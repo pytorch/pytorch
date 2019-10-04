@@ -131,10 +131,6 @@ INSTALL(FILES
           generic/THCTensorMath.cu
           generic/THCTensorMathBlas.cu
           generic/THCTensorMathBlas.h
-          generic/THCTensorMathCompare.h
-          generic/THCTensorMathCompare.cu
-          generic/THCTensorMathCompareT.h
-          generic/THCTensorMathCompareT.cu
           generic/THCTensorMathMagma.h
           generic/THCTensorMathMagma.cu
           generic/THCTensorMathPairwise.h

@@ -550,6 +550,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IndexCopyModel(), x)
 
     # TODO: enable for opset 10 when ONNXRuntime version will be updated
+
     def test_index_select_constant_scaler_index(self):
         class IndexSelectScalerIndexModel(torch.nn.Module):
             def forward(self, x):
@@ -573,8 +574,8 @@ class TestONNXRuntime(unittest.TestCase):
         base = 1
         self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
 
-    # TODO: enable for opset 10 when ONNXRuntime version will be updated
-    @skipIfUnsupportedOpsetVersion([10, 11])
+    # TODO: enable for opset 11 when ONNXRuntime version will be updated
+    @skipIfUnsupportedOpsetVersion([11])
     def test_topk(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -583,6 +584,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         self.run_test(MyModule(), x)
 
+    # TODO: enable for opset 11 when ONNXRuntime version will be updated
+    @skipIfUnsupportedOpsetVersion([11])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_topk_smallest_unsorted(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x, k):
+                return torch.topk(x, k, largest=False, sorted=False)
+
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        self.run_test(MyModule(), (x, k))
+
+    # TODO: enable for opset 11 when ONNXRuntime version will be updated
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipIfUnsupportedOpsetVersion([11])
     def test_topk_script(self):
@@ -989,6 +1003,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(SortModel(dim), x)
 
+    # TODO: enable for opset 11 when ONNXRuntime version will be updated
+    @skipIfUnsupportedOpsetVersion([11])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_sort_ascending(self):
+        class SortModel(torch.nn.Module):
+            def __init__(self, dim):
+                super(SortModel, self).__init__()
+                self.dim = dim
+
+            def forward(self, x):
+                return torch.sort(x, dim=self.dim, descending=False)
+
+        dim = 1
+        x = torch.randn(3, 4)
+        self.run_test(SortModel(dim), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
@@ -1076,6 +1106,42 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
+
+    def test_remainder(self):
+        class RemainderModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.remainder(input, other)
+
+        x = torch.randn(4, 2, 3)
+        y = torch.randn(1, 2, 1)
+        self.run_test(RemainderModel(), (x, y))
+
+    def test_remainder_scalar(self):
+        class RemainderModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.remainder(input, 2.55)
+
+        x = torch.randint(10, (2, 3))
+        self.run_test(RemainderModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fmod(self):
+        class FModModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.fmod(input, other)
+
+        x = torch.randn(4, 2, 3)
+        y = torch.randn(1, 2, 1)
+        self.run_test(FModModel(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fmod_scalar(self):
+        class FModModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.fmod(input, 2.55)
+
+        x = torch.randint(10, (2, 3))
+        self.run_test(FModModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gelu(self):

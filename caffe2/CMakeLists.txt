@@ -481,18 +481,29 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_call.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_with_autograd.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_rref_proto.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_ret.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
   endif()
 
@@ -538,6 +549,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
@@ -550,6 +562,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/named_any.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/dropout.cpp

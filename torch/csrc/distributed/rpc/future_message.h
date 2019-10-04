@@ -18,7 +18,6 @@ struct TORCH_API FutureMessage final {
   const Message& wait();
   void markCompleted(Message message);
   void markCompleted();
-  const Message& message();
   bool completed() const;
 
   // If completed() the callback will be invoked in-place.
@@ -27,10 +26,10 @@ struct TORCH_API FutureMessage final {
  private:
   void fireCallbacks();
 
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   std::atomic_bool completed_{false}; // is this future complete
   std::condition_variable finished_cv_;
-  std::vector<Callback> callbacks;
+  std::vector<Callback> callbacks_;
   // TODO: make message_ an optional field, and get rid of UNKNOWN message type
   Message message_;
 };
