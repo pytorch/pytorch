@@ -20,6 +20,9 @@ namespace at { namespace native {
 
 namespace {
 
+using c10::cuda::CUDAAssert;
+using ATag = c10::cuda::AssertTag::MultinomialKernel;
+
 #define MAX_NUM_BLOCKS 200
 
 // Normalizes the L1 norm of every row to 1; used by multinomial
@@ -29,7 +32,7 @@ C10_LAUNCH_BOUNDS_1(1024)
 #endif
 __global__ void renormRowsL1(
     scalar_t* dist, long rows, long cols,
-    c10::cuda::CUDAAssert* __c10_assert_state) {
+    CUDAAssert* __c10_assert_state) {
   extern __shared__  unsigned char my_smem[];
   scalar_t *smem = reinterpret_cast<scalar_t *>(my_smem);
   scalar_t zero = static_cast<scalar_t>(0);
@@ -38,15 +41,20 @@ __global__ void renormRowsL1(
     scalar_t sum = static_cast<scalar_t>(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      C10_KERNEL_ASSERT_RETURN(!THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
+      C10_KERNEL_ASSERT_SOFT(
+        ATag::_000,
+        !THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       sum = sum + val;
     }
 
     sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<scalar_t>(), zero);
     if (threadIdx.x == 0) {
-      C10_KERNEL_ASSERT_RETURN(!THCNumerics<scalar_t>::lt(sum, zero)); // ! < 0 for NaN handling
+      C10_KERNEL_ASSERT_SOFT(
+        ATag::_001,
+        !THCNumerics<scalar_t>::lt(sum, zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
+
     __syncthreads();
 
     sum = smem[0];
@@ -71,7 +79,7 @@ void renormRows(Tensor& t) {
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
   dim3 block(cols < maxThreads ? cols : maxThreads);
 
-  C10_PREPARE_KERNEL_ASSERT2;
+  C10_PREPARE_KERNEL_ASSERT;
   AT_DISPATCH_FLOATING_TYPES(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
         <<<grid, block, block.x * sizeof(scalar_t),
@@ -85,11 +93,14 @@ __device__ int binarySearchForMultinomial(scalar_t* cumdist,
                                           scalar_t* dist,
                                           int size,
                                           scalar_t val,
-                                          c10::cuda::CUDAAssert* __c10_assert_state) {
+                                          CUDAAssert* __c10_assert_state) {
   int start = 0;
   int end = size;
+
   // cumdist[size - 1] = 0 => all zero prob dist
-  C10_KERNEL_ASSERT_RETURN_0(cumdist[size - 1] > static_cast<scalar_t>(0));
+  C10_KERNEL_ASSERT_RETURN_0(
+    ATag::_003,
+    cumdist[size - 1] > static_cast<scalar_t>(0));
 
   while (end - start > 0) {
     int mid = start + (end - start) / 2;
@@ -250,9 +261,9 @@ sampleMultinomialOnce(int64_t* dest,
     scalar_t val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
-      C10_KERNEL_ASSERT_SOFT(val >= zero, "invalid multinomial distribution (encountering probability entry < 0)");
-      C10_KERNEL_ASSERT_SOFT(!THCNumerics<scalar_t>::isinf(val), "invalid multinomial distribution (encountering probability entry = infinity)");
-      C10_KERNEL_ASSERT_SOFT(!THCNumerics<scalar_t>::isnan(val), "invalid multinomial distribution (encountering probability entry = NaN)");
+      C10_KERNEL_ASSERT_SOFT(ATag::_004, val >= zero); // "invalid multinomial distribution (encountering probability entry < 0)"
+      C10_KERNEL_ASSERT_SOFT(ATag::_005, !THCNumerics<scalar_t>::isinf(val)); // "invalid multinomial distribution (encountering probability entry = infinity)");
+      C10_KERNEL_ASSERT_SOFT(ATag::_006, !THCNumerics<scalar_t>::isnan(val)); // "invalid multinomial distribution (encountering probability entry = NaN)"
       sum = sum + static_cast<accscalar_t>(val);
     }
 
@@ -262,17 +273,13 @@ sampleMultinomialOnce(int64_t* dest,
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      C10_KERNEL_ASSERT_SOFT(!THCNumerics<accscalar_t>::isinf(sum));
-      C10_KERNEL_ASSERT_SOFT(sum > accZero);
+      C10_KERNEL_ASSERT_SOFT(ATag::_007, !THCNumerics<accscalar_t>::isinf(sum));
+      C10_KERNEL_ASSERT_SOFT(ATag::_008, sum > accZero);
 
       asmem[0] = sum;
       smem[0] = sampled[curDist];
     }
     __syncthreads();
-
-    if (__c10_assert_state->error) {
-      return;   // leave kernel if assert triggered
-    }
 
     sum = asmem[0];
     scalar_t sample = smem[0];
@@ -285,6 +292,11 @@ sampleMultinomialOnce(int64_t* dest,
       }
 
       continue;
+    }
+
+    // leave kernel if assert triggered
+    if (__c10_assert_state->error) {
+      return;
     }
 
     int chunks = (categories + (int)blockDim.x - 1) / blockDim.x;
@@ -374,7 +386,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 
   result.resize_({numDist, n_sample});
 
-  C10_PREPARE_KERNEL_ASSERT2;
+  C10_PREPARE_KERNEL_ASSERT;
   AT_DISPATCH_FLOATING_TYPES(self_v.scalar_type(), "multinomial_kernel_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto props = at::cuda::getCurrentDeviceProperties();
@@ -401,13 +413,13 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
           requiredShared,
           at::cuda::getCurrentCUDAStream()>>>(
               result.data_ptr<int64_t>(),
-                  numDist,
-                  numCategories,
-                  sampled.data_ptr<scalar_t>(),
-                  self_v.data_ptr<scalar_t>(),
-                  self_v.stride(0),
-                  self_v.stride(1),
-                  __c10_assert_state
+                numDist,
+                numCategories,
+                sampled.data_ptr<scalar_t>(),
+                self_v.data_ptr<scalar_t>(),
+                self_v.stride(0),
+                self_v.stride(1),
+                __c10_assert_state
           );
     } else {
       // Generic, slow implementation with memory allocations

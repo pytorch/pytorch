@@ -476,7 +476,7 @@ struct ReduceOp {
     out_scalar_t* out, arg_t value,
     typename std::enable_if<can_acc>::type* = nullptr
   ) const {
-    C10_KERNEL_ASSERT(!final_output);
+    assert(!final_output);
     return (out_scalar_t)value;
   }
 
@@ -488,7 +488,7 @@ struct ReduceOp {
     out_scalar_t*, arg_t,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
-    C10_KERNEL_ASSERT(false);
+    assert(false);
     return arg_t {};
   }
 
@@ -500,13 +500,13 @@ struct ReduceOp {
     out_scalar_t* out, arg_t value,
     typename std::enable_if<!can_acc>::type* = nullptr
   ) const {
-    C10_KERNEL_ASSERT(false);
+    assert(false);
     return *out;
   }
 
   template<class T>
   C10_DEVICE void set_results(const T x, const index_t base_offset) const {
-    C10_KERNEL_ASSERT(noutputs == 1);
+    assert(noutputs == 1);
     auto res = (out_scalar_t*)((char*)dst[0] + base_offset);
     *res = x;
   }
@@ -525,7 +525,7 @@ struct ReduceOp {
   }
 
   C10_DEVICE void set_results_to_output(arg_t value, index_t base_offset) const {
-    C10_KERNEL_ASSERT(final_output);
+    assert(final_output);
     set_results(ops.project(value), base_offset);
   }
 

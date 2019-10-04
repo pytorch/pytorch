@@ -10,6 +10,8 @@
 
 namespace at { namespace native {
 
+using ATag = c10::cuda::AssertTag::IndexKernel;
+
 template <int N>
 static OffsetCalculator<N> index_make_offset_calculator(const TensorIterator& iter) {
   AT_ASSERT(N <= iter.ntensors());
@@ -64,7 +66,7 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
       int64_t index = *(int64_t*)(index_ptrs[i] + offsets[2]);
 
       if (index < -sizes[i] || index >= sizes[i]) {
-        C10_KERNEL_INDEX_ERROR_SOFT(index, i, sizes[i]);
+        C10_KERNEL_INDEX_ERROR_SOFT(ATag::_000, index, i, sizes[i]);
         return;
       }
 

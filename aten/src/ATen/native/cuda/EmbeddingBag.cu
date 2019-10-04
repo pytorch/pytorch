@@ -25,6 +25,8 @@ namespace native {
 
 namespace {
 
+using ATag = c10::cuda::AssertTag::EmbeddingBag;
+
 constexpr int MODE_SUM = 0;
 constexpr int MODE_MEAN = 1;
 constexpr int MODE_MAX = 2;
@@ -56,7 +58,7 @@ __global__ void EmbeddingBag_updateOutputKernel(
       int64_t begin = offsets[bag];
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
 
-      C10_KERNEL_ASSERT_RETURN(end >= begin);
+      C10_KERNEL_ASSERT_RETURN(ATag::_000, end >= begin);
 
       accscalar_t weightFeatSum = 0;
       scalar_t weightFeatMax;

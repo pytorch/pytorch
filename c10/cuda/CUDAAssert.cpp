@@ -2,14 +2,52 @@
 
 #include <stdio.h>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 
 #include "CUDAAssert.h"
 
 namespace c10 {
 namespace cuda {
+
+struct FileErrorRange {
+  std::string file;
+  int32_t first;
+  int32_t last;
+};
+
+#define FILE_ERROR_RANGE(file, tag)                 \
+  {                                                 \
+    (int32_t) tag::FIRST, {                         \
+      file, (int32_t)tag::FIRST, (int32_t)tag::LAST \
+    }                                               \
+  }
+
+static std::map<int32_t, FileErrorRange> error_range_file_table{
+    FILE_ERROR_RANGE("MultinomialKernel.cu", AssertTag::MultinomialKernel),
+    FILE_ERROR_RANGE("BinaryOpsKernell.cu", AssertTag::BinaryOpsKernel),
+    FILE_ERROR_RANGE("IndexKernel.cu", AssertTag::IndexKernel),
+    FILE_ERROR_RANGE("THCTensorIndex.cu", AssertTag::THCTensorIndex),
+    FILE_ERROR_RANGE("ClassNLLCriterion.cu", AssertTag::ClassNLLCriterion),
+    FILE_ERROR_RANGE("Distributions.cu", AssertTag::Distributions),
+    FILE_ERROR_RANGE("EmbeddingBag.cu", AssertTag::EmbeddingBag),
+    FILE_ERROR_RANGE("FractionalMaxPoo2d.cu", AssertTag::FractionalMaxPoo2d),
+    FILE_ERROR_RANGE(
+        "SpatialClassNLLCriterion.cu",
+        AssertTag::SpatialClassNLLCriterion)};
+
+// global assert error output format table
+static std::unordered_map<int32_t, const char*> assert_format_table{
+    // MultinomialKernel.cu:
+    {(int32_t)AssertTag::MultinomialKernel::_004,
+     "invalid multinomial distribution (encountering probability entry < 0)"},
+    {(int32_t)AssertTag::MultinomialKernel::_005,
+     "invalid multinomial distribution (encountering probability entry = infinity)"},
+    {(int32_t)AssertTag::MultinomialKernel::_006,
+     "invalid multinomial distribution (encountering probability entry = NaN)"}};
 
 template <typename T>
 static std::string formatToken(const std::string& fmt, const T& data) {
@@ -118,18 +156,49 @@ static std::string formatAssertOutput(const char* format, char* data) {
   return ss.str();
 }
 
-static char* nextField(char*& ptr) {
-  constexpr size_t align_size = c10::cuda::C10_ASSERT_ARG_ALIGN_SIZE;
-
-  size_t size = *reinterpret_cast<size_t*>(ptr);
-  char* field_data =
-      ptr + align_size; // alignment is also used  as size for the size field
-  ptr = field_data + size;
-  size_t misalign = size % align_size;
-  if (misalign > 0) {
-    ptr += align_size - misalign;
+std::string fileFromErrorCode(int32_t error_code) {
+  auto iter = error_range_file_table.lower_bound(error_code);
+  if (iter != error_range_file_table.end()) {
+    const auto& range = iter->second;
+    if (error_code >= range.first && error_code <= range.last) {
+      return range.file;
+    }
   }
-  return field_data;
+
+  return "unknown";
+}
+
+std::string generateErrorMessage(CUDAAssert* assert_state) {
+  char* args = assert_state->buffer;
+  const int32_t error_code = assert_state->error;
+  auto iter = assert_format_table.find(error_code);
+  if (iter != assert_format_table.end()) {
+    // format error specific message
+    const char* format = iter->second;
+    return formatAssertOutput(format, args);
+  } else {
+    auto file = fileFromErrorCode((int32_t)assert_state->error);
+    const auto line = assert_state->line;
+
+    // if no fomat message was specified, fall back to default messages
+    switch (assert_state->kind) {
+      case AssertKind::ZERO_DIVISION:
+        return "ZeroDivisionError: integer division or modulo by zero";
+      case AssertKind::INDEX_ERROR: {
+        return formatAssertOutput(
+            "Index %d is out of bounds for dimension %d with size %d", args);
+      }
+      default:
+        return c10::str(
+            "Kernel Assertion failed [#",
+            assert_state->error,
+            "; ",
+            file,
+            ":",
+            line,
+            "]");
+    }
+  }
 }
 
 void checkAssertError(c10::cuda::CUDAAssert* assert_state) {
@@ -141,37 +210,37 @@ void checkAssertError(c10::cuda::CUDAAssert* assert_state) {
 
     std::lock_guard<std::mutex> lock(*assert_state->mutex);
 
-    // decode output
-    char* ptr = assert_state->buffer;
-    const char* file = nextField(ptr);
-    const char* func = nextField(ptr);
-    const char* expression = nextField(ptr);
-    char* format = nextField(ptr);
-    int32_t line = *reinterpret_cast<int32_t*>(nextField(ptr));
-    char* args = ptr;
-
-    auto message = formatAssertOutput(format, args);
-
     // generate full error message
-    auto error_message = c10::str(
-        message,
-        '\n',
-        file,
-        ":",
-        line,
-        ": Assertion `",
-        expression,
-        "` failed.");
+    auto error_message = generateErrorMessage(assert_state);
+
+    // instead of the real function name (which we do not know)
+    // use the error code to identify location
+    auto function = c10::str("kernel_assert #", assert_state->error);
+    auto file = fileFromErrorCode(assert_state->error);
+    auto kind = assert_state->kind;
+    auto line = assert_state->line;
 
     if (!assert_state->persistent) {
       // reset assert state if error is not persistent
       memset(assert_state->buffer, 0, sizeof(assert_state->buffer));
       assert_state->length = 0;
       assert_state->persistent = false;
+      assert_state->kind = AssertKind::DEFAULT;
+      std::atomic_thread_fence(std::memory_order_release);
       assert_state->error = 0;
     }
 
-    throw ::c10::Error({func, file, line}, error_message);
+    switch (kind) {
+      case AssertKind::INDEX_ERROR:
+        throw ::c10::IndexError(
+            {function.c_str(), file.c_str(), line}, error_message);
+        break;
+      case AssertKind::ZERO_DIVISION:
+      case AssertKind::DEFAULT:
+      default:
+        throw ::c10::Error(
+            {function.c_str(), file.c_str(), line}, error_message);
+    }
   }
 }
 

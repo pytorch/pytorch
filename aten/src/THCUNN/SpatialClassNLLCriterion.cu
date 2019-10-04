@@ -12,6 +12,9 @@
 
 #include <thrust/functional.h>
 
+using c10::cuda::CUDAAssert;
+using ATag = c10::cuda::AssertTag::SpatialClassNLLCriterion;
+
 template <typename Dtype>
 __global__ void SpatialClassNLLCriterion_updateOutput_no_reduce_kernel(
     int64_t nthreads,
@@ -84,7 +87,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
           int map_nelem,
           int blocks_per_sample,
           int64_t ignore_index,
-          c10::cuda::CUDAAssert* __c10_assert_state)
+          CUDAAssert* __c10_assert_state)
 {
   __shared__ AccumT partial_sums[CUDA_NUM_THREADS];
 
@@ -107,7 +110,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
         input_sum -= input[ioffset + i + map_nelem * t] * cur_weight;
         acc_weight += cur_weight;
       } else {
-        C10_KERNEL_ASSERT_SOFT(t >= 0 && t < n_classes);
+        C10_KERNEL_ASSERT_SOFT(ATag::_000, t >= 0 && t < n_classes);
       }
     }
   }
@@ -149,7 +152,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
           int map_nelem,
           int blocks_per_sample,
           int64_t ignore_index,
-          c10::cuda::CUDAAssert* __c10_assert_state)
+          CUDAAssert* __c10_assert_state)
 {
   if (*total_weight <= 0)
     return;
@@ -166,7 +169,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
        i += step) {
     t = (int)target[toffset + i];
     if (t != ignore_index) {
-      C10_KERNEL_ASSERT_RETURN(t >= 0 && t < n_classes);
+      C10_KERNEL_ASSERT_RETURN(ATag::_001, t >= 0 && t < n_classes);
       gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm * gradOutput[0];
     }
   }

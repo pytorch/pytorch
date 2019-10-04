@@ -21,6 +21,9 @@ using namespace at::cuda::detail;
 
 namespace {
 
+using c10::cuda::CUDAAssert;
+using ATag = c10::cuda::AssertTag::FractionalMaxPoo2d;
+
 template <typename scalar_t, typename accscalar_t>
 __device__ inline int get_interval(accscalar_t sample,
   int index, int inputSize, int outputSize, int poolSize) {
@@ -41,7 +44,7 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
   PackedTensorAccessor<scalar_t, 4> input,
   PackedTensorAccessor<scalar_t, 3> samples,
   int poolSizeH, int poolSizeW,
-  c10::cuda::CUDAAssert* __c10_assert_state) {
+  CUDAAssert* __c10_assert_state) {
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
 
@@ -87,8 +90,8 @@ __global__ void fractional_max_pool2d_out_cuda_frame(
       }
     }
 
-    C10_KERNEL_ASSERT_RETURN(maxVal != at::numeric_limits<scalar_t>::lowest());
-    C10_KERNEL_ASSERT_RETURN(maxIndex != -1);
+    C10_KERNEL_ASSERT_RETURN(ATag::_000, maxVal != at::numeric_limits<scalar_t>::lowest());
+    C10_KERNEL_ASSERT_RETURN(ATag::_001, maxIndex != -1);
 
     indices[batch][plane][outputH][outputW] = maxIndex;
     output[batch][plane][outputH][outputW] = maxVal;
@@ -100,7 +103,7 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
   PackedTensorAccessor<scalar_t, 4> gradInput,
   PackedTensorAccessor<scalar_t, 4> gradOutput,
   PackedTensorAccessor<int64_t, 4> indices,
-  c10::cuda::CUDAAssert* __c10_assert_state) {
+  CUDAAssert* __c10_assert_state) {
   // Output (h, w) point that this thread is responsible for
   int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y;
@@ -113,10 +116,10 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
     int outputH = ourOutputPoint / gradOutput.size(3);
 
     int index = indices[batch][plane][outputH][outputW];
-    C10_KERNEL_ASSERT_RETURN(index >= 0);
+    C10_KERNEL_ASSERT_RETURN(ATag::_002, index >= 0);
     int inputW = index % gradInput.size(3);
     int inputH = index / gradInput.size(3);
-    C10_KERNEL_ASSERT_RETURN(inputH < gradInput.size(2));
+    C10_KERNEL_ASSERT_RETURN(ATag::_003, inputH < gradInput.size(2));
 
     atomicAdd(
       &gradInput[batch][plane][inputH][inputW],
