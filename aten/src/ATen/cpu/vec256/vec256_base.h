@@ -173,7 +173,7 @@ public:
   Vec256<T> map(T (*f)(const T &)) const {
     Vec256<T> ret;
     for (int64_t i = 0; i != size(); i++) {
-      ret[i] = T(f(values[i]));
+      ret[i] = f(values[i]);
     }
     return ret;
   }
@@ -185,13 +185,25 @@ public:
     return map([](T x) -> T { return x < static_cast<other_t>(0) ? -x : x; });
   }
   template <typename float_t = T,
-            typename std::enable_if<std::is_floating_point<float_t>::value || std::is_complex_t<float_t>::value, int>::type = 0>
+            typename std::enable_if<std::is_floating_point<float_t>::value, int>::type = 0>
   Vec256<T> abs() const {
     // float_t is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<float_t, T>::value, "float_t must be T");
     // Specifically deal with floating-point because the generic code above won't handle -0.0 (which should result in
     // 0.0) properly.
     return map(std::abs);
+  }
+  template <typename complex_t = T,
+            typename std::enable_if<std::is_complex_t<complex_t>::value, int>::type = 0>
+  Vec256<T> abs() const {
+    // complex_t is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<complex_t, T>::value, "complex_t must be T");
+    // Specifically map() does not perform the type conversion needed by abs.
+    Vec256<complex_t> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = static_cast<complex_t>(std::abs(values[i]));
+    }
+    return ret;
   }
   Vec256<T> angle() const {
     return *this;
