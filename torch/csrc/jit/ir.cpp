@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
@@ -18,8 +19,6 @@
 
 namespace torch {
 namespace jit {
-
-void printQuotedString(std::ostream& stmt, const std::string& str);
 
 // Constants relating to maintaining the topological index of nodes.
 //
@@ -116,7 +115,7 @@ static void printStrList(
   for (auto& item : items) {
     if (i++ > 0)
       out << ", ";
-    printQuotedString(out, item);
+    c10::printQuotedString(out, item);
   }
   out << "]";
 }
@@ -149,7 +148,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      printQuotedString(out, s(name));
+      c10::printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
       printStrList(out, ss(name));
@@ -929,6 +928,7 @@ bool Node::hasSideEffects() const {
     case prim::CallFunction:
     case prim::CallMethod:
     case prim::BailoutTemplate:
+    case prim::profile:
       return true;
   }
 

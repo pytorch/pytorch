@@ -47,6 +47,9 @@ struct TORCH_API Slot {
   bool is_module() const {
     return entity_type() == EntityType::MODULE;
   }
+  bool is_parameter() const {
+    return container_->type()->is_parameter(offset_);
+  }
 
   Module to_module() const;
   bool operator==(const Slot& rhs) const {
