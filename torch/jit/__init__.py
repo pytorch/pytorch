@@ -14,6 +14,7 @@ from torch.serialization import validate_cuda_device
 from torch._six import PY2, PY37, with_metaclass, string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
+from torch.utils import set_module
 
 import collections
 import contextlib
@@ -65,6 +66,7 @@ _jit_script_class_compile = torch._C._jit_script_class_compile
 _python_cu = torch._C.CompilationUnit()
 
 Future = torch._C.Future
+set_module(Future, "torch.jit")
 _fork = torch._C.fork
 _wait = torch._C.wait
 
@@ -243,7 +245,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     return ScriptModule(_cpp_module=cpp_module)
 
 
-def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_inputs=False):
+def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
+                    return_inputs=False, _return_inputs_states=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value. If return_inputs,
@@ -271,7 +274,7 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False, return_input
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f, _force_outplace, return_inputs)(*args, **kwargs)
+    return LegacyTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -314,7 +317,7 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
 
 
 class LegacyTracedModule(Module):
-    def __init__(self, inner, force_outplace=False, return_inputs=False):
+    def __init__(self, inner, force_outplace=False, return_inputs=False, return_inputs_states=False):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
@@ -322,6 +325,7 @@ class LegacyTracedModule(Module):
         self.inner = inner
         self._force_outplace = force_outplace
         self._return_inputs = return_inputs
+        self._return_inputs_states = return_inputs_states
 
     def forward(self, *args):
         in_vars, in_desc = _flatten(args)
@@ -338,7 +342,18 @@ class LegacyTracedModule(Module):
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
             trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
+            # inputs_states is a tuple of len == 2 that keeps track of
+            # the inputs before (inputs_states[0]) and after (inputs_states[1])
+            # the trace to verify if they were modified during the trace
+            if self._return_inputs_states:
+                # executing a deepcopy on trace_inputs will fail
+                # for tensors not explicitly created by the user.
+                # generating trace_inputs again by calling _unflatten
+                # for now.
+                inputs_states = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
             out = self.inner(*trace_inputs)
+            if self._return_inputs_states:
+                inputs_states = (inputs_states, trace_inputs)
             out_vars, _ = _flatten(out)
             torch._C._tracer_exit(tuple(out_vars))
         except Exception:
@@ -346,6 +361,8 @@ class LegacyTracedModule(Module):
             raise
         if self._return_inputs:
             return trace, out, ret_inputs
+        if self._return_inputs_states:
+            return trace, out, inputs_states
         else:
             return trace, out
 
@@ -709,14 +726,14 @@ def trace(func,
           _module_class=None,
           _compilation_unit=_python_cu):
     """
-    Trace a function and return an executable ``ScriptModule`` or ``torch._C.Function``
+    Trace a function and return an executable ``ScriptModule`` or ``torch.jit.ScriptFunction``
     that will be optimized using just-in-time compilation.
 
     Using ``torch.jit.trace`` and :func:`torch.jit.trace_module<torch.jit.trace_module>`, you can turn an existing module or Python
-    function into a TorchScript ``torch._C.Function`` or ``ScriptModule``. You must provide example inputs,
+    function into a TorchScript ``torch.jit.ScriptFunction`` or ``ScriptModule``. You must provide example inputs,
     and we run the function, recording the operations performed on all the tensors.
 
-    * The resulting recording of a standalone function produces ``torch._C.Function``.
+    * The resulting recording of a standalone function produces ``torch.jit.ScriptFunction``.
     * The resulting recording of ``forward`` function of ``nn.Module`` or ``nn.Module`` produces ``ScriptModule``.
 
     This module also contains any parameters that the original
@@ -784,7 +801,7 @@ def trace(func,
         a ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
         The returned ``ScriptModule`` will have the same set of sub-modules and parameters as the
         original ``nn.Module``.
-        If ``callable`` is a standalone function, ``trace`` returns ``torch._C.Function``
+        If ``callable`` is a standalone function, ``trace`` returns ``torch.jit.ScriptFunction``
 
     Example (tracing a function):
 
@@ -1065,7 +1082,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a ``ScriptModule`` or
-    ``torch._C.Function``. TorchScript itself is a subset of the Python language, so not all
+    ``torch.jit.ScriptFunction``. TorchScript itself is a subset of the Python language, so not all
     features in Python work, but we provide enough functionality to compute on
     tensors and do control-dependent operations. For a complete guide, see the
     `TorchScript Language Reference`_.
@@ -1074,7 +1091,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     ``@torch.jit.script`` for `TorchScript Classes <TorchScript Class_>`_ and functions.
 
     **Scripting a function**
-        The ``@torch.jit.script`` decorator will construct a ``torch._C.Function``
+        The ``@torch.jit.script`` decorator will construct a ``torch.jit.ScriptFunction``
         by compiling the body of the function.
 
         Example (scripting a function):
@@ -1240,6 +1257,7 @@ def interface(obj):
     ast = get_jit_class_def(obj, obj.__name__)
     rcb = _jit_internal.createResolutionCallback(1)
     torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
+    obj.__torch_script_interface__ = True
     return obj
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -2043,6 +2061,10 @@ def _check_directly_compile_overloaded(obj):
 
 # torch.jit.Error
 Error = torch._C.JITException
+set_module(Error, "torch.jit")
+# This is not perfect but works in common cases
+Error.__name__ = "Error"
+Error.__qualname__ = "Error"
 
 def _get_named_tuple_properties(obj):
     assert issubclass(obj, tuple) and hasattr(obj, '_fields')
@@ -2090,8 +2112,9 @@ def _graph_for(self, *args, **kwargs):
     return last_executed_optimized_graph()
 
 torch._C.ScriptMethod.graph_for = _graph_for
-torch._C.Function.graph_for = _graph_for
-Function = torch._C.Function
+torch._C.ScriptFunction.graph_for = _graph_for
+ScriptFunction = torch._C.ScriptFunction
+set_module(ScriptFunction, "torch.jit")
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
