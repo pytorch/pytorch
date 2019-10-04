@@ -166,7 +166,7 @@ class Conv2d(torch.nn.Module):
             w,
             b,
             self.scale,
-            self.zero_point
+            self.zero_point,
             self.training
         )
 
