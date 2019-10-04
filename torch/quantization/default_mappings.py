@@ -48,12 +48,18 @@ DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.LSTM: nnqd.LSTM,
 }
 
-# List of modules to skip the qconfig propagation
-DEFAULT_SKIP_LIST = (
-    nn.Dropout,
-    nn.Identity,
-    nn.MaxPool2d,
-    nn.AvgPool2d,
-    nn.AdaptiveAvgPool2d,
-    DeQuantStub
+# Whitelist for propagating the qconfig
+_EXCLUDE_QCONFIG_PROPAGATE_LIST = {
+    DeQuantStub,
+}
+_INCLUDE_QCONFIG_PROPAGATE_LIST = {
+    nn.Sequential,
+}
+
+DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
+    set(DEFAULT_MODULE_MAPPING.keys()) |
+    set(DEFAULT_QAT_MODULE_MAPPING.keys()) |
+    set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys()) |
+    _INCLUDE_QCONFIG_PROPAGATE_LIST -
+    _EXCLUDE_QCONFIG_PROPAGATE_LIST
 )
