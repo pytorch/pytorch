@@ -360,3 +360,11 @@ TEST_F(FunctionalTest, LogSigmoid) {
   auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
+
+TEST_F(FunctionalTest, Linear) {
+  const auto x = torch::arange(18).resize_({3, 3, 2});
+  const auto w = torch::arange(0, 2);
+  const auto b = torch::arange(0, 3);
+  const auto y = F::linear(x, w, b);
+  // const auto y_exp = torch::tensor({{}, {}, {}});
+}
