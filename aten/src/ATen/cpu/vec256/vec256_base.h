@@ -185,10 +185,10 @@ public:
     return map([](T x) -> T { return x < static_cast<other_t>(0) ? -x : x; });
   }
   template <typename float_t = T,
-            typename std::enable_if<std::is_floating_point<float_t>::value, int>::type = 0>
+            typename std::enable_if<std::is_floating_point<float_t>::value || std::is_complex_t<float_t>::value, int>::type = 0>
   Vec256<T> abs() const {
     // float_t is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<float_t, T>::value || std::is_same<float_t, T>::value, "float_t must be T");
+    static_assert(std::is_same<float_t, T>::value, "float_t must be T");
     // Specifically deal with floating-point because the generic code above won't handle -0.0 (which should result in
     // 0.0) properly.
     return map(std::abs);
