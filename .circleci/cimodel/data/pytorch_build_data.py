@@ -168,7 +168,7 @@ class ParallelTBBConfigNode(TreeConfigNode):
         return "PARALLELTBB=" + str(label)
 
     def init2(self, node_name):
-        self.props["parallel_backend"] = "tbb"
+        self.props["parallel_backend"] = "parallel_tbb"
 
     def child_constructor(self):
         return ImportantConfigNode
@@ -178,7 +178,7 @@ class ParallelNativeConfigNode(TreeConfigNode):
         return "PARALLELNATIVE=" + str(label)
 
     def init2(self, node_name):
-        self.props["parallel_backend"] = "native"
+        self.props["parallel_backend"] = "parallel_native"
 
     def child_constructor(self):
         return ImportantConfigNode
