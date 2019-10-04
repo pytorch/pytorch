@@ -382,18 +382,6 @@ def get_torchscript_modifier(fn):
     return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
 
-def _parameter_list(parameter_names_fn):
-    """
-    Decorator to denote that a function returns a list of all the parameters
-    in a module
-    """
-    def decorator(fn):
-        fn._parameter_names_fn = parameter_names_fn
-        return fn
-
-    return decorator
-
-
 # overloading registration
 # overloads get registered in this file, and compiled in torch/jit/__init__.py
 # so that they can be imported in nn/functional.py without an import cycle
