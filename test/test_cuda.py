@@ -1344,29 +1344,33 @@ class TestCuda(TestCase):
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
 
-        # Make sure there are no reallocatable blocks.
-        torch.cuda.empty_cache()
+        # This test detects unexpected block reallocation. For reliable test,
+        # the stream to allocate tensors is isolated. The allocator will not
+        # reuse free blocks which were allocated from another stream.
+        stream_alloc = torch.cuda.Stream()
+        with torch.cuda.stream(stream_alloc):
+            base = torch.cuda.FloatTensor([10, 10])
 
-        # Create a view tensor with shifted offset.
-        base = torch.cuda.FloatTensor([10, 10])
+        # Record another stream on a shifted view tensor.
         view = base[5:]
         assert view.storage_offset() > 0
 
-        # Record a custom stream on the view tensor.
-        stream = torch.cuda.Stream()
-        cycles_per_ms = get_cycles_per_ms()
-        with torch.cuda.stream(stream):
-            torch.cuda._sleep(int(50 * cycles_per_ms))
-        view.record_stream(stream)
+        stream_record = torch.cuda.Stream()
+        with torch.cuda.stream(stream_record):
+            torch.cuda._sleep(int(50 * get_cycles_per_ms()))
 
-        # The storage will be free soon.
+        view.record_stream(stream_record)
+
+        # Delete those tensors to make the block free soon.
         data_ptr = base.data_ptr()
         del base, view
-        torch.cuda.current_stream().synchronize()
 
-        # Create a new tensor and check its address.
-        # It should not be allocated to the storage above.
-        try_realloc = torch.cuda.FloatTensor([10, 10])
+        # A new tensor should not be allocated to the block above.
+        stream_alloc.synchronize()
+
+        with torch.cuda.stream(stream_alloc):
+            try_realloc = torch.cuda.FloatTensor([10, 10])
+
         self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
 
     def test_noncontiguous_pinned_memory(self):
