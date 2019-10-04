@@ -2,9 +2,9 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 
-from torch._jit_internal import Optional
+from torch._jit_internal import Optional  # noqa: F401
 import torch.nn as nn
-import torch.nn._intrinsic as nni
+import torch.nn.intrinsic as nni
 from torch.nn.modules import Module
 from torch.nn.quantized.modules.utils import _quantize_weight
 
@@ -221,9 +221,6 @@ class Linear(torch.nn.Module):
             assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
                 cls._FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
-            # workaround for sequential, ConvReLU2d should probably
-            # inherit from Conv2d instead
             if type(mod) == nni.LinearReLU:
                 activation_observer = mod[1].observer
                 mod = mod[0]

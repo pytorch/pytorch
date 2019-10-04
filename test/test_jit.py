@@ -21,11 +21,12 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
+from torch.quantization._quantize_script import PackedParams
 
 # Testing utils
 from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
+    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, enable_profiling_mode, do_input_map, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -565,12 +566,23 @@ class TestJit(JitTestCase):
                 x.is_cuda,
                 x.is_mkldnn,
                 x.is_quantized,
-                x.requires_grad
+                x.requires_grad,
+                # x.layout TODO: layout long -> instance conversion
             )
 
         scripted = torch.jit.script(foo)
         x = torch.rand(3, 4)
         self.assertEqual(scripted(x), foo(x))
+
+    def test_layout(self):
+        @torch.jit.script
+        def check(x, y):
+            return x.layout == y.layout
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+
+        self.assertTrue(check(x, y))
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -662,8 +674,9 @@ class TestJit(JitTestCase):
         self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
 
     def test_script_backward(self):
-        def checkGradEquals(fn, inputs):
+        def checkBackwardScript(fn, inputs):
             scripted_fn = torch.jit.script(fn)
+            FileCheck().check("torch.autograd.backward").run(scripted_fn.code)
             recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
 
             fn(*inputs)
@@ -693,9 +706,9 @@ class TestJit(JitTestCase):
             torch.autograd.backward((output,), grad_outputs)
 
         inp = torch.randn(2, 2, requires_grad=True)
-        checkGradEquals(test_tensor_backward, (inp,))
-        checkGradEquals(test_torch_autograd_backward, (inp,))
-        checkGradEquals(test_torch_autograd_backward_with_grad_tensors, (inp,))
+        checkBackwardScript(test_tensor_backward, (inp,))
+        checkBackwardScript(test_torch_autograd_backward, (inp,))
+        checkBackwardScript(test_torch_autograd_backward_with_grad_tensors, (inp,))
 
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
@@ -1117,20 +1130,37 @@ graph(%x : Tensor,
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_prepack_unpack(self):
-        input_str = """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
+                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
+
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
+                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
+                r = torch.nn.functional.linear(xq.dequantize(), wq.dequantize(), self.bias)
+                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
+                return rq
+        m = torch.jit.script(M())
+        torch._C._jit_pass_insert_prepack_unpack(m._c)
+        FileCheck().check("quantized::linear_prepack") \
+                   .check("quantized::linear_unpack") \
+                   .run(get_forward_graph(m._c))
+
+        conv_input_str = """
+graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
         %a_dequant = aten::dequantize(%a_quant)
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK: quantized::linear_prepack
-        # CHECK: quantized::linear_unpack
+        # CHECK: quantized::conv_prepack
+        # CHECK: quantized::conv_unpack
         %w_dequant = aten::dequantize(%w_quant)
-        %linear = prim::Constant[name="linear"]()
-        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         return (%r)"""
-        graph = parse_ir(input_str)
+        graph = parse_ir(conv_input_str)
         torch._C._jit_pass_insert_prepack_unpack(graph)
-        FileCheck().run(input_str, graph)
+        FileCheck().run(conv_input_str, graph)
 
     def test_quant_fusion(self):
         input_strs = [
@@ -1155,61 +1185,48 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         return (%r_dequant)""",
             # addmm -> quantized::linear
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: aten::t
-        # CHECK: quantized::linear_prepack
+        %w_dequant_t = aten::t(%w_dequant)
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
-        %r = aten::addmm(%b, %a_dequant, %w_dequant, %4, %4)
-        # CHECK-NOT: aten::quantize_per_tensor
+        %r = aten::addmm(%b, %a_dequant, %w_dequant_t, %4, %4)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(with bias) -> quantized::linear
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype, %4):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: aten::t
-        # CHECK: quantized::linear_prepack
+        %w_dequant_t = aten::t(%w_dequant)
         # CHECK: quantized::linear
         # CHECK-NOT: aten::addmm
-        %output = aten::matmul(%a_dequant, %w_dequant)
+        %output = aten::matmul(%a_dequant, %w_dequant_t)
         %r = aten::add_(%output, %b, %4)
-        # CHECK-NOT: aten::quantize_per_tensor
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # matmul(without bias) -> quantized::linear
             """
-graph(%a, %w, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype, %r_scale, %r_zero_point, %r_dtype):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r_zero_point, %r_dtype):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: aten::t
-        # CHECK: prim::Constant()
-        # CHECK: quantized::linear_prepack
+        %w_dequant_t = aten::t(%w_dequant)
         # CHECK: quantized::linear
         # CHECK-NOT: aten::matmul
-        %r = aten::matmul(%a_dequant, %w_dequant)
-        # CHECK-NOT: aten::quantize_per_tensor
+        %r = aten::matmul(%a_dequant, %w_dequant_t)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)"""
         ]
@@ -1370,6 +1387,53 @@ graph(%input, %weight):
         FileCheck().check_not('GetAttr[name="weight"]') \
                    .check('GetAttr[name="_quantized_weight"]') \
                    .run(m._c._get_method('forward').graph)
+
+    @unittest.skipUnless(
+        'fbgemm' in torch.backends.quantized.supported_engines,
+        " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
+        " with instruction set support avx2 or newer.",
+    )
+    @_tmp_donotuse_dont_inline_everything
+    def test_fold_prepack(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
+                self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
+
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 1, torch.quint8)
+                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
+                packed = torch.ops.quantized.linear_prepack(wq, self.bias)
+                w_unpacked, b_unpacked = torch.ops.quantized.linear_unpack(packed)
+                r = torch.nn.functional.linear(xq.dequantize(), w_unpacked.dequantize(), b_unpacked)
+                rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
+                return rq
+
+
+        m = torch.jit.script(M())
+        data = torch.randn((5, 5), dtype=torch.float)
+        ref_res = m._c._get_method('forward')(data)
+        torch._C._jit_pass_fold_prepack(m._c, torch.jit.script(PackedParams())._c)
+        res = m._c._get_method('forward')(data)
+        # check attribute and graph
+        self.assertTrue(m._c._has_module('_packed_linear_weight_bias'))
+        # check values
+        original_w = m._c._get_parameter('weight')
+        ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
+        ref_b = m._c._get_parameter('bias')
+        w, b = m._c._get_module('_packed_linear_weight_bias')._get_method('_weight_bias')()
+        self.assertEqual(ref_w, w.dequantize())
+        self.assertEqual(ref_b, b)
+        self.assertEqual(ref_res, res)
+
+        # test serialization
+        buffer = io.BytesIO()
+        torch.jit.save(m, buffer)
+        buffer.seek(0)
+        loaded_mod = torch.jit.load(buffer)
+        loaded_res = loaded_mod._c._get_method('forward')(data)
+        self.assertEqual(ref_res, loaded_res)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -1729,6 +1793,7 @@ graph(%Ra, %Rb):
         x, y = torch.randn(2, 2), torch.randn(1, 10)
         self.assertEqual(to_tensor_trace(x, y), to_tensor(x, y))
 
+    @skipIfCompiledWithoutNumpy
     def test_trace_warn(self):
         def fn(x):
             int(x)  # Warning 1.
@@ -1987,6 +2052,7 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @skipIfRocm
@@ -1996,6 +2062,7 @@ graph(%Ra, %Rb):
         torch._C._jit_run_cpp_tests(run_cuda=False)
         tests_setup.shutdown()
 
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     @skipIfRocm
     def test_cpp_cuda(self):
@@ -3936,7 +4003,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch._C.JITException, 'test_jit.py:{}'.format(lineno + 3)):
+        with self.assertRaisesRegex(torch.jit.Error, 'test_jit.py:{}'.format(lineno + 3)):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -4531,7 +4598,7 @@ a")
         def func():
             c = 1
             return c.add(1)
-        with self.assertRaisesRegex(RuntimeError, 'Cannot call methods on numbers'):
+        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
             torch.jit.script(func)
 
     # testing implicit conversion of tensors to scalars to match function arguments
@@ -4940,18 +5007,11 @@ a")
         a = torch.rand(2, 3)
 
         with enable_profiling_mode():
-            # the first calls are profiled
-            def_in_one_branch(a, False)
-            # check prim::profile are inserted
-            profiled_graph_str = str(def_in_one_branch.graph_for(a, True))
+            # the first call is profiled
+            profiled_graph_str = str(def_in_one_branch.graph_for(a, False))
             FileCheck().check_count("prim::profile", 4).run(profiled_graph_str)
+            # the second call is optimized
             def_in_one_branch(a, False)
-            def_in_one_branch(a, False)
-            # this call is optimized for
-            # the given shape of (2, 3)
-            def_in_one_branch(a, False)
-            # change shape to (3)
-            # so we go down a bailout path
             a = torch.ones(3)
             # check prim::BailOuts are inserted
             bailout_graph_str = str(def_in_one_branch.graph_for(a, True))
@@ -6726,11 +6786,12 @@ a")
             test(inp, typ, type_hint)
 
         # test optional isinstance check
-        with self.assertRaisesRegex(RuntimeError, "Optional isinstance check is not supported"):
-            @torch.jit.script
-            def opt_func(x):
-                # type: (Optional[int]) -> bool
-                return isinstance(x, int)
+        @torch.jit.script
+        def opt_func(x):
+            # type: (Optional[int]) -> bool
+            return isinstance(x, int)
+        self.assertTrue(opt_func(3))
+        self.assertFalse(opt_func(None))
 
     def test_dropout_eval(self):
         class ScriptedConv2d(torch.jit.ScriptModule):
@@ -8752,6 +8813,7 @@ a")
             m = M2()
             m(torch.zeros(4, 3))
 
+    @skipIfCompiledWithoutNumpy
     def test_pack_padded_pad_packed_trace(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
         T, B, C = 3, 5, 7
@@ -8872,6 +8934,7 @@ a")
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
+    @skipIfCompiledWithoutNumpy
     def test_rnn_trace_override(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
         num_layers = 3
@@ -10605,7 +10668,7 @@ a")
             ReassignSelfRHS()
 
     def test_unknown_builtin(self):
-        with self.assertRaisesRegex(RuntimeError, 'Unknown builtin op'):
+        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
             @torch.jit.script
             def unknown_builtin(x):
                 return x.splork(3)
@@ -11903,12 +11966,12 @@ a")
 
         self.checkScript(f, (torch.rand(20, 20, 20),), optimize=True)
 
-        with self.assertRaisesRegex(RuntimeError, "Unknown attribute to named tuple"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
             @torch.jit.script
             def g1(x):
                 return x.max(dim=1).unknown_symbol
 
-        with self.assertRaisesRegex(RuntimeError, "Getting attributes of tuples is not supported"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
             @torch.jit.script
             def g2(x):
                 print((x, x, x).__doc__)
@@ -13975,6 +14038,21 @@ a")
         out = test_non_primitive_types(_MyNamedTuple(value=torch.tensor(5.0)))
         self.assertEqual(out, torch.tensor(6.0))
 
+    def test_isinstance_dynamic(self):
+        @torch.jit.script
+        def foo(a):
+            # type: (Optional[List[int]]) -> int
+            b = 0
+            if isinstance(a, (int, (float,), list, str)):
+                b += 1
+            if isinstance(a, (int, str)):
+                b += 1
+            if isinstance(a, List[int]):
+                b += 1
+            return b
+        self.assertEqual(foo([3, 4]), 2)
+        self.assertEqual(foo(None), 0)
+
     def test_function_overloads(self):
         # TODO: pyflakes currently does not compose @overload annotation with other
         # decorators. This is fixed on master but not on version 2.1.1.
@@ -14554,7 +14632,7 @@ a")
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
 
-        with self.assertRaisesRegex(torch._C.JITException, "annotated to be ignored and cannot be run"):
+        with self.assertRaisesRegex(torch.jit.Error, "annotated to be ignored and cannot be run"):
             loaded(torch.tensor(.5), True)
 
     def test_module_error(self):
@@ -19182,6 +19260,18 @@ class TestClassType(JitTestCase):
                 def set_non_initialized(self, y):
                     self.bar = y  # can't assign to non-initialized attr
 
+    def test_schema_human_readable(self):
+        """
+        Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None,
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor):
+        Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
+        """
+        with self.assertRaisesRegex(RuntimeError, "nearest"):
+            @torch.jit.script
+            def FooTest(x):
+                return torch.nn.functional.interpolate(x, 'bad')
+
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
@@ -19629,8 +19719,46 @@ class TestClassType(JitTestCase):
                 # type: (OneTwoWrong) -> int
                 return as_interface(x)
 
-    # TODO test: interface-interface class-interface inheritance errors,
-    # NamedTuple inheritance errors
+        # Test interface/class python assignment
+        with torch.jit._disable_emit_hooks():
+            class TestPyAssign(nn.Module):
+                def __init__(self):
+                    super(TestPyAssign, self).__init__()
+                    self.proxy_mod = Foo()
+
+                def forward(self, x):
+                    return self.proxy_mod.two(x)
+
+            TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
+
+            input = torch.rand(3, 4)
+            scripted_pyassign_mod = torch.jit.script(TestPyAssign())
+            self.assertEqual(scripted_pyassign_mod(input), 2 * input)
+
+            class TestPyAssignError(nn.Module):
+                def __init__(self, obj):
+                    super(TestPyAssignError, self).__init__()
+                    self.proxy_mod = obj
+
+                def forward(self, x):
+                    return self.proxy_mod.two(x)
+
+            TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        "is not compatible with interface __torch__"):
+                torch.jit.script(TestPyAssignError(Foo()))
+
+            # test pure python object assignment to interface fails
+            class PyClass(object):
+                def __init__(self):
+                    pass
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        "the value is not a TorchScript compatible type"):
+                torch.jit.script(TestPyAssignError(PyClass()))
+        # TODO test: interface-interface class-interface inheritance errors,
+        # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
         @torch.jit.script
@@ -19659,7 +19787,7 @@ class TestClassType(JitTestCase):
 
         # TODO - support compiling classes from strings in jit.CompilationUnit
         @torch.jit.script
-        class BinOps(object):
+        class MyClass(object):
             def __init__(self, x):
                 # type: (int) -> None
                 self.x = x
@@ -19732,49 +19860,57 @@ class TestClassType(JitTestCase):
                 # type: (int, int) -> None
                 self.x = val * idx
 
+            def __call__(self, val):
+                # type: (int) -> int
+                return self.x * val * 3
+
+
         def add():
-            return BinOps(4) + 3
+            return MyClass(4) + 3
         def sub():  # noqa: E306
-            return BinOps(4) - 3
+            return MyClass(4) - 3
         def mul():  # noqa: E306
-            return BinOps(4) * 3
+            return MyClass(4) * 3
         def pow():  # noqa: E306
-            return BinOps(4) ** 3
+            return MyClass(4) ** 3
         def truediv():  # noqa: E306
-            return BinOps(4) / 3
+            return MyClass(4) / 3
         def ne():  # noqa: E306
-            return BinOps(4) != 3
+            return MyClass(4) != 3
         def eq():  # noqa: E306
-            return BinOps(4) == 3
+            return MyClass(4) == 3
         def lt():  # noqa: E306
-            return BinOps(4) < 3
+            return MyClass(4) < 3
         def gt():  # noqa: E306
-            return BinOps(4) > 3
+            return MyClass(4) > 3
         def le():  # noqa: E306
-            return BinOps(4) <= 3
+            return MyClass(4) <= 3
         def ge():  # noqa: E306
-            return BinOps(4) >= 3
+            return MyClass(4) >= 3
         def _and():  # noqa: E306
-            return BinOps(4) & 3
+            return MyClass(4) & 3
         def _or():  # noqa: E306
-            return BinOps(4) | 3
+            return MyClass(4) | 3
         def _xor():  # noqa: E306
-            return BinOps(4) ^ 3
+            return MyClass(4) ^ 3
         def getitem():  # noqa: E306
-            return BinOps(4)[1]
+            return MyClass(4)[1]
         def setitem():  # noqa: E306
-            a = BinOps(4)
+            a = MyClass(4)
             a[1] = 5
             return a.x
+        def call():  # noqa: E306
+            a = MyClass(5)
+            return a(2)
 
-        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem]
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem, call]
 
         if not PY2:
             ops.append(truediv)
         for func in ops:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegex(RuntimeError, "__add__ method"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))

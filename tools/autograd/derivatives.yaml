@@ -233,7 +233,7 @@
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
   self: grad * (self <= max).to(grad.dtype())
 
-- name: clone(Tensor self) -> Tensor
+- name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
 
 - name: coalesce(Tensor self) -> Tensor
@@ -321,6 +321,9 @@
 
 - name: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
   self: fake_quantize_per_tensor_affine_backward(grad, self, scale, zero_point, quant_min, quant_max)
+
+- name: fake_quantize_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
+  self: fake_quantize_per_channel_affine_backward(grad, self, scale, zero_point, axis, quant_min, quant_max)
 
 - name: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   self: zeros_like(grad)
@@ -1574,4 +1577,7 @@
   output_differentiability: [False]
 
 - name: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
+  output_differentiability: [False]
+
+- name: nonzero(Tensor self) -> Tensor
   output_differentiability: [False]
