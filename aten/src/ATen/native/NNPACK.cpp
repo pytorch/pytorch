@@ -10,8 +10,7 @@ at::Tensor _nnpack_spatial_convolution(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias,
-    const IntArrayRef stride,
-    const IntArrayRef padding) {
+    IntArrayRef padding) {
   throw std::runtime_error(
       "nnpack_spatial_convolution: ATen not compiled with NNPACK support");
 }
@@ -62,12 +61,12 @@ namespace at {
 namespace native {
 
 static bool init_nnpack() {
-  static std::once_flag once;
-  static bool nnpack_successfully_initialized = false;
+  static std::once_flag once_;
+  static bool nnpack_successfully_initialized_ = false;
 
-  std::call_once(once, []() {
+  std::call_once(once_, []() {
     const nnp_status nnpack_status = nnp_initialize();
-    nnpack_successfully_initialized = (nnp_status_success == nnpack_status);
+    nnpack_successfully_initialized_ = (nnp_status_success == nnpack_status);
 
     if (nnpack_status != nnp_status_success) {
       if (nnpack_status == nnp_status_out_of_memory) {
@@ -75,16 +74,44 @@ static bool init_nnpack() {
       } else if (nnpack_status == nnp_status_unsupported_hardware) {
         LOG(WARNING) << "Could not initialize NNPACK! Reason: Unsupported hardware.";
       } else {
-        LOG(WARNING) << "could not initialize NNPACK! Reason: Unknown error!";
+        LOG(WARNING) << "Could not initialize NNPACK! Reason: Unknown error!";
       }
     }
   });
 
-  return nnpack_successfully_initialized;
+  return nnpack_successfully_initialized_;
 }
 
 static pthreadpool_t nnpack_threadpool() {
+  // Try initializing a threadpool for NNPACK's use.  If we fail to
+  // successfully initialize an implementation, return nullptr which will
+  // instruct NNPACK to run single threaded.
+
+#ifdef C10_MOBILE
+  // If building for mobile, use Caffe 2's mobile-friendly threadpool.
   return caffe2::mobile_pthreadpool();
+#else
+  // Otherwise, try using pthreadpool if we manage to initialize it successfully.
+  static pthreadpool_t nnpack_threadpool_ = nullptr;
+  static bool called_nnpack_threadpool_ = false;
+
+  if (!called_nnpack_threadpool_) {
+    called_nnpack_threadpool_ = true;
+
+#ifdef INTRA_OP_PARALLEL
+    const uint32_t threads = at::get_num_threads();
+#else
+    const uint32_t threads = std::thread::hardware_concurrency();
+#endif
+
+    nnpack_threadpool_ = pthreadpool_create(threads);
+    if ( !nnpack_threadpool_ ) {
+      LOG(WARNING) << "Failed to initialize pthreadpool! Running NNPACK in single-threaded mode.";
+    }
+  }
+
+  return nnpack_threadpool_;
+#endif
 }
 
 bool _nnpack_available() {
@@ -122,32 +149,24 @@ constexpr int output_height_dim = 2;
 constexpr int output_width_dim = 3;
 constexpr int weight_output_channels_dim = 0;
 // constexpr int weight_input_channels_dim = 1;
-constexpr int weight_height_dim = 2;
-constexpr int weight_width_dim = 3;
+// constexpr int weight_height_dim = 2;
+// constexpr int weight_width_dim = 3;
 
 // Often written as 2 + max_dim (extra dims for batch size and channels)
 // constexpr int max_dim = 3;
 
-static std::vector<int64_t> conv_output_size(
-    const IntArrayRef input_size,
-    const IntArrayRef weight_size,
-    const IntArrayRef stride,
-    const IntArrayRef padding) {
-  const auto calc_output_dimension = [](
-    const int64_t input, const int64_t kernel, const int64_t stride, const int64_t padding) {
-    return 1 + (input - kernel + 2 * padding) / stride;
-  };
-
-  const auto dim = input_size.size();
+std::vector<int64_t> conv_output_size(
+    IntArrayRef input_size,
+    IntArrayRef weight_size,
+    IntArrayRef padding) {
+  auto dim = input_size.size();
   std::vector<int64_t> output_size(dim);
-
   output_size[output_batch_size_dim] = input_size[input_batch_size_dim];
   output_size[output_channels_dim] = weight_size[weight_output_channels_dim];
-  output_size[output_height_dim] = calc_output_dimension(
-    input_size[input_height_dim], weight_size[weight_height_dim], stride[0], padding[0]);
-  output_size[output_width_dim] = calc_output_dimension(
-    input_size[input_width_dim], weight_size[weight_width_dim], stride[1], padding[1]);
-
+  output_size[output_height_dim] =
+      input_size[input_height_dim] + 2 * padding[0] - (weight_size[2] - 1);
+  output_size[output_width_dim] =
+      input_size[input_width_dim] + 2 * padding[1] - (weight_size[3] - 1);
   return output_size;
 }
 
@@ -155,10 +174,9 @@ Tensor _nnpack_spatial_convolution(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias,
-    const IntArrayRef stride,
-    const IntArrayRef padding) {
+    IntArrayRef padding) {
   at::Tensor output = at::empty(
-      conv_output_size(input.sizes(), weight.sizes(), stride, padding),
+      conv_output_size(input.sizes(), weight.sizes(), padding),
       input.options());
 
   // Our input Tensor must be in the form N,C,H,W
@@ -257,7 +275,7 @@ Tensor _nnpack_spatial_convolution(
   };
 
   auto single = [&]() -> nnp_status {
-    const nnp_size output_subsample = {.width = stride[0], .height = stride[1]};
+    const nnp_size output_subsample = {.width = 1, .height = 1};
     auto input_ = input.contiguous();
     return nnp_convolution_inference(
         algorithm,
