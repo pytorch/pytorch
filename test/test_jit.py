@@ -19721,8 +19721,6 @@ class TestClassType(JitTestCase):
 
         # Test interface/class python assignment
         class TestPyAssign(nn.Module):
-            proxy_mod: OneTwo
-
             def __init__(self):
                 super(TestPyAssign, self).__init__()
                 self.proxy_mod = Foo()
