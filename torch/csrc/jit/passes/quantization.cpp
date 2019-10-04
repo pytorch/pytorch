@@ -181,14 +181,14 @@ Node* InsertObserversHelper::insertObserverFor(
   }
   script::Module observer = observer_module.clone();
   std::string observer_name =
-      "observer_for_" + std::to_string(uid_.getUniqueId());
+      "_observer_" + std::to_string(uid_.getUniqueId());
   while (module.find_module(observer_name)) {
-    observer_name = "observer_for_" + std::to_string(uid_.getUniqueId());
+    observer_name = "_observer_" + std::to_string(uid_.getUniqueId());
   }
   module.register_module(observer_name, observer);
   // Get handle of observer module
   Node* observer_instance = g->create(c10::prim::GetAttr);
-  // self.observer_for_v
+  // self.observer_v
   observer_instance->addInput(g->inputs()[0]);
   observer_instance->s_(c10::attr::name, observer_name);
   observer_instance->output()->setDebugName(observer_name);
@@ -443,7 +443,7 @@ c10::optional<std::string> findObserverName(Value* v) {
         u.user->s(attr::name) == "forward") {
       auto module_instance = u.user->inputs().at(0);
       if (module_instance->node()->kind() == prim::GetAttr &&
-          module_instance->node()->s(attr::name).find("observer_for_") !=
+          module_instance->node()->s(attr::name).find("_observer_") !=
               std::string::npos) {
         return module_instance->node()->s(attr::name);
       }
@@ -561,7 +561,7 @@ c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
       child_instance->node()->kind() == prim::GetAttr,
       "Child instance should come from GetAttr.");
   auto child_module_name = child_instance->node()->s(attr::name);
-  if (child_module_name.find("observer_for_") == std::string::npos) {
+  if (child_module_name.find("_observer_") == std::string::npos) {
     auto child_module = module_.find_module(child_module_name);
     TORCH_INTERNAL_ASSERT(
         child_module,
@@ -670,12 +670,12 @@ c10::optional<IValue> toTwoElementIntList(Value* v) {
       n->inputs().size() == 2) {
     auto e0 = toIValue(n->inputs()[0]);
     auto e1 = toIValue(n->inputs()[1]);
-    if (!e0 || !e1) {
+    if (!e0 || !e1 ||
+        !e0.value().isInt() ||
+        !e1.value().isInt()) {
       return c10::nullopt;
     }
-    c10::List<int64_t> a =
-      c10::List<int64_t>({e0.value().toInt(), e1.value().toInt()});
-    return IValue(a);
+    return IValue(c10::List<int64_t>({e0.value().toInt(), e1.value().toInt()}));
   }
   return c10::nullopt;
 }
@@ -1002,10 +1002,9 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       std::make_tuple(false, linear_prepack, linear_params_module),
       std::make_tuple(true, conv2d_prepack, conv_params_module)};
   for (const auto& item : pattern_and_modules) {
-    bool is_conv;
-    std::string pattern;
-    script::Module packed_params_module;
-    std::tie(is_conv, pattern, packed_params_module) = item;
+    bool is_conv = std::get<0>(item);
+    std::string pattern = std::get<1>(item);
+    script::Module packed_params_module = std::get<2>(item);
     Graph pattern_graph;
     std::unordered_map<std::string, Value*> vmap;
     script::parseIR(pattern, &pattern_graph, vmap);
