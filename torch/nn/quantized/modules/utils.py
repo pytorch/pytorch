@@ -1,4 +1,3 @@
-import sys
 import torch
 
 def _quantize_weight(float_wt, observer):
@@ -22,7 +21,7 @@ Args:
     docstring: New docstring
 """
 def __alias(aliased_class, module=None, docstring=''):
-    attr_dict = { '__doc__': docstring }
+    attr_dict = {'__doc__': docstring}
     if module is not None:
         attr_dict['__module__'] = module
     alias = type(aliased_class.__name__, (aliased_class,), attr_dict)
