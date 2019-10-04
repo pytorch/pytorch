@@ -11794,6 +11794,8 @@ class TestTorchDeviceType(TestCase):
 
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
     @skipCUDAIfRocm
+    # stft -> rfft -> _fft -> _fft_with_size -> _fft_mkl
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_stft(self, device):
         if not TEST_LIBROSA:
             raise unittest.SkipTest('librosa not found')

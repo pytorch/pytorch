@@ -158,7 +158,9 @@ fi
 
 function pip_install() {
   # retry 3 times
-  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@"
+  # old versions of pip don't have the "--progress-bar" flag
+  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
+  pip install "$@" || pip install "$@" || pip install "$@"
 }
 
 function pip_uninstall() {
