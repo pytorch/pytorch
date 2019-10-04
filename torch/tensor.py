@@ -80,6 +80,16 @@ class Tensor(torch._C._TensorBase):
                     self.requires_grad,
                     OrderedDict())
             return (torch._utils._rebuild_qtensor, args)
+        elif self.is_sparse:
+            if self.layout == torch.sparse_coo:
+                args = (self.layout,
+                        (self._indices(),
+                         self._values(),
+                         self.size()))
+            else:
+                raise NotImplementedError(
+                    'sparse tensor __reduce_ex__ for layout `%s`' % (self.layout))
+            return (torch._utils._rebuild_sparse_tensor, args)
         else:
             args = (self.storage(),
                     self.storage_offset(),
