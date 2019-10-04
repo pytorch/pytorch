@@ -1,8 +1,10 @@
 
 from torch import nn
-from .utils import __add_alias
+from .utils import __alias
 
-AdaptiveAvgPool2d = __add_alias(nn.AdaptiveAvgPool2d, r"""
+_module_name = __name__
+
+AdaptiveAvgPool2d = __alias(nn.AdaptiveAvgPool2d, module=_module_name, docstring=r"""
 Applies a 2D adaptive average pooling over a quantized input signal composed of several input planes.
 
 The output is of size H x W, for any input size.
@@ -36,7 +38,7 @@ Examples:
 See :class:`~torch.nn.AdaptiveAvgPool2d` for non-quantized version.
 """)
 
-AvgPool2d = __add_alias(nn.AvgPool2d, r"""
+AvgPool2d = __alias(nn.AvgPool2d, module=_module_name, docstring=r"""
 Applies a 2D average pooling over a quantized input signal composed of several input planes.
 
 In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,
@@ -91,7 +93,7 @@ Examples::
 See :class:`~torch.nn.AvgPool2d` for non-quantized version.
 """)
 
-MaxPool2d = __add_alias(nn.MaxPool2d, r"""
+MaxPool2d = __alias(nn.MaxPool2d, module=_module_name, docstring=r"""
 Applies a 2D max pooling over a quantized input signal composed of several input planes.
 
 In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,

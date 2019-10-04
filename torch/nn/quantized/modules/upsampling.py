@@ -1,8 +1,8 @@
 
 from torch import nn
-from .utils import __add_alias
+from .utils import __alias
 
-UpsamplingBilinear2d = __add_alias(nn.UpsamplingBilinear2d, r"""
+UpsamplingBilinear2d = __alias(nn.UpsamplingBilinear2d, r"""
 Applies a 2D bilinear upsampling to a quantized input signal composed of several
 quantized input channels.
 
@@ -19,8 +19,8 @@ Args:
         spatial size.
 
 .. warning::
-    This class is deprecated in favor of :func:`~nn.functional.interpolate`. It is
-    equivalent to ``nn.functional.interpolate(..., mode='bilinear', align_corners=True)``.
+    This class is deprecated in favor of :func:`~nn.quantized.functional.interpolate`. It is
+    equivalent to ``nn.quantized.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
 Shape:
     - Input: :math:`(N, C, H_{in}, W_{in})`
@@ -53,7 +53,7 @@ Examples::
 See :class:`~torch.nn.UpsamplingBilinear2d`
 """)
 
-UpsamplingNearest2d = __add_alias(nn.UpsamplingNearest2d, r"""
+UpsamplingNearest2d = __alias(nn.UpsamplingNearest2d, r"""
 Applies a 2D nearest neighbor upsampling to a quantized input signal composed of
 several quantized input channels.
 
@@ -70,7 +70,7 @@ Args:
         spatial size.
 
 .. warning::
-    This class is deprecated in favor of :func:`~nn.functional.interpolate`.
+    This class is deprecated in favor of :func:`~nn.quantized.functional.interpolate`.
 
 Shape:
     - Input: :math:`(N, C, H_{in}, W_{in})`
