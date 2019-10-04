@@ -139,7 +139,6 @@
             export IN_CIRCLECI=1
 
             brew install cmake
-            brew install libomp # hilariously, installs python
 
             # Reinitialize submodules
             git submodule sync && git submodule update -q --init --recursive
@@ -147,10 +146,7 @@
             # Reinitialize path (see man page for path_helper(8))
             eval `/usr/libexec/path_helper -s`
 
-            # Use Homebrew Python if configured to do so
-            if [ "${PYTHON_INSTALLATION}" == "homebrew" ]; then
-              export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
-            fi
+            export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
 
             # Install Anaconda if we need to
             if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
