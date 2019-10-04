@@ -153,7 +153,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             Default: ``False``
     """
     if not input.is_quantized:
-        raise ValueError("Input to 'quantized.adaptive_avg_pool2d' must be quantized!")
+        raise ValueError("Input to 'quantized.interpolate' must be quantized!")
     return torch.nn.functional.interpolate(input, size, scale_factor, mode,
                                            align_corners)
 
