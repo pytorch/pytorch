@@ -97,7 +97,7 @@ commands:
             set -ex
             export HOMEBREW_NO_AUTO_UPDATE=1
             brew install << parameters.formulae >>
-
+  
   run_brew_for_macos_build:
     steps:
       - brew_update
@@ -108,7 +108,7 @@ commands:
     steps:
       - brew_update
       - brew_install:
-          formulae: libtool xcodeproj
+          formulae: libtool
 
 ##############################################################################
 # Binary build (nightlies nightly build) defaults
@@ -857,7 +857,16 @@ jobs:
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
             # run test on X86 build
             if [ ${IOS_PLATFORM} = "SIMULATOR" ]; then
+              if ! [ -x "$(command -v xcodebuild)" ]; then
+                echo 'Error: xcodebuild is not installed.' >&2
+                exit 1
+              fi 
+              sudo gem install xcodeproj
               ruby ${PROJ_ROOT}/scripts/xcode_ios_x86_build.rb -i ${PROJ_ROOT}/build_ios/install/lib -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj
+              if [ "$?" -eq "0" ]; then
+                  echo 'xcodebuild failed!'
+                  exit 1
+              fi
             fi
 
 ##############################################################################

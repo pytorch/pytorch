@@ -76,7 +76,7 @@ commands:
             set -ex
             export HOMEBREW_NO_AUTO_UPDATE=1
             brew install << parameters.formulae >>
-
+  
   run_brew_for_macos_build:
     steps:
       - brew_update
@@ -87,4 +87,4 @@ commands:
     steps:
       - brew_update
       - brew_install:
-          formulae: libtool xcodeproj
+          formulae: libtool
