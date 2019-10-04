@@ -685,7 +685,7 @@ void initJitScriptBindings(PyObject* module) {
             cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
           });
 
-  py::class_<StrongFunctionPtr>(m, "Function", py::dynamic_attr())
+  py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
