@@ -4,7 +4,6 @@ import collections
 import copyreg
 import io
 import pickle
-import six
 import threading
 import traceback
 
@@ -26,10 +25,10 @@ class _InternalRPCPickler:
     e.g. attach tensor to distributed autograd graph in C++
     """
     def __init__(self):
-        # python2 does not have dispatch_table, add "if six.PY3" condition,
+        # python2 does not have dispatch_table, add "if torch._six.PY3" condition,
         # as _InternalRPCPickler still got build in python2 even
         # we skipped python 2 tests for rpc_test
-        if six.PY3:
+        if torch._six.PY3:
             self._dispatch_table = copyreg.dispatch_table.copy()
             self._dispatch_table[torch.Tensor] = self._tensor_reducer
 
