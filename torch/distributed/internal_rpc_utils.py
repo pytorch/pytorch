@@ -100,6 +100,8 @@ class _InternalRPCPickler:
 # Create _internal_rpc_pickler only once to initialize _dispatch_table only once
 _internal_rpc_pickler = _InternalRPCPickler()
 
+def serialize(obj):
+    return _internal_rpc_pickler.serialize(obj)
 
 def run_python_udf_internal(pickled_python_udf, tensors):
     r"""
@@ -114,7 +116,8 @@ def run_python_udf_internal(pickled_python_udf, tensors):
         # except str = exception info + traceback string
         except_str = "{}\n{}".format(repr(e), traceback.format_exc())
         result = RemoteException(except_str)
-    return _internal_rpc_pickler.serialize(result)
+    # return _internal_rpc_pickler.serialize(result)
+    return result
 
 
 def load_python_udf_result_internal(pickled_python_result, tensors):

@@ -26,7 +26,7 @@ from torch.quantization._quantize_script import PackedParams
 # Testing utils
 from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName
+    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, enable_profiling_mode, do_input_map, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -1793,6 +1793,7 @@ graph(%Ra, %Rb):
         x, y = torch.randn(2, 2), torch.randn(1, 10)
         self.assertEqual(to_tensor_trace(x, y), to_tensor(x, y))
 
+    @skipIfCompiledWithoutNumpy
     def test_trace_warn(self):
         def fn(x):
             int(x)  # Warning 1.
@@ -8812,6 +8813,7 @@ a")
             m = M2()
             m(torch.zeros(4, 3))
 
+    @skipIfCompiledWithoutNumpy
     def test_pack_padded_pad_packed_trace(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
         T, B, C = 3, 5, 7
@@ -8932,6 +8934,7 @@ a")
         v = torch.rand(10, 3)
         self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
 
+    @skipIfCompiledWithoutNumpy
     def test_rnn_trace_override(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
         num_layers = 3
@@ -19258,10 +19261,10 @@ class TestClassType(JitTestCase):
                     self.bar = y  # can't assign to non-initialized attr
 
     def test_schema_human_readable(self):
-        """ 
+        """
         Make sure that the schema is human readable, ie the mode parameter should read "nearest" instead of being displayed in octal
-        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None, 
-        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor): 
+        aten::__interpolate(Tensor input, int? size=None, float[]? scale_factor=None,
+        str mode='\156\145\141\162\145\163\164', bool? align_corners=None) -> (Tensor):
         Expected a value of type 'Optional[int]' for argument 'size' but instead found type 'Tensor'.
         """
         with self.assertRaisesRegex(RuntimeError, "nearest"):
@@ -19716,8 +19719,46 @@ class TestClassType(JitTestCase):
                 # type: (OneTwoWrong) -> int
                 return as_interface(x)
 
-    # TODO test: interface-interface class-interface inheritance errors,
-    # NamedTuple inheritance errors
+        # Test interface/class python assignment
+        with torch.jit._disable_emit_hooks():
+            class TestPyAssign(nn.Module):
+                def __init__(self):
+                    super(TestPyAssign, self).__init__()
+                    self.proxy_mod = Foo()
+
+                def forward(self, x):
+                    return self.proxy_mod.two(x)
+
+            TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
+
+            input = torch.rand(3, 4)
+            scripted_pyassign_mod = torch.jit.script(TestPyAssign())
+            self.assertEqual(scripted_pyassign_mod(input), 2 * input)
+
+            class TestPyAssignError(nn.Module):
+                def __init__(self, obj):
+                    super(TestPyAssignError, self).__init__()
+                    self.proxy_mod = obj
+
+                def forward(self, x):
+                    return self.proxy_mod.two(x)
+
+            TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        "is not compatible with interface __torch__"):
+                torch.jit.script(TestPyAssignError(Foo()))
+
+            # test pure python object assignment to interface fails
+            class PyClass(object):
+                def __init__(self):
+                    pass
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        "the value is not a TorchScript compatible type"):
+                torch.jit.script(TestPyAssignError(PyClass()))
+        # TODO test: interface-interface class-interface inheritance errors,
+        # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
         @torch.jit.script
