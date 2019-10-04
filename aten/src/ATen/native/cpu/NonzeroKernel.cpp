@@ -31,25 +31,23 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self) {
   iter.add_input(self);
   iter.build();
   cpu_kernel(iter, [&](scalar_t a) {
-    for (int64_t i = 0; i < n; i++) {
-      if (a != 0) {
-        ii = idx + dimensions;
-        for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
-          --ii;
-          *subscript_data = *ii;
-          subscript_data += stride1;
-        }
-        subscript_data += stride0;
+    if (a != 0) {
+      ii = idx + dimensions;
+      for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
+        --ii;
+        *subscript_data = *ii;
+        subscript_data += stride1;
       }
-      ii = idx;
-      ss = sizes;
+      subscript_data += stride0;
+    }
+    ii = idx;
+    ss = sizes;
+    ++(*ii);
+    while (*ii == *ss) {
+      *ii = 0;
+      ++ii;
+      ++ss;
       ++(*ii);
-      while (*ii == *ss) {
-        *ii = 0;
-        ++ii;
-        ++ss;
-        ++(*ii);
-      }
     }
   });
 }
@@ -65,7 +63,6 @@ static void nonzero_kernel(Tensor& subscript, const Tensor& self) {
         if (a != 0) {
           numel++;
         }
-      });
     });
     subscript.resize_({numel, self.dim()});
     if (numel <= 0) {
