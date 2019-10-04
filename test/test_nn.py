@@ -187,6 +187,7 @@ class PackedSequenceTest(TestCase):
                 padded, lengths, enforce_sorted=enforce_sorted).cpu()
 
             self.assertIs(a, a.to('cpu'))
+            self.assertIs(a, a.cpu())
             self.assertIs(a, a.to('cpu', dtype=torch.int32))
             self.assertEqual(a.long(), a.to(torch.int64))
 
@@ -194,6 +195,7 @@ class PackedSequenceTest(TestCase):
                 for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
                     b = a.cuda(device=cuda)
                     self.assertIs(b, b.to(cuda))
+                    self.assertIs(b, b.cuda())
                     self.assertEqual(a, b.to('cpu'))
                     self.assertEqual(b, a.to(cuda))
                     self.assertEqual(a, b.to('cpu', dtype=torch.int32))
@@ -7400,8 +7402,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not torch._nnpack_available(), "NNPACK unavailable")
     def test_nnpack_conv(self):
         for kern, inp_size in [(3, 6), (3, 7), (4, 9)]:
-            for batch, stride, padding, chan_in, chan_out in \
-                    product([1, 2], [1, 2], [0, 1, 2], [2], [3]):
+            for batch, padding, chan_in, chan_out in \
+                    product([1, 2], [0, 1, 2], [2], [3]):
 
                 for has_bias in [True, False]:
                     input_shape = [batch, chan_in]
@@ -7414,8 +7416,8 @@ class TestNN(NNTestCase):
                     weight = torch.randn(weight_shape, requires_grad=True, dtype=torch.float)
                     if has_bias:
                         bias = torch.randn([chan_out], requires_grad=True, dtype=torch.float)
-                    output = torch._nnpack_spatial_convolution(input, weight, stride=stride, padding=padding, bias=bias)
-                    output_expected = torch.nn.functional.conv2d(input, weight, stride=stride, padding=padding, bias=bias)
+                    output = torch._nnpack_spatial_convolution(input, weight, padding=padding, bias=bias)
+                    output_expected = torch.nn.functional.conv2d(input, weight, padding=padding, bias=bias)
                     self.assertAlmostEqual(output, output_expected, delta=3e-4)
 
                     gradient_o = torch.randn(output.shape, dtype=torch.float)
@@ -8987,7 +8989,7 @@ class TestNNDeviceType(NNTestCase):
             packed = rnn_utils.pack_padded_sequence(
                 padded, lengths, enforce_sorted=enforce_sorted)
             self.assertFalse(packed.is_cuda)
-            packed = packed.to(device=device)
+            packed = packed.to(device)
             self.assertTrue(packed.is_cuda)
             unpacked, _ = rnn_utils.pad_packed_sequence(packed)
             self.assertEqual(unpacked.type(), cuda_type_str)

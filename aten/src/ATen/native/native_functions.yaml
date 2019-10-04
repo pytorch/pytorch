@@ -66,7 +66,7 @@
   supports_named_tensor: True
 
 - func: align_to(Tensor(a) self, DimnameList names) -> Tensor(a)
-  variants: function, method
+  variants: method
   supports_named_tensor: True
 
 - func: align_as(Tensor self, Tensor other) -> Tensor
@@ -1025,6 +1025,9 @@
   variants: method
 
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  variants: method
+
+- func: new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
 
 # other overrides are to provide a more helpful error message that dtype is required
@@ -2027,7 +2030,7 @@
 - func: _nnpack_available() -> bool
   use_c10_dispatcher: full
 
-- func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] stride, int[2] padding) -> Tensor
+- func: _nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int[2] padding) -> Tensor
   variants: function
 
 - func: _nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int[2] padding, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
