@@ -444,16 +444,13 @@
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
-            # run test on X86 build
-            if [ ${IOS_PLATFORM} = "SIMULATOR" ]; then
-              if ! [ -x "$(command -v xcodebuild)" ]; then
-                echo 'Error: xcodebuild is not installed.' >&2
-                exit 1
-              fi 
-              sudo gem install xcodeproj
-              ruby ${PROJ_ROOT}/scripts/xcode_ios_x86_build.rb -i ${PROJ_ROOT}/build_ios/install/lib -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj
-              if [ "$?" -eq "0" ]; then
-                  echo 'xcodebuild failed!'
-                  exit 1
-              fi
+            # run xcodebuild
+            if ! [ -x "$(command -v xcodebuild)" ]; then
+              echo 'Error: xcodebuild is not installed.'
+              exit 1
+            fi 
+            ruby ${PROJ_ROOT}/scripts/xcode_ios_x86_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM}
+            if [ "$?" -eq "0" ]; then
+              echo 'xcodebuild failed!'
+              exit 1
             fi
