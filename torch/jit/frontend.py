@@ -9,8 +9,6 @@ from torch._six import PY2
 from torch._C._jit_tree_views import *
 from torch._utils_internal import get_source_lines_and_file
 
-import torch._jit_internal
-
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
@@ -146,9 +144,13 @@ def get_jit_class_def(cls, self_name):
     # Get defs for each method independently
     methods = inspect.getmembers(
         cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
-    method_defs = [get_jit_def(method[1],
-                               self_name=self_name,
-                               raiser=torch._jit_internal.should_drop(method[1])) for method in methods]
+
+    def get_def(fn):
+        replace_body = None
+        if torch._jit_internal.should_drop(fn):
+            replace_body = [ast.parse('raise RuntimeError("Cannot call @unused methods")').body[0]]
+        return get_jit_def(fn, self_name=self_name, replace_body=replace_body)
+    method_defs = [get_def(method[1]) for method in methods]
 
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls)
     source = ''.join(sourcelines)
@@ -159,7 +161,7 @@ def get_jit_class_def(cls, self_name):
     return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
-def get_jit_def(fn, self_name=None, raiser=False):
+def get_jit_def(fn, self_name=None, replace_body=None):
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
@@ -169,9 +171,8 @@ def get_jit_def(fn, self_name=None, raiser=False):
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
-    if raiser:
-        raise_stmt = ast.parse('raise RuntimeError("Cannot call @unused methods")').body[0]
-        py_ast.body[0].body = [raise_stmt]
+    if replace_body:
+        py_ast.body[0].body = replace_body
     return build_def(ctx, py_ast.body[0], type_line, self_name)
 
 
