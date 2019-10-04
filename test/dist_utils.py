@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from collections import namedtuple
 from functools import wraps
 from os import getenv
 
@@ -13,7 +12,13 @@ if not dist.is_available():
     sys.exit(0)
 
 
-TestConfig = namedtuple("TestEnv", ["backend"])
+class TestConfig:
+    __slots__ = ['backend']
+
+    def __init__(self, *args, **kwargs):
+        assert len(args) == 0, "TestConfig only takes kwargs."
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
 
 TEST_CONFIG = TestConfig(backend=getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP))
