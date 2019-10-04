@@ -4,7 +4,7 @@ from .utils import __alias
 
 _module_name = __name__
 
-UpsamplingBilinear2d = __alias(nn.UpsamplingBilinear2d,  module=_module_name, docstring=r"""
+UpsamplingBilinear2d = __alias(nn.UpsamplingBilinear2d, module=_module_name, docstring=r"""
 Applies a 2D bilinear upsampling to a quantized input signal composed of several
 quantized input channels.
 
@@ -55,7 +55,7 @@ Examples::
 See :class:`~torch.nn.UpsamplingBilinear2d`
 """)
 
-UpsamplingNearest2d = __alias(nn.UpsamplingNearest2d,  module=_module_name, docstring=r"""
+UpsamplingNearest2d = __alias(nn.UpsamplingNearest2d, module=_module_name, docstring=r"""
 Applies a 2D nearest neighbor upsampling to a quantized input signal composed of
 several quantized input channels.
 
