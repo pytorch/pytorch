@@ -66,7 +66,7 @@
   supports_named_tensor: True
 
 - func: align_to(Tensor(a) self, DimnameList names) -> Tensor(a)
-  variants: function, method
+  variants: method
   supports_named_tensor: True
 
 - func: align_as(Tensor self, Tensor other) -> Tensor
@@ -1027,6 +1027,9 @@
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
 
+- func: new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  variants: method
+
 # other overrides are to provide a more helpful error message that dtype is required
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
@@ -1539,15 +1542,12 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _log10__cpu
-    CUDA: _log10__cuda
 
 - func: log10.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log10_out_cpu
-    CUDA: _log10_out_cuda
+    CPU: log10_out
+    CUDA: log10_out
 
 - func: log1p(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3108,8 +3108,7 @@
 - func: nuclear_norm.dim_out(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
-- func: clone(Tensor self) -> Tensor
-  use_c10_dispatcher: full
+- func: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   variants: function, method
   dispatch:
     CPU: clone

@@ -233,7 +233,7 @@
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
   self: grad * (self <= max).to(grad.dtype())
 
-- name: clone(Tensor self) -> Tensor
+- name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
 
 - name: coalesce(Tensor self) -> Tensor
@@ -952,6 +952,10 @@
 
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
+
+- name: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
+  self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
+  grad_output: binary_cross_entropy_double_backward_grad_output(grad, self, target, weight, reduction)
 
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_with_logits_backward(grad, self, target, weight, pos_weight, reduction)

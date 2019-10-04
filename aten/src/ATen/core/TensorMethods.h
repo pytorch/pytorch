@@ -1042,6 +1042,15 @@ inline Tensor Tensor::new_full(IntArrayRef size, Scalar fill_value, const Tensor
     return table->callUnboxed<Tensor, const Tensor &, IntArrayRef, Scalar, const TensorOptions &>(const_cast<Tensor&>(*this), size, fill_value, options);
 #endif
 }
+inline Tensor Tensor::new_zeros(IntArrayRef size, const TensorOptions & options) const {
+#ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode _var_guard(true);
+    return TypeDefault::new_zeros(const_cast<Tensor&>(*this), size, options);
+#else
+    static auto table = globalATenDispatch().getOpTable("aten::new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor");
+    return table->callUnboxed<Tensor, const Tensor &, IntArrayRef, const TensorOptions &>(const_cast<Tensor&>(*this), size, options);
+#endif
+}
 inline Tensor & Tensor::resize_(IntArrayRef size) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
@@ -1547,13 +1556,7 @@ inline Tensor Tensor::log10() const {
 inline Tensor & Tensor::log10_() const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::log10_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("log10_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::log10_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::log10_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &>(
@@ -3044,26 +3047,25 @@ inline Tensor Tensor::norm(c10::optional<Scalar> p, DimnameList dim, bool keepdi
 #endif
 }
 #endif
-inline Tensor Tensor::clone() const {
+inline Tensor Tensor::clone(c10::optional<MemoryFormat> memory_format) const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
     switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
         case Backend::CPU:
-            return CPUType::clone(const_cast<Tensor&>(*this));
+            return CPUType::clone(const_cast<Tensor&>(*this), memory_format);
             break;
         case Backend::QuantizedCPU:
-            return QuantizedCPUType::clone(const_cast<Tensor&>(*this));
+            return QuantizedCPUType::clone(const_cast<Tensor&>(*this), memory_format);
             break;
         case Backend::SparseCPU:
-            return SparseCPUType::clone(const_cast<Tensor&>(*this));
+            return SparseCPUType::clone(const_cast<Tensor&>(*this), memory_format);
             break;
         default:
             AT_ERROR("clone not implemented for ", at::toString(type_set()));
     }
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::clone", ""}).value();
-    return c10::Dispatcher::singleton().callUnboxed<Tensor, const Tensor &>(
-        op, impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(*this)), const_cast<Tensor&>(*this));
+    static auto table = globalATenDispatch().getOpTable("aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor");
+    return table->callUnboxed<Tensor, const Tensor &, c10::optional<MemoryFormat>>(const_cast<Tensor&>(*this), memory_format);
 #endif
 }
 inline Tensor & Tensor::resize_as_(const Tensor & the_template) const {
