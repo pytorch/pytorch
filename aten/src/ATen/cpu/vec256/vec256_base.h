@@ -199,11 +199,7 @@ public:
     // complex_t is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t, T>::value, "complex_t must be T");
     // Specifically map() does not perform the type conversion needed by abs.
-    Vec256<complex_t> ret;
-    for (int64_t i = 0; i < size(); i++) {
-      ret[i] = static_cast<complex_t>(std::abs(values[i]));
-    }
-    return ret;
+    return map([](T x) { return (T)std::abs(x); });
   }
   Vec256<T> angle() const {
     return *this;
