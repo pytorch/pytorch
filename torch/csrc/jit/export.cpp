@@ -697,7 +697,7 @@ class ScriptModuleSerializer {
             } else if (lt->getElementType() == BoolType::get()) {
               opnames[ins.X].overload_name = "bool";
             } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
-              opnames[ins.X].overload_name = "tensor";
+              opnames[ins.X].overload_name = "Tensor";
             } else {
               opnames[ins.X].overload_name = "generic";
             }

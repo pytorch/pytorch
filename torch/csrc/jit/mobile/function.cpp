@@ -63,7 +63,7 @@ void Function::build_vararg_operator_table() {
           code_->vararg_operators_.emplace_back(listConstruct<double>);
         } else if (opname.overload_name == "bool") {
           code_->vararg_operators_.emplace_back(listConstruct<bool>);
-        } else if (opname.overload_name == "tensor") {
+        } else if (opname.overload_name == "Tensor") {
           code_->vararg_operators_.emplace_back(tensorListConstruct);
         } else {
           AT_ERROR("Type of ListConstruct is not supported.");
