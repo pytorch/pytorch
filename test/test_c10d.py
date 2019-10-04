@@ -2166,46 +2166,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    def test_multihead_attention_ddp_compatibility(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
-
-        # create model and move it to device_ids[0]
-        embed_dim = 128
-        kv_embed_dim = 1024
-        num_heads = 8
-        model = torch.nn.MultiheadAttention(embed_dim, num_heads,
-                                            kdim=kv_embed_dim,
-                                            vdim=kv_embed_dim).to(device_id)
-        ddp_model = DistributedDataParallel(
-            model,
-            device_ids=[gpus[0]],
-            process_group=process_group,
-            bucket_cap_mb=0.001,
-        )
-
-        # inputs
-        src_len, tgt_len, batch_size = 10, 5, 16
-        query = torch.rand((tgt_len, batch_size, embed_dim)).to(device_id)
-        key = torch.rand((src_len, batch_size, kv_embed_dim)).to(device_id)
-        value = key.to(device_id)
-
-        # First forward pass
-        outputs = ddp_model(query, key, value)[0]
-
-        loss_fn = torch.nn.functional.l1_loss
-        # First backward pass
-        loss = loss_fn(outputs, torch.zeros_like(outputs))
-        loss.backward()
-        ddp_model.zero_grad()
-
-        # Second forward pass
-        outputs = ddp_model(query, key, value)[0]
-
-    @requires_nccl()
-    @skip_if_not_multigpu
     def test_queue_reduction(self):
         # Set up process group.
         store = c10d.FileStore(self.file_name, self.world_size)

@@ -691,7 +691,6 @@ class MultiheadAttention(Module):
             self.q_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
             self.k_proj_weight = Parameter(torch.Tensor(embed_dim, self.kdim))
             self.v_proj_weight = Parameter(torch.Tensor(embed_dim, self.vdim))
-            self.register_parameter('in_proj_weight', None)
         else:
             self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
 
@@ -760,7 +759,7 @@ class MultiheadAttention(Module):
         if hasattr(self, '_qkv_same_embed_dim') and self._qkv_same_embed_dim is False:
             return F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
-                self.in_proj_weight, self.in_proj_bias,
+                None, self.in_proj_bias,  # set self.in_proj_weight = None
                 self.bias_k, self.bias_v, self.add_zero_attn,
                 self.dropout, self.out_proj.weight, self.out_proj.bias, 
                 training=self.training,
