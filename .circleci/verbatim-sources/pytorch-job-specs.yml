@@ -1,7 +1,7 @@
 executors:
   windows-gpu-prototype:
     machine:
-      resource_class: windows.gpu.large.prototype
+      resource_class: windows.gpu.small.prototype
       image: windows-server-2019-nvidia:201908-28
       shell: bash.exe
 
