@@ -3455,13 +3455,14 @@ def foo(x):
             self.assertFalse(m._c._get_attribute('training'))
             self.assertFalse(m(torch.ones(2, 2)))
 
-            buffer = io.BytesIO()
-            m.save(buffer)
+            if not PY2:
+                buffer = io.BytesIO()
+                m.save(buffer)
 
-            loaded = torch.jit.load(buffer)
+                loaded = torch.jit.load(buffer)
 
-            self.assertFalse(loaded.training)
-            self.assertFalse(loaded._c._get_attribute('training'))
+                self.assertFalse(loaded.training)
+                self.assertFalse(loaded._c._get_attribute('training'))
 
         class M(nn.Module):
             def __init__(self):
