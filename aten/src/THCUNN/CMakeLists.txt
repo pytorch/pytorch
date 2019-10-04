@@ -30,7 +30,6 @@ ${CMAKE_CURRENT_SOURCE_DIR}/SpatialConvolutionMM.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialCrossMapLRN.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialDepthwiseConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/SpatialSubSampling.cu
-${CMAKE_CURRENT_SOURCE_DIR}/Sqrt.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Square.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/Tanh.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/TemporalConvolution.cu

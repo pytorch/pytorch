@@ -2653,13 +2653,7 @@ inline Tensor Tensor::sqrt() const {
 inline Tensor & Tensor::sqrt_() const {
 #ifdef USE_STATIC_DISPATCH
     at::AutoNonVariableTypeMode _var_guard(true);
-    switch(tensorTypeIdToBackend(impl::dispatchTypeId(type_set()))) {
-        case Backend::CPU:
-            return CPUType::sqrt_(const_cast<Tensor&>(*this));
-            break;
-        default:
-            AT_ERROR("sqrt_ not implemented for ", at::toString(type_set()));
-    }
+    return TypeDefault::sqrt_(const_cast<Tensor&>(*this));
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::sqrt_", ""}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<Tensor &, Tensor &>(
