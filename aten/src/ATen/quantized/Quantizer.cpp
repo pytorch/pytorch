@@ -297,7 +297,8 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   }
 #endif
   auto qdata = qtensor.data_ptr<T>();
-  for (int i = 0; i < rtensor.numel(); ++i) {
+  auto numel = rtensor.numel();
+  for (int i = 0; i < numel; ++i) {
     qdata[i] = quantize_val<T>(scale, zero_point, rdata[i]);
   }
   return qtensor;
@@ -318,7 +319,8 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   checkZeroPoint<typename T::underlying>(fn_name, zero_point);
   const auto* qd = qtensor.data_ptr<T>();
   float* rd = rtensor.data_ptr<float>();
-  for (auto i = 0; i < qtensor.numel(); ++i) {
+  auto numel = qtensor.numel();
+  for (auto i = 0; i < numel; ++i) {
     rd[i] = dequantize_val<T>(scale, zero_point, qd[i]);
   }
   return rtensor;
