@@ -648,13 +648,10 @@ c10::optional<IValue> toTwoElementIntList(Value* v) {
     }
   }
 
-  if (n->kind() == prim::ListConstruct &&
-      n->inputs().size() == 2) {
+  if (n->kind() == prim::ListConstruct && n->inputs().size() == 2) {
     auto e0 = toIValue(n->inputs()[0]);
     auto e1 = toIValue(n->inputs()[1]);
-    if (!e0 || !e1 ||
-        !e0.value().isInt() ||
-        !e1.value().isInt()) {
+    if (!e0 || !e1 || !e0.value().isInt() || !e1.value().isInt()) {
       return c10::nullopt;
     }
     return IValue(c10::List<int64_t>({e0.value().toInt(), e1.value().toInt()}));
@@ -984,8 +981,8 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       std::make_tuple(true, conv2d_prepack, conv_params_module)};
   for (const auto& item : pattern_and_modules) {
     bool is_conv = std::get<0>(item);
-    std::string pattern = std::get<1>(item);
-    script::Module packed_params_module = std::get<2>(item);
+    const std::string& pattern = std::get<1>(item);
+    const script::Module& packed_params_module = std::get<2>(item);
     Graph pattern_graph;
     std::unordered_map<std::string, Value*> vmap;
     script::parseIR(pattern, &pattern_graph, vmap);
@@ -1015,7 +1012,8 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
         auto groups = toIValue(match_vmap.at(vmap.at("groups")));
         auto set_conv_params = wrapper_module.get_method("set_conv_params");
         if (!stride || !padding || !dilation) {
-          TORCH_WARN("Failed to extract two element IntList for stride/padding/dilation");
+          TORCH_WARN(
+              "Failed to extract two element IntList for stride/padding/dilation");
           continue;
         }
         set_conv_params(std::vector<IValue>{
