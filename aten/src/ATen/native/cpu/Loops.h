@@ -80,13 +80,40 @@ dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& o
   return dereference_vec_impl<traits>(data, opt_scalar, S, i, Indices{});
 }
 
+template <typename func_t,
+    typename std::enable_if<!std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+static inline void
+execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t op) {
+  using traits = function_traits<func_t>;
+  using result_type = typename traits::result_type;
+  for (; i < n; i++) {
+    result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
+    *out_ptr = c10::guts::apply(op, dereference<traits>(
+        &data[1],
+        &strides[1],
+        i));
+  }
+}
+
+template <typename func_t,
+    typename std::enable_if<std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+static inline void
+execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t op) {
+  using traits = function_traits<func_t>;
+  for (; i < n; i++) {
+    c10::guts::apply(op, dereference<traits>(
+        &data[0],
+        &strides[0],
+        i));
+  }
+}
+
 // Basic loop operation (one output, N inputs). May be auto-vectorized
 // by the compiler. Supports inputs and outputs of different types.
 template <typename func_t>
 static inline void
 basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t op) {
   using traits = function_traits<func_t>;
-  using result_type = typename traits::result_type;
   constexpr int ntensors = traits::arity + 1;
 
   // Copying strides to temporary array helps auto vectorization in older GCC
@@ -96,13 +123,7 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
     strides[arg] = strides_[arg];
   }
 
-  for (; i < n; i++) {
-    result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
-    *out_ptr = c10::guts::apply(op, dereference<traits>(
-      &data[1],
-      &strides[1],
-      i));
-  }
+  execute_op(data, strides, i, n, op);
 }
 
 // Explicitly vectorized loop implementation. All inputs and outputs must be
@@ -205,7 +226,8 @@ void cpu_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
 template <typename func_t>
 void cpu_serial_kernel(TensorIterator& iter, func_t op) {
   using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
+  TORCH_INTERNAL_ASSERT((std::is_void<typename traits::result_type>::value &&
+    iter.noutputs() == 0 && iter.ntensors() == traits::arity) || (iter.ntensors() >= traits::arity + 1));
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
@@ -217,6 +239,7 @@ void cpu_serial_kernel(TensorIterator& iter, func_t op) {
       });
     }
   }, {0, iter.numel()});
+  iter.cast_outputs();
 }
 
 }}}  // namespace at::native::<anonymous>
