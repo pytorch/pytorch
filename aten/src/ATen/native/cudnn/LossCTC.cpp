@@ -62,7 +62,13 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
 
   cudnnCTCLossAlgo_t algo = (deterministic ? CUDNN_CTC_LOSS_ALGO_DETERMINISTIC : CUDNN_CTC_LOSS_ALGO_NON_DETERMINISTIC);
 
-  Tensor probs = log_probs->softmax(2);
+  Tensor probs;
+  // before 7.6 passing probs was the only option, starting with 7.1 the log probs/unnormalized log probs is the default
+  if (cudnnGetVersion() < 7600) {
+    probs = log_probs->softmax(2);
+  } else {
+    probs = log_probs;
+  }
   TensorDescriptor probs_desc{probs};
   Tensor grad = at::empty_like(probs);
   TensorDescriptor grad_desc{grad};
