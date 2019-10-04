@@ -289,7 +289,7 @@ binary_mac_params: &binary_mac_params
 executors:
   windows-gpu-prototype:
     machine:
-      resource_class: windows.gpu.small.prototype
+      resource_class: windows.gpu.large.prototype
       image: windows-server-2019-nvidia:201908-28
       shell: bash.exe
 
