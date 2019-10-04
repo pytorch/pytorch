@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import torch
 from torch.nn import Module
-from .observer import MinMaxObserver, HistogramObserver, PerChannelMinMaxObserver, _with_args
+from .observer import MovingAverageMinMaxObserver, HistogramObserver, MovingAveragePerChannelMinMaxObserver, _with_args
 
 class FakeQuantize(Module):
     ''' Simulate the quantize and dequantize operations in training time.
@@ -48,7 +48,7 @@ class FakeQuantize(Module):
         given the stats
         `observer_kwargs`
     '''
-    def __init__(self, observer=MinMaxObserver, quant_min=0, quant_max=255, **observer_kwargs):
+    def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, **observer_kwargs):
         super(FakeQuantize, self).__init__()
         assert quant_min <= quant_max, \
             'quant_min must be less than or equal to quant_max'
@@ -119,12 +119,12 @@ class FakeQuantize(Module):
         super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                         missing_keys, unexpected_keys, error_msgs)
 
-default_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, quant_min=0, quant_max=255,
+default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
                                             dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
-default_weight_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, quant_min=-128, quant_max=127,
+default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 
-default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                                quant_min=-128,
                                                                quant_max=127,
                                                                dtype=torch.qint8,
