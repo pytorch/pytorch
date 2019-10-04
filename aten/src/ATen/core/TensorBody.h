@@ -507,6 +507,7 @@ class CAFFE2_API Tensor {
   Tensor dot(const Tensor & tensor) const;
   Tensor new_empty(IntArrayRef size, const TensorOptions & options={}) const;
   Tensor new_full(IntArrayRef size, Scalar fill_value, const TensorOptions & options={}) const;
+  Tensor new_zeros(IntArrayRef size, const TensorOptions & options={}) const;
   Tensor & resize_(IntArrayRef size) const;
   Tensor erf() const;
   Tensor & erf_() const;
