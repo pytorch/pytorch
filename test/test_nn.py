@@ -2640,7 +2640,7 @@ class TestNN(NNTestCase):
                     result, result_weight = torch.nn.functional.multi_head_attention_forward(
                         _Q, _K, _V,
                         d_model, nheads,
-                        multihead_attn_module.in_proj_weight, multihead_attn_module.in_proj_bias,
+                        None, multihead_attn_module.in_proj_bias,
                         multihead_attn_module.bias_k, multihead_attn_module.bias_v,
                         multihead_attn_module.add_zero_attn, multihead_attn_module.dropout,
                         multihead_attn_module.out_proj.weight, multihead_attn_module.out_proj.bias,
@@ -2651,10 +2651,11 @@ class TestNN(NNTestCase):
 
                 result = result.squeeze(0).detach().numpy()
 
-                q_proj_weight = multihead_attn_module.in_proj_weight[:d_model]
-                k_proj_weight = multihead_attn_module.in_proj_weight[d_model:(d_model * 2)]
-                v_proj_weight = multihead_attn_module.in_proj_weight[(d_model * 2):]
-                if not multihead_attn_module._qkv_same_embed_dim:
+                if multihead_attn_module._qkv_same_embed_dim:
+                    q_proj_weight = multihead_attn_module.in_proj_weight[:d_model]
+                    k_proj_weight = multihead_attn_module.in_proj_weight[d_model:(d_model * 2)]
+                    v_proj_weight = multihead_attn_module.in_proj_weight[(d_model * 2):]
+                else:
                     q_proj_weight = multihead_attn_module.q_proj_weight
                     k_proj_weight = multihead_attn_module.k_proj_weight
                     v_proj_weight = multihead_attn_module.v_proj_weight
