@@ -1,10 +1,13 @@
 #include <torch/nn/modules/linear.h>
+#include <torch/nn/functional/linear.h>
 
 #include <torch/types.h>
 #include <torch/utils.h>
 
 #include <cmath>
 #include <cstdint>
+
+namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
@@ -47,7 +50,7 @@ void LinearImpl::pretty_print(std::ostream& stream) const {
 
 Tensor LinearImpl::forward(const Tensor& input) {
   AT_ASSERT(!options.with_bias() || bias.defined());
-  return torch::linear(input, weight, bias);
+  return F::linear(input, weight, bias);
 }
 } // namespace nn
 } // namespace torch
