@@ -144,8 +144,8 @@ FusedKernelCUDA::FusedKernelCUDA(
   // XXX HIP function signature is not compatible yet
   uint32_t max_blocks;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
-      &max_blocks_, function_, 128, 0));
-  maxBlocks = max_blocks;
+      &max_blocks, function_, 128, 0));
+  maxBlocks_ = max_blocks;
 #else
   AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
       &maxBlocks_, function_, 128, 0));
