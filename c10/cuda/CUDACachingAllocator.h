@@ -39,6 +39,26 @@ namespace cuda {
 
 namespace CUDACachingAllocator {
 
+struct DeviceStats {
+  uint64_t   total_num_alloc_requests;    // total number of allocation requests received by
+  uint64_t   total_num_free_requests;     // total number of free requests received by the allocator
+
+  uint64_t   total_num_blocks_allocated;  // total number of memory blocks ever created
+                                          // (including splits)
+  uint64_t   total_num_blocks_released;   // total number of memory blocks ever released
+  uint64_t   total_num_blocks_split;      // total number of memory blocks ever split into two
+
+  uint64_t   total_num_cuda_mallocs;      // total number of calls to CUDA malloc
+  uint64_t   total_num_cuda_frees;        // total number of calls to CUDA free
+  uint64_t   total_num_cache_flushes;     // total number of cache flushes
+                                          //   (i.e. failed calls to CUDA malloc)
+
+  uint64_t   amount_allocated;            // total amount allocated in bytes
+  uint64_t   max_amount_allocated;        // max total amount allocated in bytes
+  uint64_t   amount_cached;               // total amount in cache in bytes
+  uint64_t   max_amount_cached;           // max total amount in cache in bytes
+};
+
 C10_CUDA_API void* raw_alloc(size_t nbytes);
 C10_CUDA_API void raw_delete(void* ptr);
 
@@ -47,21 +67,10 @@ C10_CUDA_API void emptyCache();
 C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
 C10_CUDA_API void* getBaseAllocation(void *ptr, size_t *size);
 C10_CUDA_API void recordStream(void *ptr, CUDAStream stream);
-C10_CUDA_API uint64_t totalNumAllocRequests(int device);
-C10_CUDA_API uint64_t totalNumFreeRequests(int device);
-C10_CUDA_API uint64_t totalNumBlocksAllocated(int device);
-C10_CUDA_API uint64_t totalNumBlocksReleased(int device);
-C10_CUDA_API uint64_t totalNumBlocksSplit(int device);
-C10_CUDA_API uint64_t totalNumCudaMallocs(int device);
-C10_CUDA_API uint64_t totalNumCudaFrees(int device);
-C10_CUDA_API uint64_t totalNumCacheFlushes(int device);
-C10_CUDA_API void     resetEventCounts(int device);
-C10_CUDA_API uint64_t currentMemoryAllocated(int device);
-C10_CUDA_API uint64_t maxMemoryAllocated(int device);
-C10_CUDA_API void     resetMaxMemoryAllocated(int device);
-C10_CUDA_API uint64_t currentMemoryCached(int device);
-C10_CUDA_API uint64_t maxMemoryCached(int device);
-C10_CUDA_API void     resetMaxMemoryCached(int device);
+C10_CUDA_API DeviceStats getDeviceStats(int device);
+C10_CUDA_API void resetEventCounts(int device);
+C10_CUDA_API void resetMaxMemoryAllocated(int device);
+C10_CUDA_API void resetMaxMemoryCached(int device);
 
 C10_CUDA_API std::mutex* getFreeMutex();
 

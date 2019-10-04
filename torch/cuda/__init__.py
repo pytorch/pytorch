@@ -462,8 +462,8 @@ def empty_cache():
         torch._C._cuda_emptyCache()
 
 
-def memory_event_counts(device=None):
-    r"""Returns a dictionary of historical CUDA memory allocator event counts:
+def memory_stats(device=None):
+    r"""Returns a dictionary of CUDA memory allocator stats:
 
     - `"num_alloc_requests"`: total number of memory allocations ever requested.
     - `"num_free_requests"`: total number of memory frees ever requested.
@@ -487,7 +487,7 @@ def memory_event_counts(device=None):
         management.
     """
     device = _get_device_index(device, optional=True)
-    return torch._C._cuda_memoryEventCounts(device)
+    return torch._C._cuda_memoryStats(device)
 
 
 def reset_memory_event_counts(device=None):
@@ -524,7 +524,7 @@ def memory_allocated(device=None):
         details about GPU memory management.
     """
     device = _get_device_index(device, optional=True)
-    return torch._C._cuda_memoryAllocated(device)
+    return memory_stats(device=device)["memory_allocated"]
 
 
 def max_memory_allocated(device=None):
@@ -547,7 +547,7 @@ def max_memory_allocated(device=None):
         management.
     """
     device = _get_device_index(device, optional=True)
-    return torch._C._cuda_maxMemoryAllocated(device)
+    return memory_stats(device=device)["max_memory_allocated"]
 
 
 def reset_max_memory_allocated(device=None):
@@ -583,7 +583,7 @@ def memory_cached(device=None):
         management.
     """
     device = _get_device_index(device, optional=True)
-    return torch._C._cuda_memoryCached(device)
+    return memory_stats(device=device)["memory_cached"]
 
 
 def max_memory_cached(device=None):
@@ -606,7 +606,7 @@ def max_memory_cached(device=None):
         management.
     """
     device = _get_device_index(device, optional=True)
-    return torch._C._cuda_maxMemoryCached(device)
+    return memory_stats(device=device)["max_memory_cached"]
 
 
 def reset_max_memory_cached(device=None):
