@@ -928,6 +928,7 @@ bool Node::hasSideEffects() const {
     case prim::CallFunction:
     case prim::CallMethod:
     case prim::BailoutTemplate:
+    case prim::profile:
       return true;
   }
 
@@ -1708,6 +1709,14 @@ void ProfileOp::cloneFrom(Node* other_) {
 }
 Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
+}
+
+TypePtr NamedValue::type() const {
+  if (value_) {
+    return value_->type();
+  } else {
+    return ivalue_.type();
+  }
 }
 
 constexpr Symbol ProfileOp::Kind;

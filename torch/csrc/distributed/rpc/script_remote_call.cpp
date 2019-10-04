@@ -9,32 +9,26 @@ namespace rpc {
 ScriptRemoteCall::ScriptRemoteCall(
     std::shared_ptr<Operator> op,
     std::vector<at::IValue>&& args,
-    at::IValue retRRefId,
-    at::IValue retForkId)
+    const RRefId& retRRefId,
+    const ForkId& retForkId)
     : ScriptCall(std::move(op), std::move(args)),
-      retRRefId_(std::move(retRRefId)),
-      retForkId_(std::move(retForkId)) {}
-
-const at::IValue& ScriptRemoteCall::retRRefId() {
-  return retRRefId_;
-}
-
-const at::IValue& ScriptRemoteCall::retForkId() {
-  return retForkId_;
-}
+      retRRefId_(retRRefId),
+      retForkId_(retForkId) {}
 
 Message ScriptRemoteCall::toMessage() && {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
-  ivalues.push_back(retRRefId_);
-  ivalues.push_back(retForkId_);
+  ivalues.emplace_back(retRRefId_.toIValue());
+  ivalues.emplace_back(retForkId_.toIValue());
 
   std::vector<torch::Tensor> tensor_table;
-  auto payload =
-      jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
+  auto payload = jit::pickle(
+      c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
 
   return Message(
-      std::move(payload), std::move(tensor_table), MessageType::REMOTE_CALL);
+      std::move(payload),
+      std::move(tensor_table),
+      MessageType::SCRIPT_REMOTE_CALL);
 }
 
 std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
@@ -47,9 +41,9 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
   auto values = value.toTuple()->elements();
 
   // remove the last element from values and convert it back to an RRef
-  auto retForkId = std::move(values.back());
+  auto retForkId = RRefId::fromIValue(values.back());
   values.pop_back();
-  auto retRRefId = std::move(values.back());
+  auto retRRefId = ForkId::fromIValue(values.back());
   values.pop_back();
 
   auto op = ScriptCall::fromIValues(values);
