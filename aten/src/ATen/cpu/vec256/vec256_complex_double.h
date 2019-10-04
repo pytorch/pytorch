@@ -105,35 +105,46 @@ public:
     return _mm256_hadd_pd(val_2, val_2);            // a*a+b*b a*a+b*b
   }
   __m256d abs_() const {
-    auto abs = _mm256_sqrt_pd(abs_2_());            // abs     abs
-    auto mask = _mm256_setr_pd(1.0, 0.0, 1.0, 0.0);
-    return _mm256_mul_pd(abs, mask);                // abs     0
+    return _mm256_sqrt_pd(abs_2_());                // abs     abs
   }
   Vec256<std::complex<double>> abs() const {
-   return abs_();     // abs     0
+    const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
+    return _mm256_and_pd(abs_(), real_mask);        // abs     0
   }
   __m256d angle_() const {
-    auto b_a = _mm256_permute_pd(values, 0x05);      //b        a
-    auto angle = Sleef_atan2d4_u10(values, b_a);     //-angle   angle
-    auto mask = _mm256_setr_pd(0.0, 1.0, 0.0, 1.0);
-    return _mm256_mul_pd(angle, mask);               //0        angle
+    auto pi = _mm256_set1_pd(M_PI);
+    auto zero = _mm256_setzero_pd();
+
+    auto b_a = _mm256_permute_pd(values, 0x05);     // b        a
+    b_a = _mm256_sub_pd(abs_(), b_a);               // abs-b    abs-a
+    auto angle = Sleef_atan2d4_u10(b_a, values);    // -angle/2 angle/2
+    angle = _mm256_add_pd(angle, angle);            // -angle   angle
+
+    auto alt = _mm256_blendv_pd(zero, pi, _mm256_cmp_pd(real(), zero, _CMP_GT_OQ));
+    return _mm256_blendv_pd(alt, angle, _mm256_cmp_pd(imag(), zero, _CMP_EQ_OQ));
   }
   Vec256<std::complex<double>> angle() const {
-    return _mm256_permute_pd(angle_(), 0x05);        // angle     0
+    const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
+    auto angle = _mm256_permute_pd(angle_(), 0x05); // angle     -angle
+    return _mm256_and_pd(angle, real_mask);         // angle      0
   }
   __m256d real_() const {
-    auto mask = _mm256_setr_pd(1.0, 0.0, 1.0, 0.0);
-    return _mm256_mul_pd(values, mask);
+    const __m256d real_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
+                                                                     0xFFFFFFFFFFFFFFFF, 0x0000000000000000));
+    return _mm256_and_pd(values, real_mask);
   }
   Vec256<std::complex<double>> real() const {
     return real_();
   }
   __m256d imag_() const {
-    auto mask = _mm256_setr_pd(0.0, 1.0, 0.0, 1.0);
-    return _mm256_mul_pd(values, mask);
+    const __m256d imag_mask = _mm256_castsi256_pd(_mm256_setr_epi64x(0x0000000000000000, 0xFFFFFFFFFFFFFFFF,
+                                                                     0x0000000000000000, 0xFFFFFFFFFFFFFFFF));
+    return _mm256_and_pd(values, imag_mask);
     }
   Vec256<std::complex<double>> imag() const {
-    return _mm256_permute_pd(imag_(), 0x05);        //b        a
+    return _mm256_permute_pd(imag_(), 0x05);           //b        a
   }
   Vec256<std::complex<double>> acos() const {
     return map(std::acos);
@@ -248,7 +259,7 @@ template <> Vec256<std::complex<double>> inline operator-(const Vec256<std::comp
 
 template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
   //(a + bi)  * (c + di) = (ac - bd) + (ad + bc)i
-  auto neg = _mm256_setr_pd(1.0, -1.0, 1.0, -1.0);
+  const __m256d neg = _mm256_setr_pd(1.0, -1.0, 1.0, -1.0);
   auto ac_bd = _mm256_mul_pd(a, b);         //ac       bd
 
   auto d_c = _mm256_permute_pd(b, 0x05);    //d        c
@@ -260,18 +271,28 @@ template <> Vec256<std::complex<double>> inline operator*(const Vec256<std::comp
 }
 
 template <> Vec256<std::complex<double>> inline operator/(const Vec256<std::complex<double>> &a, const Vec256<std::complex<double>> &b) {
-  auto mask = _mm256_setr_pd(0.0, 1.0, 0.0, 1.0);
-  Vec256<std::complex<double>> abs = Vec256<std::complex<double>>(_mm256_div_pd(a.abs_(), _mm256_add_pd(b.abs_(), mask)));
-  Vec256<std::complex<double>> i_angle = Vec256<std::complex<double>>(_mm256_sub_pd(a.angle_(), b.angle_()));
-  return abs*i_angle.exp();
+  //re + im*i = (a + bi)  / (c + di)
+  //re = (ac + bd)/abs_2()
+  //im = (bc - ad)/abs_2()
+  const __m256d neg = _mm256_setr_pd(-1.0, 1.0, -1.0, 1.0);
+  auto ac_bd = _mm256_mul_pd(a, b);         //ac       bd
+
+  auto d_c = _mm256_permute_pd(b, 0x05);    //d        c
+  d_c = _mm256_mul_pd(neg, d_c);            //-d       c
+  auto ad_bc = _mm256_mul_pd(a, d_c);       //-ad      bc
+
+  auto re_im = _mm256_hadd_pd(ac_bd, ad_bc);//ac + bd  bc - ad
+  return _mm256_div_pd(re_im, b.abs_2_());
 }
 
 // reciprocal. Implement this here so we can use multiplication.
 Vec256<std::complex<double>> Vec256<std::complex<double>>::reciprocal() const{
-  auto mask = _mm256_setr_pd(0.0, -1.0, 0.0, -1.0);
-  Vec256<std::complex<double>> abs = Vec256<std::complex<double>>(_mm256_div_pd(_mm256_permute_pd(mask, 0x05), _mm256_add_pd(abs_(), mask)));
-  Vec256<std::complex<double>> i_angle = Vec256<std::complex<double>>(angle_());
-  return abs*i_angle.exp();
+  //re + im*i = (a + bi)  / (c + di)
+  //re = (ac + bd)/abs_2() = c/abs_2()
+  //im = (bc - ad)/abs_2() = d/abs_2()
+  const __m256d neg = _mm256_setr_pd(1.0, -1.0, 1.0, -1.0);
+  auto c_d = _mm256_mul_pd(neg, values);    //c       -d
+  return _mm256_div_pd(c_d, abs_2_());
 }
 
 template <>
@@ -279,7 +300,10 @@ Vec256<std::complex<double>> inline maximum(const Vec256<std::complex<double>>& 
   auto abs_a = a.abs_2_();
   auto abs_b = b.abs_2_();
   auto mask = _mm256_cmp_pd(abs_a, abs_b, _CMP_LT_OQ);
-  return _mm256_blendv_pd(a, b, mask);
+  auto max = _mm256_blendv_pd(a, b, mask);
+  // Exploit the fact that all-ones is a NaN.
+  auto isnan = _mm256_cmp_pd(abs_a, abs_b, _CMP_UNORD_Q);
+  return _mm256_or_pd(max, isnan);
 }
 
 template <>
@@ -287,7 +311,10 @@ Vec256<std::complex<double>> inline minimum(const Vec256<std::complex<double>>& 
   auto abs_a = a.abs_2_();
   auto abs_b = b.abs_2_();
   auto mask = _mm256_cmp_pd(abs_a, abs_b, _CMP_GT_OQ);
-  return _mm256_blendv_pd(a, b, mask);
+  auto min = _mm256_blendv_pd(a, b, mask);
+  // Exploit the fact that all-ones is a NaN.
+  auto isnan = _mm256_cmp_pd(abs_a, abs_b, _CMP_UNORD_Q);
+  return _mm256_or_pd(min, isnan);
 }
 
 template <>
