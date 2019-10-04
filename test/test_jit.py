@@ -3457,7 +3457,8 @@ def foo(x):
 
             if not PY2:
                 buffer = io.BytesIO()
-                m.save(buffer)
+                torch.jit.save(m, buffer)
+                buffer.seek(0)
 
                 loaded = torch.jit.load(buffer)
 
