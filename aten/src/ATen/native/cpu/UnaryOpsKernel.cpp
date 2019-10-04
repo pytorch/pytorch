@@ -33,7 +33,7 @@ static void sigmoid_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sigmoid_cpu", [&]() {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return (decltype(a)(1) / (decltype(a)(1) + std::exp((-a)))); },
+        [=](scalar_t a) -> scalar_t { return ((scalar_t)(1) / ((scalar_t)(1) + std::exp((-a)))); },
         [=](Vec256<scalar_t> a) {
           a = Vec256<scalar_t>((scalar_t)(0)) - a;
           a = a.exp();

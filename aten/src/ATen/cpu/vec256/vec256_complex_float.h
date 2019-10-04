@@ -161,6 +161,7 @@ public:
     return _mm256_blendv_ps(alt, angle, _mm256_cmp_ps(imag(), zero, _CMP_EQ_OQ));
   }
   Vec256<std::complex<float>> angle() const {
+    //angle = 2*atan2(std::abs(z)-a/b)
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
                                                                    0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000));
     auto angle = _mm256_permute_ps(angle_(), 0x55); // angle     -angle

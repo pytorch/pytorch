@@ -113,6 +113,7 @@ public:
     return _mm256_and_pd(abs_(), real_mask);        // abs     0
   }
   __m256d angle_() const {
+    //angle = 2*atan2(std::abs(z)-a/b)
     auto pi = _mm256_set1_pd(M_PI);
     auto zero = _mm256_setzero_pd();
 

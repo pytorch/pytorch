@@ -43,7 +43,7 @@ inline TYPE angle_impl (TYPE z) {
 
 template<>
 inline std::complex<float> angle_impl <std::complex<float>> (std::complex<float> z) {
-  return std::complex<float>(2*std::atan2f(std::abs(z)-std::real(z), std::imag(z)), 0.0);
+  return std::complex<float>(2*std::atan2(std::abs(z)-std::real(z), std::imag(z)), 0.0);
 }
 
 template<>
