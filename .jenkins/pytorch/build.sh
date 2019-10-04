@@ -189,16 +189,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     popd
     assert_git_not_dirty
   fi
-else
-  # Test standalone c10 build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-    mkdir -p c10/build
-    pushd c10/build
-    cmake ..
-    make -j
-    popd
-    assert_git_not_dirty
-  fi
 
   # Build custom operator tests.
   CUSTOM_OP_BUILD="$PWD/../custom-op-build"
@@ -211,10 +201,18 @@ else
   make VERBOSE=1
   popd
   assert_git_not_dirty
-fi
+else
+  # Test standalone c10 build
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+    mkdir -p c10/build
+    pushd c10/build
+    cmake ..
+    make -j
+    popd
+    assert_git_not_dirty
+  fi
 
-# Test no-Python build
-if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
+  # Test no-Python build
   echo "Building libtorch"
   # NB: Install outside of source directory (at the same level as the root
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
