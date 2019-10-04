@@ -9,7 +9,7 @@ import torch.nn.intrinsic.qat as nniqat
 from torch.quantization import \
     QConfig, QConfigDynamic, default_observer, default_weight_observer, get_observer_dict,\
     quantize, prepare, convert, prepare_qat, quantize_qat, fuse_modules, \
-    quantize_dynamic, default_qconfig, default_per_channel_qconfig, default_debug_qconfig, default_qat_qconfig, \
+    quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver, RecordingObserver, QuantWrapper
 
 from torch.quantization._quantize_script import quantize_script
