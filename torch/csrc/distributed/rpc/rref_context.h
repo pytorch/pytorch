@@ -17,90 +17,103 @@ class RRefContext {
  public:
   static void initInstance(std::shared_ptr<RpcAgent>);
   static std::unique_ptr<RRefContext>& getInstance();
+  static void destroyInstance();
+
+  static void handleException(const Message& message);
 
   RRefContext(const RRefContext&) = delete;
+  RRefContext(RRefContext&& other) = delete;
   void operator=(const RRefContext&) = delete;
+  RRefContext& operator=(RRefContext&& other) = delete;
 
-  worker_id_t getWorkerId() const;
-  RRefId genRRefId();
-  const std::shared_ptr<RpcAgent>& agent() const;
+  ~RRefContext();
 
-  // create a new RRef
+  // get the worker id of the current worker
+  inline worker_id_t getWorkerId() const {
+    return agent_->getWorkerInfo().id_;
+  }
+
+  // get the worker name of the current worker
+  inline const std::string& getWorkerName() const {
+    return agent_->getWorkerInfo().name_;
+  }
+
+  //  generate a globally unique ID
+  inline GloballyUniqueId genGloballyUniqueId() {
+    return GloballyUniqueId(getWorkerId(), nextLocalId_++);
+  }
+
+  inline const std::shared_ptr<RpcAgent>& agent() const {
+    return agent_;
+  }
+
+  // create a ``UserRRef`` owned by the worker ``ownerId``
   template <typename T>
-  std::shared_ptr<OwnerRRef<T>> createOwnerRRef(worker_id_t ownerId) {
-    TORCH_CHECK(ownerId == getWorkerId(), "Cannot create OwnerRRef on user.");
-    return getOrCreateOwnerRRef<T>(genRRefId());
-  }
+  std::shared_ptr<UserRRef<T>> createUserRRef(worker_id_t ownerId);
 
-  std::shared_ptr<UserRRef> createUserRRef(worker_id_t ownerId) {
-    TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
-    return createUserRRef(ownerId, genRRefId(), genRRefId());
-  }
-
-  std::shared_ptr<UserRRef> createUserRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      const ForkId& forkId) {
-    TORCH_CHECK(
-        ownerId != getWorkerId(), "RRef owner cannot create user RRef.");
-    // RRefContext does not track user RRefs, it will be destructed when there
-    // is no shared_ptrs pointing to it. NB: cannot use make_shared here as the
-    // constructor of UserRRef is private
-    return std::shared_ptr<UserRRef>(new UserRRef(ownerId, rrefId, forkId));
-  }
-
-  // get an existing RRef or create a new one from a serialized
-  // ``RRefForkData``.
+  // Convert an RRefForkData into an RRef. This RRef could be user or owner.
+  // This RRef could have already existed before, or could be created in this
+  // method.
   template <typename T>
-  std::shared_ptr<RRef> getOrCreateRRef(at::IValue&& value) {
-    auto rfd = RRefForkData::fromIValue(std::move(value));
-    return getOrCreateRRef<T>(rfd.ownerId_, rfd.rrefId_, rfd.forkId_);
-  }
+  std::shared_ptr<RRef> getOrCreateRRef(const RRefForkData& rfd);
 
+  // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
+  // one.
   template <typename T>
-  std::shared_ptr<RRef> getOrCreateRRef(
-      worker_id_t ownerId,
-      const RRefId& rrefId,
-      const ForkId& forkId) {
-    if (ownerId == getWorkerId()) {
-      return getOrCreateOwnerRRef<T>(rrefId);
-    } else {
-      return createUserRRef(ownerId, rrefId, forkId);
-    }
-  }
+  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
 
-  template <typename T>
-  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    const auto iter = owners_.find(rrefId);
-    if (iter == owners_.end()) {
-      // Scenario (1) the first time this owner knows about this RRef
-      // Scenario (2) This owner is also the creator.
-      //
-      // NB: cannot use make_shared here as the constructor of OwnerRRef is
-      // private.
-      auto rref = std::shared_ptr<OwnerRRef<T>>(
-          new OwnerRRef<T>(getWorkerId(), rrefId));
-      owners_[rref->id()] = rref;
-      return rref;
+  // Register a fork of the ``OwnerRRef``, and inserts a shared_ptr of the
+  // ``OwnerRRef`` in a map to keep it alive.
+  void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
+  // Delete a fork of the ``OwnerRRef``. NB: this could trigger deletion on the
+  // IValue or py::object. For the later, this method will acquire GIL.
+  void delForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
 
-    } else {
-      // Scenario (3) retrieving an existing RRef
-      return std::dynamic_pointer_cast<OwnerRRef<T>>(iter->second);
-    }
-  }
+  // Invoked when pickling an RRef to setup child/fork properly
+  RRefForkData prepareChildFork(const std::shared_ptr<RRef>& rref);
+  // Invoked when unpickling an RRef to send RREF_FORK_REQUEST to owner and
+  // send RREF_CHILD_ACCEPT to the parent.
+  // NB: forkId is necessary here as the rref could be an OwnerRRef
+  void notifyOwnerAndParentOfFork(
+      const ForkId& forkId,
+      worker_id_t parent,
+      const std::shared_ptr<RRef>& rref);
 
-  void addFork(const at::IValue& value);
-  void delFork(const at::IValue& value);
+  // When a UserRRef is forked to another worker (user or owner), it is added
+  // into pendingChildren_ to be held alive until it receives RREF_CHILD_ACCEPT
+  // from the child.
+  // NB: This is necessary for both user and owner child. As we do not have FIFO
+  // communication between workers, we need this strategy to make sure that all
+  // previously submitted rpc/remote calls are acked before sending out the
+  // RREF_USER_DELETE message. Otherwise, the OwnerRRef could be deleted too
+  // soon.
+  void addPendingChild(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
+  void delPendingChild(const ForkId& forkId);
+
+  // When a UserRRef is created, it is added into pendingUsers_ to be held alive
+  // until it receives RREF_USER_ACCEPT from the owner.
+  void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
+  void delPendingUser(const ForkId& forkId);
 
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
+
+  template <typename T>
+  std::shared_ptr<UserRRef<T>> createUserRRef(
+      worker_id_t ownerId,
+      const RRefId& rrefId,
+      const ForkId& forkId);
+
+  void finishForkRequest(const ForkId& forkId, worker_id_t parent);
+
+  // If there is any leak on any RRef, this method will throw an error.
+  void checkRRefLeaks();
 
   static std::unique_ptr<RRefContext> context_;
   static std::atomic<local_id_t> nextLocalId_;
 
   const std::shared_ptr<RpcAgent> agent_;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
   // Keep OwnerRRefs alive until there is no living UserRRefs.
   std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
   // Tracks known living UserRRefs of an OwnerRRef
@@ -109,6 +122,26 @@ class RRefContext {
       std::unordered_set<ForkId, ForkId::Hash>,
       RRefId::Hash>
       forks_;
+
+  // The follow two maps keep UserRRefs alive by holding a shared_ptr to the
+  // RRef instances. A UserRRef must be added into this map if any of the
+  // following two conditions is ture:
+  //
+  // (1) A UserRRef has not been accepted by owner yet.
+  //
+  //     It can be used or shared, but cannot be deleted, and hence kept alive
+  //     in this map. A message of type RREF_USER_ACCEPT will remove the
+  //     corresponding RRef from this map.
+  std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash> pendingUsers_;
+
+  // (2) A UserRRef has forked a child UserRRef which has not been accepted by
+  //     the owner yet.
+  //
+  //     In this case, this UserRRef cannot send out RREF_USER_DELETE message,
+  //     as it could potentially trigger the OwnerRRef been deleted before the
+  //     owner learns about the forked child.
+  std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash>
+      pendingChildren_;
 };
 
 } // namespace rpc
