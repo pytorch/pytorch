@@ -543,6 +543,7 @@ jobs:
 
             export IN_CIRCLECI=1
 
+            brew install python@2
             brew install cmake
 
             # Reinitialize submodules
@@ -2112,11 +2113,6 @@ workflows:
           name: caffe2_py2_ios_macos10_13_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "caffe2-py2-ios-macos10.13-build"
           build_ios: "1"
       - caffe2_macos_build:

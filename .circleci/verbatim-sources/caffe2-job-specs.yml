@@ -138,6 +138,7 @@
 
             export IN_CIRCLECI=1
 
+            brew install python@2
             brew install cmake
 
             # Reinitialize submodules

@@ -31,7 +31,7 @@ CONFIG_TREE_DATA = [
     (Ver("macos", "10.13"), [
         # TODO ios and system aren't related. system qualifies where the python comes
         #  from (use the system python instead of homebrew or anaconda)
-        (Ver("ios"), [X("py2")]),
+        (Ver("ios"), [XImportant("py2")]),
         (Ver("system"), [XImportant("py2")]),
     ]),
 ]
