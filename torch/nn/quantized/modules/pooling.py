@@ -18,7 +18,8 @@ Args:
                  H and W can be either a ``int``, or ``None`` which means the size will
                  be the same as that of the input.
 
-Examples:
+Examples::
+
     >>> # target output size of 5x7
     >>> m = nnq.AdaptiveAvgPool2d((5,7))
     >>> input = torch.randn(1, 64, 8, 9)
@@ -84,10 +85,11 @@ Shape:
 Examples::
 
     >>> # pool of square window of size=3, stride=2
-    >>> m = nn.AvgPool2d(3, stride=2)
+    >>> m = nnq.AvgPool2d(3, stride=2)
     >>> # pool of non-square window
-    >>> m = nn.AvgPool2d((3, 2), stride=(2, 1))
+    >>> m = nnq.AvgPool2d((3, 2), stride=(2, 1))
     >>> input = torch.randn(20, 16, 50, 32)
+    >>> input = torch.quantize_per_tensor(input, 1e-6, 0, torch.qint32)
     >>> output = m(input)
 
 See :class:`~torch.nn.AvgPool2d` for non-quantized version.
@@ -143,10 +145,11 @@ Shape:
 Examples::
 
     >>> # pool of square window of size=3, stride=2
-    >>> m = nn.MaxPool2d(3, stride=2)
+    >>> m = nnq.MaxPool2d(3, stride=2)
     >>> # pool of non-square window
-    >>> m = nn.MaxPool2d((3, 2), stride=(2, 1))
+    >>> m = nnq.MaxPool2d((3, 2), stride=(2, 1))
     >>> input = torch.randn(20, 16, 50, 32)
+    >>> input = torch.quantize_per_tensor(input, 1e-6, 0, torch.qint32)
     >>> output = m(input)
 
 See :class:`~torch.nn.MaxPool2d` for non-quantized version.
