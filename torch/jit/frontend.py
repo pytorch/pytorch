@@ -146,9 +146,9 @@ def get_jit_class_def(cls, self_name):
     # Get defs for each method independently
     methods = inspect.getmembers(
         cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
-    methods = filter(lambda m: not torch._jit_internal.is_unused_fn(m[1]), methods)
     method_defs = [get_jit_def(method[1],
-                   self_name=self_name) for method in methods]
+                               self_name=self_name,
+                               raiser=torch._jit_internal.is_unused_fn(method[1])) for method in methods]
 
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls)
     source = ''.join(sourcelines)
@@ -159,7 +159,7 @@ def get_jit_class_def(cls, self_name):
     return build_class_def(ctx, py_ast.body[0], method_defs, self_name)
 
 
-def get_jit_def(fn, self_name=None):
+def get_jit_def(fn, self_name=None, raiser=False):
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
@@ -169,6 +169,9 @@ def get_jit_def(fn, self_name=None):
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
+    if raiser:
+        raise_stmt = ast.parse('raise RuntimeError("Cannot call @unused methods")').body[0]
+        py_ast.body[0].body = [raise_stmt]
     return build_def(ctx, py_ast.body[0], type_line, self_name)
 
 

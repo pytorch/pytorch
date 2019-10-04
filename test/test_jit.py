@@ -19187,11 +19187,11 @@ class TestClassType(JitTestCase):
             x = X(2)
             return x.python_method()
 
-        # Just check compilation
         self.checkScript(ok, (torch.randn(2, 2),))
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute"):
-            torch.jit.script(bad)
+        script_bad = torch.jit.script(bad)
+        with self.assertRaisesRegex(torch.jit.Error, ''):
+            script_bad()
 
     def test_get_with_method(self):
         @torch.jit.script
