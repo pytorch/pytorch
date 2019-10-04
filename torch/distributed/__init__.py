@@ -54,4 +54,4 @@ if is_available():
             """
             _init_rpc(backend, self_name, self_rank, init_method, num_send_recv_threads)
             from .rpc_api import _agent
-            autograd._init(_agent.get_worker_id().id)
+            autograd._init(_agent.get_worker_info().id)
