@@ -148,7 +148,7 @@ def get_jit_class_def(cls, self_name):
         cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
     method_defs = [get_jit_def(method[1],
                                self_name=self_name,
-                               raiser=torch._jit_internal.is_unused_fn(method[1])) for method in methods]
+                               raiser=torch._jit_internal.should_drop(method[1])) for method in methods]
 
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls)
     source = ''.join(sourcelines)

@@ -374,11 +374,6 @@ def is_ignored_fn(fn):
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
 
-def is_unused_fn(fn):
-    mod = get_torchscript_modifier(fn)
-    return mod is FunctionModifiers.UNUSED
-
-
 def get_torchscript_modifier(fn):
     if not callable(fn):
         return None
