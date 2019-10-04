@@ -1,6 +1,4 @@
-#!/usr/local/bin/python3.7
-
-# /usr/bin/env python3
+#!/usr/bin/env python3
 
 """
 This script is the source of truth for config.yml.
