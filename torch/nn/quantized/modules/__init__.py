@@ -8,6 +8,8 @@ from .linear import DeQuantize
 from .pooling import AdaptiveAvgPool2d
 from .pooling import AvgPool2d
 from .pooling import MaxPool2d
+from .upsampling import UpsamplingBilinear2d
+from .upsampling import UpsamplingNearest2d
 
 from .functional_modules import FloatFunctional, QFunctional
 
@@ -21,6 +23,8 @@ __all__ = [
     'Quantize',
     'ReLU',
     'ReLU6',
+    'UpsamplingBilinear2d',
+    'UpsamplingNearest2d',
     # Wrapper modules
     'FloatFunctional',
     'QFunctional',

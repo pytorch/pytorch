@@ -1,6 +1,5 @@
 
 from torch import nn
-
 from .utils import __add_alias
 
 AdaptiveAvgPool2d = __add_alias(nn.AdaptiveAvgPool2d, r"""
