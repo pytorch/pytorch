@@ -2253,10 +2253,6 @@ dimensions. It is also required that ``index.size(d) <= other.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``.
 
-Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
-between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row along
-the specified dimension :attr:`dim` must be unique.
-
 .. include:: cuda_deterministic.rst
 
 Args:

@@ -397,25 +397,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   py::object attr = py::getattr(py_module_, field.c_str());
 
-  // HACK: This is used for rnn.py to get all the parameters of a Module as a
-  // List[Tensor]
-  if (py::isinstance<py::function>(attr) &&
-      py::hasattr(attr, "_parameter_names_fn")) {
-    // Fetch the names of the parameters in the list so they're in the
-    // right order
-    auto fn_self = py::getattr(attr, "__self__");
-    auto param_names = py::getattr(attr, "_parameter_names_fn")(fn_self);
-
-    Graph& g = *m.graph();
-    // Add all module parameters as inputs to the graph
-    std::vector<Value*> params;
-    for (auto name : param_names) {
-      params.emplace_back(g.insertGetAttr(self_, py::str(name)));
-    }
-    auto list = g.insertNode(g.createTuple(params))->output();
-    return std::make_shared<ConstantParameterList>(list);
-  }
-
   // Recursively create a ScriptModule and register it as
   // as submodule or register a python method as a script::Method
   if (py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
@@ -578,10 +559,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
-    return std::make_shared<ForkValue>();
+    return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
-    return std::make_shared<AnnotateValue>();
+    return SpecialFormValue::create(prim::annotate);
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
                            << " a submodule of the caller";
