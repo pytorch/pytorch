@@ -368,6 +368,7 @@ Matrix multiply functions follow some variant of this. Let's go through
 :func:`torch.mm` first and then generalize the rule for batch matrix multiplication.
 
 For ``torch.mm(tensor, other)``:
+
 - Check names: None
 - Propagate names: result names are ``(tensor.names[-2], other.names[-1])``.
 
@@ -382,7 +383,7 @@ Inherently, a matrix multiplication performs a dot product over two dimensions,
 collapsing them. When two tensors are matrix-multipled, the contracted dimensions
 disappear and do not show up in the output tensor.
 
-:func:`torch.mv`, func:`torch.dot` work in a similar way: name inference does not
+:func:`torch.mv`, :func:`torch.dot` work in a similar way: name inference does not
 check input names and removes the dimensions that are involved in the dot product:
 
 ::
@@ -421,7 +422,8 @@ Factory functions
 ^^^^^^^^^^^^^^^^^
 
 
-Factory functions now take a new names argument that represents a name for each dimension.
+Factory functions now take a new :attr:`names` argument that associates a name
+with each dimension.
 
 ::
 
@@ -435,6 +437,7 @@ out function and in-place variants
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 A tensor specified as an ``out=`` tensor has the following behavior:
+
 - If it has no named dimensions, then the names computed from the operation
   get propagated to it.
 - If it has any named dimensions, then the names computed from the operation

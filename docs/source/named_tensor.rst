@@ -8,10 +8,10 @@ Named Tensors
 Named Tensors aim to make tensors easier to use by allowing users to associate
 explicit names with tensor dimensions. In most cases, operations that take
 dimension parameters will accept dimension names, avoiding the need to track
-dimensions by index. In addition, named tensors use names to automatically
+dimensions by position. In addition, named tensors use names to automatically
 check that APIs are being used correctly at runtime, providing extra safety.
-Names can also be used to rearrange dimensions and to align tensors by their
-dimension names.
+Names can also be used to rearrange dimensions, for example, to support
+"broadcasting by name" rather than "broadcasting by position".
 
 .. warning::
     The named tensor API is experimental and subject to change.
@@ -19,7 +19,8 @@ dimension names.
 Creating named tensors
 ----------------------
 
-Factory functions now take a new names argument that represents a name for each dimension.
+Factory functions now take a new :attr:`names` argument that associates a name
+with each dimension.
 
 ::
 
@@ -27,7 +28,7 @@ Factory functions now take a new names argument that represents a name for each 
     tensor([[0., 0., 0.],
             [0., 0., 0.]], names=('N', 'C'))
 
-Named dimensions, like regular Tensor dimensions, are ordered and inherently positional.
+Named dimensions, like regular Tensor dimensions, are ordered.
 ``tensor.names[i]`` is the name of dimension ``i`` of ``tensor``.
 
 The following factory functions support named tensors:
@@ -42,13 +43,23 @@ The following factory functions support named tensors:
 Named dimensions
 ----------------
 
-See :attr:`~Tensor.names` for restrictions on tensor names. The most important
-restriction is that tensors may not have two named dimensions with the same name.
+See :attr:`~Tensor.names` for restrictions on tensor names.
 
 Use :attr:`~Tensor.names` to access the dimension names of a tensor and
 :meth:`~Tensor.rename` to rename named dimensions.
 
-Named tensors coexist with unnamed tensors; named tensors are instances of
+::
+
+    >>> imgs = torch.randn(1, 2, 2, 3 , names=('N', 'C', 'H', 'W'))
+    >>> imgs.names
+    ('N', 'C', 'H', 'W')
+
+    >>> renamed_imgs = imgs.rename(H='height', W='width')
+    >>> renamed_imgs.names
+    ('N', 'C', 'height', 'width)
+
+
+Named tensors can coexist with unnamed tensors; named tensors are instances of
 :class:`torch.Tensor`. Unnamed tensors have ``None``-named dimensions. Named
 tensors do not require all dimensions to be named.
 
@@ -65,7 +76,7 @@ Named tensors use names to automatically check that APIs are being called
 correctly at runtime. This occurs in a process called *name inference*.
 More formally, name inference consists of the following two steps:
 
-- **Check names**: an operator may perform automatic checks at runtime that 
+- **Check names**: an operator may perform automatic checks at runtime that
   check that certain dimension names must match.
 - **Propagate names**: name inference propagates names to output tensors.
 
@@ -134,6 +145,7 @@ specific than ``None``.
 
 For a comprehensive list of name inference rules, see :ref:`name_inference_reference-doc`.
 There are two main ones that are important to go over:
+
 - Binary arithmetic ops: :ref:`unifies_names_from_inputs-doc`
 - Matrix multiplication ops: :ref:`contracts_away_dims-doc`
 
@@ -230,9 +242,11 @@ Operators
 
 See :ref:`name_inference_reference-doc` for a full list of the supported torch and
 tensor operations. We do NOT support the following that is not covered by the link:
+
 - indexing, advanced indexing.
 
 For ``torch.nn.functional`` operators, we support the following:
+
 - :func:`torch.nn.functional.relu`
 - :func:`torch.nn.functional.softmax`
 - :func:`torch.nn.functional.log_softmax`
@@ -248,12 +262,14 @@ Because gradients are currently unnamed, optimizers may work but are untested.
 
 NN modules are currently unsupported. This can lead to the following when calling
 modules with named tensor inputs:
+
 - NN module parameters are unnamed, so outputs may be partially named.
 - NN module forward passes have code that don't support named tensors and will
   error out appropriately.
 
 We also do not support the following subsystems, though some may work out
 of the box:
+
 - distributions
 - serialization (:func:`torch.load`, :func:`torch.save`)
 - multiprocessing
@@ -269,10 +285,11 @@ Named tensor API reference
 --------------------------
 
 In this section please find the documentation for named tensor specific APIs.
-For a comprehensive list of how names are propagated through other PyTorch
+For a comprehensive reference for how names are propagated through other PyTorch
 operators, see :ref:`name_inference_reference-doc`.
 
 .. class:: Tensor()
+   :noindex:
 
    .. autoattribute:: names
    .. automethod:: rename
