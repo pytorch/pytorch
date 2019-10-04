@@ -4,21 +4,22 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import concurrent.futures
 import sys
 import unittest
+from collections import namedtuple
 from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc_backend_registry as rpc_backend_registry
-from collections import namedtuple
 from common_utils import load_tests
-from dist_utils import dist_init, BACKEND, INIT_METHOD_TEMPLATE
+from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
 from torch.distributed import ProcessGroupAgent
-from torch.distributed.internal_rpc_utils import _internal_rpc_pickler, PythonUDF
+from torch.distributed.internal_rpc_utils import PythonUDF, _internal_rpc_pickler
 from torch.distributed.rpc_api import RpcBackend
 
 
 def requires_process_group_agent(func):
     from torch.distributed.rpc_api import _agent
+
     return unittest.skipUnless(
         isinstance(_agent, ProcessGroupAgent),
         "Only ProcessGroupAgent supports global termination detection",
@@ -48,9 +49,8 @@ class MyPickleClass:
 
     def __getstate__(self):
         (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
-            PythonUDF(my_tensor_function,
-                      (torch.ones(2, 2), torch.ones(2, 2)),
-                      None))
+            PythonUDF(my_tensor_function, (torch.ones(2, 2), torch.ones(2, 2)), None)
+        )
         return (pickled_python_udf, tensors)
 
     def __setstate__(self, obj):
@@ -87,7 +87,7 @@ def build_complex_tensors():
     b = [a, a]
     c = [b, b]
     d = [a, b]
-    e = {a : d}
+    e = {a: d}
     return [a, b, c, d, e]
 
 
@@ -120,6 +120,7 @@ def no_result():
 def nested_rpc(dst):
     return dist.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
 
+
 def multi_layer_nested_async_rpc(dst, world_size, ttl):
     # this method returns immediately without blocking the callee, but will
     # generate additional requests.
@@ -129,18 +130,15 @@ def multi_layer_nested_async_rpc(dst, world_size, ttl):
         dist.rpc_async(
             current_dst,
             multi_layer_nested_async_rpc,
-            args=(
-                next_dst,
-                world_size,
-                ttl - 1
-            )
+            args=(next_dst, world_size, ttl - 1),
         )
         return 0
+
 
 def nested_rref(dst):
     return (
         dist.remote(dst, torch.add, args=(torch.ones(2, 2), 1)),
-        dist.remote(dst, torch.add, args=(torch.ones(2, 2), 2))
+        dist.remote(dst, torch.add, args=(torch.ones(2, 2), 2)),
     )
 
 
@@ -154,14 +152,7 @@ def rref_forward_chain(dst, world_size, rref, ttl):
         current_dst = "worker{}".format(dst)
         next_dst = (dst + 1) % world_size
         ret_rref = dist.remote(
-            current_dst,
-            rref_forward_chain,
-            args=(
-                next_dst,
-                world_size,
-                rref,
-                ttl - 1
-            )
+            current_dst, rref_forward_chain, args=(next_dst, world_size, rref, ttl - 1)
         )
         return [ret_rref]
     else:
@@ -228,20 +219,12 @@ class RpcTest(object):
         with self.assertRaisesRegex(
             RuntimeError, "does not support making RPC calls to self"
         ):
-            dist.rpc_sync(
-                self_worker_info,
-                torch.add,
-                args=(torch.ones(2, 2), 1)
-            )
+            dist.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
 
         with self.assertRaisesRegex(
             RuntimeError, "does not support making RPC calls to self"
         ):
-            dist.rpc_sync(
-                self_worker_name,
-                torch.add,
-                args=(torch.ones(2, 2), 1)
-            )
+            dist.rpc_sync(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc_api, "_init_rref_context")
@@ -255,36 +238,32 @@ class RpcTest(object):
         dist.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
 
     @unittest.skipIf(
-        BACKEND != RpcBackend.PROCESS_GROUP,
+        TEST_CONFIG.backend != RpcBackend.PROCESS_GROUP,
         "PROCESS_GROUP rpc backend specific test, skip",
     )
     def test_duplicate_name(self):
-        dist.init_process_group(
-            backend="gloo", init_method=self.init_method
-        )
+        dist.init_process_group(backend="gloo", init_method=self.init_method)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             dist.init_model_parallel(
                 self_name="duplicate_name",
-                backend=BACKEND,
+                backend=TEST_CONFIG.backend,
                 self_rank=self.rank,
                 init_method=self.init_method,
             )
         dist.join_rpc()
 
     def test_reinit(self):
-        dist.init_process_group(
-            backend="gloo", init_method=self.init_method,
-        )
+        dist.init_process_group(backend="gloo", init_method=self.init_method)
         dist.init_model_parallel(
             self_name="worker{}".format(self.rank),
-            backend=BACKEND,
+            backend=TEST_CONFIG.backend,
             self_rank=self.rank,
             init_method=self.init_method,
         )
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
             dist.init_model_parallel(
                 self_name="worker{}".format(self.rank),
-                backend=BACKEND,
+                backend=TEST_CONFIG.backend,
                 self_rank=self.rank,
                 init_method=self.init_method,
             )
@@ -301,9 +280,7 @@ class RpcTest(object):
 
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
-        dist.init_process_group(
-            backend="gloo", init_method=self.init_method
-        )
+        dist.init_process_group(backend="gloo", init_method=self.init_method)
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
             dist.init_model_parallel(self_name="abc*")
@@ -319,7 +296,7 @@ class RpcTest(object):
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             dist.init_model_parallel(
                 self_name="".join(["a" for _ in range(500)]),
-                backend=BACKEND,
+                backend=TEST_CONFIG.backend,
                 self_rank=self.rank,
                 init_method=self.init_method,
             )
@@ -494,16 +471,8 @@ class RpcTest(object):
         n = self.rank + 1
         dst_rank = n % self.world_size
         dst_worker_info = dist.get_worker_info("worker{}".format(dst_rank))
-        fut1 = dist.rpc_async(
-            dst_worker_info,
-            MyClass.my_static_method,
-            args=(n + 10,)
-        )
-        fut2 = dist.rpc_async(
-            dst_worker_info,
-            min,
-            args=(n, n + 1, n + 2)
-        )
+        fut1 = dist.rpc_async(dst_worker_info, MyClass.my_static_method, args=(n + 10,))
+        fut2 = dist.rpc_async(dst_worker_info, min, args=(n, n + 1, n + 2))
         self.assertEqual(fut1.wait(), MyClass.my_static_method(n + 10))
         self.assertEqual(fut2.wait(), min(n, n + 1, n + 2))
 
@@ -521,11 +490,9 @@ class RpcTest(object):
         ret = dist.rpc_sync(
             "worker{}".format(dst_rank),
             my_tensor_function,
-            args=(torch.ones(n, n), torch.ones(n, n))
+            args=(torch.ones(n, n), torch.ones(n, n)),
         )
-        self.assertEqual(ret,
-                         my_tensor_function(torch.ones(n, n),
-                                            torch.ones(n, n)))
+        self.assertEqual(ret, my_tensor_function(torch.ones(n, n), torch.ones(n, n)))
 
     @dist_init
     def test_py_tensors_multi_async_call(self):
@@ -536,15 +503,15 @@ class RpcTest(object):
             fut = dist.rpc_async(
                 "worker{}".format(dst_rank),
                 my_tensor_function,
-                args=(torch.ones(i, i), torch.ones(i, i))
+                args=(torch.ones(i, i), torch.ones(i, i)),
             )
             futs.append(fut)
 
         j = 0
         for fut in futs:
-            self.assertEqual(fut.wait(),
-                             my_tensor_function(torch.ones(j, j),
-                                                torch.ones(j, j)))
+            self.assertEqual(
+                fut.wait(), my_tensor_function(torch.ones(j, j), torch.ones(j, j))
+            )
             j += 1
 
     @dist_init
@@ -555,9 +522,7 @@ class RpcTest(object):
         b = TensorClass(build_complex_tensors())
         c = {"foo": torch.ones(n, n), "bar": torch.ones(n, n)}
         ret = dist.rpc_sync(
-            "worker{}".format(dst_rank),
-            my_complex_tensor_function,
-            args=(a, b, c)
+            "worker{}".format(dst_rank), my_complex_tensor_function, args=(a, b, c)
         )
         self.assertEqual(ret, my_complex_tensor_function(a, b, c))
 
@@ -569,7 +534,7 @@ class RpcTest(object):
         ret = dist.rpc_sync(
             "worker{}".format(dst_rank),
             run_nested_pickle,
-            args=(MyPickleClass(), torch.ones(2, 2))
+            args=(MyPickleClass(), torch.ones(2, 2)),
         )
 
         m = MyPickleClass()
@@ -581,11 +546,7 @@ class RpcTest(object):
         n = self.rank + 1
         dst_rank = n % self.world_size
         with self.assertRaisesRegex(Exception, "TypeError"):
-            ret = dist.rpc_sync(
-                "worker{}".format(dst_rank),
-                no_result,
-                args=(10,)
-            )
+            ret = dist.rpc_sync("worker{}".format(dst_rank), no_result, args=(10,))
 
     @dist_init
     def test_py_raise_in_user_func(self):
@@ -645,9 +606,7 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
 
-    def _test_multi_remote_call(
-        self, fn, args_fn=lambda x: (), kwargs_fn=lambda x: {}
-    ):
+    def _test_multi_remote_call(self, fn, args_fn=lambda x: (), kwargs_fn=lambda x: {}):
         m = 10
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -655,12 +614,14 @@ class RpcTest(object):
         expected = []
         for i in range(m):
             n = n + i
-            rrefs.append(dist.remote(
-                'worker{}'.format(dst_rank),
-                fn,
-                args=args_fn(n),
-                kwargs=kwargs_fn(n)
-            ))
+            rrefs.append(
+                dist.remote(
+                    "worker{}".format(dst_rank),
+                    fn,
+                    args=args_fn(n),
+                    kwargs=kwargs_fn(n),
+                )
+            )
             expected.append(fn(*args_fn(n), **kwargs_fn(n)))
 
         for i in range(m):
@@ -671,6 +632,7 @@ class RpcTest(object):
     def test_multi_builtin_remote_ret(self):
         def args_fn(n):
             return (torch.ones(n, n), torch.ones(n, n))
+
         self._test_multi_remote_call(torch.add, args_fn=args_fn)
 
     @dist_init
@@ -689,11 +651,8 @@ class RpcTest(object):
     @requires_process_group_agent
     def test_multi_py_udf_remote(self):
         def kwargs_fn(n):
-            return {
-                "a" : torch.ones(n, n),
-                "b" : torch.ones(n, n),
-                "c" : torch.ones(n, n),
-            }
+            return {"a": torch.ones(n, n), "b": torch.ones(n, n), "c": torch.ones(n, n)}
+
         self._test_multi_remote_call(my_function, kwargs_fn=kwargs_fn)
 
     @dist_init
@@ -702,19 +661,13 @@ class RpcTest(object):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref_a = dist.remote(
-            'worker{}'.format(dst_rank),
-            torch.add,
-            args=(torch.ones(n, n), 2)
+            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 2)
         )
         rref_b = dist.remote(
-            'worker{}'.format(dst_rank),
-            torch.add,
-            args=(torch.ones(n, n), 1)
+            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 1)
         )
         rref_c = dist.remote(
-            'worker{}'.format(dst_rank),
-            my_rref_function,
-            args=(rref_a, rref_b)
+            "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
@@ -725,22 +678,15 @@ class RpcTest(object):
         owner_rank = n % self.world_size
         user_rank = (n + 1) % self.world_size
         rref_a = dist.remote(
-            'worker{}'.format(owner_rank),
-            my_function,
-            args=(torch.ones(n, n), 2, 0)
+            "worker{}".format(owner_rank), my_function, args=(torch.ones(n, n), 2, 0)
         )
         rref_b = dist.remote(
-            'worker{}'.format(owner_rank),
-            my_function,
-            args=(torch.ones(n, n), 1, 0)
+            "worker{}".format(owner_rank), my_function, args=(torch.ones(n, n), 1, 0)
         )
         rref_c = dist.remote(
-            'worker{}'.format(user_rank),
-            my_rref_function,
-            args=(rref_a, rref_b)
+            "worker{}".format(user_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
-
 
     @dist_init
     @requires_process_group_agent
@@ -748,20 +694,14 @@ class RpcTest(object):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref_a = dist.remote(
-            "worker{}".format(dst_rank),
-            my_function,
-            args=(torch.ones(n, n), 2, 0)
+            "worker{}".format(dst_rank), my_function, args=(torch.ones(n, n), 2, 0)
         )
         rref_b = dist.remote(
-            "worker{}".format(dst_rank),
-            my_function,
-            args=(torch.ones(n, n), 1, 0)
+            "worker{}".format(dst_rank), my_function, args=(torch.ones(n, n), 1, 0)
         )
 
         c = dist.rpc_sync(
-            "worker{}".format(dst_rank),
-            my_rref_function,
-            args=(rref_a, rref_b)
+            "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
 
         self.assertEqual(c, torch.ones(n, n) + 4)
@@ -775,7 +715,7 @@ class RpcTest(object):
         rref = dist.remote(
             "worker{}".format(dst_rank1),
             nested_remote,
-            args=("worker{}".format(dst_rank2),)
+            args=("worker{}".format(dst_rank2),),
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
@@ -788,7 +728,7 @@ class RpcTest(object):
         rref_of_rrefs = dist.remote(
             "worker{}".format(dst_rank1),
             nested_rref,
-            args=("worker{}".format(dst_rank2),)
+            args=("worker{}".format(dst_rank2),),
         )
         rrefs = rref_of_rrefs.to_here()
         self.assertEqual(len(rrefs), 2)
@@ -807,7 +747,7 @@ class RpcTest(object):
                 dist.remote(
                     "worker{}".format(dst_rank1),
                     nested_rref,
-                    args=("worker{}".format(dst_rank2),)
+                    args=("worker{}".format(dst_rank2),),
                 )
             )
 
@@ -836,10 +776,7 @@ class RpcTest(object):
     def test_remote_with_exception(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        rref = dist.remote(
-            "worker{}".format(dst_rank),
-            raise_func
-        )
+        rref = dist.remote("worker{}".format(dst_rank), raise_func)
         with self.assertRaisesRegex(Exception, "ValueError"):
             rref.to_here()
 
@@ -852,7 +789,7 @@ class RpcTest(object):
         rref = dist.rpc_sync(
             "worker{}".format(dst_rank1),
             rpc_return_rref,
-            args=("worker{}".format(dst_rank2),)
+            args=("worker{}".format(dst_rank2),),
         )
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
 
@@ -864,9 +801,7 @@ class RpcTest(object):
         dst_rank = n % self.world_size
 
         rref = dist.remote(
-            "worker{}".format(dst_rank),
-            torch.add,
-            args=(torch.ones(n, n), 1)
+            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 1)
         )
 
         ret_rref = rref_forward_chain(dst_rank, self.world_size, rref, ttl)
@@ -884,18 +819,12 @@ class RpcTest(object):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref_a = dist.remote(
-            "worker{}".format(dst_rank),
-            torch.add,
-            args=(torch.ones(n, n), 2)
+            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 2)
         )
         rref_b = dist.remote(
-            "worker{}".format(dst_rank),
-            torch.add,
-            args=(torch.ones(n, n), 1)
+            "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 1)
         )
         rref_c = dist.remote(
-            "worker{}".format(dst_rank),
-            my_rref_function,
-            args=(rref_a, rref_b)
+            "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)

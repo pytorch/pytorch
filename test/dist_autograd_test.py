@@ -1,25 +1,30 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import time
+import unittest
+
+import six
+import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
-from dist_utils import dist_init, INIT_METHOD_TEMPLATE
-import six
-import unittest
-import torch
-import time
+from dist_utils import INIT_METHOD_TEMPLATE, dist_init
+
 
 prev_rank_rpc_done = False
 prev_rank_context_id = 0
+
+
 def _set_rpc_done(context_id):
     global prev_rank_rpc_done
     global prev_rank_context_id
     prev_rank_rpc_done = True
     prev_rank_context_id = context_id
 
-@unittest.skipIf(not six.PY3, "Pytorch distributed autograd package "
-                 "does not support python2")
-class DistAutogradTest(object):
 
+@unittest.skipIf(
+    not six.PY3, "Pytorch distributed autograd package " "does not support python2"
+)
+class DistAutogradTest(object):
     @property
     def world_size(self):
         return 4
@@ -34,18 +39,26 @@ class DistAutogradTest(object):
     def test_autograd_context(self):
         # Verify max possible id.
         max_auto_increment = 281474976710655
-        self.assertEqual(max_auto_increment + (self.worker_id << 48), dist_autograd._get_max_id())
+        self.assertEqual(
+            max_auto_increment + (self.worker_id << 48), dist_autograd._get_max_id()
+        )
 
         context_ids = []
         for i in range(1000):
             with dist_autograd.context() as context_id:
-                self.assertEqual(context_id, dist_autograd._retrieve_context(context_id)._context_id())
+                self.assertEqual(
+                    context_id,
+                    dist_autograd._retrieve_context(context_id)._context_id(),
+                )
                 # First 16 bits should be worker_id.
                 self.assertEqual(self.worker_id, context_id >> 48)
                 context_ids.append(context_id)
 
         for context_id in context_ids:
-            with self.assertRaisesRegex(RuntimeError, 'Could not find autograd context with id: {}'.format(context_id)):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Could not find autograd context with id: {}".format(context_id),
+            ):
                 dist_autograd._retrieve_context(context_id)
 
     @dist_init
@@ -54,8 +67,10 @@ class DistAutogradTest(object):
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = dist.rpc_sync('worker{}'.format(dst_rank), torch.add, args=(t1, t2))
-            dist.rpc_sync('worker{}'.format(dst_rank), _set_rpc_done, args=(context_id,))
+            ret = dist.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+            dist.rpc_sync(
+                "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
+            )
 
             # Get send function.
             ctx = dist_autograd._current_context()
@@ -68,10 +83,10 @@ class DistAutogradTest(object):
             self.assertEqual(2, len(next_funcs))
 
             # We should now hit t1 and t2 in the autograd graph.
-            self.assertEqual('torch::autograd::AccumulateGrad', next_funcs[0][0].name())
+            self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[0][0].name())
             self.assertEqual(t1, next_funcs[0][0].variable)
             self.assertEqual(0, next_funcs[0][1])
-            self.assertEqual('torch::autograd::AccumulateGrad', next_funcs[1][0].name())
+            self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[1][0].name())
             self.assertEqual(t2, next_funcs[1][0].variable)
             self.assertEqual(0, next_funcs[1][1])
 
@@ -99,13 +114,17 @@ class DistAutogradTest(object):
             next_funcs = list(send_functions.values())[0].next_functions
             self.assertEqual(1, len(next_funcs))
             add_backward_fn = next_funcs[0][0]
-            self.assertEqual('AddBackward0', add_backward_fn.name())
+            self.assertEqual("AddBackward0", add_backward_fn.name())
 
             # Verify the next two functions are the same recv backward function.
             next_funcs = add_backward_fn.next_functions
             self.assertEqual(2, len(next_funcs))
-            self.assertEqual('torch::distributed::autograd::RecvRpcBackward', next_funcs[0][0].name())
-            self.assertEqual('torch::distributed::autograd::RecvRpcBackward', next_funcs[1][0].name())
+            self.assertEqual(
+                "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
+            )
+            self.assertEqual(
+                "torch::distributed::autograd::RecvRpcBackward", next_funcs[1][0].name()
+            )
             self.assertEqual(next_funcs[0][0], next_funcs[1][0])
 
         # autograd context should be cleaned up by now.
@@ -124,15 +143,21 @@ class DistAutogradTest(object):
             tensors = []
             for i in range(num_tensors):
                 tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
-            ret = dist.rpc_sync('worker{}'.format(dst_rank), torch.stack, args=(tensors,))
+            ret = dist.rpc_sync(
+                "worker{}".format(dst_rank), torch.stack, args=(tensors,)
+            )
             self.assertEqual(torch.stack(tensors), ret)
 
             # Verify appropriate tensors have been attached the autograd graph.
-            next_funcs = list(dist_autograd._current_context()._send_functions().values())[0].next_functions
+            next_funcs = list(
+                dist_autograd._current_context()._send_functions().values()
+            )[0].next_functions
             idx = 0
             for i in range(num_tensors):
                 if i % 2 == 0:
-                    self.assertEqual('torch::autograd::AccumulateGrad', next_funcs[i][0].name())
+                    self.assertEqual(
+                        "torch::autograd::AccumulateGrad", next_funcs[i][0].name()
+                    )
                     self.assertEqual(tensors[i], next_funcs[i][0].variable)
                 else:
                     self.assertIsNone(next_funcs[i][0])
