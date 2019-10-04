@@ -1107,6 +1107,42 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    def test_remainder(self):
+        class RemainderModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.remainder(input, other)
+
+        x = torch.randn(4, 2, 3)
+        y = torch.randn(1, 2, 1)
+        self.run_test(RemainderModel(), (x, y))
+
+    def test_remainder_scalar(self):
+        class RemainderModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.remainder(input, 2.55)
+
+        x = torch.randint(10, (2, 3))
+        self.run_test(RemainderModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fmod(self):
+        class FModModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.fmod(input, other)
+
+        x = torch.randn(4, 2, 3)
+        y = torch.randn(1, 2, 1)
+        self.run_test(FModModel(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fmod_scalar(self):
+        class FModModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.fmod(input, 2.55)
+
+        x = torch.randint(10, (2, 3))
+        self.run_test(FModModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gelu(self):
         class GeluModel(torch.nn.Module):

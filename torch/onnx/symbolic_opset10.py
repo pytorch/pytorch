@@ -168,3 +168,7 @@ def flip(g, input, dims):
                                   starts=[-1] * len(dims),
                                   ends=[-9223372036854775807] * len(dims),
                                   steps=[-1] * len(dims))
+
+
+def fmod(g, input, other):
+    return g.op("Mod", input, other, fmod_i=1)
