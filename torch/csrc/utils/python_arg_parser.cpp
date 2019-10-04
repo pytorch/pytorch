@@ -5,6 +5,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 
@@ -21,6 +22,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Scalar", ParameterType::SCALAR},
   {"int64_t", ParameterType::INT64},
   {"double", ParameterType::DOUBLE},
+  {"complex", ParameterType::COMPLEX},
   {"TensorList", ParameterType::TENSOR_LIST},
   {"IntArrayRef", ParameterType::INT_LIST},
   {"Generator", ParameterType::GENERATOR},
@@ -133,9 +135,10 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 bool FunctionParameter::check(PyObject* obj) {
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkDouble(obj));
+      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
     }
     case ParameterType::SCALAR:
+    case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
       }
@@ -199,6 +202,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::SCALAR: return "Number";
     case ParameterType::INT64: return "int";
     case ParameterType::DOUBLE: return "float";
+    case ParameterType::COMPLEX: return "complex";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";
     case ParameterType::INT_LIST: return "tuple of ints";
     case ParameterType::GENERATOR: return "torch.Generator";
@@ -274,6 +278,9 @@ void FunctionParameter::set_default_str(const std::string& str) {
     default_bool = (str == "True" || str == "true");
   } else if (type_ == ParameterType::DOUBLE) {
     default_double = atof(str.c_str());
+  } else if (type_ == ParameterType::COMPLEX) {
+    default_complex[0] = atof(str.c_str()); // TODO: parse "x + xj"?
+    default_complex[1] = 0;
   } else if (type_ == ParameterType::SCALAR) {
     if (str != "None") {
       // we sometimes rely on integer-vs-float values, e.g. with arange.
@@ -643,9 +650,13 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   }
 
   at::Scalar scalar;
-  if (THPUtils_checkLong(obj)) {
+  if (PyBool_Check(obj)) {
+    scalar = at::Scalar(THPUtils_unpackBool(obj));
+  } else if (THPUtils_checkLong(obj)) {
     scalar = at::Scalar(THPUtils_unpackLong(obj));
-  } else if (THPUtils_checkDouble(obj)) {
+  }else if (PyComplex_Check(obj)) {
+    scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
+  }else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
   } else {
     // NB: Are you here because you passed None to a Variable method,
@@ -673,8 +684,13 @@ at::Scalar PythonArgs::scalar_slow(int i) {
   if (THPVariable_Check(args[i])) {
     return ((THPVariable*)args[i])->cdata.item();
   }
+
   if (THPUtils_checkLong(args[i])) {
     return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  }
+
+  if (PyBool_Check(args[i])) {
+    return at::Scalar(THPUtils_unpackBool(args[i]));
   }
 
   if (PyComplex_Check(args[i])) {

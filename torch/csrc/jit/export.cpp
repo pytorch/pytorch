@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/source_range_serialization.h>
+#include <torch/csrc/jit/instruction.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -31,6 +32,7 @@
 
 namespace torch {
 namespace jit {
+char const * toString(OpCode op);
 
 namespace {
 namespace onnx_torch = ::torch::onnx;
@@ -153,7 +155,7 @@ class EncoderBase {
 
   virtual void EncodeIntermediateValueInfo(
       onnx::GraphProto* graph_proto,
-      const Value* n){};
+      const Value* n){}
 
   virtual void EncodeValueInfo(
       onnx::GraphProto* graph_proto,
@@ -211,7 +213,7 @@ EncoderBase::EncoderBase(
   // stable. only bump it when it's necessary
   model_proto_.set_ir_version(4);
   // TODO: set the producer version using appropriate function call
-  model_proto_.set_producer_version("1.2");
+  model_proto_.set_producer_version("1.3");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -275,13 +277,13 @@ void EncoderBase::EncodeBlock(
   // Since ONNX IR VERSION 4, initializers do not have to
   // be a subset of graph inputs. We use keep_initializers_as_inputs
   // argument to determine whether to add initializers
-  // as inputs or not. If keep_initializers_as_inputs=false, 
+  // as inputs or not. If keep_initializers_as_inputs=false,
   // we only add non-parameter inputs as inputs to ONNX graph, and.
   // not the initializers (parameters). If keep_initializers_as_inputs
   // =true, we add initializers as inputs too. Setting
-  // keep_initializers_as_inputs=false allows better 
+  // keep_initializers_as_inputs=false allows better
   // optimizations, such as constant-folding, on ONNX graphs
-  // by backends/optimizers.  
+  // by backends/optimizers.
   if (keep_initializers_as_inputs) {
     for (auto input : block->inputs()) {
       onnx::ValueInfoProto* v = graph_proto->add_input();
@@ -527,106 +529,18 @@ void GraphEncoder::EncodeTensor(
   }
 }
 
-// this is a serializer class which saves script modules to pt files. the
-// content of the file is written using PyTorchStreamWriter, for details please
-// check caffe2/serialize/inline_container.h. all the records except the last
-// one are tensor data, and the last record is a serialized ModelProto, defined
-// in caffe2/proto/torch.proto. ModelProto contains all the metadata of the
-// model, and it is serialized as json.
 class ScriptModuleSerializer {
  public:
-  ScriptModuleSerializer(const std::string& filename);
-
-  ScriptModuleSerializer(std::ostream* ofs);
-
-  void serialize(
-      const script::Module& module,
-      const script::ExtraFilesMap& extra_files = script::ExtraFilesMap());
-
-  virtual ~ScriptModuleSerializer() {}
-
- protected:
-  virtual void convertModel(
-      const script::Module& module,
-      torch::ModelDef* model_def,
-      const script::ExtraFilesMap& extra_files);
-  void writePickleArchive(
-      const std::string& name,
-      const std::vector<IValue>& ivalues);
-  void convertModule(
-      const script::Module& module,
-      const std::string& prefix,
-      const std::string& name,
-      torch::ModuleDef* module_def);
-
-  // add a tensor to the tensorTable
-  // returns the offset into the tensor table
-  size_t addTensor(const at::Tensor& tensor);
-
-  // write the content of the tensor to the file/stream, and save the
-  // offset in the storageMap_
-  void convertAndWriteTensor(
-      size_t tensor_id,
-      const at::Tensor& tensor,
-      torch::TensorDef* tensor_proto,
-      std::unordered_map<const void*, std::string>& storageMap);
-
-  // dump all the tensors in the tensorTable_ to a ModelDef (metadata) and
-  // the file/stream (the content), assuming all the information of the
-  // tensors has been collected. the method calls convertAndWriteTensor
-  // to dump the content of a tensor
-  void writeTensorTable(torch::ModelDef* model_def);
-
-  // Write the list of ivalues to a file as a pickle program
-  virtual void writeLibs(torch::ModelDef* model_def);
-
-  void writeExtraFiles(
-      const script::Module& module,
-      const script::ExtraFilesMap& extra_files);
-
-  IValue moduleGetState(const script::Module& module);
-
-  virtual void convertNamedType(const c10::NamedTypePtr& type);
-
-  std::ofstream ofs_;
-  caffe2::serialize::PyTorchStreamWriter writer_;
-
-  // all tensors that will be stored
-  std::vector<at::Tensor> tensor_table_;
-
- private:
-  // A list of attributes (indexed by attr_def->id()) and module state (indexed
-  // by module_def->id())
-  // all classes used by this module hierarchy
-  std::vector<c10::NamedTypePtr> deps_table_;
-  OrderedDict<c10::NamedTypePtr, std::string> converted_classes_;
-  std::vector<IValue> pickled_ivalues_;
-};
-
-// [serialization forward compat]
-// We have changed the serialization format, but need to retain forward
-// compatability so that users who export models off master internally can still
-// load their model in a service with a potentially older binary.
-//
-// The solution is to disable the new code path for a while with a compile-time
-// flag (#FBCODE_CAFFE2), wait a bit until the new import code is available
-// everywhere, then delete all the old export code.
-//
-// To make this work, several things have been disabled internally. They have
-// been tagged with [serialization forward compat] so they can be fixed when we
-// delete the old export path.
-// 1. Several tests that depend on the serialization format details.
-// 2. The emit module hook (since combining the old export and new import code
-//    is going to cause jitter)
-class ScriptModuleSerializer2 {
- public:
-  ScriptModuleSerializer2(const std::string& filename)
+  ScriptModuleSerializer(const std::string& filename)
       : writer_(filename.c_str()) {}
 
-  ScriptModuleSerializer2(std::ostream* ofs) : ofs_(), writer_(ofs) {}
+  ScriptModuleSerializer(std::ostream* ofs)
+      : ofs_(), writer_(ofs) {}
+
   void serialize(
       const script::Module& module,
-      const script::ExtraFilesMap& extra_files) {
+      const script::ExtraFilesMap& extra_files,
+      bool bytecode_format) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
     // Serialize all code info.
@@ -636,6 +550,9 @@ class ScriptModuleSerializer2 {
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+    if (bytecode_format) {
+      writeByteCode(module);
+    }
     // finally we serialize the model
     writeArchive("data", module.module_object());
   }
@@ -696,8 +613,8 @@ class ScriptModuleSerializer2 {
       auto& type_info = item.value();
 
       // For the type, foo.bar.Baz
-      const std::string filename = ImportExportHelpers::qualifierToPath(
-          converted_type->name()->prefix(), "code/");
+      const std::string filename =
+          qualifierToArchivePath(converted_type->name()->prefix(), "code/");
       // End state: filename is "foo/bar.py", in which we will define a class
       // named Baz
       auto& stream = fileToSrc[filename];
@@ -744,6 +661,48 @@ class ScriptModuleSerializer2 {
           /*compress=*/true);
     }
   }
+
+  void writeByteCode(const script::Module& module) {
+    auto methods = module.get_methods();
+    std::vector<c10::IValue> elements;
+    for (const auto& method : methods) {
+      const auto& func = method.function();
+      torch::jit::Code code(func.graph());
+
+      // instructions
+      std::vector<IValue> inss;
+      for (const auto& ins : code.instructions()) {
+        TORCH_CHECK(isOpSupportedInMobile(ins.op), toString(ins.op),
+                    " is not supported in mobile module.");
+        std::vector<IValue> insv{toString(ins.op), ins.X, ins.N};
+        inss.emplace_back(c10::ivalue::Tuple::create(std::move(insv)));
+      }
+      auto instructions = c10::ivalue::Tuple::create(std::move(inss));
+      auto named_ins = c10::ivalue::Tuple::create({"instructions", instructions});
+
+      // operators
+      std::vector<IValue> opss;
+      for (const auto& opname : code.opname_table()) {
+        opss.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
+      }
+      auto operators = c10::ivalue::Tuple::create(std::move(opss));
+      auto named_ops = c10::ivalue::Tuple::create({"operators", operators});
+
+      // constants
+      auto constants = c10::ivalue::Tuple::create(code.constant_table());
+      auto named_consts = c10::ivalue::Tuple::create({"constants", constants});
+
+      // since the register location is embedded into the bytecode, pass the register size
+      auto named_regsize = c10::ivalue::Tuple::create({"register_size",
+                                                       static_cast<int>(code.register_size())});
+
+      auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts, named_regsize});
+      elements.push_back(c10::ivalue::Tuple::create({func.qualname().qualifiedName(), element}));
+    }
+    auto telements = c10::ivalue::Tuple::create(std::move(elements));
+    writeArchive("bytecode", telements);
+  }
+
   void convertNamedType(const c10::NamedTypePtr& class_type) {
     if (converted_types_.contains(class_type)) {
       return;
@@ -785,333 +744,8 @@ class ScriptModuleSerializer2 {
     SourceRangeRecords debug_info;
   };
   OrderedDict<c10::NamedTypePtr, TypeInfo> converted_types_;
+  bool bytecode_format_;
 };
-
-// ScriptModuleSerializer's methods
-ScriptModuleSerializer::ScriptModuleSerializer(const std::string& filename)
-    : writer_(filename.c_str()) {
-  // TODO appropriate support for mmap, right now we still use stream writer
-}
-
-ScriptModuleSerializer::ScriptModuleSerializer(std::ostream* ofs)
-    : ofs_(), writer_(ofs) {}
-
-void ScriptModuleSerializer::serialize(
-    const script::Module& module,
-    const script::ExtraFilesMap& extra_files) {
-  C10_LOG_API_USAGE_ONCE("torch.script.save");
-  torch::ModelDef model_def;
-  convertModel(module, &model_def, extra_files);
-  std::string output;
-  // NB: cannot use MessageToJsonString, since fbcode's protobuf is too old
-  // be consistent with MessageToJsonString
-  std::string url_prefix = "type.googleapis.com";
-  std::unique_ptr<::google::protobuf::util::TypeResolver> resolver(
-      ::google::protobuf::util::NewTypeResolverForDescriptorPool(
-          url_prefix, model_def.GetDescriptor()->file()->pool()));
-  ::google::protobuf::util::Status convert_result =
-      ::google::protobuf::util::BinaryToJsonString(
-          resolver.get(),
-          url_prefix + "/" + model_def.GetDescriptor()->full_name(),
-          model_def.SerializeAsString(),
-          &output);
-  if (!convert_result.ok()) {
-    std::stringstream ss;
-    ss << convert_result;
-    AT_ERROR(ss.str());
-  }
-  writer_.writeRecord(
-      "model.json",
-      output.data(),
-      output.size(),
-      /*compress=*/true);
-  writer_.writeEndOfFile();
-}
-
-void ScriptModuleSerializer::writeLibs(torch::ModelDef* model_def) {
-  // Convert all the classes that this model depends on
-  for (const auto& class_type : deps_table_) {
-    convertNamedType(class_type);
-  }
-
-  // Mapping of filename => src. We need this because multiple clases may go in
-  // the same file (e.g. foo.bar.Baz and foo.bar.Qux)
-
-  // Aggregate dependencies into files by their qualified names
-  std::unordered_map<std::string, std::ostringstream> fileToSrc;
-  for (const auto& item : converted_classes_) {
-    const auto& class_type = item.key();
-    const auto& class_src = item.value();
-
-    // For the type, foo.bar.Baz
-    const std::string filename = ImportExportHelpers::qualifierToPath(
-        class_type->name()->prefix(), "libs/");
-    // End state: filename is "foo/bar.py", in which we will define a class
-    // named Baz
-    fileToSrc[filename] << class_src;
-  }
-
-  // Write out the files. We still have to do this in converted_classes_ order,
-  // to maintain dependency order.
-  std::unordered_set<std::string> written_files;
-  for (const auto& item : converted_classes_) {
-    const c10::NamedTypePtr& class_type = item.key();
-    const std::string filename = ImportExportHelpers::qualifierToPath(
-        class_type->name()->prefix(), "libs/");
-    if (written_files.count(filename)) {
-      continue;
-    }
-    written_files.insert(filename);
-
-    const std::string& src = fileToSrc.at(filename).str();
-
-    std::ostringstream lib_stream;
-    lib_stream << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
-    lib_stream << src;
-    std::string lib_str = lib_stream.str();
-    writer_.writeRecord(
-        filename,
-        lib_str.c_str(),
-        lib_str.size(),
-        /*compress=*/true);
-  }
-}
-
-// python print the type and add to the converted_types_. Recursively
-// python print all classes that this class depends on.
-void ScriptModuleSerializer::convertNamedType(
-    const c10::NamedTypePtr& class_type) {
-  if (converted_classes_.contains(class_type)) {
-    return;
-  }
-
-  std::vector<c10::NamedTypePtr> deps;
-  std::ostringstream source_stream;
-  SourceRangeRecords source_ranges;
-  LEGACY_PythonPrint(
-      source_stream,
-      source_ranges,
-      class_type,
-      tensor_table_,
-      deps,
-      /*enforce_importable=*/true);
-
-  for (const auto& c : deps) {
-    convertNamedType(c);
-  }
-  // Insert *after* we've traversed the dependencies. This ensures that any
-  // given class will appear after its dependencies in the order.
-  converted_classes_.insert(class_type, source_stream.str());
-}
-
-void ScriptModuleSerializer::convertModel(
-    const script::Module& module,
-    torch::ModelDef* model_def,
-    const script::ExtraFilesMap& extra_files) {
-  model_def->set_producer_name("pytorch");
-  model_def->set_producer_version("1.0"); // TODO: set the producer version
-                                          // using appropriate function call
-  model_def->set_proto_version(5);
-
-  convertModule(
-      module, "", writer_.archiveName(), model_def->mutable_main_module());
-
-  writePickleArchive("attributes.pkl", pickled_ivalues_);
-
-  writeTensorTable(model_def);
-  writeLibs(model_def);
-  writeExtraFiles(module, extra_files);
-}
-
-void ScriptModuleSerializer::writeExtraFiles(
-    const script::Module& module,
-    const script::ExtraFilesMap& extra_files) {
-  // Write out extra files.
-  for (const auto& kv : extra_files) {
-    const std::string key = "extra/" + kv.first;
-    writer_.writeRecord(key, kv.second.data(), kv.second.size());
-  }
-  auto hook = GetExtraFilesHook();
-  if (hook) {
-    script::ExtraFilesMap hook_files = hook(module);
-    for (const auto& kv : hook_files) {
-      const std::string key = "extra/" + kv.first;
-      writer_.writeRecord(key, kv.second.data(), kv.second.size());
-    }
-  }
-}
-
-/// Run module.__getstate__() and return the result
-IValue ScriptModuleSerializer::moduleGetState(const script::Module& module) {
-  return module.get_method("__getstate__")({});
-}
-
-size_t ScriptModuleSerializer::addTensor(const at::Tensor& tensor) {
-  tensor_table_.push_back(tensor);
-  return tensor_table_.size() - 1;
-}
-
-void ScriptModuleSerializer::convertAndWriteTensor(
-    size_t tensor_id,
-    const at::Tensor& tensor,
-    torch::TensorDef* tensor_proto,
-    std::unordered_map<const void*, std::string>& storageMap) {
-  for (auto d : tensor.sizes()) {
-    tensor_proto->add_dims(d);
-  }
-  for (auto s : tensor.strides()) {
-    tensor_proto->add_strides(s);
-  }
-  tensor_proto->set_data_type(caffe2::TypeMetaToDataType(
-      at::scalarTypeToTypeMeta(tensor.scalar_type())));
-  tensor_proto->set_offset(tensor.storage_offset());
-
-  tensor_proto->set_requires_grad(tensor.requires_grad());
-
-  tensor_proto->set_is_quantized(tensor.is_quantized());
-  if (tensor.is_quantized()) {
-    tensor_proto->set_scale(tensor.q_scale());
-    tensor_proto->set_zero_point(tensor.q_zero_point());
-  }
-
-  auto* key = tensor.storage().unsafeGetStorageImpl();
-  auto storage_it = storageMap.find(key);
-  if (storage_it == storageMap.end()) {
-    WriteableTensorData data = getWriteableTensorData(tensor);
-    std::string name = "tensors/" + std::to_string(tensor_id);
-    writer_.writeRecord(name, data.data(), data.sizeInBytes());
-    storage_it = storageMap.insert({key, name}).first;
-  }
-
-  auto* data = tensor_proto->mutable_data();
-  data->set_key(storage_it->second);
-
-  // handle device case, set the device_detail and load to CUDA device
-  std::stringstream ss;
-  ss << tensor.device();
-  tensor_proto->set_device(ss.str());
-}
-
-void ScriptModuleSerializer::writeTensorTable(torch::ModelDef* model_def) {
-  std::unordered_map<const void*, std::string> storageMap;
-  size_t tensor_id = 0;
-  for (const at::Tensor& t : tensor_table_) {
-    auto* tensor_proto = model_def->add_tensors();
-    convertAndWriteTensor(tensor_id++, t, tensor_proto, storageMap);
-  }
-}
-
-void ScriptModuleSerializer::writePickleArchive(
-    const std::string& name,
-    const std::vector<IValue>& ivalues) {
-  auto data = pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table_);
-  writer_.writeRecord(name, data.data(), data.size(), /*compress=*/true);
-}
-
-void ScriptModuleSerializer::convertModule(
-    const script::Module& module,
-    const std::string& prefix,
-    const std::string& name,
-    torch::ModuleDef* module_def) {
-  module_def->set_name(name);
-  module_def->set_optimize(true);
-
-  // If __getstate__ and __setstate__ methods are provided, use those for
-  // serializing instead of serializing the attributes directly
-  bool user_provided_serialization =
-      checkHasValidSetGetState(module.module_object()->type());
-  if (user_provided_serialization) {
-    // Run the '__getstate__' method on the module and store the result
-    pickled_ivalues_.emplace_back(moduleGetState(module));
-    module_def->set_get_state_attribute_id(pickled_ivalues_.size() - 1);
-  }
-
-  // Add all the parameters
-  for (const auto& param : module.get_parameters()) {
-    torch::ParameterDef* param_def = module_def->add_parameters();
-    param_def->set_name(param.name());
-    param_def->set_is_buffer(false);
-    if (user_provided_serialization) {
-      // If a __getstate__ was used, don't write the actual tensor
-      param_def->set_tensor_id(-1);
-    } else {
-      param_def->set_tensor_id(addTensor(param.value().toTensor()));
-    }
-  }
-
-  // Add all the attributes
-  for (const auto& attribute : module.get_attributes()) {
-    // Add attribute to ModuleDef
-    torch::AttributeDef* attribute_def = module_def->add_attributes();
-    attribute_def->set_name(attribute.name());
-    attribute_def->set_type(attribute.type()->python_str());
-
-    if (!user_provided_serialization) {
-      // Write the attribute's index if it's actually saved, -1 if it needs to
-      // come from __getstate__
-      pickled_ivalues_.push_back(attribute.value());
-      attribute_def->set_id(pickled_ivalues_.size() - 1);
-    } else {
-      // The module had a __setstate__, so write the attribute name/type so
-      // it can be correctly imported, but it has no entry in the
-      // pickled_ivalues_ table
-      attribute_def->set_id(-1);
-    }
-  }
-
-  std::stringstream module_name;
-  if (prefix != "")
-    module_name << prefix << "_";
-  module_name << name;
-
-  if (module.type()->methods().size() > 0) {
-    std::ostringstream methods;
-    SourceRangeRecords source_ranges;
-    methods << "op_version_set = " << CURRENT_OP_VERSION_SET << "\n";
-    std::vector<c10::NamedTypePtr> deps_table;
-    LEGACY_PythonPrint(
-        methods,
-        source_ranges,
-        module,
-        tensor_table_,
-        deps_table,
-        /*enforce_importable=*/true);
-    for (const auto& named_type : deps_table) {
-      convertNamedType(named_type);
-    }
-    torch::RecordRef* record = module_def->mutable_torchscript_arena();
-
-    std::stringstream filename;
-    filename << "code/" << module_name.str() << ".py";
-    std::string methods_str = methods.str();
-    writer_.writeRecord(
-        filename.str(),
-        methods_str.c_str(),
-        methods_str.size(),
-        /*compress=*/true);
-    record->set_key(filename.str());
-
-    // Write out debug records
-    torch::RecordRef* debug_record =
-        module_def->mutable_torchscript_debug_arena();
-
-    SourceRangePickler source_range_pickler;
-    const auto& range_data = source_range_pickler.pickle(source_ranges);
-    std::stringstream debug_filename;
-    debug_filename << "debug/" << module_name.str() << ".pkl";
-    writer_.writeRecord(
-        debug_filename.str(),
-        range_data.data(),
-        range_data.size(),
-        /*compress=*/true);
-    debug_record->set_key(debug_filename.str());
-  }
-
-  for (script::Slot s : module.get_module_slots()) {
-    torch::ModuleDef* sub_def = module_def->add_submodules();
-    convertModule(s.to_module(), module_name.str(), s.name(), sub_def);
-  }
-}
 
 // Pretty printing for ONNX
 constexpr char indent_char = ' ';
@@ -1349,26 +983,19 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
 void ExportModule(
     const script::Module& module,
     std::ostream& out,
-    const script::ExtraFilesMap& extra_files) {
-#ifdef FBCODE_CAFFE2
+    const script::ExtraFilesMap& extra_files,
+    bool bytecode_format) {
   ScriptModuleSerializer serializer(&out);
-#else
-  ScriptModuleSerializer2 serializer(&out);
-#endif
-
-  serializer.serialize(module, extra_files);
+  serializer.serialize(module, extra_files, bytecode_format);
 }
 
 void ExportModule(
     const script::Module& module,
     const std::string& filename,
-    const script::ExtraFilesMap& extra_files) {
-#ifdef FBCODE_CAFFE2
+    const script::ExtraFilesMap& extra_files,
+    bool bytecode_format) {
   ScriptModuleSerializer serializer(filename);
-#else
-  ScriptModuleSerializer2 serializer(filename);
-#endif
-  serializer.serialize(module, extra_files);
+  serializer.serialize(module, extra_files, bytecode_format);
 }
 
 } // namespace jit

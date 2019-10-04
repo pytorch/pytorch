@@ -13,9 +13,8 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <algorithm>
 #include <vector>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {
@@ -342,16 +341,19 @@ Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto tid = self.type_id();
-  auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), tid);
+  auto result = detail::make_tensor<TensorImpl>(Storage(self.storage()), self.type_set());
   setStrided(result, size, stride, storage_offset);
   return result;
 }
 
 Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto tid = self.type_id();
-  auto result = detail::make_tensor<QTensorImpl>(Storage(self.storage()), tid, get_qtensorimpl(self)->quantizer());
+  auto quantizer = get_qtensorimpl(self)->quantizer();
+  TORCH_CHECK(
+      quantizer->qscheme() == QScheme::PER_TENSOR_AFFINE,
+      "Setting strides is possible only on uniformly quantized tensor");
+  auto result = detail::make_tensor<QTensorImpl>(
+      Storage(self.storage()), self.type_set(), quantizer);
   setStrided(result, size, stride, storage_offset);
   return result;
 }
@@ -924,7 +926,12 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_squeeze_outnames(self);
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
@@ -935,7 +942,11 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
     return self.as_strided(self.sizes(), self.strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_except(result, self, {dim});
+#endif
+  return result;
 }
 
 Tensor & squeeze_(Tensor& self) {
@@ -1037,6 +1048,39 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   return self.reshape(shape);
 }
 
+#ifdef BUILD_NAMEDTENSOR
+Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
+  auto outnames = self.names().vec();
+  outnames.erase(outnames.begin() + start_dim, outnames.begin() + end_dim + 1);
+  outnames.insert(outnames.begin() + start_dim, out_dim);
+
+  Tensor result;
+  {
+    NoNamesGuard guard;
+    result = native::flatten(self, start_dim, end_dim);
+  }
+  internal_set_names_inplace(result, outnames);
+  return result;
+}
+
+Tensor flatten(const Tensor& self, Dimname start_dim, Dimname end_dim, Dimname out_dim) {
+  auto start_pos = dimname_to_position(self, start_dim);
+  auto end_pos  = dimname_to_position(self, end_dim);
+  return native::flatten(self, start_pos, end_pos, out_dim);
+}
+
+Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
+  auto positions = dimnames_to_positions(self, dims);
+  for (size_t i = 0; i < positions.size() - 1; i++) {
+    if (positions[i] + 1 == positions[i + 1]) continue;
+    TORCH_CHECK(positions[i] + 1 == positions[i + 1],
+        "flatten(tensor, dims, out_dim): dims ", dims, " must be consecutive ",
+        "in Tensor", self.names());
+  }
+  return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
+}
+#endif
+
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
 }
@@ -1054,6 +1098,12 @@ std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
   }
   return tensors;
 }
+
+#ifdef BUILD_NAMEDTENSOR
+std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
+  return at::unbind(self, dimname_to_position(self, dim));
+}
+#endif
 
 std::vector<Tensor> meshgrid(TensorList tensors) {
   int64_t size = tensors.size();
@@ -1115,14 +1165,14 @@ Tensor alias(const Tensor& self) {
   if (self.is_quantized()) {
     auto impl = c10::make_intrusive<QTensorImpl>(
                     Storage(self.storage()),
-                    self.type_id(),
+                    self.type_set(),
                     get_qtensorimpl(self)->quantizer());
     impl->set_storage_offset(self.storage_offset());
     impl->set_sizes_and_strides(self.sizes(), self.strides());
     self_ = Tensor(std::move(impl));
   } else {
     auto impl = c10::make_intrusive<TensorImpl>(Storage(self.storage()),
-                                                self.type_id());
+                                                self.type_set());
     impl->set_storage_offset(self.storage_offset());
     impl->set_sizes_and_strides(self.sizes(), self.strides());
     self_ = Tensor(std::move(impl));

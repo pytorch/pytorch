@@ -139,7 +139,6 @@ void ConcretePythonOp::cloneFrom(Node* other_) {
   this->cconv = other->cconv;
   Py_INCREF(other->pyobj.get());
   this->pyobj = THPObjectPtr(other->pyobj.get());
-  this->ignore_on_export = other->ignore_on_export;
   for (auto& sa : other->scalar_args) {
     Py_INCREF(sa.get());
     this->scalar_args.emplace_back(sa.get());
@@ -722,6 +721,12 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
+      }));
+  py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
+      m, "InterfaceType")
+      .def(py::init([](const std::string& qualified_name) {
+        return get_python_cu()->get_interface(
+            c10::QualifiedName(qualified_name));
       }));
 
   py::class_<Use>(m, "Use")

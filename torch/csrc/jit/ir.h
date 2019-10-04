@@ -628,11 +628,11 @@ struct TORCH_API Node {
 
   void dump() const;
 
-  std::ostream& print(
-      std::ostream& out,
-      size_t level,
-      std::vector<const Node*>* groups,
-      bool print_source_locations = true) const;
+  std::ostream &print(std::ostream &out, size_t level,
+                      std::vector<const Node *> *groups,
+                      bool print_source_locations = true,
+                      bool print_attributes = true, bool print_scopes = true,
+                      bool print_body = true) const;
 
   virtual ~Node() = default;
 
@@ -704,6 +704,8 @@ struct TORCH_API Node {
   CREATE_ACCESSOR(Ints, is)
   CREATE_ACCESSOR(Graph, g)
   CREATE_ACCESSOR(Graphs, gs)
+  CREATE_ACCESSOR(Type, ty)
+  CREATE_ACCESSOR(Types, tys)
 
 #undef CREATE_ACCESSOR
 
@@ -734,9 +736,9 @@ struct TORCH_API Node {
     return getAttr<TensorsAttr>(name);
   }
 
- private:
+private:
   void printAttrValue(std::ostream& out, const Symbol& name) const;
-  void printAttributes(std::ostream& out, bool ignore_subgraph) const;
+  void printAttributes(std::ostream &out, bool ignore_subgraph) const;
 
   template <typename T>
   Node* setAttr(Symbol name, typename T::ConstructorType v) {
@@ -1055,8 +1057,7 @@ struct Graph {
       ArrayRef<Value*> inputs,
       size_t num_outputs = 1);
 
-  TORCH_API Node* createNone(
-      TypePtr typ); // value of None with type Optional[typ]
+  TORCH_API Node* createNone();
   TORCH_API Node* createAutogradZero();
   TORCH_API Node* createUninitialized(TypePtr typ);
   TORCH_API Node* createWithSubgraph(Symbol kind);
@@ -1093,6 +1094,11 @@ struct Graph {
   }
   TORCH_API Node* createStore(const std::string& name, Value* v);
   TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
+  TORCH_API Node* createIsInstance(
+      Value* v,
+      at::ArrayRef<TypePtr> types,
+      bool is_list,
+      bool is_tuple);
 
   TORCH_API Value* insertFunctionCall(
       Function* callee,
@@ -1115,11 +1121,9 @@ struct Graph {
       const std::function<Value*(Value*)>& value_map,
       bool copy_blocks = true);
 
-  // Insert constant IValue into the graph. If the type cannot be fully deduced
-  // from the ivalue, as with a None that is set to t?, use result_type
+  // Insert constant IValue into the graph.
   TORCH_API Value* insertConstant(
       IValue val,
-      const TypePtr& result_type = nullptr,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
 
@@ -1295,10 +1299,6 @@ struct ProfileOp : public Node {
 // python-aware bits need to be moved to the descendant classes.
 struct TORCH_API PythonOp : public Node {
   using Node::Node;
-
-  // should this Python function be skipped over when exported (i.e. for
-  // debugging functions that only run in Python)
-  bool ignore_on_export = false;
 
   virtual std::string name() const = 0;
   virtual void writeScalars(std::ostream& out) const = 0;

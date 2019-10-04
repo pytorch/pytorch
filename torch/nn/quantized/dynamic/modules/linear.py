@@ -3,8 +3,6 @@ import torch
 from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq
 
-from torch._jit_internal import Optional
-
 class Linear(nnq.Linear):
     r"""
     A dynamic quantized linear module with quantized tensor as inputs and outputs.
@@ -31,26 +29,21 @@ class Linear(nnq.Linear):
         torch.Size([128, 30])
     """
 
-    __annotations__ = {'bias' : Optional[torch.Tensor]}
-
     def __init__(self, in_features, out_features, bias_=True):
         super(Linear, self).__init__(in_features, out_features, bias_)
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and
         # deserialization modules
-        if bias_:
-            del self.bias
-            self.bias = torch.Tensor(out_features).float()
-        else:
-            self.bias = None
 
     def forward(self, x):
         # Note that we can handle self.bias == None case.
-        Y = torch.ops.quantized.fbgemm_linear_dynamic(
-            x, self._packed_weight,
-            self.bias)
+        Y = torch.ops.quantized.linear_dynamic(
+            x, self._packed_params)
         return Y.to(x.dtype)
+
+    def _get_name(self):
+        return 'DynamicQuantizedLinear'
 
     @classmethod
     def from_float(cls, mod):
@@ -62,7 +55,7 @@ class Linear(nnq.Linear):
         """
         assert type(mod) == NNLinear, 'nn.quantized.dynamic.Linear.from_float only works for nn.Linear'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-        if mod.qconfig is not None and mod.qconfig.weight() is not None:
+        if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()
         else:
             # We have the circular import issues if we import the qconfig in the beginning of this file:
@@ -73,8 +66,7 @@ class Linear(nnq.Linear):
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         weight_observer(mod.weight)
         wt_scale, wt_zp = weight_observer.calculate_qparams()
-        qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
+        qweight = torch.quantize_per_tensor(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
         qlinear = Linear(mod.in_features, mod.out_features)
-        qlinear.set_weight(qweight)
-        qlinear.bias = mod.bias
+        qlinear.set_weight_bias(qweight, mod.bias)
         return qlinear

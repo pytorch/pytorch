@@ -6,9 +6,8 @@ namespace caffe2 {
 
 template <>
 bool SparseNormalizeOp<float, CPUContext>::RunOnDevice() {
-
   return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-     this, Input(INDICES));
+      this, Input(INDICES));
 }
 
 template <>
@@ -49,10 +48,14 @@ bool SparseNormalizeOp<float, CPUContext>::DoRunWithType() {
 
 REGISTER_CPU_OPERATOR(SparseNormalize, SparseNormalizeOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseNormalize)
-    .NumInputs(2)
+    .NumInputs(2, 3)
     .NumOutputs(1)
     .Input(0, "param", "Parameters to be normalized")
     .Input(1, "indices", "Sparse indices")
+    .Input(
+        2,
+        "grad",
+        "Gradient computed (optional - not used, this argument is for backwards compatibility)")
     .Output(0, "output_param", "Normalized parameters")
     .EnforceOneToOneInplace()
     .Arg(

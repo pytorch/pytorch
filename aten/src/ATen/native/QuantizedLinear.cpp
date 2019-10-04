@@ -57,7 +57,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   TORCH_CHECK(bias.dim() == 1);
   TORCH_CHECK(bias.size(0) == N);
   TORCH_CHECK(weight_scale.isFloatingPoint());
-  TORCH_CHECK(weight_zero_point.isIntegral());
+  TORCH_CHECK(weight_zero_point.isIntegral(false));
 
   // Calculate statistics for quantization of the input Tensor
   float x_min, x_max;
@@ -250,10 +250,6 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
 
   return std::make_tuple(
       quantized, col_offsets, q_params.scale, q_params.zero_point);
-}
-
-bool fbgemm_is_cpu_supported() {
-  return fbgemm::fbgemmSupportedCPU();
 }
 
 Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {

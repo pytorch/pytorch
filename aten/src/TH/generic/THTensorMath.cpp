@@ -2,10 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THTensorMath.cpp"
 #else
 
+#include <ATen/core/EnableNamedTensor.h>
 #include <TH/generic/THTensorApply.hpp>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 // HEY YOU!
 //
@@ -182,18 +181,12 @@ void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value)
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
-void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *m1, THTensor *m2)
+static void THTensor_(addmmImpl)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha)
 {
   char transpose_r, transpose_m1, transpose_m2;
   THTensor *r__, *m1_, *m2_;
   int free_m1 = 0;
   int free_m2 = 0;
-
-#ifdef BUILD_NAMEDTENSOR
-  // The logic in this function changes these around so we save a copy of the original
-  THTensor* orig_m1 = m1;
-  THTensor* orig_m2 = m2;
-#endif
 
   if( (m1->dim() != 2) || (m2->dim() != 2))
     THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
@@ -218,9 +211,6 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
   {
     THTensor_(resizeAs)(r_, t);
     if (beta != 0.0) {
-#ifdef BUILD_NAMEDTENSOR
-      at::NoNamesGuard guard;
-#endif
       at::Tensor r__wrap = THTensor_wrap(r_);
       at::Tensor t_wrap = THTensor_wrap(t);
       at::native::copy_(r__wrap, t_wrap);
@@ -332,13 +322,21 @@ void THTensor_(addmm)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
 
   if(r__ != r_)
     THTensor_(freeCopyTo)(r__, r_);
+}
 
+void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha) {
+  {
 #ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names_for_addmm(r_, orig_m1, orig_m2, t);
+    at::NoNamesGuard guard;
+#endif
+    THTensor_(addmmImpl)(r_, t, m1, m2, beta, alpha);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmm(r_, m1, m2, t);
 #endif
 }
 
-void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *mat, THTensor *vec)
+static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
 {
   if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
     THError("matrix and vector expected, got %dD, %dD",
@@ -408,13 +406,22 @@ void THTensor_(addmv)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, 
     }
   }
 
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
-#endif
   #undef LDA_COND
 }
 
-void THTensor_(addr)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *vec1, THTensor *vec2)
+void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha) {
+  {
+#ifdef BUILD_NAMEDTENSOR
+    at::NoNamesGuard guard;
+#endif
+    THTensor_(addmvImpl)(r_, t, mat, vec, beta, alpha);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
+#endif
+}
+
+void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha)
 {
   if( (THTensor_nDimension(vec1) != 1) || (THTensor_nDimension(vec2) != 1) )
     THError("vector and vector expected, got %dD, %dD tensors",
@@ -437,9 +444,6 @@ void THTensor_(addr)(THTensor *r_, scalar_t beta, THTensor *t, scalar_t alpha, T
 
   if(r_ != t)
   {
-#ifdef BUILD_NAMEDTENSOR
-    at::NoNamesGuard guard;
-#endif
     THTensor_(resizeAs)(r_, t);
     at::Tensor r__wrap = THTensor_wrap(r_);
     at::Tensor t_wrap = THTensor_wrap(t);
@@ -794,7 +798,7 @@ void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t gain)
   c10::raw::intrusive_ptr::decref(m2);
 }
 
-void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
+void THTensor_(addbmm)(THTensor *result, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha)
 {
   int64_t batch;
 
@@ -829,7 +833,7 @@ void THTensor_(addbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t al
     THTensor_(select)(matrix1, batch1, 0, batch);
     THTensor_(select)(matrix2, batch2, 0, batch);
 
-    THTensor_(addmm)(result, beta, result, alpha, matrix1, matrix2);
+    THTensor_(addmm)(result, result, matrix1, matrix2, beta, alpha);
     beta = 1; // accumulate output once
   }
 

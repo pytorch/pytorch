@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorTopK.cu"
 #else
 
+#include <c10/macros/Macros.h>
+
 void THCTensor_(topk)(THCState* state,
                       THCTensor *topK,
                       THCudaLongTensor *indices,
@@ -66,12 +68,6 @@ void THCTensor_(topk)(THCState* state,
     RUN_DIR(INDEX_T, -1);                       \
   }
 
-#ifdef __HIP_PLATFORM_HCC__
-#define TOPK_WARP_SIZE 64
-#else
-#define TOPK_WARP_SIZE 32
-#endif
-
 #define RUN_T(INDEX_T)                                                  \
   TensorInfo<scalar_t, INDEX_T> inputInfo =                                 \
     getTensorInfo<scalar_t, THCTensor, INDEX_T>(state, input);              \
@@ -105,7 +101,7 @@ void THCTensor_(topk)(THCState* state,
     THError("Slice to sort is too large");                              \
   }                                                                     \
                                                                         \
-  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) TOPK_WARP_SIZE), (int64_t) 1024)); \
+  dim3 block(std::min(THCRoundUp(sliceSize, (int64_t) C10_WARP_SIZE), (int64_t) 1024)); \
                                                                         \
   /* This is used as a template parameter to calculate indices. */      \
   /* We only specialize it if all collapsed dim sizes are the */        \
@@ -133,7 +129,6 @@ void THCTensor_(topk)(THCState* state,
 #undef RUN_DIM
 #undef RUN_DIR
 #undef RUN_K
-#undef TOPK_WARP_SIZE
 
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting

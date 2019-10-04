@@ -1,13 +1,15 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from caffe2.python import core, workspace
-import torch
-from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-from scipy.stats import norm
+import struct
+import torch
 import unittest
+
+from caffe2.python import core, workspace
+from hypothesis import given
+from scipy.stats import norm
 
 
 def generate_rois(roi_counts, im_dims):
@@ -66,6 +68,51 @@ def create_bbox_transform_inputs(roi_counts, num_classes, rotated):
     im_info[:, 1] = im_dims
     im_info[:, 2] = 1.0
     return rois, deltas, im_info
+
+
+# Eigen/Python round 0.5 away from 0, Numpy rounds to even
+round_to_nearest = np.vectorize(round)
+
+
+def bytes_to_floats(byte_matrix):
+    floats = np.empty([np.shape(byte_matrix)[0], 1], dtype=np.float32)
+    for i, byte_values in enumerate(byte_matrix):
+        floats[i], = struct.unpack('f', bytearray(byte_values))
+    return floats
+
+
+def floats_to_bytes(floats):
+    byte_matrix = np.empty([np.shape(floats)[0], 4], dtype=np.uint8)
+    for i, value in enumerate(floats):
+        assert isinstance(value, np.float32), (value, floats)
+        as_bytes = struct.pack('f', value)
+        # In Python3 bytes will be a list of int, in Python2 a list of string
+        if isinstance(as_bytes[0], int):
+            byte_matrix[i] = list(as_bytes)
+        else:
+            byte_matrix[i] = list(map(ord, as_bytes))
+    return byte_matrix
+
+
+def fused_rowwise_8bit_quantize_reference(data):
+    minimum = np.min(data, axis=1, keepdims=True)
+    maximum = np.max(data, axis=1, keepdims=True)
+    span = maximum - minimum
+    bias = minimum
+    scale = span / 255.0
+    inverse_scale = 255.0 / (span + 1e-8)
+    quantized_data = round_to_nearest((data - bias) * inverse_scale)
+    scale_bytes = floats_to_bytes(scale.reshape(-1))
+    bias_bytes = floats_to_bytes(bias.reshape(-1))
+    return np.concatenate([quantized_data, scale_bytes, bias_bytes], axis=1)
+
+
+def fused_rowwise_8bit_quantize_dequantize_reference(data):
+    fused_quantized = fused_rowwise_8bit_quantize_reference(data)
+    scale = bytes_to_floats(fused_quantized[:, -8:-4].astype(np.uint8))
+    bias = bytes_to_floats(fused_quantized[:, -4:].astype(np.uint8))
+    quantized_data = fused_quantized[:, :-8]
+    return quantized_data * scale + bias
 
 
 class TorchIntegration(hu.HypothesisTestCase):
@@ -608,6 +655,60 @@ class TorchIntegration(hu.HypothesisTestCase):
     @unittest.skipIf(not workspace.has_cuda_support, "No cuda support")
     def test_resize_nearest_op_cuda(self):
         return self._test_resize_nearest_op("cuda")
+
+    @given(input_data=hu.tensor(min_dim=2, max_dim=2))
+    def test_Fused8BitRowwiseQuantizedToFloat(self, input_data):
+        QuantizeOp = core.CreateOperator(
+            "FloatToFused8BitRowwiseQuantized",
+            ["input_data"],
+            ["quantized_data"],
+        )
+
+        workspace.FeedBlob("input_data", input_data)
+        workspace.RunOperatorOnce(QuantizeOp)
+
+        quantized_data = workspace.FetchBlob("quantized_data")
+
+        dequantized_data = torch.ops._caffe2.Fused8BitRowwiseQuantizedToFloat(
+            torch.tensor(quantized_data)
+        )
+
+        reference = fused_rowwise_8bit_quantize_dequantize_reference(input_data)
+        np.testing.assert_array_almost_equal(dequantized_data.numpy(), reference)
+
+    @given(binary_input=st.booleans())
+    def test_piecewise_linear_op(self, binary_input):
+        if binary_input:
+            num_dims = 1
+        else:
+            num_dims = 3
+        data = np.random.rand(1024, num_dims).astype(np.float32)
+        slopes = np.zeros(4 * num_dims).astype(np.float32)
+        bounds = np.sort(np.random.rand(5, num_dims).astype(np.float32), axis=0).flatten('F')
+        intercepts = np.random.rand(4 * num_dims).astype(np.float32)
+
+        def _piecewise_linear_ref(X):
+            ref_op = core.CreateOperator(
+                "PiecewiseLinearTransform",
+                ["data",
+                    "bounds",
+                    "slopes",
+                    "intercepts"],
+                ["calibrated"],
+                binary=binary_input,
+            )
+            workspace.FeedBlob("data", X)
+            workspace.FeedBlob("bounds", bounds)
+            workspace.FeedBlob("slopes", slopes)
+            workspace.FeedBlob("intercepts", intercepts)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("calibrated")
+
+        expected_output = _piecewise_linear_ref(data)
+        actual_output = torch.ops._caffe2.PiecewiseLinearTransform(
+            torch.tensor(data), bounds.tolist(), slopes.tolist(), intercepts.tolist(), binary_input)
+
+        torch.testing.assert_allclose(torch.tensor(expected_output), actual_output)
 
 
 if __name__ == '__main__':

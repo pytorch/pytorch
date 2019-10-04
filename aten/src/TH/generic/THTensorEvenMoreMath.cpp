@@ -3,9 +3,8 @@
 #else
 
 #include <TH/generic/THTensorApply.hpp>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
+#include <ATen/core/EnableNamedTensor.h>
 
 // Finds non-zero elements of a tensor and returns their subscripts
 void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
@@ -599,6 +598,10 @@ void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int ac
 
 void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
+
   ptrdiff_t i, numel;
   THTensor *tSlice;
   int64_t *index_data;
@@ -672,7 +675,7 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
 
   elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
 
-  TH_TENSOR_DIM_APPLY3(scalar_t, tensor, scalar_t, src, int64_t, index, dim,
+  TH_TENSOR_DIM_APPLY3(int64_t, index, scalar_t, tensor, scalar_t, src, dim,
                        TH_TENSOR_DIM_APPLY3_SIZE_SCATTER,
                        for (i = 0; i < elems_per_row; ++i)
                        {
@@ -704,7 +707,7 @@ void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTen
 
   elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
 
-  TH_TENSOR_DIM_APPLY3(scalar_t, tensor, scalar_t, src, int64_t, index, dim,
+  TH_TENSOR_DIM_APPLY3(int64_t, index, scalar_t, tensor, scalar_t, src, dim,
                        TH_TENSOR_DIM_APPLY3_SIZE_SCATTER,
                        for (i = 0; i < elems_per_row; ++i)
                        {
@@ -763,6 +766,9 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
 
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 {
+#ifdef BUILD_NAMEDTENSOR
+  at::NoNamesGuard guard;
+#endif
   if ( (THTensor_nDimension(tensor) != 1) || (THTensor_nDimension(src) != 1) ) {
     THError("1D tensors expected, got %dD, %dD tensors",
        THTensor_nDimension(tensor), THTensor_nDimension(src));
@@ -777,9 +783,6 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
                    tensor_data += sz*tensor_stride;
                    src_data += sz*src_stride;
                    break;);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::check_names_for_dot(tensor, src);
-#endif
   return sum;
 }
 

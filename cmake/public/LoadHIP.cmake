@@ -167,6 +167,8 @@ IF(HIP_FOUND)
   # TODO: miopen_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
   FIND_LIBRARY(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
+  # hiprtc is part of HIP
+  FIND_LIBRARY(ROCM_HIPRTC_LIB hiprtc HINTS ${HIP_PATH}/lib)
 
 
   # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.

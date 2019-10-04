@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/symbolic_script.h>
-
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -476,39 +475,105 @@ static value_list getReverseCaptures(Gradient& grad_desc) {
 // nodes we have in our graphs are simply constants, which are cheap to execute
 // and replicate, and so it's better to just copy them into the reverse graph,
 // without polluting the output lists unnecessarily.
-static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
+static void liftConstants(Block* block, Block* move_to_this_block);
+
+// is node defined inside container?
+static bool inBlock(Node* node, Block* container) {
+  Block* b = node->owningBlock();
+  while (b) {
+    if (b == container) {
+      return true;
+    }
+    b = b->owningNode() ? b->owningNode()->owningBlock() : nullptr;
+  }
+  return false;
+}
+
+static void liftConstants(Node* node, Block* move_to_this_block) {
   static const auto err = [](Value*) -> Value* {
     throw std::runtime_error("unexpected input");
   };
-  auto& graph = *grad_desc.f;
-  Block* reverse_block = rev_info.reverse_block;
-
-  for (Node* top_node : reverse_block->nodes()) {
-    AT_ASSERT(
-        top_node->kind() == prim::GradOf ||
-        top_node->kind() == prim::AutogradAdd ||
-        top_node->kind() == prim::AutogradZero);
-    if (top_node->kind() != prim::GradOf)
+  auto& graph = *node->owningGraph();
+  for (Value* input : node->inputs()) {
+    if (input->node()->kind() != prim::Constant)
       continue;
-    Block* grad_body = top_node->blocks().at(0);
-    for (Node* node : grad_body->nodes()) {
-      for (Value* input : node->inputs()) {
-        if (input->node()->kind() != prim::Constant)
-          continue;
-        if (input->node()->owningBlock() == grad_body)
-          continue;
-        Node* lifted_constant = graph.createClone(input->node(), err);
-        reverse_block->prependNode(lifted_constant);
-        GRAPH_DEBUG(
-            "Lifting constant ",
-            input->debugName(),
-            " from GradOf's block and adding ",
-            lifted_constant->output()->debugName(),
-            " to the backprop block");
-        node->replaceInputWith(input, lifted_constant->output());
-      }
-    }
+    // if this constant is _already_ defined in the backward pass
+    // block, we do not need to duplicate and move it because
+    // it already won't be part of the capture set
+    if (inBlock(input->node(), move_to_this_block))
+      continue;
+    Node* lifted_constant = graph.createClone(input->node(), err);
+    move_to_this_block->prependNode(lifted_constant);
+    GRAPH_DEBUG(
+        "Lifting constant ",
+        input->debugName(),
+        " from GradOf's block and adding ",
+        lifted_constant->output()->debugName(),
+        " to the backprop block");
+    node->replaceInputWith(input, lifted_constant->output());
   }
+  for (Block* sub : node->blocks()) {
+    liftConstants(sub, move_to_this_block);
+  }
+}
+
+static void liftConstants(Block* block, Block* move_to_this_block) {
+  for (Node* node : block->nodes()) {
+    liftConstants(node, move_to_this_block);
+  }
+  liftConstants(block->return_node(), move_to_this_block);
+}
+
+// we need to fold aten::_size_if_not_equal at the differentiation time
+// while we know the shapes of aten::_size_if_not_equal's arguments
+// Otherwise, they will become inputs to a reverse Graph, and we will
+// lose this information and we don't profile Scalars, or Lists yet.
+static void foldSizeIfNotEqual(Block *node);
+
+static void foldSizeIfNotEqual(Node *node) {
+  for (Value *input : node->inputs()) {
+
+    if (input->node()->kind() != aten::_size_if_not_equal) {
+      continue;
+    }
+
+    auto ptt_input =
+        input->node()->input(0)->node()->input()->type()->expect<TensorType>();
+    auto ptt_output =
+        input->node()->input(1)->node()->input()->type()->expect<TensorType>();
+
+    auto input_size = ptt_input->sizes().concrete_sizes();
+    auto output_size = ptt_output->sizes().concrete_sizes();
+
+    if (!input_size || !output_size) {
+      continue;
+    }
+    // insert in front of _grad_sum_to_size
+    WithInsertPoint guard(node);
+    IValue ival{};
+    Value *size;
+    if (input_size != output_size) {
+      size = node->owningGraph()->insertConstant(*input_size);
+    } else {
+      size = node->owningGraph()->insertConstant(IValue());
+    }
+    node->replaceInputWith(input, size);
+  }
+
+  for (auto ib : node->blocks()) {
+    foldSizeIfNotEqual(ib);
+  }
+}
+
+// we need to fold aten::_size_if_not_equal at the differentiation time
+// while we know the shapes of aten::_size_if_not_equal's arguments
+// Otherwise, they will become inputs to a reverse Graph, and we will
+// lose this information and we don't profile Scalars, or Lists yet.
+static void foldSizeIfNotEqual(Block *reverse_block) {
+  for (auto n : reverse_block->nodes()) {
+    foldSizeIfNotEqual(n);
+  }
+  foldSizeIfNotEqual(reverse_block->return_node());
 }
 
 static void deduplicateSizeCaptures(
@@ -577,7 +642,9 @@ static void Optimize(Gradient& grad_desc, ReverseDetails& rev_info) {
   // derivative. I guess a smart analysis could implement this, but I didn't
   // have time before the 1.0 release, so I put this only as a peephole
   // optimization.
-  liftConstants(grad_desc, rev_info);
+  liftConstants(rev_info.reverse_block, rev_info.reverse_block);
+  // TODO: see if this pass can be replaced with peephole pass
+  foldSizeIfNotEqual(rev_info.reverse_block);
   // We generally add a lot of aten::size calls (for derivatives of broadcasting
   // operators), and they often end up duplicated, and would get captured
   // multiple times. Make sure we deduplicate them before lifting.
@@ -679,6 +746,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     // f's outputs that we differentiate).
     if (rev_info.grad_map.count(tmp) == 0)
       continue;
+
     Value* tmp_vjp_in = reverse_block->addInput()->setType(tmp->type());
     Value* tmp_vjp_prev = rev_info.grad_map.at(tmp);
     // This is quite weird because we can't first make a sum and then replace
@@ -731,6 +799,14 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   reverse_block->owningNode()->destroy();
 }
 
+void packReturnValuesIntoTuple(const std::shared_ptr<Graph> &graph) {
+  auto returnNode = graph->block()->return_node();
+  WithInsertPoint wip(returnNode);
+  auto tuple = graph->insertNode(graph->createTuple(returnNode->inputs()));
+  returnNode->removeAllInputs();
+  returnNode->addInput(tuple->output());
+}
+
 Gradient differentiate(std::shared_ptr<Graph>& graph) {
   Gradient grad_desc;
   // Take ownership of the graph
@@ -756,6 +832,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // It's possible the we've cloned the same constants many times, so
   // de-duplicate them
   ConstantPooling(grad_desc.df);
+  packReturnValuesIntoTuple(grad_desc.df);
   return grad_desc;
 }
 } // namespace jit

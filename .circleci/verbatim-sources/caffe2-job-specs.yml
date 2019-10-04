@@ -4,15 +4,10 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_linux_system_environment
+    - should_run_job
+    - setup_linux_system_environment
     - checkout
-    - run:
-        <<: *setup_ci_environment
+    - setup_ci_environment
     - run:
         name: Build
         no_output_timeout: "1h"
@@ -45,7 +40,7 @@
           chmod +x /home/circleci/project/ci_build_script.sh
 
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          docker pull ${DOCKER_IMAGE} >/dev/null
+          time docker pull ${DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
@@ -60,7 +55,7 @@
               export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-            docker push ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
           fi
 
   caffe2_linux_test:
@@ -69,14 +64,9 @@
       image: ubuntu-1604:201903-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - attach_workspace:
-        at: ~/workspace
-    - run:
-        <<: *setup_linux_system_environment
-    - run:
-        <<: *should_run_job
-    - run:
-        <<: *setup_ci_environment
+    - should_run_job
+    - setup_linux_system_environment
+    - setup_ci_environment
     - run:
         name: Test
         no_output_timeout: "1h"
@@ -120,7 +110,7 @@
             export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
@@ -137,13 +127,9 @@
       xcode: "9.0"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-      - attach_workspace:
-          at: ~/workspace
-      - run:
-          <<: *should_run_job
+      - should_run_job
       - checkout
-      - run:
-          <<: *macos_brew_update
+      - run_brew_for_macos_build
       - run:
           name: Build
           no_output_timeout: "1h"

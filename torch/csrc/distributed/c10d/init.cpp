@@ -17,7 +17,6 @@
 
 #include <c10d/PrefixStore.hpp>
 #include <c10d/TCPStore.hpp>
-#include <gloo/transport/tcp/device.h>
 #include <pybind11/chrono.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -35,28 +34,6 @@ namespace {
 
 #ifdef USE_C10D_GLOO
 constexpr char* GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
-
-std::shared_ptr<::gloo::transport::Device> createDeviceForDefaultHostname() {
-  ::gloo::transport::tcp::attr attr;
-
-  // Use the hostname to resolve the network address to
-  // use. Note: if the hostname does not resolve to an address (e.g.
-  // because of misconfigured /etc/hosts file), this will not work.
-  std::array<char, HOST_NAME_MAX> hostname{};
-  auto rv = gethostname(hostname.data(), hostname.size());
-  if (rv != 0) {
-    throw std::system_error(errno, std::system_category());
-  }
-  attr.hostname = hostname.data();
-  return ::gloo::transport::tcp::CreateDevice(attr);
-}
-
-std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
-    std::string iface) {
-  ::gloo::transport::tcp::attr attr;
-  attr.iface = std::move(iface);
-  return ::gloo::transport::tcp::CreateDevice(attr);
-}
 #endif
 
 std::vector<std::string> split(char separator, const std::string& string) {
@@ -108,8 +85,8 @@ PyObject* c10d_init(PyObject* _unused) {
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
-An enum-like class of available reduce operations: ``SUM``, ``PRODUCT``,
-``MIN``, and ``MAX``.
+An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
+``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
@@ -117,7 +94,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .value("SUM", ::c10d::ReduceOp::SUM)
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
-      .value("MAX", ::c10d::ReduceOp::MAX);
+      .value("MAX", ::c10d::ReduceOp::MAX)
+      .value("BAND", ::c10d::ReduceOp::BAND)
+      .value("BOR", ::c10d::ReduceOp::BOR)
+      .value("BXOR", ::c10d::ReduceOp::BXOR);
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
@@ -446,20 +426,17 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("threads", &::c10d::ProcessGroupGloo::Options::threads);
 
   processGroupGloo.def_static(
-      "create_tcp_device",
+      "create_device",
       [](const std::string& hostname, const std::string& interface)
           -> std::shared_ptr<::gloo::transport::Device> {
-        ::gloo::transport::tcp::attr attr;
         if (!hostname.empty()) {
-          attr.hostname = hostname;
-        } else if (!interface.empty()) {
-          attr.iface = interface;
-        } else {
-          // Neither argument is specified; Gloo itself will use the
-          // hostname
-          // Nothing specified, default to something useful
+          return ::c10d::ProcessGroupGloo::createDeviceForHostname(hostname);
         }
-        return ::gloo::transport::tcp::CreateDevice(attr);
+        if (!interface.empty()) {
+          return ::c10d::ProcessGroupGloo::createDeviceForInterface(interface);
+        }
+        throw std::invalid_argument(
+            "Specify either `hostname` or `interface` argument.");
       },
       py::arg("hostname") = "",
       py::arg("interface") = "");
@@ -481,10 +458,15 @@ They are used in specifying strategies for reduction collectives, e.g.,
             char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV);
             if (ifnameEnv) {
               for (const auto& iface : split(',', ifnameEnv)) {
-                options.devices.push_back(createDeviceForInterface(iface));
+                options.devices.push_back(
+                    ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }
             } else {
-              options.devices.push_back(createDeviceForDefaultHostname());
+              // If no hostname is specified, this function looks up
+              // the machine's hostname and returns a device instance
+              // associated with the address that the hostname resolves to.
+              options.devices.push_back(
+                  ::c10d::ProcessGroupGloo::createDefaultDevice());
             }
 
             options.timeout = timeout;
@@ -506,12 +488,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
               const std::shared_ptr<::c10d::Store>&,
               int,
               int,
-              const std::string&,
               const std::chrono::milliseconds&>(),
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("groupName") = "",
           py::arg("timeout") = std::chrono::milliseconds(
               ::c10d::ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis));
 #endif

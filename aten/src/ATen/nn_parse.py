@@ -42,11 +42,7 @@ def argument_to_declaration(param, func=None):
     arg['name'] = name
 
     if func is not None:
-        default_inits = func.get('default_init', {})
         wrap_dims = func.get('wrap_dim', {})
-        if name in default_inits:
-            # non constexpr defaults
-            arg['default_init'] = default_inits[name]
         if name in wrap_dims:
             arg['wrap_dim'] = wrap_dims[name]
 
@@ -235,6 +231,8 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, scalar_ch
     return {
         'mode': 'NN',
         'name': name,
+        'cpu_bfloat16': True if backend_types is not None and 'CPU' in backend_types and
+                'BFloat16' in backend_types['CPU'] else False,
         'backend_types': backend_types,
         'arguments': arguments,
         'return': 'argument 0' if inplace else get_return(arguments),

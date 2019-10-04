@@ -1,9 +1,10 @@
-#ifdef BUILD_NAMEDTENSOR
-
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
+#include <ATen/WrapDimUtilsMulti.h>
 #include <bitset>
 #include <sstream>
 
+#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
@@ -20,21 +21,10 @@ int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
   const auto names = tensor.names();
 
-  const auto it = std::find_if(
-      names.begin(), names.end(),
-      [&dim](const Dimname& candidate) { return dim.can_refer_to(candidate); });
+  const auto it = std::find(names.begin(), names.end(), dim);
   TORCH_CHECK(it != names.end(),
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
 
-  // Check that it can't refer to another dimension
-  const auto dup = std::find_if(
-      it + 1, names.end(),
-      [&dim](const Dimname& candidate) { return dim.can_refer_to(candidate); });
-  TORCH_CHECK(
-      dup == names.end(),
-      "Name ", dim, " could refer to multiple dimensions in ",
-      toDimnameRepr(tensor), ". Please disambiguate by using a more ",
-      "specific name like ", *it, " or ", dup, ".");
   return std::distance(names.begin(), it);
 }
 
@@ -65,16 +55,15 @@ static void check_for_misalignment(
     DimnameList names,
     DimnameList other_names,
     const char* action) {
-  if (name.is_wildcard()) {
+  if (name.isWildcard()) {
     return;
   }
-  auto it = std::find_if(other_names.begin(), other_names.end(),
-      [&](const Dimname& candidate) { return name.can_refer_to(candidate); });
+  auto it = std::find(other_names.begin(), other_names.end(), name);
   // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
   TORCH_CHECK(it == other_names.end(),
       "Misaligned dims when attempting to ", action, " dims ", names, " and dims ",
       other_names, ": dim ", name, " appears in a different position from the right "
-      "across both lists");
+      "across both lists.");
 }
 
 // Assumption: A DimnameList can have no duplicate full names with
@@ -94,20 +83,15 @@ std::vector<Dimname> unify_from_right(
     const auto& name = names_it == names.rend() ? wildcard : *names_it;
     const auto& other_name = other_it == other_names.rend() ? wildcard : *other_it;
 
-    // TODO(zou3519): Don't support tagged names for now. They're a little weird.
-    if (name.is_tagged() || other_name.is_tagged()) {
-      TORCH_INTERNAL_ASSERT("unify_from_right: NYI: tagged names.");
-    }
-
     // Step 1: Check that the names match
-    const auto maybeName = unify(name, other_name);
+    const auto maybeName = name.unify(other_name);
     if (!maybeName) {
       report_positional_error(name, other_name, names, other_names, action);
     }
     *result_it = *maybeName;
 
     // Step 2: Check that the names are not misaligned
-    if (!name.is_normal() || !other_name.is_normal()) {
+    if (!name.isBasic() || !other_name.isBasic()) {
       // Let: N = max(len(names), len(other_names))
       //      K = # of special names among names and other_names.
       // This search (including the outer loop) is O(N*K) but typically # of dims is small.
@@ -129,24 +113,18 @@ std::vector<Dimname> unify_from_right(
 
 namespace namedinference {
 
-static std::bitset<kMaxNamedTensorDim>
-compute_included_idxs(IntArrayRef excluded_idxs) {
-  std::bitset<kMaxNamedTensorDim> included_idxs;
-  for (auto i : excluded_idxs) {
-    TORCH_INTERNAL_ASSERT(
-        i <= kMaxNamedTensorDim,
-        "Only tensors with up to ", kMaxNamedTensorDim, " are supported.");
-    included_idxs.set(i);
-  }
-  included_idxs.flip();
-  return included_idxs;
+static std::bitset<dim_bitset_size>
+compute_included_idxs(IntArrayRef excluded_idxs, int64_t ndims) {
+  auto result = dim_list_to_bitset(excluded_idxs, ndims);
+  result.flip();
+  return result;
 }
 
 static void assert_names_equal(DimnameList a, DimnameList b) {
   TORCH_CHECK(a == b,
       "Name mismatch: specified out tensor with names ", a,
       " are not the same as the computed output names ", b,
-      ". Please rename the out tensor's dimensions.");
+      ". Please rename the out tensor's dims with `Tensor.rename`.");
 }
 
 void propagate_names(TensorImpl* result, optional<DimnameList> names) {
@@ -208,14 +186,14 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
   // fast path
   if (excluded_idxs.size() == 1) {
     std::vector<Dimname> outnames = src_names.vec();
-    outnames.erase(outnames.begin() + excluded_idxs[0]);
+    outnames.erase(outnames.begin() + maybe_wrap_dim(excluded_idxs[0], src_dim));
     propagate_names(result, std::move(outnames), /*validate_names=*/false);
     return;
   }
 
   std::vector<Dimname> outnames;
   outnames.reserve(result_dim);
-  auto included_idxs = compute_included_idxs(excluded_idxs);
+  auto included_idxs = compute_included_idxs(excluded_idxs, src_dim);
   for (size_t dim = 0; dim < src_dim; ++dim) {
     if (included_idxs[dim]) {
       outnames.push_back(src_names[dim]);
@@ -247,12 +225,18 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   propagate_names(result, impl::get_opt_names(src));
 }
 
-void propagate_names_for_copy(Tensor& result, const Tensor& src) {
-  if (!result.has_names() && !src.has_names()) {
-    return;
+optional<std::vector<Dimname>> compute_squeeze_outnames(const Tensor& tensor) {
+  if (!tensor.has_names()) {
+    return nullopt;
   }
-  auto outnames = unify_from_right(result.names(), src.names());
-  propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  std::vector<Dimname> outnames;
+  auto tensor_names = tensor.names();
+  for (int64_t d = 0; d < tensor.dim(); d++) {
+    if (tensor.sizes()[d] != 1) {
+      outnames.push_back(tensor_names[d]);
+    }
+  }
+  return outnames;
 }
 
 // tensor_dotted_dim and other_dotted_dim are the dimensions of the two
@@ -297,7 +281,7 @@ static void check_feature_names_are_distinct(
     " with Tensor", other_names,
     " would produce output tensor with duplicate names ",
     outnames,
-    ". Please rename the input tensors to prevent this.");
+    ". Please rename the input tensors with `Tensor.rename` to prevent this.");
 }
 
 static DimnameList batch_dims(DimnameList names) {
@@ -316,7 +300,7 @@ static DimnameList feature_dims(DimnameList names) {
 
 static bool are_distinct(DimnameList batch_dims, DimnameList feature_dims) {
   for (const auto& target : feature_dims) {
-    if (target.is_wildcard()) {
+    if (target.isWildcard()) {
       continue;
     }
     if (std::any_of(batch_dims.begin(), batch_dims.end(),
