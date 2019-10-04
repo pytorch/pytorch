@@ -80,6 +80,16 @@ class Tensor(torch._C._TensorBase):
                     self.requires_grad,
                     OrderedDict())
             return (torch._utils._rebuild_qtensor, args)
+        elif self.is_sparse:
+            if self.layout == torch.sparse_coo:
+                args = (self.layout,
+                        (self._indices(),
+                         self._values(),
+                         self.size()))
+            else:
+                raise NotImplementedError(
+                    'sparse tensor __reduce_ex__ for layout `%s`' % (self.layout))
+            return (torch._utils._rebuild_sparse_tensor, args)
         else:
             args = (self.storage(),
                     self.storage_offset(),
@@ -414,6 +424,8 @@ class Tensor(torch._C._TensorBase):
         return id(self)
 
     def __dir__(self):
+        if self.is_quantized:
+            warnings.warn('Only a small subset of methods are supported for quantized tensors.')
         tensor_methods = dir(self.__class__)
         tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
