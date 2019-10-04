@@ -149,23 +149,15 @@ public:
     return _mm256_and_ps(abs_(), real_mask);        // abs     0
   }
   __m256 angle_() const {
-    auto pi = _mm256_set1_ps(M_PIf);
-    auto zero = _mm256_setzero_ps();
-
+    //angle = atan2(b/a)
     auto b_a = _mm256_permute_ps(values, 0x55);     // b        a
-    b_a = _mm256_sub_ps(abs_(), b_a);               // abs-b    abs-a
-    auto angle = Sleef_atan2f8_u10(b_a, values);    // -angle/2 angle/2
-    angle = _mm256_add_ps(angle, angle);            // -angle   angle
-
-    auto alt = _mm256_blendv_ps(zero, pi, _mm256_cmp_ps(real(), zero, _CMP_GT_OQ));
-    return _mm256_blendv_ps(alt, angle, _mm256_cmp_ps(imag(), zero, _CMP_EQ_OQ));
+    return Sleef_atan2f8_u10(values, b_a);          // 90-angle angle
   }
   Vec256<std::complex<float>> angle() const {
-    //angle = 2*atan2(std::abs(z)-a/b)
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
                                                                    0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000));
-    auto angle = _mm256_permute_ps(angle_(), 0x55); // angle     -angle
-    return _mm256_and_ps(angle, real_mask);         // angle      0
+    auto angle = _mm256_permute_ps(angle_(), 0x55); // angle    90-angle
+    return _mm256_and_ps(angle, real_mask);         // angle    0
   }
   __m256 real_() const {
     const __m256 real_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
