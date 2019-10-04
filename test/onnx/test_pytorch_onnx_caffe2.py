@@ -2230,6 +2230,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         model = MeshgridModel()
         outputs = model(x, y, z)
         self.run_model_test(model, train=False, input=(x, y, z), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
 
     def test_remainder(self):
         class RemainderModel(torch.nn.Module):
