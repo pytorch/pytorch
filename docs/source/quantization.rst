@@ -1,7 +1,6 @@
 torch.quantization
 ===========================
 
-
 Introduction to Quantization
 ----------------------------
 
@@ -219,8 +218,8 @@ Utility Functions
 .. autofunction:: get_observer_dict
 
 torch.nn.instrinsic.qat.modules
-================================
-.. automodule:: torch.nn._intrinsic.qat.modules
+--------------------------------
+.. automodule:: torch.nn.intrinsic.qat.modules
 
 ConvBn2d
 --------
@@ -243,8 +242,8 @@ LinearReLU
     :members:
 
 torch.nn.intrinsic.quantized.modules
-======================================
-.. automodule:: torch.nn._intrinsic.quantized.modules
+--------------------------------------
+.. automodule:: torch.nn.intrinsic.quantized.modules
 
 ConvReLU2d
 ------------------
@@ -257,7 +256,7 @@ LinearReLU
     :members:
 
 torch.nn.qat.modules
-===========================
+---------------------------
 .. automodule:: torch.nn.qat.modules
 
 Conv2d
@@ -272,7 +271,7 @@ Linear
 
 
 torch.nn.quantized
-===========================
+----------------------------
 .. automodule:: torch.nn.quantized.functional
 
 Functional interface
