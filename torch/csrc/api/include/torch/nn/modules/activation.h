@@ -55,5 +55,28 @@ class TORCH_API HardshrinkImpl : public torch::nn::Cloneable<HardshrinkImpl> {
 
 TORCH_MODULE(Hardshrink);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Hardtanh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the HardTanh function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Hardtanh to learn
+/// about the exact behavior of this module.
+class TORCH_API HardtanhImpl : public torch::nn::Cloneable<HardtanhImpl> {
+ public:
+  HardtanhImpl() : HardtanhImpl(HardtanhOptions()) {}
+  explicit HardtanhImpl(const HardtanhOptions& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Hardtanh` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  HardtanhOptions options;
+};
+
+TORCH_MODULE(Hardtanh);
+
 } // namespace nn
 } // namespace torch
