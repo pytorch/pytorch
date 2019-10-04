@@ -39,6 +39,11 @@ Convolution functions
 
 .. autofunction:: conv_transpose3d
 
+:hidden:`conv_tbc`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: conv_tbc
+
 :hidden:`unfold`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
