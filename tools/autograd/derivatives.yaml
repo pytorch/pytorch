@@ -233,7 +233,7 @@
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
   self: grad * (self <= max).to(grad.dtype())
 
-- name: clone(Tensor self) -> Tensor
+- name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad
 
 - name: coalesce(Tensor self) -> Tensor
@@ -1577,4 +1577,7 @@
   output_differentiability: [False]
 
 - name: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
+  output_differentiability: [False]
+
+- name: nonzero(Tensor self) -> Tensor
   output_differentiability: [False]

@@ -771,6 +771,16 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
 
+    def test_remainder(self):
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 1, 4)
+        self.assertONNX(lambda x, y: torch.remainder(x, y), (x, y))
+
+    def test_fmod(self):
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 1, 4)
+        self.assertONNX(lambda x, y: torch.fmod(x, y), (x, y), opset_version=10)
+
     def test_gelu(self):
         x = torch.randn(2, 3, 4, 5, requires_grad=True)
         self.assertONNX(lambda x: torch.nn.functional.gelu(x), x)
@@ -779,6 +789,16 @@ class TestOperators(TestCase):
         x = torch.randint(3, (2, 3, 4, 5)).float()
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
+
+    def test_topk(self):
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        self.assertONNX(lambda x, k: torch.topk(x, k), (x, k), opset_version=10)
+
+    def test_topk_smallest_unsorted(self):
+        x = torch.arange(1., 6., requires_grad=True)
+        k = torch.tensor(3)
+        self.assertONNX(lambda x, k: torch.topk(x, k, largest=False, sorted=False), (x, k), opset_version=11)
 
     def test_baddbmm(self):
         x = torch.randn(10, 3, 5)
