@@ -42,13 +42,13 @@ struct AutoNcclGroup {
   }
 };
 
-at::ArrayRef<ncclComm_t> _get_communicators(at::TensorList inputs);
-void _check_inputs(
+TORCH_API at::ArrayRef<ncclComm_t> get_communicators(at::TensorList inputs);
+TORCH_API void check_inputs(
     at::TensorList inputs,
     at::TensorList outputs,
     int input_multiplier,
     int output_multiplier);
-ncclDataType_t _get_data_type(const at::Tensor& t);
+TORCH_API ncclDataType_t get_data_type(const at::Tensor& t);
 
 } // namespace detail
 
@@ -59,7 +59,7 @@ TORCH_API std::uint64_t version();
 
 bool is_available(at::TensorList tensors);
 
-void broadcast(
+TORCH_API void broadcast(
     at::TensorList tensors,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
