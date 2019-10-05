@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import time
 import unittest
 
-import six
 import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
@@ -22,7 +21,7 @@ def _set_rpc_done(context_id):
 
 
 @unittest.skipIf(
-    not six.PY3, "Pytorch distributed autograd package " "does not support python2"
+    not torch._six.PY3, "Pytorch distributed autograd package " "does not support python2"
 )
 class DistAutogradTest(object):
     @property
