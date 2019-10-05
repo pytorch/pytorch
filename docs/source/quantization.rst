@@ -190,6 +190,8 @@ The code is organized into the following modules
    quantized implementations of fused operations like conv + relu.
 -  ``torch.nn.intrinsic.qat.modules``: This module implements the versions
    of those fused operations needed for quantization aware training.
+
+
 .. automodule:: torch.quantization
 
 Fake Quantize
