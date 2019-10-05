@@ -22,6 +22,8 @@ inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
     return rhs.isBool() && lhs.toBool() == rhs.toBool();
   } else if (lhs.isIntList()) {
     return rhs.isIntList() && lhs.toIntListRef() == rhs.toIntListRef();
+  } else if (lhs.isTensor()) {
+    return lhs.toTensor().is_same(rhs.toTensor());
   } else {
     AT_ERROR("shallowEquals(IValue, IValue) not implemented for type ", lhs.tagKind());
   }
@@ -29,10 +31,8 @@ inline bool shallowEquals(const IValue& lhs, const IValue& rhs) {
 
 template<class Key, class Value>
 Dict<Key, Value> toTypedDict(GenericDict dict) {
-  if (dict.impl_->elementTypes.has_value()) {
-    TORCH_INTERNAL_ASSERT(*getTypePtr<Key>() == *dict.impl_->elementTypes->keyType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes->keyType), ", ", toString(dict.impl_->elementTypes->valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Key types mismatch.");
-    TORCH_INTERNAL_ASSERT(*getTypePtr<Value>() == *dict.impl_->elementTypes->valueType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes->keyType), ", ", toString(dict.impl_->elementTypes->valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Value types mismatch.");
-  }
+  TORCH_INTERNAL_ASSERT(*getTypePtr<Key>() == *dict.impl_->elementTypes.keyType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes.keyType), ", ", toString(dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Key types mismatch.");
+  TORCH_INTERNAL_ASSERT(*getTypePtr<Value>() == *dict.impl_->elementTypes.valueType, "Tried to cast a Dict<", toString(dict.impl_->elementTypes.keyType), ", ", toString(dict.impl_->elementTypes.valueType) ,"> to a Dict<", toString(getTypePtr<Key>()), ", ", toString(getTypePtr<Value>()), ">. Value types mismatch.");
 
   return Dict<Key, Value>(std::move(dict.impl_));
 }
@@ -54,6 +54,8 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
     return std::hash<double>()(ivalue.toDouble());
   } else if (ivalue.isBool()) {
     return std::hash<bool>()(ivalue.toBool());
+  } else if (ivalue.isTensor()) {
+    return std::hash<TensorImpl*>()(ivalue.toTensor().unsafeGetTensorImpl());
   } else {
     throw std::runtime_error("Can't hash IValues with this tag");
   }
@@ -79,15 +81,6 @@ Dict<Key, Value>::Dict(TypePtr keyType, TypePtr valueType)
 : Dict(make_intrusive<detail::DictImpl>(
     detail::DictImpl::dict_map_type(),
     detail::DictImpl::DictElementTypes {std::move(keyType), std::move(valueType)})) {
-  static_assert(std::is_same<Key, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
-  static_assert(std::is_same<Value, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
-}
-
-template<class Key, class Value>
-Dict<Key, Value>::Dict(impl::deprecatedUntypedDict)
-: Dict(make_intrusive<detail::DictImpl>(
-    detail::DictImpl::dict_map_type(),
-    c10::nullopt)) {
   static_assert(std::is_same<Key, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
   static_assert(std::is_same<Value, IValue>::value, "This constructor is only valid for c10::impl::GenericDict.");
 }
@@ -190,19 +183,22 @@ void Dict<Key, Value>::reserve(size_type count) const {
 }
 
 template<class Key, class Value>
-optional<TypePtr> Dict<Key, Value>::_keyType() const {
-  if (!impl_->elementTypes.has_value()) {
-    return c10::nullopt;
-  }
-  return impl_->elementTypes->keyType;
+TypePtr Dict<Key, Value>::keyType() const {
+  return impl_->elementTypes.keyType;
 }
 
 template<class Key, class Value>
-optional<TypePtr> Dict<Key, Value>::_valueType() const {
-  if (!impl_->elementTypes.has_value()) {
-    return c10::nullopt;
-  }
-  return impl_->elementTypes->valueType;
+TypePtr Dict<Key, Value>::valueType() const {
+  return impl_->elementTypes.valueType;
+}
+template <class Key, class Value>
+void Dict<Key, Value>::unsafeSetKeyType(TypePtr t) {
+  impl_->elementTypes.keyType = std::move(t);
+}
+
+template <class Key, class Value>
+void Dict<Key, Value>::unsafeSetValueType(TypePtr t) {
+  impl_->elementTypes.valueType = std::move(t);
 }
 
 }

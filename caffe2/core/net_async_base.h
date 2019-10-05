@@ -13,6 +13,7 @@
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/prof_dag.pb.h"
 #include "caffe2/utils/proto_utils.h"
+#include <ATen/core/Tensor.h>
 
 C10_DECLARE_int(caffe2_streams_per_gpu);
 C10_DECLARE_int(caffe2_net_async_max_gpus);

@@ -2,7 +2,6 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/core/TensorTypeId.h>
-#include <c10/core/TensorTypeIdRegistration.h>
 #include <c10/util/Exception.h>
 
 #include <stdexcept>
@@ -77,31 +76,31 @@ static inline Backend toDense(Backend b) {
 }
 
 static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
-  if (t == CPUTensorId()) {
+  if (t == TensorTypeId::CPUTensorId) {
     return Backend::CPU;
-  } else if (t == CUDATensorId()) {
+  } else if (t == TensorTypeId::CUDATensorId) {
     return Backend::CUDA;
-  } else if (t == HIPTensorId()) {
+  } else if (t == TensorTypeId::HIPTensorId) {
     return Backend::HIP;
-  } else if (t == MSNPUTensorId()) {
+  } else if (t == TensorTypeId::MSNPUTensorId) {
     return Backend::MSNPU;
-  } else if (t == XLATensorId()) {
+  } else if (t == TensorTypeId::XLATensorId) {
     return Backend::XLA;
-  } else if (t == SparseCPUTensorId()) {
+  } else if (t == TensorTypeId::SparseCPUTensorId) {
     return Backend::SparseCPU;
-  } else if (t == SparseCUDATensorId()) {
+  } else if (t == TensorTypeId::SparseCUDATensorId) {
     return Backend::SparseCUDA;
-  } else if (t == SparseHIPTensorId()) {
+  } else if (t == TensorTypeId::SparseHIPTensorId) {
     return Backend::SparseHIP;
-  } else if (t == MkldnnCPUTensorId()) {
+  } else if (t == TensorTypeId::MkldnnCPUTensorId) {
     return Backend::MkldnnCPU;
-  } else if (t == QuantizedCPUTensorId()) {
+  } else if (t == TensorTypeId::QuantizedCPUTensorId) {
     return Backend::QuantizedCPU;
-  } else if (t == ComplexCPUTensorId()) {
+  } else if (t == TensorTypeId::ComplexCPUTensorId) {
     return Backend::ComplexCPU;
-  } else if (t == ComplexCUDATensorId()) {
+  } else if (t == TensorTypeId::ComplexCUDATensorId) {
     return Backend::ComplexCUDA;
-  } else if (t == UndefinedTensorId()) {
+  } else if (t == TensorTypeId::UndefinedTensorId) {
     return Backend::Undefined;
   } else {
     AT_ERROR("Unrecognized tensor type ID: ", t);
@@ -111,31 +110,31 @@ static inline Backend tensorTypeIdToBackend(TensorTypeId t) {
 static inline TensorTypeId backendToTensorTypeId(Backend b) {
   switch (b) {
     case Backend::CPU:
-      return CPUTensorId();
+      return TensorTypeId::CPUTensorId;
     case Backend::CUDA:
-      return CUDATensorId();
+      return TensorTypeId::CUDATensorId;
     case Backend::HIP:
-      return HIPTensorId();
+      return TensorTypeId::HIPTensorId;
     case Backend::MSNPU:
-      return MSNPUTensorId();
+      return TensorTypeId::MSNPUTensorId;
     case Backend::XLA:
-      return XLATensorId();
+      return TensorTypeId::XLATensorId;
     case Backend::SparseCPU:
-      return SparseCPUTensorId();
+      return TensorTypeId::SparseCPUTensorId;
     case Backend::SparseCUDA:
-      return SparseCUDATensorId();
+      return TensorTypeId::SparseCUDATensorId;
     case Backend::SparseHIP:
-      return SparseHIPTensorId();
+      return TensorTypeId::SparseHIPTensorId;
     case Backend::MkldnnCPU:
-      return MkldnnCPUTensorId();
+      return TensorTypeId::MkldnnCPUTensorId;
     case Backend::QuantizedCPU:
-      return QuantizedCPUTensorId();
+      return TensorTypeId::QuantizedCPUTensorId;
     case Backend::ComplexCPU:
-      return ComplexCPUTensorId();
+      return TensorTypeId::ComplexCPUTensorId;
     case Backend::ComplexCUDA:
-      return ComplexCUDATensorId();
+      return TensorTypeId::ComplexCUDATensorId;
     case Backend::Undefined:
-      return UndefinedTensorId();
+      return TensorTypeId::UndefinedTensorId;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -244,6 +243,7 @@ static inline Backend backendToHIP(Backend b) {
   }
 }
 
+// TODO: This probably shouldn't actually be static inline
 static inline const char* toString(Backend b) {
   switch (b) {
     case Backend::CPU:

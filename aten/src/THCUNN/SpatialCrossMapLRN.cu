@@ -4,6 +4,7 @@
 #include <THC/THCTensor.hpp>
 #include <THC/THCStorage.hpp>
 #include <THCUNN/common.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/macros/Macros.h>
 
 template <typename Dtype, typename Acctype>

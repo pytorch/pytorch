@@ -3,11 +3,9 @@ import sys
 from glob import glob
 import shutil
 
-from .setup_helpers import escape_path
 from .setup_helpers.env import IS_64BIT, IS_WINDOWS, check_negative_env_flag
 from .setup_helpers.cmake import USE_NINJA
 from .setup_helpers.cuda import USE_CUDA, CUDA_HOME
-from .setup_helpers.cudnn import CUDNN_INCLUDE_DIR, CUDNN_LIBRARY, USE_CUDNN
 
 
 def _overlay_windows_vcvars(env):
@@ -35,11 +33,8 @@ def _create_build_env():
     # you should NEVER add something to this list. It is bad practice to
     # have cmake read the environment
     my_env = os.environ.copy()
-    if USE_CUDNN:
-        my_env['CUDNN_LIBRARY'] = escape_path(CUDNN_LIBRARY)
-        my_env['CUDNN_INCLUDE_DIR'] = escape_path(CUDNN_INCLUDE_DIR)
     if USE_CUDA:
-        my_env['CUDA_BIN_PATH'] = escape_path(CUDA_HOME)
+        my_env['CUDA_BIN_PATH'] = CUDA_HOME
 
     if IS_WINDOWS and USE_NINJA:
         # When using Ninja under Windows, the gcc toolchain will be chosen as

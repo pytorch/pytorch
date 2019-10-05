@@ -52,6 +52,8 @@ class BackendTransformerBase {
       const std::unordered_map<std::string, TensorShape>& shape_hints,
       const std::unordered_set<int>& blacklisted_ops) = 0;
 
+  static void annotateOpIndex(NetDef* net);
+
  protected:
   // Get model ID from the NetDef
   std::string getModelId(const NetDef& net);

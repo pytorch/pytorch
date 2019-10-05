@@ -8,6 +8,7 @@
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCApply.cuh>
 #include <c10/macros/Macros.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 
 #include <thrust/functional.h>
 

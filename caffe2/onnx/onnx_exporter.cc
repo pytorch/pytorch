@@ -1020,7 +1020,6 @@ ConvertedResult OnnxExporter::CreateReduceMeanNodes(
 
     ConvertedResult result;
     auto& nodes = result.first;
-    auto& const_tensors = result.second;
     std::unordered_map<std::string, const caffe2::Argument*> args;
     for (const auto& a : def.arg()) {
         args.emplace(a.name(), &a);

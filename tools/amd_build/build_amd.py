@@ -4,8 +4,6 @@ from __future__ import absolute_import, division, print_function
 import os
 import subprocess
 import argparse
-from functools import reduce
-from itertools import chain
 
 from pyHIPIFY import hipify_python
 
@@ -36,12 +34,6 @@ parser.add_argument(
     nargs='+',
     help="The list of extra directories in caffe2 to hipify",
     required=False)
-
-# Hipify using HIP-Clang launch.
-parser.add_argument(
-    '--hip-clang-launch',
-    action='store_true',
-    help=argparse.SUPPRESS)
 
 args = parser.parse_args()
 
@@ -103,7 +95,6 @@ ignores = [
     '*/hip/*',
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
-    "torch/csrc/autograd/engine.cpp",
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
     "torch/include/*",
@@ -115,32 +106,13 @@ if not args.out_of_place_only:
     for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
         subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
 
-    # Make various replacements inside AMD_BUILD/torch directory
-    ignore_files = [
-        # These files use nvrtc, hip doesn't have equivalent
-        "csrc/autograd/profiler.h",
-        "csrc/autograd/profiler.cpp",
-        # These files are compatible with both cuda and hip
-        "csrc/autograd/engine.cpp"
-    ]
-    paths = ("torch", "tools")
-    for root, _directories, files in chain.from_iterable(os.walk(path) for path in paths):
-        for filename in files:
-            if filename.endswith(".cpp") or filename.endswith(".h") or filename.endswith(".hpp"):
-                source = os.path.join(root, filename)
-                # Disabled files
-                if reduce(lambda result, exclude: source.endswith(exclude) or result, ignore_files, False):
-                    continue
-                # Update contents.
-                with open(source, "r+") as f:
-                    contents = f.read()
-                    contents = contents.replace("USE_CUDA", "USE_ROCM")
-                    contents = contents.replace("CUDA_VERSION", "0")
-                    f.seek(0)
-                    f.write(contents)
-                    f.truncate()
-                    f.flush()
-                    os.fsync(f)
+# Check if the compiler is hip-clang.
+def is_hip_clang():
+    try:
+        hip_path = os.getenv('HIP_PATH', '/opt/rocm/hip')
+        return 'HIP_COMPILER=clang' in open(hip_path + '/lib/.hipInfo').read()
+    except IOError:
+        return False
 
 hipify_python.hipify(
     project_directory=proj_dir,
@@ -148,4 +120,4 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    hip_clang_launch=args.hip_clang_launch)
+    hip_clang_launch=is_hip_clang())

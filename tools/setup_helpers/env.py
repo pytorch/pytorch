@@ -67,6 +67,10 @@ def hotpatch_build_env_vars():
 
 hotpatch_build_env_vars()
 
+# We promised that CXXFLAGS should also be affected by CFLAGS
+if 'CFLAGS' in os.environ and 'CXXFLAGS' not in os.environ:
+    os.environ['CXXFLAGS'] = os.environ['CFLAGS']
+
 
 class BuildType(object):
     """Checks build type. The build type will be given in :attr:`cmake_build_type_env`. If :attr:`cmake_build_type_env`

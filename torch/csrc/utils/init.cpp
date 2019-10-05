@@ -44,6 +44,8 @@ void initThroughputBenchmarkBindings(PyObject* module) {
         AutoNoGIL no_gil_guard;
         return self.benchmark(config);
       });
+
+
 }
 
 } // namespace throughput_benchmark

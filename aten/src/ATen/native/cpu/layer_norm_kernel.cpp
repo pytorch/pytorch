@@ -23,12 +23,12 @@ void LayerNormKernelImplInternal(
   DCHECK_EQ(X.numel(), M * N);
   DCHECK(!gamma.defined() || gamma.numel() == N);
   DCHECK(!beta.defined() || beta.numel() == N);
-  const T* X_data = X.data<T>();
-  const T* gamma_data = gamma.defined() ? gamma.data<T>() : nullptr;
-  const T* beta_data = beta.defined() ? beta.data<T>() : nullptr;
-  T* Y_data = Y->data<T>();
-  T* mean_data = mean->data<T>();
-  T* rstd_data = rstd->data<T>();
+  const T* X_data = X.data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
+  const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
+  T* Y_data = Y->data_ptr<T>();
+  T* mean_data = mean->data_ptr<T>();
+  T* rstd_data = rstd->data_ptr<T>();
   const T c = T(1) / static_cast<T>(N);
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
@@ -89,17 +89,17 @@ void LayerNormBackwardKernelImplInternal(
   DCHECK_EQ(mean.numel(), M);
   DCHECK_EQ(rstd.numel(), M);
   DCHECK(!gamma.defined() || gamma.numel() == N);
-  const T* dY_data = dY.template data<T>();
-  const T* X_data = X.template data<T>();
-  const T* mean_data = mean.template data<T>();
-  const T* rstd_data = rstd.template data<T>();
-  const T* gamma_data = gamma.defined() ? gamma.template data<T>() : nullptr;
-  T* dX_data = dX->defined() ? dX->template data<T>() : nullptr;
-  T* dgamma_data = dgamma->defined() ? dgamma->template data<T>() : nullptr;
+  const T* dY_data = dY.template data_ptr<T>();
+  const T* X_data = X.template data_ptr<T>();
+  const T* mean_data = mean.template data_ptr<T>();
+  const T* rstd_data = rstd.template data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
+  T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
+  T* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
   if (dgamma_data != nullptr) {
     std::memset(dgamma_data, 0, N * sizeof(T));
   }
-  T* dbeta_data = dbeta->defined() ? dbeta->template data<T>() : nullptr;
+  T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
   if (dbeta_data != nullptr) {
     std::memset(dbeta_data, 0, N * sizeof(T));
   }
@@ -309,18 +309,18 @@ void LayerNormDoubleBackwardKernelImplInternal(
   DCHECK(!ddX.defined() || ddX.numel() == M * N);
   DCHECK(!ddgamma.defined() || ddgamma.numel() == N);
   DCHECK(!ddbeta.defined() || ddbeta.numel() == N);
-  const T* ddX_data = ddX.defined() ? ddX.template data<T>() : nullptr;
+  const T* ddX_data = ddX.defined() ? ddX.template data_ptr<T>() : nullptr;
   const T* ddgamma_data =
-      ddgamma.defined() ? ddgamma.template data<T>() : nullptr;
-  const T* ddbeta_data = ddbeta.defined() ? ddbeta.template data<T>() : nullptr;
-  const T* dY_data = dY.template data<T>();
-  const T* X_data = X.template data<T>();
-  const T* mean_data = mean.template data<T>();
-  const T* rstd_data = rstd.template data<T>();
-  const T* gamma_data = gamma.defined() ? gamma.template data<T>() : nullptr;
-  T* ddY_data = ddY->defined() ? ddY->data<T>() : nullptr;
-  T* dX_data = dX->defined() ? dX->data<T>() : nullptr;
-  T* dgamma_data = dgamma->defined() ? dgamma->data<T>() : nullptr;
+      ddgamma.defined() ? ddgamma.template data_ptr<T>() : nullptr;
+  const T* ddbeta_data = ddbeta.defined() ? ddbeta.template data_ptr<T>() : nullptr;
+  const T* dY_data = dY.template data_ptr<T>();
+  const T* X_data = X.template data_ptr<T>();
+  const T* mean_data = mean.template data_ptr<T>();
+  const T* rstd_data = rstd.template data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
+  T* ddY_data = ddY->defined() ? ddY->data_ptr<T>() : nullptr;
+  T* dX_data = dX->defined() ? dX->data_ptr<T>() : nullptr;
+  T* dgamma_data = dgamma->defined() ? dgamma->data_ptr<T>() : nullptr;
   if (dgamma_data != nullptr) {
     std::memset(dgamma_data, 0, N * sizeof(dgamma_data));
   }

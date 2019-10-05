@@ -5,7 +5,7 @@ import numbers
 
 from .module import Module
 from ..parameter import Parameter
-from ..utils.rnn import PackedSequence, get_packed_sequence
+from ..utils.rnn import PackedSequence
 from .. import init
 from .. import _VF
 from ..._jit_internal import _parameter_list
@@ -372,11 +372,13 @@ class RNN(RNNBase):
 
 # XXX: LSTM and GRU implementation is different from RNNBase, this is because:
 # 1. we want to support nn.LSTM and nn.GRU in TorchScript and TorchScript in
-#    its current state could not support the python Union Type or Any Type.
+#    its current state could not support the python Union Type or Any Type
 # 2. TorchScript static typing does not allow a Function or Callable type in
 #    Dict values, so we have to separately call _VF instead of using _rnn_impls
 # 3. This is temporary only and in the transition state that we want to make it
 #    on time for the release
+#
+# More discussion details in https://github.com/pytorch/pytorch/pull/23266
 #
 # TODO: remove the overriding implementations for LSTM and GRU when TorchScript
 # support expressing these two modules generally.
@@ -544,14 +546,14 @@ class LSTM(RNNBase):
 
     @torch._jit_internal.export
     def forward_packed(self, input, hx=None):
-        # type: (Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]], Tuple[Tensor, Tensor]]  # noqa
+        # type: (PackedSequence, Optional[Tuple[Tensor, Tensor]]) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
         input, batch_sizes, sorted_indices, unsorted_indices = input
         max_batch_size = batch_sizes[0]
         max_batch_size = int(max_batch_size)
 
         output, hidden = self.forward_impl(input, hx, batch_sizes, max_batch_size, sorted_indices)
 
-        output = get_packed_sequence(output, batch_sizes, sorted_indices, unsorted_indices)
+        output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
         return output, self.permute_hidden(hidden, unsorted_indices)
 
     @torch._jit_internal.ignore

@@ -127,6 +127,24 @@ class ProcessGroupGloo : public ProcessGroup {
     int threads;
   };
 
+  // Helper functions to create a new device object.
+  // They are static functions on this class to keep them logically
+  // separate from the rest of the code base (e.g. torch/csrc/distributed).
+
+  // Create new device instance for specific interface.
+  static std::shared_ptr<::gloo::transport::Device> createDeviceForInterface(
+      const std::string& interface);
+
+  // Create new device instance for specific hostname or address.
+  static std::shared_ptr<::gloo::transport::Device> createDeviceForHostname(
+      const std::string& hostname);
+
+  // Create new device instance.
+  // It tries to resolve this machine's hostname and bind to that address.
+  // If that fails (i.e. the hostname doesn't resolve to an address), it
+  // falls back to binding to the loopback address.
+  static std::shared_ptr<::gloo::transport::Device> createDefaultDevice();
+
   explicit ProcessGroupGloo(
       const std::shared_ptr<Store>& store,
       int rank,
@@ -142,6 +160,11 @@ class ProcessGroupGloo : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts =
+          AllreduceCoalescedOptions()) override;
 
   std::shared_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
