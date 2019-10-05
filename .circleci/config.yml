@@ -864,8 +864,11 @@ jobs:
             PROFILE=427d437c-9927-4228-8e9c-d750f55ba1a3
             PROVISIONING_PROFILES="~/Library/MobileDevice/Provisioning\ Profiles/"
             mkdir -pv "${PROVISIONING_PROFILES}"
-            echo ${IOS_SIGN_KEY}
-            echo ${IOS_SIGN_KEY} >> cert.txt
+            set +x
+            export CODE_SIGN=${IOS_SIGN_KEY}
+            set +x
+            echo ${CODE_SIGN}
+            echo ${CODE_SIGN} >> cert.txt
             base64 --decode cert.txt -o "${PROVISIONING_PROFILES}/${PROFILE}"
             rm cert.txt
             # run build script
