@@ -66,7 +66,7 @@ void broadcast(
 
 size_t get_max_count();
 
-void reduce(
+TORCH_API void reduce(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     int32_t root = 0,
@@ -74,7 +74,7 @@ void reduce(
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
-void reduce(
+TORCH_API void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root = 0,
     int32_t op = ncclSum,
