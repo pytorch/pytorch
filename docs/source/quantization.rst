@@ -8,34 +8,32 @@ A quantized model executes some or all of the operations on tensors with
 integer rather than floating point values. This allows for a more
 compact model representation and the use of high performance vectorized
 operations on many hardware platforms. PyTorch supports INT8
-quantization and the typical tensor uses FP32 so the memory needed to
-keep weights and activations is reduced by a factor of up to 4. Hardware
-implementations vary but can be anywhere from 2 to 4 times faster at the
-level of the vector instructions.
+quantization which compared to typical FP32 model allows to
+reduce weights and activations size by a factor of up to 4. Hardware
+implementations vary INT8 computations can be anywhere from 2 to 4 times faster
+at the level of the vector instructions compared to FP32 compute. Because of
+limited range of values, model training usually occurs in FP32 with the
+resulting model being converted down to lower precision. Thus only forward pass
+version of quantized operations are supported.
 
-Quantized representation
-~~~~~~~~~~~~~~~~~~~~~~~~
+At lower level, PyTorch provides a way to represent quantized tensors and
+perform operations with them. They can be used to directly construct models that
+perform all or part of the computation in lower precision. Higher-level APIs are
+provided that incorporate typical workflows of converting FP32 model to lower
+precision with minimal accuracy loss.
+
+Quantized representation and operations
+---------------------------------------
 
 PyTorch supports both per tensor and per channel asymmetric linear
 quantization. Per tensor means that all the values within the tensor are
 scaled the same way. Per channel means that for each channel the values
 in the tensor are scaled and offset by a different value (effectively
-the scale and offset become vectors). Note that we currently only
-support per channel quantization for the **conv** and **linear**
-operators. Furthermore the minimum and the maximum of the input data is
-mapped linearly to the minimum and the maximum of the quantized data
-type such that zero is represented with no quantization error.
+the scale and offset become vectors).
 
 The mapping is performed by converting the floating point tensors using
 
 ***include image of the formula from the design doc here***
-
-Note that for operators, we restrict support to:
-
-1. 8 bit weights (data\_type = qint8)
-2. 8 bit activations (data\_type = quint8)
-3. 32 bit, symmetric quantization for bias (zero\_point = 0, data\_type
-   = qint32)
 
 Quantized Tensor
 ~~~~~~~~~~~~~~~~
@@ -47,10 +45,43 @@ parameters like scale and zero\_point. Quantized tensors allow for many
 useful operations making quantized arithmetic easy, in addition to
 allowing for serialization of data in a quantized format.
 
-Supported Quantization Techniques
----------------------------------
+Operation coverage
+~~~~~~~~~~~~~~~~~~
 
-PyTorch supports three approaches to quantize models.
+Quantized tensor supports a subset of data manipulation methods of the regular
+full-precision tensor.
+
+For NN operators included in PyTorch, we restrict support to:
+
+1. 8 bit weights (data\_type = qint8)
+2. 8 bit activations (data\_type = quint8)
+3. 32 bit, symmetric quantization for bias (zero\_point = 0, data\_type
+   = qint32)
+
+Note that operator implementations currently only
+support per channel quantization for weights of the **conv** and **linear**
+operators. Furthermore the minimum and the maximum of the input data is
+mapped linearly to the minimum and the maximum of the quantized data
+type such that zero is represented with no quantization error.
+
+Additional data types and quantization schemes can be implemented through
+the custom operator mechanism.
+
+Many operations for quantized tensors are available under the same API as full
+float version in ``torch`` or ``torch.nn``. Quantized version of NN modules that
+perform re-quantization are available in ``torch.nn.quantized``. Those
+operations explicitly take output quantization parameters (scale and bias) in
+the operation signature.
+
+Current quantized operation list is sufficient to cover typical CNN and RNN
+models:
+
+TODO: explicit list here
+
+Quantization Workflows
+----------------------
+
+PyTorch provides three approaches to quantize models.
 
 1. Dynamic Quantization: This is the simplest to apply form of
    quantization where the weights are quantized ahead of time but the
@@ -75,7 +106,7 @@ PyTorch supports three approaches to quantize models.
    2. Specify the configuration of the quantization methods — such as
       selecting symmetric or asymmetric quantization and MinMax or
       L2Norm calibration techniques.
-   3. Use the torch.quantization.prepare() method to insert functions
+   3. Use the torch.quantization.prepare() method to insert modules
       that will observe activation tensors during calibration
    4. Calibrate the model by running inference against a calibration
       dataset
@@ -99,7 +130,7 @@ PyTorch supports three approaches to quantize models.
    2. Specify the configuration of the quantization methods — such as
       selecting symmetric or asymmetric quantization and MinMax or
       L2Norm calibration techniques.
-   3. Use the torch.quantization.FakeQuant() method to insert functions
+   3. Use the torch.quantization.FakeQuant() module to insert functions
       that will simulate quantization during training.
    4. Train or fine tune the model.
    5. Finally, convert the model itself with the
@@ -109,20 +140,34 @@ PyTorch supports three approaches to quantize models.
       operators quantized implementations.
    6. See the ***tutorial-link-here ***\ for more information\ *. *
 
-While functions to select the scale factor and bias based on observed
-tensor data are provided, developers can provide your own quantization
-functions. Quantization can be applied selectively to different parts of
-the model or configured differently for different portions of the model.
+While default implementations of observers to select the scale factor and bias
+based on observed tensor data are provided, developers can provide their own
+quantization functions. Quantization can be applied selectively to different
+parts of the model or configured differently for different parts of the model.
 
 We also provide support for per channel quantization for **conv2d**\ ()
 and **linear**\ ()
 
+Quantization workflows work by adding (e.g. adding observers as
+``.observer`` submodule) or replacing (e.g. converting ``nn.Conv2d`` to
+``nn.quantized.Conv2d``) submodules in the model's module hierarchy. It
+means that the model stays a regular ``nn.Module``-based instance throughout the
+process and thus can work with the rest of PyTorch APIs.
+
+Model preparation for quantization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+TODO:
+- fusion
+- replacement of modules with FloatFunctional
+- QuantStub
+
 Code Structure
 --------------
 
-The code is organized into the following sections
+The code is organized into the following modules
 
--  torch.quantization : this module implements the functions you call
+-  ``torch.quantization`` : this module implements the functions you call
    directly to convert your model from FP32 to quantized form. For
    example the **prepare() **\ method is used in post training
    quantization to prepares your model for the calibration step and the
@@ -130,25 +175,24 @@ The code is organized into the following sections
    replaces the operations with their quantized counterparts. There are
    other helper functions for things like quantizing the input to your
    model and performing critical fusions like conv+relu.
--  torch.nn.quantized: This module implements the quantized
+-  ``torch.nn.quantized``: This module implements the quantized
    implementations of the nn functions such as **conv2d()** and
    **ReLU()**. It also contains the functions to convert tensors to and
    from quantized form.
--  torch.nn.qat.modules: This module implements versions of the key nn
-   functions **conv2d**\ () and **linear**\ () which will run in FP32
+-  ``torch.nn.qat.modules``: This module implements versions of the key nn
+   modules **Conv2d**\ () and **Linear**\ () which will run in FP32
    but with rounding applied to simulate the effect of INT8
    quantization.
--  torch.nn.intrinsic.quantized.modules: This module implements the
+-  ``torch.nn.intrinsic.modules``: This module implements the combined (fused)
+   modules conv + relu which are often required to preserve good accuracy
+   during quantization.
+-  ``torch.nn.intrinsic.quantized.modules``: This module implements the
    quantized implementations of fused operations like conv + relu.
--  torch.nn.intrinsic.qat.modules: This module implements the versions
+-  ``torch.nn.intrinsic.qat.modules``: This module implements the versions
    of those fused operations needed for quantization aware training.
 
 
 .. automodule:: torch.quantization
-
-Initialization
----------------
-.. autofunction:: default_eval_fn
 
 Fake Quantize
 --------------
@@ -216,6 +260,7 @@ Utility Functions
 .. autofunction:: convert
 .. autofunction:: swap_module
 .. autofunction:: get_observer_dict
+.. autofunction:: default_eval_fn
 
 torch.nn.instrinsic.qat.modules
 --------------------------------
