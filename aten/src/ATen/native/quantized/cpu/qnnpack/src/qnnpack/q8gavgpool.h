@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define DECLARE_Q8MPGAVGPOOL_UKERNEL_FUNCTION(fn_name)      \
+#define DECLARE_PYTORCH_Q8MPGAVGPOOL_UKERNEL_FUNCTION(fn_name)      \
   PYTORCH_QNNP_INTERNAL void fn_name(                       \
       size_t m,                                             \
       size_t n,                                             \
@@ -30,10 +30,10 @@ extern "C" {
       const union pytorch_qnnp_avgpool_quantization_params* \
           quantization_params);
 
-DECLARE_Q8MPGAVGPOOL_UKERNEL_FUNCTION(q8gavgpool_ukernel_mp8x7p7q__neon)
-DECLARE_Q8MPGAVGPOOL_UKERNEL_FUNCTION(q8gavgpool_ukernel_mp8x7p7q__sse2)
+DECLARE_PYTORCH_Q8MPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_mp8x7p7q__neon)
+DECLARE_PYTORCH_Q8MPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_mp8x7p7q__sse2)
 
-#define DECLARE_Q8UPGAVGPOOL_UKERNEL_FUNCTION(fn_name)      \
+#define DECLARE_PYTORCH_Q8UPGAVGPOOL_UKERNEL_FUNCTION(fn_name)      \
   PYTORCH_QNNP_INTERNAL void fn_name(                       \
       size_t m,                                             \
       size_t n,                                             \
@@ -44,10 +44,10 @@ DECLARE_Q8MPGAVGPOOL_UKERNEL_FUNCTION(q8gavgpool_ukernel_mp8x7p7q__sse2)
       const union pytorch_qnnp_avgpool_quantization_params* \
           quantization_params);
 
-DECLARE_Q8UPGAVGPOOL_UKERNEL_FUNCTION(q8gavgpool_ukernel_up8x7__neon)
-DECLARE_Q8UPGAVGPOOL_UKERNEL_FUNCTION(q8gavgpool_ukernel_up8xm__neon)
-DECLARE_Q8UPGAVGPOOL_UKERNEL_FUNCTION(q8gavgpool_ukernel_up8x7__sse2)
-DECLARE_Q8UPGAVGPOOL_UKERNEL_FUNCTION(q8gavgpool_ukernel_up8xm__sse2)
+DECLARE_PYTORCH_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8x7__neon)
+DECLARE_PYTORCH_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8xm__neon)
+DECLARE_PYTORCH_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8x7__sse2)
+DECLARE_PYTORCH_Q8UPGAVGPOOL_UKERNEL_FUNCTION(pytorch_q8gavgpool_ukernel_up8xm__sse2)
 
 #ifdef __cplusplus
 } /* extern "C" */

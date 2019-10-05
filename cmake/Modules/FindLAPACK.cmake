@@ -143,6 +143,21 @@ if(BLAS_FOUND)
     endif()
   endif()
 
+  # FLAME
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "FLAME"))
+    check_lapack_libraries(
+      LAPACK_LIBRARIES
+      LAPACK
+      cheev
+      ""
+      "flame"
+      "${BLAS_LIBRARIES}"
+      )
+    if(LAPACK_LIBRARIES)
+      SET(LAPACK_INFO "FLAME")
+    endif(LAPACK_LIBRARIES)
+  endif()
+
   # ACML
   IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "acml"))
     SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})

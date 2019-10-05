@@ -365,7 +365,9 @@ class WeightedSumOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    const int input_size = this->InputSize();
+    // the code is written this way because of 10.1 + gcc 7.3.1 compiler bug
+    // as discussed at https://devtalk.nvidia.com/default/topic/1048037/linux/cuda-10-1-nvidia-you-re-now-quot-fixing-quot-gcc-bugs-that-gcc-doesn-t-even-have/
+    const int input_size = (*this).InputSize();
     CAFFE_ENFORCE_EQ(input_size % 2, 0);
     const auto& X0 = Input(0);
     const auto& weight0 = Input(1);
@@ -752,7 +754,7 @@ class ScatterOp : public Operator<CPUContext> {
   virtual ~ScatterOp() noexcept override {}
 
   bool RunOnDevice() override {
-    
+
     TORCH_CHECK(Context::GetDeviceType() == kCPU, "ScatterOp currently only supports CPU.")
 
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -769,7 +771,7 @@ class ScatterOp : public Operator<CPUContext> {
 
     // ONNX allows negative axis to index from the back, valid range: [-r, r].
     axis_ = data.canonical_axis_index(axis_);
-    
+
     CAFFE_ENFORCE_GE(data.dim(), axis_ + 1, "DATA should be at least [axis+1]-D");
     CAFFE_ENFORCE_GE(axis_, 0, "Axis should be non-negative");
     CAFFE_ENFORCE_LT(axis_, data.dim(), "Axis out of range");
@@ -789,27 +791,43 @@ class ScatterOp : public Operator<CPUContext> {
     const IndexType* idxs = indices.template data<IndexType>();
     const char* src_base = static_cast<const char*>(updates.raw_data());
 
-    const int64_t outer_dims_product = updates.size_to_dim(axis_);
-    const int64_t block_size = updates.size_from_dim(axis_ + 1);
-    const int64_t block_bytesize = block_size * item_bytesize;
+    const int64_t outer_dims_product = indices.size_to_dim(axis_);
 
-    const int64_t src_indexing_axis_dim = updates.size(axis_);
-    const int64_t src_batch_bytesize = updates.size_from_dim(axis_) * item_bytesize;
-    const int64_t dst_batch_size = data.size_from_dim(axis_) * item_bytesize;
-    
+    const int64_t dst_indexing_axis_dim = data.size(axis_);
+
+    const int64_t idxs_block_size = indices.size_from_dim(axis_ + 1);
+    const int64_t src_block_size = updates.size_from_dim(axis_ + 1);
+    const int64_t dst_block_size = data.size_from_dim(axis_ + 1);
+
+    const int64_t idxs_batch_size = indices.size_from_dim(axis_);
+    const int64_t src_batch_size = updates.size_from_dim(axis_);
+    const int64_t dst_batch_size = data.size_from_dim(axis_);
+
     const int64_t N = indices.size(axis_);
 
-    check_indexarray_range<IndexType>(idxs, N, src_indexing_axis_dim);
+    check_indexarray_range<IndexType>(idxs, N, dst_indexing_axis_dim);
 
-    int64_t i = 0;
-    for (int64_t batch = 0; batch < outer_dims_product; ++batch) {
-      int64_t i_max = i + N;
-      for (; i < i_max && i < indices.numel(); ++i) {
-        auto idx = idxs[i];
+    // For a 3-D tensor, dst is updated as:
+    //    dst[i][idxs[i][j][k]][k] = src[i][j][k]  # if dim == 1
+    // where i, j, k are iterating over their corresponding axis I, J, K.
+    // For a given i, j, k tuple.
+    // idxs offset can be computed as i * J_src * K + j * K + k.
+    // src offset can be computed as i * J_src * K + j * K + k.
+    // dst offset can be computed as i * J_dst * K + idxs[idxs_offset] * K + K
+    // Note that idxs and src should have the same rank and shape.
+    // dst should have the same rank as idxs and src, but the dimension of dim axis can be different.
+    // That is why in the above equation, there is the difference of J_src and J_dst.
+    for (int64_t outer_batch = 0; outer_batch < outer_dims_product; ++outer_batch) {
+      for (int64_t i = 0; i < N; ++i) {
+        for (int64_t inner_batch = 0; inner_batch < idxs_block_size; ++inner_batch) {
+          auto idxs_elem_idx = outer_batch * idxs_batch_size + i * idxs_block_size + inner_batch;
+          auto src_elem_idx = outer_batch * src_batch_size + i * src_block_size + inner_batch;
+          auto dst_elem_idx = outer_batch * dst_batch_size + idxs[idxs_elem_idx] * dst_block_size + inner_batch;
 
-        auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
-        auto dst = out + batch * dst_batch_size + (i - i_max + N) * block_bytesize;
-        context_.CopyItemsSameDevice(dataType, block_size, src, dst);
+          auto src = src_base + src_elem_idx * item_bytesize;
+          auto dst = out + dst_elem_idx * item_bytesize;
+          context_.CopyItemsSameDevice(dataType, 1, src, dst);
+        }
       }
     }
     return true;

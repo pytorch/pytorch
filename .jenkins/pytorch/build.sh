@@ -65,9 +65,6 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
   build_args=()
-  build_args+=("-DBUILD_CAFFE2_MOBILE=OFF")
-
-  build_args+=("-DBUILD_SHARED_LIBS=ON")
   if [[ "${BUILD_ENVIRONMENT}" == *-arm-v7a* ]]; then
     build_args+=("-DANDROID_ABI=armeabi-v7a")
   elif [[ "${BUILD_ENVIRONMENT}" == *-arm-v8a* ]]; then
@@ -77,9 +74,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
     build_args+=("-DANDROID_ABI=x86_64")
   fi
-
-  build_args+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
-  build_args+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+  export BUILD_PYTORCH_MOBILE=1
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
@@ -121,14 +116,9 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
   USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
 
-  ORIG_COMP=/opt/rocm/hcc/bin/clang-*_original
-  if [ -e $ORIG_COMP ]; then
-    # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
-    # note that the wrapping always names the compiler "clang-7.0_original"
-    WRAPPED=/opt/rocm/hcc/bin/clang-[0-99]
-    sudo mv $ORIG_COMP $WRAPPED
+  # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
+  bash tools/amd_build/unwrap_clang.sh
 
-  fi
   exit 0
 fi
 
@@ -178,8 +168,13 @@ else
   python setup.py install
 fi
 
-echo 'PyTorch Build Statistics'
-sccache --show-stats
+# TODO: I'm not sure why, but somehow we lose verbose commands
+set -x
+
+if which sccache > /dev/null; then
+  echo 'PyTorch Build Statistics'
+  sccache --show-stats
+fi
 
 assert_git_not_dirty
 
@@ -213,18 +208,19 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   pushd ../cpp-build/caffe2
   WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
   popd
-
-  # Build custom operator tests.
-  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-  CUSTOM_OP_TEST="$PWD/test/custom_operator"
-  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  mkdir "$CUSTOM_OP_BUILD"
-  pushd "$CUSTOM_OP_BUILD"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake "$CUSTOM_OP_TEST"
-  make VERBOSE=1
-  popd
-  assert_git_not_dirty
 fi
+
+# Build custom operator tests.
+CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+CUSTOM_OP_TEST="$PWD/test/custom_operator"
+python --version
+SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+mkdir "$CUSTOM_OP_BUILD"
+pushd "$CUSTOM_OP_BUILD"
+cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+make VERBOSE=1
+popd
+assert_git_not_dirty
 
 # Test XLA build
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then

@@ -2,11 +2,11 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 
-from torch._jit_internal import Optional
+from torch._jit_internal import Optional  # noqa: F401
 import torch.nn as nn
-import torch.nn._intrinsic as nni
+import torch.nn.intrinsic as nni
 from torch.nn.modules import Module
-
+from torch.nn.quantized.modules.utils import _quantize_weight
 
 class Quantize(Module):
     r"""Quantizes an incoming tensor
@@ -35,8 +35,8 @@ class Quantize(Module):
         self.dtype = dtype
 
     def forward(self, X):
-        return torch.quantize_linear(X, float(self.scale),
-                                     int(self.zero_point), self.dtype)
+        return torch.quantize_per_tensor(X, float(self.scale),
+                                         int(self.zero_point), self.dtype)
 
     @staticmethod
     def from_float(mod):
@@ -93,7 +93,7 @@ class Linear(torch.nn.Module):
 
         >>> m = nn.quantized.Linear(20, 30)
         >>> input = torch.randn(128, 20)
-        >>> input = torch.quantize_linear(input, 1.0, 0, torch.quint8)
+        >>> input = torch.quantize_per_tensor(input, 1.0, 0, torch.quint8)
         >>> output = m(input)
         >>> print(output.size())
         torch.Size([128, 30])
@@ -108,18 +108,20 @@ class Linear(torch.nn.Module):
         # deserialization modules
         self.in_features = in_features
         self.out_features = out_features
-        qbias = None
+        bias = None
         if bias_:
-            qbias = torch._empty_affine_quantized(
-                [out_features], scale=1, zero_point=0, dtype=torch.qint32)
+            bias = torch.zeros(out_features, dtype=torch.float)
+
 
         qweight = torch._empty_affine_quantized(
             [out_features, in_features], scale=1, zero_point=0, dtype=torch.qint8)
 
-        self.set_weight_bias(qweight, qbias)
-        self.weight_scale = 1.0
+        self.set_weight_bias(qweight, bias)
         self.scale = 1.0
         self.zero_point = 0
+
+    def _get_name(self):
+        return 'QuantizedLinear'
 
     def extra_repr(self):
         return 'in_features={}, out_features={}, scale={}, zero_point={}'.format(
@@ -145,6 +147,10 @@ class Linear(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
+        if not torch.jit.is_scripting():
+            raise RuntimeError('torch.save() is not currently supported for quantized modules.'
+                               ' See https://github.com/pytorch/pytorch/issues/24045.'
+                               ' Please use state_dict or torch.jit serialization.')
         (w, b) = self._weight_bias()
         return (
             self.in_features,
@@ -198,7 +204,6 @@ class Linear(torch.nn.Module):
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         self._packed_params = torch.ops.quantized.linear_prepack(w, b)
-        self.weight_scale = w.q_scale()
 
     @classmethod
     def from_float(cls, mod):
@@ -216,9 +221,6 @@ class Linear(torch.nn.Module):
             assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
                 cls._FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert hasattr(mod, 'observer'), 'Input float module must have observer attached'
-            # workaround for sequential, ConvReLU2d should probably
-            # inherit from Conv2d instead
             if type(mod) == nni.LinearReLU:
                 activation_observer = mod[1].observer
                 mod = mod[0]
@@ -228,17 +230,9 @@ class Linear(torch.nn.Module):
             weight_observer(mod.weight)
         act_scale, act_zp = activation_observer.calculate_qparams()
         assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
-        wt_scale, wt_zp = weight_observer.calculate_qparams()
-        # Scale bias to activation_scale/2^16, this quantizes bias
-        # to about 24 bits of precision
-        bias_scale = float(act_scale / (2**16))
-        qweight = torch.quantize_linear(mod.weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
-        if mod.bias is not None:
-            qbias = torch.quantize_linear(mod.bias.float(), bias_scale, 0, torch.qint32)
-        else:
-            qbias = None
+        qweight = _quantize_weight(mod.weight.float(), weight_observer)
         qlinear = cls(mod.in_features, mod.out_features)
-        qlinear.set_weight_bias(qweight, qbias)
+        qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
         return qlinear

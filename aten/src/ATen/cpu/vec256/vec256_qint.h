@@ -83,7 +83,7 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
   constexpr int VLEN = 8;
   constexpr auto min_val = std::numeric_limits<typename T::underlying>::min();
   constexpr auto max_val = std::numeric_limits<typename T::underlying>::max();
-  std::size_t i = 0;
+  int i = 0;
   __m256 inverse_scale_v = _mm256_set1_ps(inverse_scale);
   __m256i permute_mask_v =
       _mm256_set_epi32(0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
@@ -206,7 +206,7 @@ struct Vec256<c10::qint8> {
   float_vec_return_type dequantize(
       Vec256<float> scale,
       Vec256<float> zero_point,
-      Vec256<float> scale_zp_premul) const {
+      Vec256<float> scale_neg_zp_premul) const {
     __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
     __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
     __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
@@ -219,13 +219,13 @@ struct Vec256<c10::qint8> {
 
 #if defined(__AVX2__) && defined(__FMA__)
     auto val0 =
-        vec256::fmadd(scale, Vec256<float>(float_val0), scale_zp_premul);
+        vec256::fmadd(scale, Vec256<float>(float_val0), scale_neg_zp_premul);
     auto val1 =
-        vec256::fmadd(scale, Vec256<float>(float_val1), scale_zp_premul);
+        vec256::fmadd(scale, Vec256<float>(float_val1), scale_neg_zp_premul);
     auto val2 =
-        vec256::fmadd(scale, Vec256<float>(float_val2), scale_zp_premul);
+        vec256::fmadd(scale, Vec256<float>(float_val2), scale_neg_zp_premul);
     auto val3 =
-        vec256::fmadd(scale, Vec256<float>(float_val3), scale_zp_premul);
+        vec256::fmadd(scale, Vec256<float>(float_val3), scale_neg_zp_premul);
 #else
     auto val0 = scale * (Vec256<float>(float_val0) - zero_point);
     auto val1 = scale * (Vec256<float>(float_val1) - zero_point);
@@ -330,7 +330,7 @@ struct Vec256<c10::quint8> {
 
  private:
     __m256i vals __attribute__((aligned(64)));
- 
+
  public:
     // Broadcast constructor
     Vec256(const c10::quint8& val) {

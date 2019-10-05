@@ -8,12 +8,12 @@ CONFIG_TREE_DATA = [
         (None, [
             XImportant("2.7.9"),
             X("2.7"),
-            X("3.5"),
+            XImportant("3.5"),  # Not run on all PRs, but should be included on [test all]
             X("nightly"),
         ]),
         ("gcc", [
             ("4.8", [X("3.6")]),
-            ("5.4", [
+            ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
                 ("3.6", [
                     ("namedtensor", [XImportant(True)]),

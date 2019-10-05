@@ -1,3 +1,4 @@
+
 import argparse
 import os
 
@@ -119,6 +120,7 @@ TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegistrationDeclarations.h")
+OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/OpsAlreadyMovedToC10.cpp")
 
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
@@ -157,6 +159,8 @@ top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
     'function_registrations': [],
+    'c10_ops_already_moved_from_aten_to_c10': [],
+    'c10_ops_not_moved_from_aten_to_c10_yet': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -388,7 +392,7 @@ def cmpfiles_with_eol_normalization(a, b, names):
 def is_namedtensor_only_decl(decl):
     if 'Dimname' in decl['schema_string']:
         return True
-    if decl['name'] == 'align_tensors':
+    if decl['name'] == 'align_tensors' or decl['name'] == 'align_as':
         return True
     return False
 
@@ -426,7 +430,8 @@ def generate_outputs():
 
     core_files = {
         'TensorBody.h': TENSOR_H,
-        'TensorMethods.h': TENSOR_METHODS_H
+        'TensorMethods.h': TENSOR_METHODS_H,
+        'OpsAlreadyMovedToC10.cpp': OPS_ALREADY_MOVED_TO_C10_CPP,
     }
 
     for core_file, core_template_file in core_files.items():

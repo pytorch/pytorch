@@ -11,8 +11,8 @@
 #include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
@@ -231,8 +231,16 @@ struct CanEmitInline {
     scanBlock(graph->block());
   }
   bool canInline(Value* v) {
-    return v->node()->kind() != prim::Param && v->uses().size() == 1 &&
-        v->node()->outputs().size() == 1;
+    return v->node()->kind() != prim::Param &&
+           // without this a BailOut may float downstream past some later
+           // BailOut
+           // and receive a higher jf_index. Then a GUARD instruction
+           // we generated for the floated BailOut will get popped up from the
+           // instruction stack
+           // by the later BailOut in createBailoutBlock and its jf_index
+           // will become invalid.
+           v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
+           v->node()->outputs().size() == 1;
   }
 
   Node* previousNonConstant(Node* n) {
@@ -336,6 +344,7 @@ struct CodeImpl {
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
+  TypePtr return_type_;
 
   // We MUST hold onto graph here because some Operators stored in the
   // instruction lists have dependencies on meta-data stored in the graph
@@ -366,6 +375,12 @@ struct CodeImpl {
       : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
+    if (n_outputs == 1) {
+      return_type_ = graph->outputs().at(0)->type();
+    } else {
+      return_type_ = TupleType::create(
+          fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
+    }
     n_inputs = graph_->inputs().size();
     // std::cout << *graph_ << "\n";
     emitCodeForBlock(graph_->block());
@@ -373,6 +388,18 @@ struct CodeImpl {
     // we deferred the emission of bailout blocks so they appear at the end
     // emit them now and patch up the jumps
     insertBailoutBlocks();
+  }
+
+  const std::vector<c10::IValue>& constant_table() const {
+    return constant_table_;
+  }
+
+  const std::vector<Instruction>& instructions() const {
+    return instructions_;
+  }
+
+  const std::vector<Node*>& instructions_source() const {
+    return instructions_source_;
   }
 
   void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
@@ -574,7 +601,8 @@ struct CodeImpl {
     TORCH_INTERNAL_ASSERT(bailout_index >= 0);
 
     auto build_bailout_graph = [bailout_index,
-                                unoptimized_graph](Function& func) {
+                                unoptimized_graph](Function &func) {
+
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 
@@ -590,7 +618,7 @@ struct CodeImpl {
     emitLoadInputs(node->inputs());
     const auto type = node->input()->type()->expect<ClassType>();
     const auto& field = node->s(attr::name);
-    uint64_t slot = type->getAttributeSlot(field);
+    const auto slot = type->getAttributeSlot(field);
     insertInstruction(GET_ATTR, slot);
   }
 
@@ -817,13 +845,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-        // std::cout << "RUNNING ";
-        // frames.back().function->dump(std::cout, af.pc);
+//         std::cout << "RUNNING ";
+//         frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
             af.operators[inst.X](stack);
             ++af.pc;
+            break;
+          case OPN:
+            AT_ERROR("OPN is currently supported in mobile mode only.");
             break;
           case LOAD:
             stack.emplace_back(reg(inst.X));
@@ -978,14 +1009,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case GUARD: {
-            auto actual = TensorType::create(stack.back().toTensor());
-            const TypePtr& expected = af.types[inst.X];
+            auto t = stack.back().toTensor();
+            auto actual = t.defined() ? TensorType::create(t)
+                                      : TensorType::get()->withUndefined();
+            const TypePtr &expected = af.types[inst.X];
             push(stack, *expected == *actual);
             ++af.pc;
           } break;
           case TAIL_CALL: {
             af.functions[inst.X]->ensure_defined();
-            const Code& code =
+            const Code &code =
                 af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
@@ -1041,7 +1074,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
  public:
   c10::intrusive_ptr<Future> getOrCreateFuture() {
     if (!future_) {
-      future_ = c10::make_intrusive<Future>();
+      future_ =
+          c10::make_intrusive<Future>(frames.front().function->return_type_);
     }
     return future_;
   }
@@ -1088,6 +1122,22 @@ size_t Code::num_inputs() const {
 
 size_t Code::num_outputs() const {
   return pImpl->n_outputs;
+}
+
+const std::vector<c10::IValue>& Code::constant_table() const {
+  return pImpl->constant_table();
+}
+
+const std::vector<Instruction>& Code::instructions() const {
+  return pImpl->instructions();
+}
+
+const std::vector<Node*>& Code::instructions_source() const {
+  return pImpl->instructions_source();
+}
+
+size_t Code::register_size() const {
+  return pImpl->register_size_;
 }
 
 InterpreterState::InterpreterState(const Code& code)

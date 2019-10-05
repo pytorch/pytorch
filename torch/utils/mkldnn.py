@@ -150,19 +150,3 @@ def to_mkldnn(module):
         return new_m
 
     return m_fn_rec(module)
-
-
-# **** WARNING: This is used to temporarily disable MKL-DNN convolution due
-# to a bug: https://github.com/pytorch/pytorch/issues/23825
-# Once this bug is fixed, this context manager as well as its callsites
-# should be removed!
-
-from contextlib import contextmanager
-
-@contextmanager
-def disable_mkldnn_conv():
-    torch._C._disable_mkldnn_conv()
-    try:
-        yield
-    finally:
-        torch._C._enable_mkldnn_conv()

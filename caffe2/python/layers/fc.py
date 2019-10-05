@@ -5,11 +5,20 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+from caffe2.python.helpers.arg_scope import get_current_scope
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer
 from caffe2.python.layers.sampling_trainable_mixin import SamplingTrainableMixin
 import math
 import numpy as np
+
+
+def get_fc_predictor_version(fc_version):
+    assert fc_version in ["fp32", "fp16"], (
+        "Only support fp32 and fp16 for the fully connected layer "
+        "in the predictor net, the provided FC precision is {}".format(fc_version)
+    )
+    return fc_version
 
 
 class FC(SamplingTrainableMixin, ModelLayer):
@@ -119,18 +128,47 @@ class FC(SamplingTrainableMixin, ModelLayer):
 
         return output_dim_vec
 
-    def _add_ops(self, net, params):
+    def _insert_fc_ops(self, net, params, outputs, version):
+        """
+        Args:
+            net: the caffe2 net to insert operator
+            params: weight and bias for FC
+            outputs: the output blobs
+            version: support fp32 and fp16 for now.
+        """
+        if version == "fp32":
+            return net.FC(
+                self.input_record.field_blobs() + params,
+                outputs,
+                axis=self.axis,
+                **self.kwargs
+            )
+        elif version == "fp16":
+            return net.FbFCPacked(
+                self.input_record.field_blobs() + params,
+                outputs,
+                axis=self.axis,
+                **self.kwargs
+            )
+        else:
+            raise Exception("unsupported FC type version {}".format(version))
+
+    def _add_ops(self, net, params, version):
+        """
+        Args:
+            params : the weight and bias,
+                passed by either add_ops or add_train_ops function
+            version : fp16 or fp32, might support in8 in the future.
+        """
         if self.clip_args is not None:
             clipped_params = [net.NextScopedBlob(
                 'clipped_%s' % str(p)) for p in params]
             for p, cp in zip(params, clipped_params):
                 net.Clip([p], [cp], **self.clip_args)
-
             params = clipped_params
 
         if self.output_dim_vec is None or len(self.output_dim_vec) == 1:
-            net.FC(self.input_record.field_blobs() + params,
-                   self.output_schema.field_blobs(), axis=self.axis, **self.kwargs)
+            self._insert_fc_ops(net, params, self.output_schema.field_blobs(), version)
         else:
             w_vec = params[:int(len(params) / 2)]
             b_vec = params[int(len(params) / 2):]
@@ -142,14 +180,32 @@ class FC(SamplingTrainableMixin, ModelLayer):
             for i in range(len(self.output_dim_vec)):
                 output_blob = net.NextScopedBlob(
                     'output_sub_{}'.format(i))
-                output_blob_vec.append(
-                    net.FC(self.input_record.field_blobs() +
-                           [w_vec[i], b_vec[i]],
-                           [output_blob], axis=self.axis, **self.kwargs))
-
+                insert_ret = self._insert_fc_ops(
+                    net, [w_vec[i], b_vec[i]], [output_blob], version
+                )
+                output_blob_vec.append(insert_ret)
             net.Concat(output_blob_vec,
                        self.output_schema.field_blobs() +
                        [self.output_schema.field_blobs()[0] + "_concat_dims"])
+
+    def add_ops(self, net):
+        """Both the predict net and the eval net will call this function
+        """
+        version_info = get_current_scope().get(
+            get_fc_predictor_version.__name__, {'fc_version': 'fp32'}
+        )
+        predictor_fc_fp_version = version_info['fc_version']
+        self._add_ops(net, self.param_blobs, predictor_fc_fp_version)
+
+    def add_train_ops(self, net):
+        # use the train_param_blobs to be consistent with the SamplingTrain unittest
+        self._add_ops(net, self.train_param_blobs, "fp32")
+
+    def get_fp16_compatible_parameters(self):
+        if self.output_dim_vec is None or len(self.output_dim_vec) == 1:
+            return [self.w]
+        else:
+            return self.w_vec
 
     @property
     def param_blobs(self):
