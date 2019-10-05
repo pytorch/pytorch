@@ -1414,7 +1414,7 @@ graph(%input, %weight):
 
             def forward(self, x):
                 xq = torch.quantize_per_tensor(x, 0.2, 2, torch.quint8)
-                wq = torch.quantize_per_tensor(self.weight, 0.2, 2, torch.qint8)
+                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
                 stride, padding, dilation, groups = [1, 1], [0, 0], [1, 1], 1
                 packed = torch.ops.quantized.conv_prepack(wq, self.bias, stride, padding, dilation, groups)
                 w_unpacked, b_unpacked = torch.ops.quantized.conv_unpack(packed)
