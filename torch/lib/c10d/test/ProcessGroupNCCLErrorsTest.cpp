@@ -7,6 +7,8 @@
 
 using namespace c10d::test;
 
+constexpr int kNcclErrorHandlingVersion = 2400;
+
 class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
  public:
   WorkNCCLSimulateErrors(
@@ -76,7 +78,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
       return true;
     }
 #ifdef USE_C10D_NCCL
-    return torch::cuda::nccl::version() < 2400;
+    return torch::cuda::nccl::version() < kNcclErrorHandlingVersion;
 #else
     return false;
 #endif
