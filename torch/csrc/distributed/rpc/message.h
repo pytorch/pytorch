@@ -106,10 +106,11 @@ class TORCH_API Message final {
 };
 
 // create an exception given a message and exception.
-Message createException(const Message& request, const std::exception& e);
+TORCH_API Message
+createException(const Message& request, const std::exception& e);
 
 // create an exception given a message and string.
-Message createException(
+TORCH_API Message createException(
     const Message& request,
     const std::string& exceptionStr);
 
