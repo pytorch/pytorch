@@ -108,6 +108,13 @@ ELSE()
   SET(ROCTHRUST_PATH $ENV{ROCTHRUST_PATH})
 ENDIF()
 
+# ROCTRACER_PATH
+IF(NOT DEFINED ENV{ROCTRACER_PATH})
+  SET(ROCTRACER_PATH ${ROCM_PATH}/roctracer)
+ELSE()
+  SET(ROCTRACER_PATH $ENV{ROCTRACER_PATH})
+ENDIF()
+
 IF(NOT DEFINED ENV{PYTORCH_ROCM_ARCH})
   SET(PYTORCH_ROCM_ARCH gfx803;gfx900;gfx906;gfx908)
 ELSE()
@@ -181,7 +188,9 @@ IF(HIP_FOUND)
   FIND_LIBRARY(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
   # hiprtc is part of HIP
   FIND_LIBRARY(ROCM_HIPRTC_LIB hiprtc HINTS ${HIP_PATH}/lib)
-
+  # roctx is part of roctracer
+  FIND_LIBRARY(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
+  set(roctracer_INCLUDE_DIRS ${ROCTRACER_PATH}/include)
 
   # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.
   set(hcc_INCLUDE_DIRS ${HCC_PATH}/include)
