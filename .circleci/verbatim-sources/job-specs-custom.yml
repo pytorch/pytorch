@@ -451,9 +451,11 @@
             fi 
             # decode provisioning profile
             echo ${IOS_SIGN_KEY}
+            mkdir -pv ~/Library/MobileDevice/Provisioning\ Profiles/
             base64 -D -o ~/Library/MobileDevice/Provisioning\ Profiles/427d437c-9927-4228-8e9c-d750f55ba1a3.mobileprovision <<< ${IOS_SIGN_KEY}
-            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c 427d437c-9927-4228-8e9c-d750f55ba1a3
+            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c "427d437c-9927-4228-8e9c-d750f55ba1a3"
             if ! [ "$?" -eq "0" ]; then
               echo 'xcodebuild failed!'
               exit 1
             fi
+
