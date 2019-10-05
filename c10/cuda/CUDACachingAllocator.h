@@ -56,6 +56,7 @@ enum struct StatType : uint64_t {
 
 typedef std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)> StatArray;
 
+// Struct containing memory allocator summary statistics for a device.
 struct DeviceStats {
   // COUNT: allocations requested by client code
   StatArray allocation;
@@ -64,7 +65,7 @@ struct DeviceStats {
   // COUNT: number of active memory blocks (allocated or used by stream)
   StatArray active;
   // COUNT: number of inactive, split memory blocks (unallocated but can't be released via cudaFree)
-  StatArray split;
+  StatArray inactive_split;
 
   // SUM: bytes requested by client code
   StatArray allocated_bytes;
@@ -73,13 +74,31 @@ struct DeviceStats {
   // SUM: bytes within active memory blocks
   StatArray active_bytes;
   // SUM: bytes within inactive, split memory blocks
-  StatArray split_bytes;
+  StatArray inactive_split_bytes;
 
   // COUNT: total number of failed calls to CUDA malloc necessitating cache flushes.
   int64_t cuda_malloc_retries = 0;
 
   // COUNT: total number of OOMs (i.e. failed calls to CUDA after cache flush)
   int64_t num_ooms = 0;
+};
+
+// Struct containing info of an allocation block (i.e. a fractional part of a cudaMalloc)..
+struct BlockInfo {
+  int64_t size = 0;
+  bool allocated = false;
+  bool active = false;
+};
+
+// Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
+struct SegmentInfo {
+  int64_t device = 0;
+  int64_t address = 0;
+  int64_t total_size = 0;
+  int64_t allocated_size = 0;
+  int64_t active_size = 0;
+  bool is_large = false;
+  std::vector<BlockInfo> blocks;
 };
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);
@@ -93,6 +112,7 @@ C10_CUDA_API void recordStream(void *ptr, CUDAStream stream);
 C10_CUDA_API DeviceStats getDeviceStats(int device);
 C10_CUDA_API void resetAccumulatedStats(int device);
 C10_CUDA_API void resetPeakStats(int device);
+C10_CUDA_API std::vector<SegmentInfo> snapshot();
 
 C10_CUDA_API std::mutex* getFreeMutex();
 

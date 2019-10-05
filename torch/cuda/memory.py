@@ -39,13 +39,11 @@ def memory_stats(device=None):
     result = []
 
     def _recurse_add_to_result(prefix, obj):
-        if len(prefix) > 0:
-            prefix += "."
-
         if isinstance(obj, dict):
+            if len(prefix) > 0:
+                prefix += "."
             for k, v in obj.items():
                 _recurse_add_to_result(prefix + k, v)
-
         else:
             result.append((prefix, obj))
 
@@ -245,6 +243,15 @@ def max_memory_cached(device=None):
         "torch.cuda.max_memory_cached has been renamed to torch.cuda.max_memory_reserved",
         DeprecationWarning)
     return max_memory_reserved(device=device)
+
+
+def memory_snapshot():
+    r"""Check the internal consistency of the allocator's memory tracker (potentially expensive)"""
+    return torch._C._cuda_memorySnapshot()
+
+
+def memory_summary():
+    lines = []
 
 
 def _host_allocator():
