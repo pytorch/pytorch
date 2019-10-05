@@ -278,14 +278,16 @@ CUDA_INCLUDE_MAP = collections.OrderedDict([
     ("cusparse.h", ("hipsparse.h", CONV_INCLUDE, API_RAND)),
     ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
     ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
+    ("<nccl.h>", ("<rccl.h>", CONV_INCLUDE, API_RUNTIME)), #PyTorch also has a source file named "nccl.h", so we need to "<"">" to differentiate
     ("nvrtc.h", ("hip/hiprtc.h", CONV_INCLUDE, API_RTC)),
-    ("thrust/system/cuda/", ("thrust/system/hip/", CONV_INCLUDE, API_BLAS)),
+    ("thrust/system/cuda", ("thrust/system/hip", CONV_INCLUDE, API_BLAS)),
     ("cub/util_allocator.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
     ("cub/block/block_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
     ("cub/cub.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
     ("cub/block/block_load.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
     ("cub/device/device_reduce.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
     ("cub/device/device_scan.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
+    ("nvToolsExt.h", ("roctx.h", CONV_INCLUDE, API_ROCTX)),
 ])
 
 CUDA_IDENTIFIER_MAP = collections.OrderedDict([
@@ -494,7 +496,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("CUDA_ARRAY3D_LAYERED", ("HIP_ARRAY3D_LAYERED", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
     ("CUDA_ARRAY3D_SURFACE_LDST", ("HIP_ARRAY3D_SURFACE_LDST", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
     ("CUDA_ARRAY3D_TEXTURE_GATHER", ("HIP_ARRAY3D_TEXTURE_GATHER", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
-    # ("CUDA_VERSION", ("HIP_VERSION", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
     ("CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK", ("hipDeviceAttributeMaxThreadsPerBlock", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
     ("CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X", ("hipDeviceAttributeMaxBlockDimX", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
     ("CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y", ("hipDeviceAttributeMaxBlockDimY", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
@@ -2206,8 +2207,12 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("nvrtcGetProgramLogSize", ("hiprtcGetProgramLogSize", CONV_JIT, API_RTC)),
     ("nvrtcGetPTX", ("hiprtcGetCode", CONV_JIT, API_RTC)),
     ("nvrtcGetPTXSize", ("hiprtcGetCodeSize", CONV_JIT, API_RTC)),
-    ("thrust::cuda::", ("thrust::hip::", CONV_MATH_FUNC, API_BLAS)),
+    ("thrust::cuda", ("thrust::hip", CONV_MATH_FUNC, API_BLAS)),
     ("cub::", ("hipcub::", CONV_MATH_FUNC, API_BLAS)),
+    ("nvtxMark", ("roctxMark", CONV_OTHER, API_ROCTX)),
+    ("nvtxMarkA", ("roctxMarkA", CONV_OTHER, API_ROCTX)),
+    ("nvtxRangePushA", ("roctxRangePushA", CONV_OTHER, API_ROCTX)),
+    ("nvtxRangePop", ("roctxRangePop", CONV_OTHER, API_ROCTX)),
 ])
 
 CUDA_SPARSE_MAP = collections.OrderedDict([
@@ -2251,6 +2256,8 @@ CUDA_SPARSE_MAP = collections.OrderedDict([
 ])
 
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
+    ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
+    ("CUDA_VERSION", ("HIP_VERSION", API_PYTORCH)),
     ("cudaHostAllocator", ("hipHostAllocator", API_PYTORCH)),
     ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),
     ("define MAX_NUM_BLOCKS 200", ("define MAX_NUM_BLOCKS 64", API_PYTORCH)),
