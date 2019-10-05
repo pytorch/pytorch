@@ -153,6 +153,7 @@ class Pickler {
  private:
   void pushIValueImpl(const IValue& ivalue);
   void pushDouble(double value);
+  void pushBool(bool b);
   void pushGenericList(const IValue& ivalue);
   void pushIntList(const IValue& ivalue);
   void pushList(const IValue& ivalue);
@@ -191,6 +192,31 @@ class Pickler {
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
     writer_(begin, sizeof(T));
+  }
+
+  // Specialize 2 & 3 argument version of push as well, intended for small
+  // values. The motivation is that writer_ calls often incur per-call
+  // bounds/size checks. If we're just writing a few bytes, combine the sizes on
+  // the stack before sending off to the writer.
+  template <typename A, typename B>
+  void push(
+      typename std::common_type<A>::type a,
+      typename std::common_type<B>::type b) {
+    std::array<char, sizeof(a) + sizeof(b)> combined;
+    memcpy(&combined[0], &a, sizeof(a));
+    memcpy(&combined[sizeof(a)], &b, sizeof(b));
+    writer_(combined.data(), combined.size());
+  }
+  template <typename A, typename B, typename C>
+  void push(
+      typename std::common_type<A>::type a,
+      typename std::common_type<B>::type b,
+      typename std::common_type<C>::type c) {
+    std::array<char, sizeof(a) + sizeof(b) + sizeof(c)> combined;
+    memcpy(&combined[0], &a, sizeof(a));
+    memcpy(&combined[sizeof(a)], &b, sizeof(b));
+    memcpy(&combined[sizeof(a) + sizeof(b)], &c, sizeof(c));
+    writer_(combined.data(), combined.size());
   }
 
   // Stream to write binary data to
