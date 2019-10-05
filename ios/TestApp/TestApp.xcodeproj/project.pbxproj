@@ -316,8 +316,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = GW8XWHWQR7;
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_BITCODE = No;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -333,8 +333,9 @@
 					/Users/taox/Projects/pytorch2/build_ios/install/lib,
 				);
 				OTHER_LINKER_FLAGS = "$(inherited) -all_load";
-				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.testApp.TestApp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.testApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -343,8 +344,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = GW8XWHWQR7;
+				CODE_SIGN_STYLE = Manual;
+				DEVELOPMENT_TEAM = "";
 				ENABLE_BITCODE = No;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -360,8 +361,9 @@
 					/Users/taox/Projects/pytorch2/build_ios/install/lib,
 				);
 				OTHER_LINKER_FLAGS = "$(inherited) -all_load";
-				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.testApp.TestApp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.testApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
