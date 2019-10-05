@@ -41,6 +41,10 @@ inline Tensor logsigmoid(const Tensor& input) {
   return torch::log_sigmoid(input);
 }
 
+inline Tensor prelu(const Tensor& input, const Tensor& weight) {
+  return torch::prelu(input, weight);
+}
+
 inline Tensor multi_head_attention_forward(
   const Tensor& query,
   const Tensor& key,
