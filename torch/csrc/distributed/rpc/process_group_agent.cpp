@@ -337,7 +337,6 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
             pendingSend->wait();
           }
         } catch (std::exception& e) {
-          std::cout << "caught exception\n";
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(work.message_, e);
             auto msgId = work.message_.id();
@@ -345,7 +344,6 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
             fut->markCompleted(exceptionMsg);
           }
         } catch (...) {
-          std::cout << "caught something\n";
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(
                 work.message_, "Unknown exception occured.");
