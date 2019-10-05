@@ -294,6 +294,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
   threadPool_.run(std::bind(
       [&](const SendWork& work) {
         try {
+          throw 3;
           std::stringstream ss;
           serialize(work.message_, ss);
           std::string serializedPayload = ss.str();
@@ -337,6 +338,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
             pendingSend->wait();
           }
         } catch (std::exception& e) {
+          std::cout << "caught exception\n";
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(work.message_, e);
             auto msgId = work.message_.id();
@@ -344,6 +346,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
             fut->markCompleted(exceptionMsg);
           }
         } catch (...) {
+          std::cout << "caught something\n";
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(
                 work.message_, "Unknown exception occurred.");
