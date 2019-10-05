@@ -2,6 +2,7 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/types.h>
 
 namespace torch {
 namespace nn {
@@ -54,6 +55,20 @@ struct LeakyReLUOptions {
 
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace) = false;
+};
+
+// ============================================================================
+
+/// Options for PReLU functional and module.
+struct PReLUOptions {
+  PReLUOptions() {}
+
+  /// number of a to learn. Although it takes an int as input, there is only
+  /// two values are legitimate: 1, or the number of channels at input. Default: 1
+  TORCH_ARG(int64_t, num_parameters) = 1;
+
+  /// the initial value of a. Default: 0.25
+  TORCH_ARG(double, init) = 0.25;
 };
 
 } // namespace nn

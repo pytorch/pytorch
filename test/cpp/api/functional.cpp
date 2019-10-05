@@ -360,3 +360,12 @@ TEST_F(FunctionalTest, LogSigmoid) {
   auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
+
+TEST_F(FunctionalTest, PReLU) {
+  const auto x = torch::rand({42, 24}) * 200 - 100;
+  const auto w = torch::rand(24) * 200 - 100;
+  const auto y = F::prelu(x, w);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({42, 24}));
+  const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
