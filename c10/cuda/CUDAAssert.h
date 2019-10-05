@@ -18,7 +18,6 @@ enum class AssertError : int32_t {
 
 enum class AssertFormat  : int32_t {
   Default,
-  KernelAssertFailed,
   ZeroDivisionError,
   IndexOutOfBounds,
   MultinomialProbLessZero,
