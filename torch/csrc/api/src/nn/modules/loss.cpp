@@ -32,5 +32,27 @@ Tensor HingeEmbeddingLossImpl::forward(
   return F::hinge_embedding_loss(input, target, options);
 }
 
+// ============================================================================
+
+MultiMarginLossImpl::MultiMarginLossImpl(
+    const MultiMarginLossOptions& options_)
+    : options(options_) {
+      reset();
+    }
+
+void MultiMarginLossImpl::reset() {
+  register_buffer("weight", options.weight().value());
+}
+
+void MultiMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::HingeEmbeddingLoss(margin=" << options.margin() << ")";
+}
+
+Tensor MultiMarginLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+  return F::multi_margin_loss(input, target, options);
+}
+
 } // namespace nn
 } // namespace torch

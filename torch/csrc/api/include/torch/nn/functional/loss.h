@@ -17,6 +17,20 @@ inline Tensor hinge_embedding_loss(
       options.reduction());
 }
 
+inline Tensor multi_margin_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const MultiMarginLossOptions& options = {}) {
+  return torch::multi_margin_loss(
+    input,
+    target,
+    options.p(),
+    options.margin(),
+    options.weight().value(),
+    options.reduction()
+  );
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
