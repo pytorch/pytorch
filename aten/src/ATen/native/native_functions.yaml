@@ -5870,14 +5870,14 @@
     CPU: adaptive_max_pool3d_backward_cpu
     CUDA: adaptive_max_pool3d_backward_cuda
 
-- func: avg_pool2d.out(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: avg_pool2d.out(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=True, bool count_include_pad=True, int? divisor_override=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
     CPU: avg_pool2d_out_cpu
     CUDA: avg_pool2d_out_cuda
     MkldnnCPU: mkldnn_avg_pool2d_out
 
-- func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
+- func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=True, bool count_include_pad=True, int? divisor_override=None) -> Tensor
   use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:

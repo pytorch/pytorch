@@ -1127,7 +1127,7 @@
 - name: adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)
   self: adaptive_max_pool3d_backward(grad, self, result1)
 
-- name: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
+- name: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=True, bool count_include_pad=True, int? divisor_override=None) -> Tensor
   self: avg_pool2d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
 
 - name: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
