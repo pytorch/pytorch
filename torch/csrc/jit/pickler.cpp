@@ -105,6 +105,12 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
+    if (memorized_class_types_ != nullptr) {
+      // Memorize every class type the Pickler encountered
+      // This is used to make sure we capture all the run-time types
+      // and serialize them properly for class/interface polymorphism
+      memorized_class_types_->emplace_back(type);
+    }
     pushGlobal(type->name()->prefix(), type->name()->name());
     push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
