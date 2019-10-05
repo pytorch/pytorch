@@ -669,7 +669,7 @@ def configure_extension_build():
     ################################################################################
 
     extensions = []
-    packages = find_packages(exclude=('tools', 'tools.*'))
+    packages = find_packages(exclude=('tools', 'tools.*'),include=('tools.amd_build.pyHIPIFY'))
     C = Extension("torch._C",
                   libraries=main_libraries,
                   sources=main_sources,
@@ -865,8 +865,7 @@ if __name__ == '__main__':
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake',
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
                 'share/cmake/Gloo/*.cmake',
-                'share/cmake/Torch/*.cmake',
-                'tools/amd_build/pyHIPIFY/*.py'
+                'share/cmake/Torch/*.cmake'
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',
