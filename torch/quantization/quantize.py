@@ -80,12 +80,10 @@ def add_observer_(module):
     has a valid qconfig attribute.
 
     Args:
-        module: input module with qconfig attributes for all the leaf modules
-        that we want to quantize
+        module: input module with qconfig attributes for all the leaf modules that we want to quantize
 
     Return:
-        None, module is modified inplace with added observer modules and
-            forward_hooks
+        None, module is modified inplace with added observer modules and forward_hooks
     """
     for child in module.children():
         if type(child) == nnq.FloatFunctional:
@@ -271,8 +269,8 @@ def convert(module, mapping=None, inplace=False):
     parameters) to a quantized module.
     Args:
         module: calibrated module with observers
-        mapping: a dictionary that maps from float module type to quantized
-           module type, can be overwrritten to allow swapping user defined Modules
+        mapping: a dictionary that maps from float module type to quantized module type, can be overwrritten 
+                 to allow swapping user defined Modules
         inplace: carry out model transformations in-place, the original module is mutated
     """
     if mapping is None:
