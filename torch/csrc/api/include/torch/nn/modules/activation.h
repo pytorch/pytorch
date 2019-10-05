@@ -3,6 +3,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/options/activation.h>
 #include <torch/nn/functional/activation.h>
+#include <torch/nn/modules/linear.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -132,10 +133,10 @@ class TORCH_API MultiheadAttentionImpl
       : MultiheadAttentionImpl(MultiheadAttentionOptions(embed_dim, num_heads)) {}
   explicit MultiheadAttentionImpl(const MultiheadAttentionOptions& options_);
 
-  Tensor forward(const std::map<int, int>& query, int key, int value,
+  Tensor forward(const Tensor& query, const Tensor& key, const Tensor& value,
                  const c10::optional<Tensor>& key_padding_mask = c10::nullopt,
                  bool need_weights = true,
-                 const c10::optional<int> attn_mask = c10::nullopt);
+                 const c10::optional<Tensor>& attn_mask = c10::nullopt);
 
   void reset() override;
 
@@ -151,6 +152,10 @@ class TORCH_API MultiheadAttentionImpl
   Tensor in_proj_bias;
   Tensor bias_k;
   Tensor bias_v;
+  Linear out_proj = nullptr;
+  Tensor q_proj_weight;
+  Tensor k_proj_weight;
+  Tensor v_proj_weight;
 };
 
 TORCH_MODULE(MultiheadAttention);

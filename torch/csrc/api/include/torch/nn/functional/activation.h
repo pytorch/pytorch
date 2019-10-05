@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/nn/options/activation.h>
+#include <torch/nn/options/linear.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -64,6 +65,9 @@ inline Tensor multi_head_attention_forward(
   const c10::optional<Tensor>& v_proj_weight = c10::nullopt,
   const c10::optional<Tensor>& static_k = c10::nullopt,
   const c10::optional<Tensor>& static_v = c10::nullopt) {
+
+  namespace F = torch::nn::functional;
+
   const bool qkv_same = torch::equal(query, key) && torch::equal(key, value);
   const bool kv_same = torch::equal(key, value);
 
@@ -79,19 +83,51 @@ inline Tensor multi_head_attention_forward(
   assert(head_dim * num_heads == embed_dim);  // "embed_dim must be divisible by num_heads"
   const auto scaling = 1.0 / std::sqrt(head_dim);
 
+  Tensor q, k, v;
   if (!use_separate_proj_weight) {
     if (qkv_same) {
       // self-attention
-      // q, k, v =
-      linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
+      const auto chunks = F::linear(query, in_proj_weight, in_proj_bias)
+                          .chunk(3, /*dim=*/-1);
+      q = chunks[0];
+      k = chunks[1];
+      v = chunks[2];
     } else if (kv_same) {
+      // encoder-decoder attention
+      // This is inline in_proj function with in_proj_weight and in_proj_bias
+      auto _b = in_proj_bias;
+      auto _start = 0;
+      auto _end = embed_dim;
+      auto _w = in_proj_weight.slice(/*dim=*/0, _start, _end);
+      if (_b.defined()) {
+        _b = _b.slice(/*dim=*/0, _start, _end);
+      }
+      q = F::linear(query, _w, _b);
 
+      if (!key.defined()) {
+        assert(!value.defined());
+        k = {};
+        v = {};
+      } else {
+        // This is inline in_proj function with in_proj_weight and in_proj_bias
+        _b = in_proj_bias;
+        _start = embed_dim;
+        // _end = None
+        _w = in_proj_weight.slice(/*dim=*/0, _start);
+        if (_b.defined()) {
+          _b = _b.slice(/*dim=*/0, _start);
+        }
+        const auto chunks = F::linear(key, _w, _b).chunk(2, /*dim=*/-1);
+        k = chunks[0];
+        v = chunks[1];
+      }
     } else {
 
     }
   } else {
 
   }
+  return {};
 }
 
 } // namespace functional
