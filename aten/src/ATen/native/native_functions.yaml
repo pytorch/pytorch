@@ -1975,12 +1975,14 @@
 
 - func: mul_relu.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
-  variants: function, method
+  variants: method
+  python_module: nn
   dispatch:
     QuantizedCPU: quantized_mul_relu
 
 
 - func: mul_relu.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
   dispatch:
     QuantizedCPU: quantized_mul_relu_out
 

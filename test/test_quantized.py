@@ -336,7 +336,7 @@ class TestQuantizedOps(TestCase):
         for b in B:
             C_ref = qA.dequantize().numpy() * b.item()
             C_ref[C_ref < 0] = 0
-            qC_hat = torch.mul_relu(qA, b.item())
+            qC_hat = torch._C._nn.mul_relu(qA, b.item())
 
             self.assertEqual(C_ref, qC_hat.dequantize())
 

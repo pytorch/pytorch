@@ -176,7 +176,7 @@ static auto registry =
                     TensorTypeId::QuantizedCPUTensorId));
 }  // namespace
 
-constexpr const char *kTensorTensorError = "torch.add is not supported when adding two"
+constexpr const char *kTensorTensorError = "torch.mul is not supported when multiplying two"
 " quantized tensors. Please use torch.nn.quantized.modules.FloatFunctional";
 
 // ATen bindings for mul
