@@ -8,20 +8,6 @@ namespace rpc {
 
 using namespace torch::distributed::autograd;
 
-namespace {
-
-Message createException(const Message& request, const std::exception& e) {
-  const char* err = e.what();
-  std::vector<char> payload(err, err + strlen(err));
-  return Message(
-      std::move(payload),
-      std::vector<torch::Tensor>(),
-      MessageType::EXCEPTION,
-      request.id());
-}
-
-} // anonymous namespace
-
 Message RequestCallback::operator()(Message& request) const {
   try {
     return processMessage(request);

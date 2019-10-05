@@ -40,6 +40,7 @@ enum MessageType {
   UNKNOWN = 18
 };
 
+
 // A message to be sent/received by an RpcAgent.
 //
 // A Message object contains 4 fields:
@@ -104,6 +105,9 @@ class TORCH_API Message final {
   MessageType type_ = MessageType::UNKNOWN;
   int64_t id_ = -1;
 };
+
+// create an exception given a message and exception.
+Message createException(const Message& request, const std::exception& e);
 
 } // namespace rpc
 } // namespace distributed
