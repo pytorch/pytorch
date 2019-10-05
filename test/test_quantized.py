@@ -157,7 +157,7 @@ class TestQuantizedOps(TestCase):
 
         C_hat = qA + b
         C_ref = torch.quantize_per_tensor(C, C_hat.q_scale(), C_hat.q_zero_point(), dtype)
-        C_relu_hat = torch.add_relu(qA, b)
+        C_relu_hat = torch._C._nn.add_relu(qA, b)
         C_relu_ref = torch.quantize_per_tensor(
             C_relu, C_relu_hat.q_scale(), C_relu_hat.q_zero_point(), dtype)
 
