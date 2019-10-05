@@ -343,6 +343,14 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
             auto fut = futures_[msgId];
             fut->markCompleted(exceptionMsg);
           }
+        } catch (...) {
+          if (work.message_.isRequest()) {
+            auto exceptionMsg = rpc::createException(
+                work.message_, "Unknown exception occurred.");
+            auto msgId = work.message_.id();
+            auto fut = futures_[msgId];
+            fut->markCompleted(exceptionMsg);
+          }
         }
       },
       std::move(work)));
