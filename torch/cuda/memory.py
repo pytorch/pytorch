@@ -6,6 +6,20 @@ import torch
 from . import is_initialized, _get_device_index
 
 
+def _host_allocator():
+    _lazy_init()
+    return torch._C._cuda_cudaHostAllocator()
+
+
+@contextlib.contextmanager
+def _free_mutex():
+    torch._C._cuda_lock_mutex()
+    try:
+        yield
+    finally:
+        torch._C._cuda_unlock_mutex()
+
+
 def empty_cache():
     r"""Releases all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other GPU application and visible in
@@ -250,19 +264,85 @@ def memory_snapshot():
     return torch._C._cuda_memorySnapshot()
 
 
-def memory_summary():
+def memory_summary(device=None, short=False):
+    device = _get_device_index(device, optional=True)
+    stats = memory_stats(device=device)
+
+    def _format_size(sz, pref_sz):
+        prefixes = ["B ", "KB", "MB", "GB", "TB", "PB"]
+        prefix = prefixes[0]
+        for new_prefix in prefixes[1:]:
+            if pref_sz < 768 * 1024:
+                break
+            prefix = new_prefix
+            sz //= 1024
+            pref_sz /= 1024
+        return "{:7d} {}".format(sz, prefix)
+
+    def _format_count(cnt, pref_cnt):
+        prefixes = [" ", "K", "M"]
+        prefix = prefixes[0]
+        for new_prefix in prefixes[1:]:
+            if pref_cnt < 750 * 1000:
+                break
+            prefix = new_prefix
+            cnt //= 1000
+            pref_cnt /= 1000
+        return "{:7d} {} ".format(cnt, prefix)
+
+    metrics_to_display = [
+        ("allocated_bytes", "Allocated memory", _format_size),
+        ("active_bytes", "Active memory", _format_size),
+        ("reserved_bytes", "GPU reserved memory", _format_size),
+        ("inactive_split_bytes", "Non-releasable memory", _format_size),
+        ("allocation", "Allocations", _format_count),
+        ("active", "Active allocs", _format_count),
+        ("segment", "GPU reserved segments", _format_count),
+        ("inactive_split", "Non-releasable allocs", _format_count),
+    ]
+
     lines = []
+    lines.append("=" * 75)
+    lines.append(" {_:17} Torch CUDA memory summary, device ID {device:<18d} ")
+    lines.append("-" * 75)
+    lines.append("  {_:9} CUDA OOMs: {num_ooms:<12d} | {_:6} cudaMalloc retries: {cuda_malloc_retries:<8d}  ")
+    lines.append("=" * 75)
+    lines.append("        Metric         | Cur Usage  | Peak Usage | Tot Alloc  | Tot Freed  ")
 
+    for metric_key, metric_name, formatter in metrics_to_display:
+        lines.append("-" * 75)
+        submetrics = [("all", metric_name)]
+        if not short:
+            submetrics.append(("large_pool", "      from large pool"))
+            submetrics.append(("small_pool", "      from small pool"))
 
-def _host_allocator():
-    _lazy_init()
-    return torch._C._cuda_cudaHostAllocator()
+        current_prefval, peak_prefval, allocated_prefval, freed_prefval = None, None, None, None
 
+        for submetric_key, submetric_name in submetrics:
+            prefix = metric_key + "." + submetric_key + "."
 
-@contextlib.contextmanager
-def _free_mutex():
-    torch._C._cuda_lock_mutex()
-    try:
-        yield
-    finally:
-        torch._C._cuda_unlock_mutex()
+            current = stats[prefix + "current"]
+            peak = stats[prefix + "peak"]
+            allocated = stats[prefix + "allocated"]
+            freed = stats[prefix + "freed"]
+
+            if current_prefval is None:
+                current_prefval = current
+                peak_prefval = peak
+                allocated_prefval = allocated
+                freed_prefval = freed
+
+            lines.append(" {:<21} | {} | {} | {} | {} ".format(
+                submetric_name,
+                formatter(current, current_prefval),
+                formatter(peak, peak_prefval),
+                formatter(allocated, allocated_prefval),
+                formatter(freed, freed_prefval)),
+            )
+
+    lines.append("=" * 75)
+
+    fmt_dict = {"_": "", "device": device}
+    for k, v in stats.items():
+        fmt_dict[k.replace(".", "-")] = v
+    return "|" + "|\n|".join(lines).format(**fmt_dict) + "|\n"
