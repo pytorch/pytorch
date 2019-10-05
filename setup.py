@@ -669,7 +669,7 @@ def configure_extension_build():
     ################################################################################
 
     extensions = []
-    packages = find_packages(exclude=('tools', 'tools.*'),include=('tools.amd_build.pyHIPIFY'))
+    packages = find_packages(exclude=('tools', 'tools.*'))
     C = Extension("torch._C",
                   libraries=main_libraries,
                   sources=main_sources,
@@ -705,6 +705,7 @@ def configure_extension_build():
                 name=str('caffe2.python.caffe2_pybind11_state_hip'),
                 sources=[]),
         )
+        packages.append('tools.amd_build.pyHIPIFY')
 
     cmdclass = {
         'build_ext': build_ext,
