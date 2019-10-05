@@ -170,7 +170,7 @@ TEST_F(FunctionalTest, MultiMarginLoss) {
   auto expected = torch::tensor({0.3056}, torch::kFloat);
 
 
-  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
 TEST_F(FunctionalTest, MaxUnpool1d) {

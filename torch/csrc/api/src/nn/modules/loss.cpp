@@ -45,7 +45,10 @@ void MultiMarginLossImpl::reset() {
 }
 
 void MultiMarginLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::HingeEmbeddingLoss(margin=" << options.margin() << ")";
+  stream << "torch::nn::MultiMarginLoss(p=" << options.p() << 
+            ", margin=" << options.margin() <<
+            ", weight=" << options.weight().value() <<
+            ", reduction=" << options.reduction() << ")";
 }
 
 Tensor MultiMarginLossImpl::forward(
