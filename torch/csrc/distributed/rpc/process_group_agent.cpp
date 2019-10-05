@@ -343,15 +343,13 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         } catch (std::exception& e) {
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(work.message_, e);
-            markFutureWithException(
-                work.message_.id(), std::move(exceptionMsg));
+            markFutureWithException(work.message_.id(), exceptionMsg);
           }
         } catch (...) {
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(
                 work.message_, "Unknown exception occured.");
-            markFutureWithException(
-                work.message_.id(), std::move(exceptionMsg));
+            markFutureWithException(work.message_.id(), exceptionMsg);
           }
         }
       },
