@@ -40,7 +40,6 @@ enum MessageType {
   UNKNOWN = 18
 };
 
-
 // A message to be sent/received by an RpcAgent.
 //
 // A Message object contains 4 fields:
