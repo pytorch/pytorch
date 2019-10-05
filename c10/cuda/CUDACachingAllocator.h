@@ -77,7 +77,7 @@ struct DeviceStats {
   StatArray inactive_split_bytes;
 
   // COUNT: total number of failed calls to CUDA malloc necessitating cache flushes.
-  int64_t cuda_malloc_retries = 0;
+  int64_t num_alloc_retries = 0;
 
   // COUNT: total number of OOMs (i.e. failed calls to CUDA after cache flush)
   int64_t num_ooms = 0;

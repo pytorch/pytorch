@@ -79,7 +79,7 @@ def reset_accumulated_memory_stats(device=None):
 
     See :func:`~torch.cuda.memory_stats` for details. Accumulated stats correspond to
     the `"allocated"` and `"freed"` keys in each individual stat dict, as well as
-    `"cuda_malloc_retries"` and `"num_ooms"`.
+    `"num_alloc_retries"` and `"num_ooms"`.
 
     Arguments:
         device (torch.device or int, optional): selected device. Returns

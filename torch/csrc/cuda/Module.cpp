@@ -276,7 +276,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   const DeviceStats stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device);
   PyObject* const result = THPUtils_newDict();
 
-  THPUtils_setDictStrInt64(result, "cuda_malloc_retries", stats.cuda_malloc_retries);
+  THPUtils_setDictStrInt64(result, "num_alloc_retries", stats.num_alloc_retries);
   THPUtils_setDictStrInt64(result, "num_ooms", stats.num_ooms);
 
   setDictStatArray(result, "allocation", stats.allocation);

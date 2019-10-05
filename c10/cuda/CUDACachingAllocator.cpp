@@ -438,7 +438,7 @@ class THCCachingAllocator {
       reset_accumulated_stat(stats.inactive_split_bytes[statType]);
     }
 
-    stats.cuda_malloc_retries = 0;
+    stats.num_alloc_retries = 0;
     stats.num_ooms = 0;
   }
 
@@ -649,7 +649,7 @@ class THCCachingAllocator {
 
     if (err != cudaSuccess) {
       DeviceStats& stats = get_stats_for_device(device);
-      stats.cuda_malloc_retries += 1;
+      stats.num_alloc_retries += 1;
       cudaGetLastError();  // reset the last CUDA error
       free_cached_blocks(device);
       err = cudaMalloc(devPtr, size);
