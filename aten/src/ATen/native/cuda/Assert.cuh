@@ -10,6 +10,8 @@ namespace assert {
 
 using namespace c10::cuda;
 
+#ifdef ENABLE_C10_KERNEL_ASSERT_STRING_SUPPORT
+
 static inline C10_HOST_DEVICE char* write_string(
     char* dst,
     const char* src,
@@ -58,15 +60,18 @@ inline C10_HOST_DEVICE char* copy_string(
   return nullptr; // insufficient buffer
 }
 
-static inline C10_HOST_DEVICE char* copy_args(char* dst, char* const end) {
-  return dst;
-}
 
 inline C10_HOST_DEVICE char* copy_args(
     char* dst,
     char* const end,
     const char* arg) {
   return copy_string(dst, end, arg);
+}
+
+#endif
+
+static inline C10_HOST_DEVICE char* copy_args(char* dst, char* const end) {
+  return dst;
 }
 
 template <typename T>
@@ -99,15 +104,18 @@ C10_HOST_DEVICE char* copy_args(
 template <typename... Args>
 C10_HOST_DEVICE __noinline__ void assert_fail(
     CUDAAssert* assert_state,
-    int32_t error_code,
+    AssertError error_code,
     bool persistent,
+    AssertSource file,
     uint32_t line,
-    AssertKind kind,
+    AssertFormat format,
     Args... args) {
-  assert(error_code != 0);
+  assert(error_code != AssertError::OK);
 #ifdef __CUDA_ARCH__
-  if (atomicCAS(const_cast<int32_t*>(&assert_state->error), 0, error_code) !=
-      0) {
+  if (atomicCAS(
+          const_cast<int32_t*>(&assert_state->error),
+          0,
+          static_cast<int32_t>(error_code)) != 0) {
     return;
   }
 #else
@@ -117,23 +125,24 @@ C10_HOST_DEVICE __noinline__ void assert_fail(
   char* buffer = assert_state->buffer;
   char* dst = buffer;
   char* const end = dst + sizeof(assert_state->buffer);
-
   dst = copy_args(dst, end, line, args...);
 
-  assert_state->kind = kind;
-  assert_state->line = line;
-  assert_state->length = dst ? dst - buffer : 0;
   assert_state->persistent = persistent;
+  assert_state->file = file;
+  assert_state->line = line;
+  assert_state->format = format;
+  assert_state->length = dst ? dst - buffer : 0;
 }
 
 // handle case without format string, e.g. C10_KERNEL_ASSERT(false)
 static inline C10_HOST_DEVICE void assert_fail(
     CUDAAssert* assert_state,
-    int32_t error_code,
+    AssertError error_code,
     bool persistent,
+    AssertSource file,
     uint32_t line,
-    AssertKind kind) {
-  assert_fail(assert_state, error_code, persistent, line, kind, 0);
+    AssertFormat format) {
+  assert_fail(assert_state, error_code, persistent, file, line, format, 0);
 }
 
 static inline CUDAAssert* prepare_kernel_assert() {
@@ -148,56 +157,74 @@ static inline CUDAAssert* prepare_kernel_assert() {
 #define C10_PREPARE_KERNEL_ASSERT \
   auto __c10_assert_state = at::native::assert::prepare_kernel_assert();
 
-#define C10_KERNEL_ASSERT(code, exp, ...)  \
-  do {                                     \
-    if (!(exp)) {                          \
-      at::native::assert::assert_fail(     \
-          __c10_assert_state,              \
-          static_cast<int32_t>(code),      \
-          true, /*persistent*/             \
-          static_cast<uint32_t>(__LINE__), \
-          ##__VA_ARGS__);                  \
-      assert(exp);                         \
-      assert(false);                       \
-    }                                      \
+#define C10_KERNEL_ASSERT(exp, format, ...) \
+  do {                                      \
+    if (!(exp)) {                           \
+      at::native::assert::assert_fail(      \
+          __c10_assert_state,               \
+          c10::cuda::AssertError::Error,    \
+          true, /*persistent*/              \
+          __c10_assert_source,              \
+          static_cast<uint32_t>(__LINE__),  \
+          format,                           \
+          ##__VA_ARGS__);                   \
+      assert(exp);                          \
+      assert(false);                        \
+    }                                       \
   } while (false)
 
-#define C10_KERNEL_ASSERT_RETURN_TYPE_(rval, code, exp, type, ...) \
-  if (!(exp)) {                                                    \
-    at::native::assert::assert_fail(                               \
-        __c10_assert_state,                                        \
-        static_cast<int32_t>(code),                                \
-        false, /*persistent*/                                      \
-        static_cast<uint32_t>(__LINE__),                           \
-        type,                                                      \
-        ##__VA_ARGS__);                                            \
-    return rval;                                                   \
+#define C10_KERNEL_ASSERT_RETURN_TYPE_(rval, exp, error, format, ...) \
+  if (!(exp)) {                                                       \
+    at::native::assert::assert_fail(                                  \
+        __c10_assert_state,                                           \
+        error,                                                        \
+        false, /*persistent*/                                         \
+        __c10_assert_source,                                          \
+        static_cast<uint32_t>(__LINE__),                              \
+        format,                                                       \
+        ##__VA_ARGS__);                                               \
+    return rval;                                                      \
   }
 
-#define C10_KERNEL_ASSERT_RETURN_(rval, code, exp, ...) \
-  C10_KERNEL_ASSERT_RETURN_TYPE_(                       \
-      rval, code, exp, c10::cuda::AssertKind::DEFAULT, ##__VA_ARGS__)
+#define C10_KERNEL_ASSERT_RETURN_FORMAT_(rval, exp, format, ...) \
+  C10_KERNEL_ASSERT_RETURN_TYPE_(                                \
+      rval, exp, c10::cuda::AssertError::Error, format, ##__VA_ARGS__)
 
-#define C10_KERNEL_ASSERT_RETURN(code, exp, ...) \
-  C10_KERNEL_ASSERT_RETURN_(, code, exp, ##__VA_ARGS__)
+#define C10_KERNEL_ASSERT_RETURN_(rval, exp, ...) \
+  C10_KERNEL_ASSERT_RETURN_FORMAT_(               \
+      rval, exp, c10::cuda::AssertFormat::Default, ##__VA_ARGS__)
 
-#define C10_KERNEL_ASSERT_RETURN_0(code, exp, ...) \
-  C10_KERNEL_ASSERT_RETURN_(0, code, exp, ##__VA_ARGS__)
+#define C10_KERNEL_ASSERT_RETURN(exp, ...) \
+  C10_KERNEL_ASSERT_RETURN_(, exp, ##__VA_ARGS__)
 
-#define C10_KERNEL_ASSERT_SOFT_TYPE(code, exp, type, ...) \
-  (exp) ? ((void)0)                                       \
-        : at::native::assert::assert_fail(                \
-              __c10_assert_state,                         \
-              static_cast<int32_t>(code),                 \
-              false, /*persistent*/                       \
-              static_cast<uint32_t>(__LINE__),            \
-              type,                                       \
+
+#define C10_KERNEL_ASSERT_SOFT_TYPE(error, exp, format, ...) \
+  (exp) ? ((void)0)                                          \
+        : at::native::assert::assert_fail(                   \
+              __c10_assert_state,                            \
+              error,                                         \
+              false, /*persistent*/                          \
+              __c10_assert_source,                           \
+              static_cast<uint32_t>(__LINE__),               \
+              format,                                        \
               ##__VA_ARGS__)
 
-#define C10_KERNEL_ASSERT_SOFT(code, exp, ...) \
-  C10_KERNEL_ASSERT_SOFT_TYPE(                 \
-      code, exp, c10::cuda::AssertKind::DEFAULT, ##__VA_ARGS__)
+#define C10_KERNEL_ASSERT_SOFT_FORMAT(exp, format, ...) \
+  C10_KERNEL_ASSERT_SOFT_TYPE(                          \
+      c10::cuda::AssertError::Error, exp, format, ##__VA_ARGS__)
 
-#define C10_KERNEL_INDEX_ERROR_SOFT(code, index, axis, size) \
-  C10_KERNEL_ASSERT_SOFT_TYPE(                               \
-      code, false, c10::cuda::AssertKind::INDEX_ERROR, index, axis, size)
+#define C10_KERNEL_ASSERT_SOFT(exp, ...) \
+  C10_KERNEL_ASSERT_SOFT_TYPE(           \
+      c10::cuda::AssertError::Error,     \
+      exp,                               \
+      c10::cuda::AssertFormat::Default,  \
+      ##__VA_ARGS__)
+
+#define C10_KERNEL_INDEX_ERROR_SOFT(index, axis, size) \
+  C10_KERNEL_ASSERT_SOFT_TYPE(                         \
+      c10::cuda::AssertError::IndexError,              \
+      false,                                           \
+      c10::cuda::AssertFormat::IndexOutOfBounds,       \
+      index,                                           \
+      axis,                                            \
+      size)

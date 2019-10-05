@@ -44,7 +44,7 @@
 
 namespace {
 
-using ATag = c10::cuda::AssertTag::Distributions;
+#define __c10_assert_source c10::cuda::AssertSource::Distributions
 
 // launch bounds used for kernels utilizing TensorIterator
 const uint32_t block_size_bound = 256;
@@ -292,22 +292,22 @@ void bernoulli_tensor_cuda_kernel(
         float4 rand = curand_uniform4(&state);
         switch (n) {
           case 4: {
-            C10_KERNEL_ASSERT_RETURN(ATag::_000, 0 <= p4 && p4 <= 1);
+            C10_KERNEL_ASSERT_RETURN(0 <= p4 && p4 <= 1);
             v4 = static_cast<scalar_t>(rand.w <= p4);
             // fallthrough
           }
           case 3: {
-            C10_KERNEL_ASSERT_RETURN(ATag::_001, 0 <= p3 && p3 <= 1);
+            C10_KERNEL_ASSERT_RETURN(0 <= p3 && p3 <= 1);
             v3 = static_cast<scalar_t>(rand.z <= p3);
             // fallthrough
           }
           case 2: {
-            C10_KERNEL_ASSERT_RETURN(ATag::_002, 0 <= p2 && p2 <= 1);
+            C10_KERNEL_ASSERT_RETURN(0 <= p2 && p2 <= 1);
             v2 = static_cast<scalar_t>(rand.y <= p2);
             // fallthrough
           }
           case 1: {
-            C10_KERNEL_ASSERT_RETURN(ATag::_003, 0 <= p1 && p1 <= 1);
+            C10_KERNEL_ASSERT_RETURN(0 <= p1 && p1 <= 1);
             v1 = static_cast<scalar_t>(rand.x <= p1);
           }
         }

@@ -12,7 +12,7 @@
 #include <assert.h>
 
 using c10::cuda::CUDAAssert;
-using ATag = c10::cuda::AssertTag::ClassNLLCriterion;
+#define __c10_assert_source c10::cuda::AssertSource::ClassNLLCriterion
 
 static const int NTHREADS = 32;
 
@@ -33,7 +33,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel1(Dtype *output,
 
   int t = (int) *target;
   if (t != (int) ignore_index) {
-    C10_KERNEL_ASSERT_RETURN(ATag::_000, t >= 0 && t < n_classes);
+    C10_KERNEL_ASSERT_RETURN(t >= 0 && t < n_classes);
     Dtype cur_weight = weights ? weights[t] : ScalarConvert<int, Dtype>::to(1);
     *output = -cur_weight * input[t];
     *total_weight = cur_weight;
@@ -60,7 +60,7 @@ __global__ void ClassNLLCriterion_updateOutput_no_reduce_kernel(
       output[index] = ScalarConvert<int, Dtype>::to(0);
       continue;
     }
-    C10_KERNEL_ASSERT_RETURN(ATag::_001, cur_target >= 0 && cur_target  < n_classes);
+    C10_KERNEL_ASSERT_RETURN(cur_target >= 0 && cur_target  < n_classes);
     Dtype weight =
        weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1);
     output[index] = -weight * input[index][cur_target];
@@ -83,7 +83,7 @@ __global__ void ClassNLLCriterion_updateGradInput_no_reduce_kernel(
     if (cur_target == ignore_index) {
       continue;
     }
-    C10_KERNEL_ASSERT_RETURN(ATag::_002, cur_target  >= 0 && cur_target  < n_classes);
+    C10_KERNEL_ASSERT_RETURN(cur_target  >= 0 && cur_target  < n_classes);
     Dtype weight =
        weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1);
     gradInput[index][cur_target] = -weight * gradOutput[index];
@@ -116,7 +116,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(Dtype *output,
         shInputs[threadIdx.x] -= input[i * ndim + t] * cur_weight;
         acc_weight[threadIdx.x] += cur_weight;
         } else {
-          C10_KERNEL_ASSERT_SOFT(ATag::_003, t >= 0 && t < n_classes);
+          C10_KERNEL_ASSERT_SOFT(t >= 0 && t < n_classes);
         }
       }
   }
@@ -165,7 +165,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel1(
   Dtype norm = size_average ? (ScalarConvert<int, Dtype>::to(1) / *total_weight) : ScalarConvert<int, Dtype>::to(1);
   int t = (int)*target;
   if (t != (int) ignore_index) {
-    C10_KERNEL_ASSERT_RETURN(ATag::_004, t >= 0 && t < n_classes);
+    C10_KERNEL_ASSERT_RETURN(t >= 0 && t < n_classes);
     gradInput[t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm * gradOutput[0];
   }
 }
@@ -193,7 +193,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
   for (i = threadIdx.x; i < nframe; i += NTHREADS) {
     t = (int)target[i];
     if (t != (int) ignore_index) {
-      C10_KERNEL_ASSERT_RETURN(ATag::_005, t >= 0 && t < n_classes);
+      C10_KERNEL_ASSERT_RETURN(t >= 0 && t < n_classes);
       gradInput[i * ndim + t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm * gradOutput[0];
     }
   }

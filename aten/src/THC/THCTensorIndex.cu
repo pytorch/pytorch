@@ -19,7 +19,7 @@
 #include <algorithm> // for std::min
 
 using c10::cuda::CUDAAssert;
-using ATag = c10::cuda::AssertTag::THCTensorIndex;
+#define __c10_assert_source c10::cuda::AssertSource::THCTensorIndex
 
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
@@ -45,7 +45,7 @@ __global__ void indexCopySmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    C10_KERNEL_ASSERT_RETURN(ATag::_000, dstIndex < dstCopyDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex < dstCopyDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -101,7 +101,7 @@ __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    C10_KERNEL_ASSERT_RETURN(ATag::_001, dstIndex < dstCopyDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex < dstCopyDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -139,7 +139,7 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    C10_KERNEL_ASSERT_RETURN(ATag::_002, dstIndex < dstAddDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex < dstAddDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -194,7 +194,7 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
-    C10_KERNEL_ASSERT_RETURN(ATag::_003, dstIndex < dstAddDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex < dstAddDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -231,7 +231,7 @@ __global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex_ =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    C10_KERNEL_ASSERT_RETURN(ATag::_004, dstIndex_ < dstFillDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex_ < dstFillDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -281,7 +281,7 @@ __global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType dstIndex_ =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    C10_KERNEL_ASSERT_RETURN(ATag::_005, dstIndex_ < dstFillDimSize);
+    C10_KERNEL_ASSERT_RETURN(dstIndex_ < dstFillDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
@@ -315,7 +315,7 @@ __global__ void indexSelectSmallIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType srcIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    C10_KERNEL_ASSERT_RETURN(ATag::_006, srcIndex < srcSelectDimSize);
+    C10_KERNEL_ASSERT_RETURN(srcIndex < srcSelectDimSize);
 
     // We stride over the output ignoring the indexed dimension
     // (innerSize), whose offset calculation is handled differently
@@ -370,7 +370,7 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
     // Lua indices begin at 1
     IndexType srcIndex =
       indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(dstIndex, indices)];
-    C10_KERNEL_ASSERT_RETURN(ATag::_007, srcIndex < srcSelectDimSize);
+    C10_KERNEL_ASSERT_RETURN(srcIndex < srcSelectDimSize);
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);

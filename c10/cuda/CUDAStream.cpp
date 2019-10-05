@@ -314,12 +314,6 @@ void checkStreamAssertState(const LeakyStreamInternals* ptr) {
   auto assert_state =
       ptr->assert_state.load(std::memory_order::memory_order_relaxed);
   checkAssertError(assert_state);
-
-  if (ptr != &default_streams[ptr->device_index]) {
-    // also check default stream of device
-    auto default_stream_assert_state = default_streams[ptr->device_index].assert_state.load();
-    checkAssertError(default_stream_assert_state);
-  }
 }
 
 CUDAStream CUDAStream_fromInternals(const LeakyStreamInternals* ptr) {
@@ -424,23 +418,6 @@ void setCurrentCUDAStream(CUDAStream stream) {
   AT_ASSERT(ptr);
   current_streams[ptr->device_index] = ptr;
 }
-
-/*
-void checkCUDAStreamsAssertState() {
-  // check assert state of all streams
-  for (size_t i = 0; i < num_gpus; ++i) {
-    checkStreamAssertState(&default_streams[i]);
-
-    for (auto&& s : low_priority_streams) {
-      checkStreamAssertState(&s[i]);
-    }
-
-    for (auto&& s : high_priority_streams) {
-      checkStreamAssertState(&s[i]);
-    }
-  }
-}
-*/
 
 std::ostream& operator<<(std::ostream& stream, const CUDAStream& s) {
   return stream << s.unwrap();

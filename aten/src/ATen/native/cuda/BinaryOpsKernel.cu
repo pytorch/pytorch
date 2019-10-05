@@ -14,8 +14,7 @@
 namespace at { namespace native {
 
 using c10::cuda::CUDAAssert;
-using c10::cuda::AssertKind;
-using ATag = c10::cuda::AssertTag::BinaryOpsKernel;
+#define __c10_assert_source c10::cuda::AssertSource::BinaryOpsKernel
 
 void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "add_cuda/sub_cuda", [&]() {
@@ -53,7 +52,7 @@ void div_kernel_cuda(TensorIterator& iter) {
     C10_PREPARE_KERNEL_ASSERT;
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "div_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [=]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-        C10_KERNEL_ASSERT_RETURN_TYPE_(0, ATag::_000, b != 0, c10::cuda::AssertKind::ZERO_DIVISION);
+        C10_KERNEL_ASSERT_RETURN_FORMAT_(0, b != 0, c10::cuda::AssertFormat::ZeroDivisionError);
         return a / b;
       });
     });

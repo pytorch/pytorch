@@ -21,7 +21,8 @@ namespace at { namespace native {
 namespace {
 
 using c10::cuda::CUDAAssert;
-using ATag = c10::cuda::AssertTag::MultinomialKernel;
+using c10::cuda::AssertFormat;
+#define __c10_assert_source c10::cuda::AssertSource::MultinomialKernel
 
 #define MAX_NUM_BLOCKS 200
 
@@ -42,7 +43,6 @@ __global__ void renormRowsL1(
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
       C10_KERNEL_ASSERT_SOFT(
-        ATag::_000,
         !THCNumerics<scalar_t>::lt(val, zero)); // ! < 0 for NaN handling
       sum = sum + val;
     }
@@ -50,7 +50,6 @@ __global__ void renormRowsL1(
     sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<scalar_t>(), zero);
     if (threadIdx.x == 0) {
       C10_KERNEL_ASSERT_SOFT(
-        ATag::_001,
         !THCNumerics<scalar_t>::lt(sum, zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
@@ -98,9 +97,7 @@ __device__ int binarySearchForMultinomial(scalar_t* cumdist,
   int end = size;
 
   // cumdist[size - 1] = 0 => all zero prob dist
-  C10_KERNEL_ASSERT_RETURN_0(
-    ATag::_003,
-    cumdist[size - 1] > static_cast<scalar_t>(0));
+  C10_KERNEL_ASSERT_RETURN_(0,  cumdist[size - 1] > static_cast<scalar_t>(0));
 
   while (end - start > 0) {
     int mid = start + (end - start) / 2;
@@ -261,9 +258,9 @@ sampleMultinomialOnce(int64_t* dest,
     scalar_t val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
-      C10_KERNEL_ASSERT_SOFT(ATag::_004, val >= zero); // "invalid multinomial distribution (encountering probability entry < 0)"
-      C10_KERNEL_ASSERT_SOFT(ATag::_005, !THCNumerics<scalar_t>::isinf(val)); // "invalid multinomial distribution (encountering probability entry = infinity)");
-      C10_KERNEL_ASSERT_SOFT(ATag::_006, !THCNumerics<scalar_t>::isnan(val)); // "invalid multinomial distribution (encountering probability entry = NaN)"
+      C10_KERNEL_ASSERT_SOFT_FORMAT(val >= zero, AssertFormat::MultinomialProbLessZero);
+      C10_KERNEL_ASSERT_SOFT_FORMAT(!THCNumerics<scalar_t>::isinf(val), AssertFormat::MultinomialProbInf);
+      C10_KERNEL_ASSERT_SOFT_FORMAT(!THCNumerics<scalar_t>::isnan(val), AssertFormat::MultinomialProbNaN);
       sum = sum + static_cast<accscalar_t>(val);
     }
 
@@ -273,8 +270,8 @@ sampleMultinomialOnce(int64_t* dest,
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      C10_KERNEL_ASSERT_SOFT(ATag::_007, !THCNumerics<accscalar_t>::isinf(sum));
-      C10_KERNEL_ASSERT_SOFT(ATag::_008, sum > accZero);
+      C10_KERNEL_ASSERT_SOFT(!THCNumerics<accscalar_t>::isinf(sum));
+      C10_KERNEL_ASSERT_SOFT(sum > accZero);
 
       asmem[0] = sum;
       smem[0] = sampled[curDist];
