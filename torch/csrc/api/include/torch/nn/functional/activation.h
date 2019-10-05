@@ -40,6 +40,10 @@ inline Tensor logsigmoid(const Tensor& input) {
   return torch::log_sigmoid(input);
 }
 
+inline Tensor prelu(const Tensor& input, const Tensor& weight) {
+  return torch::prelu(input, weight);
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

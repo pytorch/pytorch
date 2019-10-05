@@ -361,6 +361,14 @@ TEST_F(FunctionalTest, LogSigmoid) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
 
+TEST_F(FunctionalTest, PReLU) {
+  const auto x = torch::rand({42, 24}) * 200 - 100;
+  const auto w = torch::rand(24) * 200 - 100;
+  const auto y = F::prelu(x, w);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({42, 24}));
+  const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
+}
+
 TEST_F(FunctionalTest, Linear) {
   const auto x = torch::arange(100, 118).resize_({3, 3, 2});
   const auto w = torch::arange(200, 206).resize_({3, 2});
