@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Registry.h>
 
+#include <array>
 #include <mutex>
 
 namespace c10 {
@@ -39,24 +40,46 @@ namespace cuda {
 
 namespace CUDACachingAllocator {
 
+struct Stat {
+  int64_t current = 0;
+  int64_t peak = 0;
+  int64_t allocated = 0;
+  int64_t freed = 0;
+};
+
+enum struct StatType : uint64_t {
+  AGGREGATE = 0,
+  SMALL_POOL = 1,
+  LARGE_POOL = 2,
+  NUM_TYPES = 3  // remember to update this whenever a new stat type is added
+};
+
+typedef std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)> StatArray;
+
 struct DeviceStats {
-  uint64_t   total_num_alloc_requests;    // total number of allocation requests received by
-  uint64_t   total_num_free_requests;     // total number of free requests received by the allocator
+  // COUNT: allocations requested by client code
+  StatArray allocation;
+  // COUNT: number of allocated segments from cudaMalloc().
+  StatArray segment;
+  // COUNT: number of active memory blocks (allocated or used by stream)
+  StatArray active;
+  // COUNT: number of inactive, split memory blocks (unallocated but can't be released via cudaFree)
+  StatArray split;
 
-  uint64_t   total_num_blocks_allocated;  // total number of memory blocks ever created
-                                          // (including splits)
-  uint64_t   total_num_blocks_released;   // total number of memory blocks ever released
-  uint64_t   total_num_blocks_split;      // total number of memory blocks ever split into two
+  // SUM: bytes requested by client code
+  StatArray allocated_bytes;
+  // SUM: bytes reserved by this memory allocator (both free and used)
+  StatArray reserved_bytes;
+  // SUM: bytes within active memory blocks
+  StatArray active_bytes;
+  // SUM: bytes within inactive, split memory blocks
+  StatArray split_bytes;
 
-  uint64_t   total_num_cuda_mallocs;      // total number of calls to CUDA malloc
-  uint64_t   total_num_cuda_frees;        // total number of calls to CUDA free
-  uint64_t   total_num_cache_flushes;     // total number of cache flushes
-                                          //   (i.e. failed calls to CUDA malloc)
+  // COUNT: total number of failed calls to CUDA malloc necessitating cache flushes.
+  int64_t cuda_malloc_retries = 0;
 
-  uint64_t   amount_allocated;            // total amount allocated in bytes
-  uint64_t   max_amount_allocated;        // max total amount allocated in bytes
-  uint64_t   amount_cached;               // total amount in cache in bytes
-  uint64_t   max_amount_cached;           // max total amount in cache in bytes
+  // COUNT: total number of OOMs (i.e. failed calls to CUDA after cache flush)
+  int64_t num_ooms = 0;
 };
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);
@@ -68,9 +91,8 @@ C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBl
 C10_CUDA_API void* getBaseAllocation(void *ptr, size_t *size);
 C10_CUDA_API void recordStream(void *ptr, CUDAStream stream);
 C10_CUDA_API DeviceStats getDeviceStats(int device);
-C10_CUDA_API void resetEventCounts(int device);
-C10_CUDA_API void resetMaxMemoryAllocated(int device);
-C10_CUDA_API void resetMaxMemoryCached(int device);
+C10_CUDA_API void resetAccumulatedStats(int device);
+C10_CUDA_API void resetPeakStats(int device);
 
 C10_CUDA_API std::mutex* getFreeMutex();
 
