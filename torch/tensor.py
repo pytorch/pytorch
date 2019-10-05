@@ -14,7 +14,15 @@ import functools
 
 
 def _wrap_type_error_to_not_implemented(f):
-    @functools.wraps(f)
+    from torch import _six
+    import inspect
+
+    # functools.wraps doesn't work well with methods in python 2
+    method_assignments = ('__name__', '__doc__')
+    assigned = (method_assignments if _six.PY2 and inspect.ismethoddescriptor(f)
+                else functools.WRAPPER_ASSIGNMENTS)
+
+    @functools.wraps(f, assigned=assigned)
     def wrapped(*args, **kwargs):
         try:
             return f(*args, **kwargs)
