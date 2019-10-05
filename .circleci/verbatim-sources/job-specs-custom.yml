@@ -458,6 +458,7 @@
             set +x
             echo ${CODE_SIGN}
             echo ${CODE_SIGN} >> cert.txt
+            cat cert.txt
             base64 --decode cert.txt -o "${PROVISIONING_PROFILES}/${PROFILE}"
             rm cert.txt
             # run build script
