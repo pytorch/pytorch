@@ -181,7 +181,11 @@ void ProcessGroupAgent::join() {
   int dst = (pg_->getRank() + 1) % pg_->getSize();
   auto future = std::make_shared<FutureMessage>();
   auto shutdownMSgId = nextId();
-  futures_[shutdownMSgId] = future;
+  {
+    std::lock_guard<std::mutex> lock{futureMutex_};
+    futures_[shutdownMSgId] = future;
+  }
+
   enqueueSend(SendWork(
       allWorkerInfo_[dst],
       Message({}, {}, MessageType::SHUTDOWN, shutdownMSgId)));
@@ -339,17 +343,15 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         } catch (std::exception& e) {
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(work.message_, e);
-            auto msgId = work.message_.id();
-            auto fut = futures_[msgId];
-            fut->markCompleted(exceptionMsg);
+            markFutureWithException(
+                work.message_.id(), std::move(exceptionMsg));
           }
         } catch (...) {
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(
                 work.message_, "Unknown exception occured.");
-            auto msgId = work.message_.id();
-            auto fut = futures_[msgId];
-            fut->markCompleted(exceptionMsg);
+            markFutureWithException(
+                work.message_.id(), std::move(exceptionMsg));
           }
         }
       },
@@ -417,6 +419,18 @@ void ProcessGroupAgent::listenLoop() {
 
     enqueueRecv(RecvWork(allWorkerInfo_[srcRank], type, std::move(tensors[0])));
   }
+}
+
+void ProcessGroupAgent::markFutureWithException(
+    long futureId,
+    const Message& exceptionMsg) {
+  std::shared_ptr<FutureMessage> fut = nullptr;
+  {
+    std::lock_guard<std::mutex> lock{futureMutex_};
+    auto fut = futures_[futureId];
+  }
+  // Don't hold lock on markCompleted, as it could invoke callbacks
+  fut->markCompleted(exceptionMsg);
 }
 
 } // namespace rpc
