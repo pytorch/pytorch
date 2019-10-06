@@ -13,7 +13,7 @@ import java.util.Map;
  * {@code IValue.tupleFrom(value1, value2, ...)}, {@code IValue.listFrom(value1, value2, ...)},
  * or one of the {@code dict} methods, depending on the key type.
  * <p>
- * Data is retrieved from {@code IValue objects} with the {@code toX()} methods.  Note that
+ * Data is retrieved from {@code IValue} objects with the {@code toX()} methods.  Note that
  * {@code str}-type IValues must be extracted with {@link #toStr()},
  * rather than {@link #toString()}.
  * <p>
