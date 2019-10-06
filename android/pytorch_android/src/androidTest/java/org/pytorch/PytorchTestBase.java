@@ -24,7 +24,7 @@ public abstract class PytorchTestBase {
   public void testForwardNull() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue input =
-        IValue.tensor(Tensor.newInt8Tensor(new long[] {1}, Tensor.allocateByteBuffer(1)));
+        IValue.from(Tensor.fromBlob(new long[] {1}, Tensor.allocateByteBuffer(1)));
     assertTrue(input.isTensor());
     final IValue output = module.forward(input);
     assertTrue(output.isNull());
@@ -34,12 +34,12 @@ public abstract class PytorchTestBase {
   public void testEqBool() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     for (boolean value : new boolean[] {false, true}) {
-      final IValue input = IValue.bool(value);
+      final IValue input = IValue.from(value);
       assertTrue(input.isBool());
-      assertTrue(value == input.getBool());
+      assertTrue(value == input.toBool());
       final IValue output = module.runMethod("eqBool", input);
       assertTrue(output.isBool());
-      assertTrue(value == output.getBool());
+      assertTrue(value == output.toBool());
     }
   }
 
@@ -47,12 +47,12 @@ public abstract class PytorchTestBase {
   public void testEqInt() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     for (long value : new long[] {Long.MIN_VALUE, -1024, -1, 0, 1, 1024, Long.MAX_VALUE}) {
-      final IValue input = IValue.long64(value);
+      final IValue input = IValue.from(value);
       assertTrue(input.isLong());
-      assertTrue(value == input.getLong());
+      assertTrue(value == input.toLong());
       final IValue output = module.runMethod("eqInt", input);
       assertTrue(output.isLong());
-      assertTrue(value == output.getLong());
+      assertTrue(value == output.toLong());
     }
   }
 
@@ -74,12 +74,12 @@ public abstract class PytorchTestBase {
             1,
         };
     for (double value : values) {
-      final IValue input = IValue.double64(value);
+      final IValue input = IValue.from(value);
       assertTrue(input.isDouble());
-      assertTrue(value == input.getDouble());
+      assertTrue(value == input.toDouble());
       final IValue output = module.runMethod("eqFloat", input);
       assertTrue(output.isDouble());
-      assertTrue(value == output.getDouble());
+      assertTrue(value == output.toDouble());
     }
   }
 
@@ -91,17 +91,17 @@ public abstract class PytorchTestBase {
     for (int i = 0; i < numElements; ++i) {
       inputTensorData[i] = i;
     }
-    final Tensor inputTensor = Tensor.newFloat32Tensor(inputTensorShape, inputTensorData);
+    final Tensor inputTensor = Tensor.fromBlob(inputTensorShape, inputTensorData);
 
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
-    final IValue input = IValue.tensor(inputTensor);
+    final IValue input = IValue.from(inputTensor);
     assertTrue(input.isTensor());
-    assertTrue(inputTensor == input.getTensor());
+    assertTrue(inputTensor == input.toTensor());
     final IValue output = module.runMethod("eqTensor", input);
     assertTrue(output.isTensor());
-    final Tensor outputTensor = output.getTensor();
+    final Tensor outputTensor = output.toTensor();
     assertNotNull(outputTensor);
-    assertArrayEquals(inputTensorShape, outputTensor.shape);
+    assertArrayEquals(inputTensorShape, outputTensor.shape());
     float[] outputData = outputTensor.getDataAsFloatArray();
     for (int i = 0; i < numElements; i++) {
       assertTrue(inputTensorData[i] == outputData[i]);
@@ -113,22 +113,22 @@ public abstract class PytorchTestBase {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final Map<Long, IValue> inputMap = new HashMap<>();
 
-    inputMap.put(Long.MIN_VALUE, IValue.long64(-Long.MIN_VALUE));
-    inputMap.put(Long.MAX_VALUE, IValue.long64(-Long.MAX_VALUE));
-    inputMap.put(0l, IValue.long64(0l));
-    inputMap.put(1l, IValue.long64(-1l));
-    inputMap.put(-1l, IValue.long64(1l));
+    inputMap.put(Long.MIN_VALUE, IValue.from(-Long.MIN_VALUE));
+    inputMap.put(Long.MAX_VALUE, IValue.from(-Long.MAX_VALUE));
+    inputMap.put(0l, IValue.from(0l));
+    inputMap.put(1l, IValue.from(-1l));
+    inputMap.put(-1l, IValue.from(1l));
 
-    final IValue input = IValue.dictLongKey(inputMap);
+    final IValue input = IValue.dictLongKeyFrom(inputMap);
     assertTrue(input.isDictLongKey());
 
     final IValue output = module.runMethod("eqDictIntKeyIntValue", input);
     assertTrue(output.isDictLongKey());
 
-    final Map<Long, IValue> outputMap = output.getDictLongKey();
+    final Map<Long, IValue> outputMap = output.toDictLongKey();
     assertTrue(inputMap.size() == outputMap.size());
     for (Map.Entry<Long, IValue> entry : inputMap.entrySet()) {
-      assertTrue(outputMap.get(entry.getKey()).getLong() == entry.getValue().getLong());
+      assertTrue(outputMap.get(entry.getKey()).toLong() == entry.getValue().toLong());
     }
   }
 
@@ -137,22 +137,22 @@ public abstract class PytorchTestBase {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final Map<String, IValue> inputMap = new HashMap<>();
 
-    inputMap.put("long_min_value", IValue.long64(Long.MIN_VALUE));
-    inputMap.put("long_max_value", IValue.long64(Long.MAX_VALUE));
-    inputMap.put("long_0", IValue.long64(0l));
-    inputMap.put("long_1", IValue.long64(1l));
-    inputMap.put("long_-1", IValue.long64(-1l));
+    inputMap.put("long_min_value", IValue.from(Long.MIN_VALUE));
+    inputMap.put("long_max_value", IValue.from(Long.MAX_VALUE));
+    inputMap.put("long_0", IValue.from(0l));
+    inputMap.put("long_1", IValue.from(1l));
+    inputMap.put("long_-1", IValue.from(-1l));
 
-    final IValue input = IValue.dictStringKey(inputMap);
+    final IValue input = IValue.dictStringKeyFrom(inputMap);
     assertTrue(input.isDictStringKey());
 
     final IValue output = module.runMethod("eqDictStrKeyIntValue", input);
     assertTrue(output.isDictStringKey());
 
-    final Map<String, IValue> outputMap = output.getDictStringKey();
+    final Map<String, IValue> outputMap = output.toDictStringKey();
     assertTrue(inputMap.size() == outputMap.size());
     for (Map.Entry<String, IValue> entry : inputMap.entrySet()) {
-      assertTrue(outputMap.get(entry.getKey()).getLong() == entry.getValue().getLong());
+      assertTrue(outputMap.get(entry.getKey()).toLong() == entry.getValue().toLong());
     }
   }
 
@@ -167,19 +167,19 @@ public abstract class PytorchTestBase {
         a[i] = i;
         sum += a[i];
       }
-      final IValue input = IValue.longList(a);
+      final IValue input = IValue.listFrom(a);
       assertTrue(input.isLongList());
 
       final IValue output = module.runMethod("listIntSumReturnTuple", input);
 
       assertTrue(output.isTuple());
-      assertTrue(2 == output.getTuple().length);
+      assertTrue(2 == output.toTuple().length);
 
-      IValue output0 = output.getTuple()[0];
-      IValue output1 = output.getTuple()[1];
+      IValue output0 = output.toTuple()[0];
+      IValue output1 = output.toTuple()[1];
 
-      assertArrayEquals(a, output0.getLongList());
-      assertTrue(sum == output1.getLong());
+      assertArrayEquals(a, output0.toLongList());
+      assertTrue(sum == output1.toLong());
     }
   }
 
@@ -187,16 +187,16 @@ public abstract class PytorchTestBase {
   public void testOptionalIntIsNone() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
 
-    assertFalse(module.runMethod("optionalIntIsNone", IValue.long64(1l)).getBool());
-    assertTrue(module.runMethod("optionalIntIsNone", IValue.optionalNull()).getBool());
+    assertFalse(module.runMethod("optionalIntIsNone", IValue.from(1l)).toBool());
+    assertTrue(module.runMethod("optionalIntIsNone", IValue.optionalNull()).toBool());
   }
 
   @Test
   public void testIntEq0None() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
 
-    assertTrue(module.runMethod("intEq0None", IValue.long64(0l)).isNull());
-    assertTrue(module.runMethod("intEq0None", IValue.long64(1l)).getLong() == 1l);
+    assertTrue(module.runMethod("intEq0None", IValue.from(0l)).isNull());
+    assertTrue(module.runMethod("intEq0None", IValue.from(1l)).toLong() == 1l);
   }
 
   @Test(expected = IllegalArgumentException.class)
@@ -219,16 +219,16 @@ public abstract class PytorchTestBase {
       floats[i] = i / 1000.f;
     }
 
-    Tensor tensorBytes = Tensor.newInt8Tensor(shape, bytes);
-    assertTrue(tensorBytes.dtype() == Tensor.DTYPE_INT8);
+    Tensor tensorBytes = Tensor.fromBlob(shape, bytes);
+    assertTrue(tensorBytes.dtype() == DType.INT8);
     assertArrayEquals(bytes, tensorBytes.getDataAsByteArray());
 
-    Tensor tensorInts = Tensor.newInt32Tensor(shape, ints);
-    assertTrue(tensorInts.dtype() == Tensor.DTYPE_INT32);
+    Tensor tensorInts = Tensor.fromBlob(shape, ints);
+    assertTrue(tensorInts.dtype() == DType.INT32);
     assertArrayEquals(ints, tensorInts.getDataAsIntArray());
 
-    Tensor tensorFloats = Tensor.newFloat32Tensor(shape, floats);
-    assertTrue(tensorFloats.dtype() == Tensor.DTYPE_FLOAT32);
+    Tensor tensorFloats = Tensor.fromBlob(shape, floats);
+    assertTrue(tensorFloats.dtype() == DType.FLOAT32);
     float[] floatsOut = tensorFloats.getDataAsFloatArray();
     assertTrue(floatsOut.length == numel);
     for (int i = 0; i < numel; i++) {
@@ -241,8 +241,8 @@ public abstract class PytorchTestBase {
     long[] shape = new long[] {1, 3, 224, 224};
     final int numel = (int) Tensor.numel(shape);
     float[] floats = new float[numel];
-    Tensor tensorFloats = Tensor.newFloat32Tensor(shape, floats);
-    assertTrue(tensorFloats.dtype() == Tensor.DTYPE_FLOAT32);
+    Tensor tensorFloats = Tensor.fromBlob(shape, floats);
+    assertTrue(tensorFloats.dtype() == DType.FLOAT32);
     tensorFloats.getDataAsByteArray();
   }
 
@@ -257,12 +257,12 @@ public abstract class PytorchTestBase {
             "#@$!@#)($*!@#$)(!@*#$"
         };
     for (String value : values) {
-      final IValue input = IValue.string(value);
+      final IValue input = IValue.from(value);
       assertTrue(input.isString());
-      assertTrue(value.equals(input.getString()));
+      assertTrue(value.equals(input.toStr()));
       final IValue output = module.runMethod("eqStr", input);
       assertTrue(output.isString());
-      assertTrue(value.equals(output.getString()));
+      assertTrue(value.equals(output.toStr()));
     }
   }
 
@@ -276,13 +276,13 @@ public abstract class PytorchTestBase {
             "#@$!@#)($*!@#$)(!@*#$"
         };
     for (String value : values) {
-      final IValue input = IValue.string(value);
+      final IValue input = IValue.from(value);
       assertTrue(input.isString());
-      assertTrue(value.equals(input.getString()));
+      assertTrue(value.equals(input.toStr()));
       final IValue output = module.runMethod("str3Concat", input);
       assertTrue(output.isString());
       String expectedOutput = new StringBuilder().append(value).append(value).append(value).toString();
-      assertTrue(expectedOutput.equals(output.getString()));
+      assertTrue(expectedOutput.equals(output.toStr()));
     }
   }
 
