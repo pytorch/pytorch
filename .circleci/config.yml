@@ -831,7 +831,7 @@ jobs:
             PROJ_ROOT=/Users/distiller/project
             cd ${PROJ_ROOT}/ios/TestApp
             # install fastlane
-            gem install bundler && bundle install
+            sudo gem install bundler && bundle install
             # install certificate
             set +x
             export CERT=${IOS_CERT_KEY}
