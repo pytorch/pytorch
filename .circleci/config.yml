@@ -837,6 +837,7 @@ jobs:
             export CERT=${IOS_CERT_KEY}
             set +x
             echo $CERT >> cert.txt
+            # decode certificate
             base64 --decode cert.txt -o Certificates.p12
             rm cert.txt
             bundle exec fastlane install_cert
@@ -887,6 +888,7 @@ jobs:
           command: |
             set -e
             PROJ_ROOT=/Users/distiller/project
+            PROFILE=427d437c-9927-4228-8e9c-d750f55ba1a3
             # run xcodebuild
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
