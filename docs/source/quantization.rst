@@ -62,10 +62,8 @@ full-precision tensor. <Link to quantized tensor documentation here>
 
 For NN operators included in PyTorch, we restrict support to:
 
-1. 8 bit weights (data\\_type = qint8)
-2. 8 bit activations (data\\_type = quint8)
-[Note: Bias is now in floating point in our APIs, removing this line below]
-
+   1. 8 bit weights (data\\_type = qint8)
+   2. 8 bit activations (data\\_type = quint8)
 
 Note that operator implementations currently only
 support per channel quantization for weights of the **conv** and **linear**
@@ -193,7 +191,7 @@ The code is organized into the following modules
    **ReLU()**. It also contains the functions to convert tensors to and
    from quantized form.
 -  ``torch.nn.qat.modules``: This module implements versions of the key nn
-   modules **Conv2d**() and **Linear()** which will run in FP32
+   modules **Conv2d()** and **Linear()** which will run in FP32
    but with rounding applied to simulate the effect of INT8
    quantization.
 -  ``torch.nn.intrinsic.modules``: This module implements the combined (fused)
