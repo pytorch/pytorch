@@ -14,10 +14,11 @@ a 4x reduction in memory bandwidth requirements.  Hardware support for  INT8 com
 is typically 2 to 4 times faster compared to FP32 compute. Quantization is primarily a technique
 to speed up inference and only the forward pass is supported for quantized operators.
 
-In addition, PyTorch also supports quantization aware training, which models quantization errors
-in both the forward and backward passes using fake-quantization modules. Note that the entire
-computation is carried out in floating point. At the end of quantization aware training, pytorch
-provides conversion functions to convert the trained model into lower precision.
+PyTorch supports multiple approaches to quantizing a deep learning model. In most cases the model is trained 
+in FP32 and then the model is converted to INT8. In addition, PyTorch also supports quantization aware 
+training, which models quantization errors in both the forward and backward passes using fake-quantization 
+modules. Note that the entire computation is carried out in floating point. At the end of quantization aware 
+training, pytorch provides conversion functions to convert the trained model into lower precision.
 
 At lower level, PyTorch provides a way to represent quantized tensors and
 perform operations with them. They can be used to directly construct models that
