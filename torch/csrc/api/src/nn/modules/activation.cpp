@@ -116,5 +116,23 @@ void PReLUImpl::pretty_print(std::ostream& stream) const {
          << options.num_parameters() << ")";
 }
 
+// ============================================================================
+
+ReLUImpl::ReLUImpl(const ReLUOptions& options_) : options(options_) {}
+
+Tensor ReLUImpl::forward(Tensor& input) {
+  return F::relu(input, options);
+}
+
+void ReLUImpl::reset() {}
+
+void ReLUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::ReLU(";
+  if (options.inplace()) {
+    stream << std::boolalpha  << "inplace=" << options.inplace();
+  }
+  stream << ")";
+}
+
 } // namespace nn
 } // namespace torch

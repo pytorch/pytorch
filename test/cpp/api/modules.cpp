@@ -1139,6 +1139,23 @@ TEST_F(ModulesTest, PReLU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, ReLU) {
+  const auto size = 3;
+  ReLU model;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size}).set_requires_grad(true);
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  auto y_exp = (x < 0) * 0 + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1398,4 +1415,10 @@ TEST_F(ModulesTest, PrettyPrintPReLU) {
   ASSERT_EQ(c10::str(PReLU()), "torch::nn::PReLU(num_parameters=1)");
   ASSERT_EQ(c10::str(PReLU(PReLUOptions().num_parameters(42))),
             "torch::nn::PReLU(num_parameters=42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintReLU) {
+  ASSERT_EQ(c10::str(ReLU()), "torch::nn::ReLU()");
+  ASSERT_EQ(c10::str(ReLU(ReLUOptions().inplace(true))),
+    "torch::nn::ReLU(inplace=true)");
 }

@@ -44,6 +44,14 @@ inline Tensor prelu(const Tensor& input, const Tensor& weight) {
   return torch::prelu(input, weight);
 }
 
+inline Tensor relu(Tensor& input, const ReLUOptions& options) {
+  if (options.inplace()) {
+    return torch::relu_(input);
+  } else {
+    return torch::relu(input);
+  }
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

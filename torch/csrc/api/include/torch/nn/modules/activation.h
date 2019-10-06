@@ -146,5 +146,28 @@ class TORCH_API PReLUImpl : public torch::nn::Cloneable<PReLUImpl> {
 
 TORCH_MODULE(PReLU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the ReLU function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReLU to learn
+/// about the exact behavior of this module.
+class TORCH_API ReLUImpl : public torch::nn::Cloneable<ReLUImpl> {
+ public:
+  ReLUImpl() : ReLUImpl(ReLUOptions()) {}
+  explicit ReLUImpl(const ReLUOptions& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `ReLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ReLUOptions options;
+};
+
+TORCH_MODULE(ReLU);
+
 } // namespace nn
 } // namespace torch

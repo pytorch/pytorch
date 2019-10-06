@@ -71,5 +71,15 @@ struct PReLUOptions {
   TORCH_ARG(double, init) = 0.25;
 };
 
+// ============================================================================
+
+/// Options for ReLU functional and module.
+struct TORCH_API ReLUOptions {
+  /* implicit */ ReLUOptions(bool inplace = false);
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace);
+};
+
 } // namespace nn
 } // namespace torch
