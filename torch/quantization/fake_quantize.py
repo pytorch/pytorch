@@ -4,7 +4,7 @@ from torch.nn import Module
 from .observer import MovingAverageMinMaxObserver, HistogramObserver, MovingAveragePerChannelMinMaxObserver, _with_args
 
 class FakeQuantize(Module):
-    ''' Simulate the quantize and dequantize operations in training time.
+    r""" Simulate the quantize and dequantize operations in training time.
     The output of this module is given by
 
     x_out = (clamp(round(x/scale + zero_point), quant_min, quant_max)-zero_point)*scale
@@ -40,7 +40,7 @@ class FakeQuantize(Module):
         observer (Module): User provided module that collects statistics on the input tensor and
                            provides a method to calculate scale and zero-point.
 
-    '''
+    """
     def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255, **observer_kwargs):
         super(FakeQuantize, self).__init__()
         assert quant_min <= quant_max, \
