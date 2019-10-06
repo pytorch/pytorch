@@ -31,7 +31,8 @@ from random import shuffle
 
 import torch
 from torch._six import inf
-from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
+from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, \
+    load_tests, default_floating_dtype
 from common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -92,6 +93,9 @@ def is_all_nan(tensor):
 
 # Register all distributions for generic tests.
 Example = namedtuple('Example', ['Dist', 'params'])
+# Declare distributions with dtype double
+_current_type = torch.tensor(()).dtype
+torch.set_default_dtype(torch.double)
 EXAMPLES = [
     Example(Bernoulli, [
         {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
@@ -647,6 +651,8 @@ BAD_EXAMPLES = [
         }
     ])
 ]
+# Resets the default dtype
+torch.set_default_dtype(_current_type)
 
 
 class TestDistributions(TestCase):
@@ -851,6 +857,7 @@ class TestDistributions(TestCase):
                 self.assertEqual(expanded.log_prob(sample), d.log_prob(sample))
                 self.assertEqual(actual_shape, expected_shape)
 
+    @default_floating_dtype(torch.double)
     def test_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         r = torch.tensor(0.3, requires_grad=True)
@@ -891,6 +898,7 @@ class TestDistributions(TestCase):
                          (2, 5, 2, 3, 5))
         self.assertEqual(Bernoulli(p).sample((2,)).size(), (2, 2, 3, 5))
 
+    @default_floating_dtype(torch.double)
     def test_geometric(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         r = torch.tensor(0.3, requires_grad=True)
@@ -932,6 +940,7 @@ class TestDistributions(TestCase):
                                          scipy.stats.geom(p=prob, loc=-1),
                                          'Geometric(prob={})'.format(prob))
 
+    @default_floating_dtype(torch.double)
     def test_binomial(self):
         p = torch.arange(0.05, 1, 0.1).requires_grad_()
         for total_count in [1, 2, 10]:
@@ -983,6 +992,7 @@ class TestDistributions(TestCase):
         ]
         self._check_enumerate_support(Binomial, examples)
 
+    @default_floating_dtype(torch.double)
     def test_binomial_extreme_vals(self):
         total_count = 100
         bin0 = Binomial(total_count, 0)
@@ -1009,6 +1019,7 @@ class TestDistributions(TestCase):
         self.assertEqual(samples.mean(dim=0), bin1.mean, prec=0.02)
         self.assertEqual(samples.var(dim=0), bin1.variance, prec=0.02)
 
+    @default_floating_dtype(torch.double)
     def test_negative_binomial(self):
         p = torch.arange(0.05, 1, 0.1).requires_grad_()
         for total_count in [1, 2, 10]:
@@ -1040,6 +1051,7 @@ class TestDistributions(TestCase):
             expected = scipy.stats.nbinom(total_count.cpu().numpy(), 1 - probs.cpu().numpy()).logpmf(sample)
             self.assertAlmostEqual(log_prob, expected, places=4)
 
+    @default_floating_dtype(torch.double)
     def test_multinomial_1d(self):
         total_count = 10
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
@@ -1066,6 +1078,7 @@ class TestDistributions(TestCase):
         expected = torch.tensor(scipy.stats.multinomial.logpmf(x.numpy(), n=total_count, p=dist.probs.detach().numpy()))
         self.assertEqual(log_prob, expected)
 
+    @default_floating_dtype(torch.double)
     def test_multinomial_2d(self):
         total_count = 10
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
@@ -1086,6 +1099,7 @@ class TestDistributions(TestCase):
         # check entropy computation
         self.assertRaises(NotImplementedError, Multinomial(10, p).entropy)
 
+    @default_floating_dtype(torch.double)
     def test_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
         self.assertTrue(is_all_nan(Categorical(p).mean))
@@ -1097,6 +1111,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(Categorical, (p,))
         self.assertRaises(NotImplementedError, Categorical(p).rsample)
 
+    @default_floating_dtype(torch.double)
     def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
@@ -1134,6 +1149,7 @@ class TestDistributions(TestCase):
         ]
         self._check_enumerate_support(Categorical, examples)
 
+    @default_floating_dtype(torch.double)
     def test_one_hot_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
         self.assertEqual(OneHotCategorical(p).sample().size(), (3,))
@@ -1143,6 +1159,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(OneHotCategorical, (p,))
         self.assertRaises(NotImplementedError, OneHotCategorical(p).rsample)
 
+    @default_floating_dtype(torch.double)
     def test_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
@@ -1174,6 +1191,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Poisson(2.0).sample((2,)).size(), (2,))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @default_floating_dtype(torch.double)
     def test_poisson_log_prob(self):
         rate = torch.randn(2, 3).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -1207,6 +1225,7 @@ class TestDistributions(TestCase):
                                          'Poisson(lambda={}, cuda)'.format(rate),
                                          failure_rate=1e-3)
 
+    @default_floating_dtype(torch.double)
     def test_relaxed_bernoulli(self):
         p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
         r = torch.tensor(0.3, requires_grad=True)
@@ -1248,6 +1267,7 @@ class TestDistributions(TestCase):
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
 
+    @default_floating_dtype(torch.double)
     def test_relaxed_one_hot_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
         temp = torch.tensor(0.67, requires_grad=True)
@@ -1257,6 +1277,7 @@ class TestDistributions(TestCase):
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((1,)).size(), (1, 3))
         self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
 
+    @default_floating_dtype(torch.double)
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
@@ -1306,6 +1327,7 @@ class TestDistributions(TestCase):
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
 
+    @default_floating_dtype(torch.double)
     def test_uniform(self):
         low = torch.zeros(5, 5, requires_grad=True)
         high = (torch.ones(5, 5) * 3).requires_grad_()
@@ -1343,6 +1365,7 @@ class TestDistributions(TestCase):
         low.grad.zero_()
         high.grad.zero_()
 
+    @default_floating_dtype(torch.double)
     def test_cauchy(self):
         loc = torch.zeros(5, 5, requires_grad=True)
         scale = torch.ones(5, 5, requires_grad=True)
@@ -1371,6 +1394,7 @@ class TestDistributions(TestCase):
         loc.grad.zero_()
         scale.grad.zero_()
 
+    @default_floating_dtype(torch.double)
     def test_halfcauchy(self):
         scale = torch.ones(5, 5, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
@@ -1394,6 +1418,7 @@ class TestDistributions(TestCase):
         self.assertEqual(scale.grad, eps)
         scale.grad.zero_()
 
+    @default_floating_dtype(torch.double)
     def test_halfnormal(self):
         std = torch.randn(5, 5).abs().requires_grad_()
         std_1d = torch.randn(1, requires_grad=True)
@@ -1438,6 +1463,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.halfnorm(scale=std),
                                         'HalfNormal(scale={})'.format(std))
 
+    @default_floating_dtype(torch.double)
     def test_lognormal(self):
         mean = torch.randn(5, 5, requires_grad=True)
         std = torch.randn(5, 5).abs().requires_grad_()
@@ -1488,6 +1514,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.lognorm(scale=math.exp(mean), s=std),
                                         'LogNormal(loc={}, scale={})'.format(mean, std))
 
+    @default_floating_dtype(torch.double)
     def test_logisticnormal(self):
         mean = torch.randn(5, 5).requires_grad_()
         std = torch.randn(5, 5).abs().requires_grad_()
@@ -1554,6 +1581,7 @@ class TestDistributions(TestCase):
                 'LogisticNormal(loc={}, scale={})'.format(mean_th, std_th),
                 multivariate=True)
 
+    @default_floating_dtype(torch.double)
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
@@ -1606,6 +1634,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.norm(loc=loc, scale=scale),
                                         'Normal(mean={}, std={})'.format(loc, scale))
 
+    @default_floating_dtype(torch.double)
     def test_lowrank_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
         mean_no_batch = torch.randn(3, requires_grad=True)
@@ -1725,6 +1754,7 @@ class TestDistributions(TestCase):
         empirical_var = samples.var(0)
         self.assertEqual(d.variance, empirical_var, prec=0.02)
 
+    @default_floating_dtype(torch.double)
     def test_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
         mean_no_batch = torch.randn(3, requires_grad=True)
@@ -1782,6 +1812,7 @@ class TestDistributions(TestCase):
         multivariate_normal_log_prob_gradcheck(mean, None, None, scale_tril)
         multivariate_normal_log_prob_gradcheck(mean_no_batch, None, None, scale_tril_batched)
 
+    @default_floating_dtype(torch.double)
     def test_multivariate_normal_stable_with_precision_matrix(self):
         x = torch.randn(10)
         P = torch.exp(-(x - x.unsqueeze(-1)) ** 2)  # RBF kernel
@@ -1846,6 +1877,7 @@ class TestDistributions(TestCase):
                                     'MultivariateNormal(loc={}, scale_tril={})'.format(mean, scale_tril),
                                     multivariate=True)
 
+    @default_floating_dtype(torch.double)
     def test_multivariate_normal_properties(self):
         loc = torch.randn(5)
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
@@ -1854,6 +1886,7 @@ class TestDistributions(TestCase):
         self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
         self.assertEqual(m.scale_tril, torch.cholesky(m.covariance_matrix, upper=False))
 
+    @default_floating_dtype(torch.double)
     def test_multivariate_normal_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5)
@@ -1865,6 +1898,7 @@ class TestDistributions(TestCase):
         empirical_var = samples.var(0)
         self.assertEqual(d.variance, empirical_var, prec=0.05)
 
+    @default_floating_dtype(torch.double)
     def test_exponential(self):
         rate = torch.randn(5, 5).abs().requires_grad_()
         rate_1d = torch.randn(1).abs().requires_grad_()
@@ -1900,6 +1934,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.expon(scale=1. / rate),
                                         'Exponential(rate={})'.format(rate))
 
+    @default_floating_dtype(torch.double)
     def test_laplace(self):
         loc = torch.randn(5, 5, requires_grad=True)
         scale = torch.randn(5, 5).abs().requires_grad_()
@@ -1944,6 +1979,7 @@ class TestDistributions(TestCase):
         self._check_log_prob(Laplace(loc, scale), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @default_floating_dtype(torch.double)
     def test_laplace_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
@@ -2066,6 +2102,7 @@ class TestDistributions(TestCase):
         self._check_log_prob(Gumbel(loc, scale), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @default_floating_dtype(torch.double)
     def test_gumbel_sample(self):
         set_rng_seed(1)  # see note [Randomized statistical tests]
         for loc, scale in product([-5.0, -1.0, -0.1, 0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
@@ -2154,6 +2191,7 @@ class TestDistributions(TestCase):
         self._check_log_prob(StudentT(df), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @default_floating_dtype(torch.double)
     def test_studentT_sample(self):
         set_rng_seed(11)  # see Note [Randomized statistical tests]
         for df, loc, scale in product([0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
@@ -2182,6 +2220,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Dirichlet(alpha_1d).sample((1,)).size(), (1, 4))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @default_floating_dtype(torch.double)
     def test_dirichlet_log_prob(self):
         num_samples = 10
         alpha = torch.exp(torch.randn(5))
@@ -2225,6 +2264,7 @@ class TestDistributions(TestCase):
             self.assertAlmostEqual(float(actual_log_prob), float(expected_log_prob), places=3, allow_inf=True)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @default_floating_dtype(torch.double)
     def test_beta_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         for con1, con0 in product([0.1, 1.0, 10.0], [0.1, 1.0, 10.0]):
@@ -2297,6 +2337,7 @@ class TestDistributions(TestCase):
                     except NotImplementedError:
                         pass
 
+    @default_floating_dtype(torch.double)
     def test_independent_expand(self):
         for Dist, params in EXAMPLES:
             for param in params:
@@ -2314,6 +2355,7 @@ class TestDistributions(TestCase):
                         self.assertEqual(expanded.event_shape, indep_dist.event_shape)
                         self.assertEqual(expanded.batch_shape, expanded_shape)
 
+    @default_floating_dtype(torch.double)
     def test_cdf_icdf_inverse(self):
         # Tests the invertibility property on the distributions
         for Dist, params in EXAMPLES:
@@ -2333,6 +2375,7 @@ class TestDistributions(TestCase):
                     'icdf(cdf(x)) = {}'.format(actual),
                 ]))
 
+    @default_floating_dtype(torch.double)
     def test_cdf_log_prob(self):
         # Tests if the differentiation of the CDF gives the PDF at a given value
         for Dist, params in EXAMPLES:
@@ -2682,6 +2725,7 @@ class TestRsample(TestCase):
                 "error = %.2g" % torch.abs(expected_grad - actual_grad).max(),
             ]))
 
+    @default_floating_dtype(torch.double)
     def test_dirichlet_tangent_field(self):
         num_samples = 20
         alpha_grid = [0.5, 1.0, 2.0]
@@ -3447,6 +3491,7 @@ class TestKL(TestCase):
                     'max error = {}'.format(torch.abs(actual - expected).max()),
                 ]))
 
+    @default_floating_dtype(torch.double)
     def test_entropy_exponential_family(self):
         for Dist, params in EXAMPLES:
             if not issubclass(Dist, ExponentialFamily):
@@ -3670,10 +3715,10 @@ class TestLazyLogitsInitialization(TestCase):
 class TestAgainstScipy(TestCase):
     def setUp(self):
         super(TestAgainstScipy, self).setUp()
-        positive_var = torch.randn(20).exp()
-        positive_var2 = torch.randn(20).exp()
-        random_var = torch.randn(20)
-        simplex_tensor = softmax(torch.randn(20), dim=-1)
+        positive_var = torch.randn(20, dtype=torch.double).exp()
+        positive_var2 = torch.randn(20, dtype=torch.double).exp()
+        random_var = torch.randn(20, dtype=torch.double)
+        simplex_tensor = softmax(torch.randn(20, dtype=torch.double), dim=-1)
         self.distribution_pairs = [
             (
                 Bernoulli(simplex_tensor),
@@ -3733,7 +3778,7 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.lognorm(s=positive_var.clamp(max=3), scale=random_var.exp())
             ),
             (
-                LowRankMultivariateNormal(random_var, torch.zeros(20, 1), positive_var2),
+                LowRankMultivariateNormal(random_var, torch.zeros(20, 1, dtype=torch.double), positive_var2),
                 scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2))
             ),
             (
@@ -3774,6 +3819,7 @@ class TestAgainstScipy(TestCase):
             )
         ]
 
+    @default_floating_dtype(torch.double)
     def test_mean(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
@@ -3784,6 +3830,7 @@ class TestAgainstScipy(TestCase):
             else:
                 self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
 
+    @default_floating_dtype(torch.double)
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
@@ -3808,6 +3855,7 @@ class TestAgainstScipy(TestCase):
                 continue
             self.assertEqual(cdf, scipy_dist.cdf(samples), message=pytorch_dist)
 
+    @default_floating_dtype(torch.double)
     def test_icdf(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             samples = torch.rand((5,) + pytorch_dist.batch_shape)
@@ -3909,6 +3957,7 @@ class TestTransforms(TestCase):
         self.assertTrue(identity_transform == identity_transform.inv)
         self.assertFalse(identity_transform != identity_transform.inv)
 
+    @default_floating_dtype(torch.double)
     def test_forward_inverse_cache(self):
         for transform in self.transforms:
             x = self._generate_data(transform).requires_grad_()
@@ -3936,6 +3985,7 @@ class TestTransforms(TestCase):
                     'y2 = t(x2) = {}'.format(y2),
                 ]))
 
+    @default_floating_dtype(torch.double)
     def test_forward_inverse_no_cache(self):
         for transform in self.transforms:
             x = self._generate_data(transform).requires_grad_()
@@ -4320,6 +4370,7 @@ class TestValidation(TestCase):
                 Dist(validate_args=True, **param)
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
+    @default_floating_dtype(torch.double)
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
             for i, param in enumerate(params):
@@ -4376,6 +4427,7 @@ class TestJit(TestCase):
             sample = Dist(**param).sample()
             return values, sample
 
+    @default_floating_dtype(torch.double)
     def test_sample(self):
         for Dist, keys, values, sample in self._examples():
 
@@ -4404,6 +4456,7 @@ class TestJit(TestCase):
             if Dist not in xfail:
                 self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
+    @default_floating_dtype(torch.double)
     def test_rsample(self):
         for Dist, keys, values, sample in self._examples():
             if not Dist.has_rsample:

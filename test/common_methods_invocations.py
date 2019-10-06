@@ -9,7 +9,8 @@ from common_utils import (skipIfNoLapack,
                           prod_single_zero, random_square_matrix_of_rank,
                           random_symmetric_matrix, random_symmetric_psd_matrix,
                           random_symmetric_pd_matrix, make_nonzero_det,
-                          random_fullrank_matrix_distinct_singular_value, set_rng_seed)
+                          random_fullrank_matrix_distinct_singular_value,
+                          set_rng_seed, default_floating_dtype)
 
 
 def index_variable(shape, max_indices):
@@ -114,6 +115,7 @@ def ident(x):
 #       version, and vice versa.
 #       When writing tests, only scalar(float/int) input triggers the Scalar schema.
 #       uniform_scalar produces a scalar **Tensor** which won't match Scalar input.
+@default_floating_dtype(torch.double)
 def method_tests():
     set_rng_seed(0)
     return [

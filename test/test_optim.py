@@ -27,7 +27,7 @@ def rosenbrock(tensor):
 
 def drosenbrock(tensor):
     x, y = tensor
-    return torch.DoubleTensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
+    return torch.FloatTensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
 
 class TestOptim(TestCase):
@@ -61,12 +61,12 @@ class TestOptim(TestCase):
             if w:
                 i = torch.LongTensor([[0, 0]])
                 x = grad[0]
-                v = torch.DoubleTensor([x / 4., x - x / 4.])
+                v = torch.FloatTensor([x / 4., x - x / 4.])
             else:
                 i = torch.LongTensor([[1, 1]])
                 y = grad[1]
-                v = torch.DoubleTensor([y - y / 4., y / 4.])
-            x = sparse.DoubleTensor(i, v, torch.Size([2]))
+                v = torch.FloatTensor([y - y / 4., y / 4.])
+            x = sparse.FloatTensor(i, v, torch.Size([2]))
             with torch.no_grad():
                 if sparse_grad:
                     params.grad = x
