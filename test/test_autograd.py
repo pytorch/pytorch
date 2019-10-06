@@ -4,7 +4,6 @@ import sys
 import math
 import tempfile
 import time
-import torch
 import unittest
 import warnings
 from copy import deepcopy

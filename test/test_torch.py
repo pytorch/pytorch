@@ -11923,7 +11923,8 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfRocm
     # stft -> rfft -> _fft -> _fft_with_size -> _fft_mkl
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
-    def test_stft(self, device):
+    @dtypes(torch.double)
+    def test_stft(self, device, dtype):
         if not TEST_LIBROSA:
             raise unittest.SkipTest('librosa not found')
 
@@ -11946,9 +11947,9 @@ class TestTorchDeviceType(TestCase):
 
         def _test(sizes, n_fft, hop_length=None, win_length=None, win_sizes=None,
                   center=True, expected_error=None):
-            x = torch.randn(*sizes, device=device)
+            x = torch.randn(*sizes, dtype=dtype, device=device)
             if win_sizes is not None:
-                window = torch.randn(*win_sizes, device=device)
+                window = torch.randn(*win_sizes, dtype=dtype, device=device)
             else:
                 window = None
             if expected_error is None:

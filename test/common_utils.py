@@ -312,22 +312,6 @@ def default_floating_dtype(dtype):
 
     return decorator
 
-def default_tensor_type(type):
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            old_type = torch.tensor(()).type()
-            torch.set_default_tensor_type(type)
-            try:
-                return fn(*args, **kwargs)
-            finally:
-                torch.set_default_tensor_type(old_type)
-
-        return wrapper
-
-    return decorator
-
-
 def get_cpu_type(type_name):
     module, name = type_name.rsplit('.', 1)
     assert module == 'torch.cuda'
