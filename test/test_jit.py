@@ -1,9 +1,9 @@
 # -*- coding: UTF-8 -*-
 from __future__ import division
-
-# Sets default tensor dtype to torch.double
-# TODO: remove this global setting
 import torch
+
+# TODO: remove this global setting
+# JIT tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
 # Torch
