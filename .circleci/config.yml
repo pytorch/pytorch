@@ -886,6 +886,7 @@ jobs:
           no_output_timeout: "30m"
           command: |
             set -e
+            PROJ_ROOT=/Users/distiller/project
             # run xcodebuild
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
