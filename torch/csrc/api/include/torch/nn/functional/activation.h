@@ -40,6 +40,25 @@ inline Tensor logsigmoid(const Tensor& input) {
   return torch::log_sigmoid(input);
 }
 
+inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options) {
+  int dim = options.dim();
+  torch::Dtype dtype = options.dtype();
+
+  if (dim == -1) {
+    int input_dim = input.dim();
+    if (input_dim == 0 || input_dim == 1 || input_dim == 3) {
+      dim = 0;
+    } else {
+      dim = 1;
+    }
+  }
+  if (dtype == torch::Dtype::Undefined) {
+    return input.softmax(dim);
+  } else {
+    return input.softmax(dim, dtype);
+  }
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

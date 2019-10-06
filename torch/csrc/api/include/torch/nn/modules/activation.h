@@ -126,9 +126,10 @@ TORCH_MODULE(LogSigmoid);
 /// Applies the Softmax function.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.Softmax to learn
 /// about the exact behavior of this module.
-class TORCH_API SoftmaxImpl : public Cloneable<SoftmaxImpl> {
+class TORCH_API SoftmaxImpl : public torch::nn::Cloneable<SoftmaxImpl> {
  public:
-  SoftmaxImpl(const SoftmaxOptions& options_);
+  SoftmaxImpl() : SoftmaxImpl(SoftmaxOptions()) {}
+  explicit SoftmaxImpl(const SoftmaxOptions& options_);
 
   Tensor forward(const Tensor& input);
 
@@ -137,7 +138,6 @@ class TORCH_API SoftmaxImpl : public Cloneable<SoftmaxImpl> {
   /// Pretty prints the `Softmax` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
- private:
   SoftmaxOptions options;
 };
 
