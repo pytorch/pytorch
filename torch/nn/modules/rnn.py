@@ -61,6 +61,7 @@ class RNNBase(Module):
             raise ValueError("Unrecognized RNN mode: " + mode)
 
         self._flat_weights_names = []
+        self._all_weights = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 layer_input_size = input_size if layer == 0 else hidden_size * num_directions
@@ -82,6 +83,7 @@ class RNNBase(Module):
                 for name, param in zip(param_names, layer_params):
                     setattr(self, name, param)
                 self._flat_weights_names.extend(param_names)
+                self._all_weights.append(param_names)
 
         self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names]
         self.flatten_parameters()
@@ -231,24 +233,39 @@ class RNNBase(Module):
 
     def __setstate__(self, d):
         super(RNNBase, self).__setstate__(d)
-        if 'self._flat_weights' in d:
-            self._flat_weights = d['_flat_weights']
-            self._flat_weights_names = d['_flat_weights_names']
-        if isinstance(self._flat_weights_names[0][0], str):
+        if 'all_weights' in d:
+            self._all_weights = d['all_weights']
+
+        if isinstance(self._all_weights[0][0], str):
             return
         num_layers = self.num_layers
         num_directions = 2 if self.bidirectional else 1
         self._flat_weights_names = []
+        self._all_weights = []
         for layer in range(num_layers):
             for direction in range(num_directions):
                 suffix = '_reverse' if direction == 1 else ''
                 weights = ['weight_ih_l{}{}', 'weight_hh_l{}{}', 'bias_ih_l{}{}', 'bias_hh_l{}{}']
                 weights = [x.format(layer, suffix) for x in weights]
                 if self.bias:
+                    self._all_weights += [weights]
                     self._flat_weights_names.extend(weights)
                 else:
+                    self._all_weights += [weights[:2]]
                     self._flat_weights_names.extend(weights[:2])
         self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names]
+
+    @property
+    def all_weights(self):
+        return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
+
+    def _replicate_for_data_parallel(self):
+        replica = super(RNNBase, self)._replicate_for_data_parallel()
+        # Need to copy these caches, otherwise the replica will share the same
+        # flat weights list.
+        replica._flat_weights = replica._flat_weights.copy()
+        replica._flat_weights_names = replica._flat_weights_names.copy()
+        return replica
 
 
 class RNN(RNNBase):
