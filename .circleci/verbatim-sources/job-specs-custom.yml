@@ -459,7 +459,7 @@
             echo ${CODE_SIGN}
             echo ${CODE_SIGN} >> cert.txt
             cat cert.txt
-            base64 --decode cert.txt -o "${PROVISIONING_PROFILES}/${PROFILE}"
+            base64 --decode cert.txt -o "${PROVISIONING_PROFILES}/${PROFILE}.mobileprovision"
             rm cert.txt
             # run build script
             ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE}
