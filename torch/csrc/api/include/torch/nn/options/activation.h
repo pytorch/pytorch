@@ -71,5 +71,41 @@ struct PReLUOptions {
   TORCH_ARG(double, init) = 0.25;
 };
 
+// ============================================================================
+
+/// Options for ReLU functional and module.
+struct TORCH_API ReLUOptions {
+  /* implicit */ ReLUOptions(bool inplace = false);
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace);
+};
+
+// ============================================================================
+
+/// Options for ReLU6 functional and module.
+struct TORCH_API ReLU6Options {
+  /* implicit */ ReLU6Options(bool inplace = false);
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace);
+};
+
+// ============================================================================
+
+/// Options for RReLU functional and module.
+struct RReLUOptions {
+  RReLUOptions() {}
+
+  /// lower bound of the uniform distribution. Default: 1/8
+  TORCH_ARG(double, lower) = 1.0 / 8.0;
+
+  /// upper bound of the uniform distribution. Default: 1/3
+  TORCH_ARG(double, upper) = 1.0 / 3.0;
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
+};
+
 } // namespace nn
 } // namespace torch
