@@ -396,5 +396,5 @@ DeQuantize
 
 Linear
 ------------------
-.. autoclass: Linear
+.. autoclass:: Linear
     :members:
