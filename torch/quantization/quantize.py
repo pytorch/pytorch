@@ -250,7 +250,8 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     Args:
         model: input model
         run_fn: a function for evaluating the prepared model, can be a
-            function that simply runs the prepared model or a training loop
+                function that simply runs the prepared model or a training 
+                loop
         run_args: positional arguments for `run_fn`
 
     Return:
@@ -269,8 +270,8 @@ def convert(module, mapping=None, inplace=False):
     parameters) to a quantized module.
     Args:
         module: calibrated module with observers
-        mapping: a dictionary that maps from float module type to quantized module type, can be overwrritten 
-                 to allow swapping user defined Modules
+        mapping: a dictionary that maps from float module type to quantized module type, can 
+                 be overwrritten to allow swapping user defined Modules
         inplace: carry out model transformations in-place, the original module is mutated
     """
     if mapping is None:

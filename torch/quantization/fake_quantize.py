@@ -30,7 +30,8 @@ class FakeQuantize(Module):
 
 
     Args:
-        observer (module): Module for observing statistics on input tensors and calculating scale and zero-point.
+        observer (module): Module for observing statistics on input tensors and calculating scale 
+                           and zero-point.
         quant_min (int): The minimum allowable quantized value.
         quant_max (int): The maximum allowable quantized value.
         observer_kwargs (optional): Arguments for the observer module
