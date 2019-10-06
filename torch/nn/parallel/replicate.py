@@ -1,6 +1,7 @@
 import torch
 import torch.cuda.comm as comm
 from torch.cuda._utils import _get_device_index
+from torch.nn import Parameter
 
 
 def _is_script_module(module):
@@ -130,11 +131,7 @@ def replicate(network, devices, detach=False):
                 replica = torch.jit.RecursiveScriptModule(cpp_replica)
                 replica._finalize()
             else:
-                replica = module.__new__(type(module))
-                replica.__dict__ = module.__dict__.copy()
-                replica._parameters = replica._parameters.copy()
-                replica._buffers = replica._buffers.copy()
-                replica._modules = replica._modules.copy()
+                replica = module._replicate_for_data_parallel()
 
             module_copies[j].append(replica)
 
@@ -151,7 +148,7 @@ def replicate(network, devices, detach=False):
                     if _is_script_module(replica):
                         replica._c._register_module(key, module_copies[j][module_idx]._c)
                     else:
-                        replica._modules[key] = module_copies[j][module_idx]
+                        setattr(replica, key, module_copies[j][module_idx])
         for key, param in module._parameters.items():
             if param is None:
                 for j in range(num_replicas):
@@ -161,10 +158,11 @@ def replicate(network, devices, detach=False):
                 param_idx = param_indices[param]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
+                    param = param_copies[j][param_idx]
                     if _is_script_module(replica):
                         replica._c._register_parameter(key, param_copies[j][param_idx], False)
                     else:
-                        replica._parameters[key] = param_copies[j][param_idx]
+                        setattr(replica, key, Parameter(param))
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
@@ -182,7 +180,7 @@ def replicate(network, devices, detach=False):
                     if _is_script_module(replica):
                         replica._c._register_parameter(key, buffer_copies[j][buffer_idx], True)
                     else:
-                        replica._buffers[key] = buffer_copies[j][buffer_idx]
+                        setattr(replica, key, buffer_copies[j][buffer_idx])
 
     for j in range(num_replicas):
         _copy_scriptmodule_methods(modules, module_copies[j], module_indices)

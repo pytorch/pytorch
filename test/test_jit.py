@@ -2391,8 +2391,6 @@ graph(%Ra, %Rb):
         with self.assertRaises(AttributeError):
             linear_submodule.in_features
         linear_submodule.weight
-        with self.assertRaises(AttributeError):
-            traced_model.asdf = 4
         linear_submodule.weight = nn.Parameter(torch.randn(linear_submodule.weight.shape))
         with self.assertRaises(RuntimeError):
             del linear_submodule.weight
@@ -3517,8 +3515,8 @@ def foo(x):
             def forward(self, x):
                 return self.fn()
 
-        mod = torch.jit.script(MyMod())
-        FileCheck().check_dag("NamedTuple").check_dag("Exception").run(mod.forward.graph)
+        # shouldn't throw a type error
+        torch.jit.script(MyMod())
 
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
@@ -9470,7 +9468,7 @@ a")
                 y = self.baz(x)
                 return x
 
-        with self.assertRaisesRegex(RuntimeError, "Expected at most 1 arguments but found 2"):
+        with self.assertRaisesRegex(RuntimeError, "Expected at most 2 arguments but found 3"):
             ModuleTooMany()
         with self.assertRaisesRegex(RuntimeError, "Argument 1 not provided"):
             ModuleTooFew()
@@ -9986,7 +9984,7 @@ a")
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
         f = io.BytesIO()
-        with self.assertRaisesRegex(RuntimeError, "Couldn't export Python operator"):
+        with self.assertRaisesRegex(RuntimeError, "Couldn't export Python"):
             torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False,
                                example_outputs=outputs)
 
@@ -19825,43 +19823,43 @@ class TestClassType(JitTestCase):
                 return as_interface(x)
 
         # Test interface/class python assignment
-        with torch.jit._disable_emit_hooks():
-            class TestPyAssign(nn.Module):
-                def __init__(self):
-                    super(TestPyAssign, self).__init__()
-                    self.proxy_mod = Foo()
+        class TestPyAssign(nn.Module):
+            def __init__(self):
+                super(TestPyAssign, self).__init__()
+                self.proxy_mod = Foo()
 
-                def forward(self, x):
-                    return self.proxy_mod.two(x)
+            def forward(self, x):
+                return self.proxy_mod.two(x)
 
-            TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
+        TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
 
-            input = torch.rand(3, 4)
-            scripted_pyassign_mod = torch.jit.script(TestPyAssign())
-            self.assertEqual(scripted_pyassign_mod(input), 2 * input)
+        input = torch.rand(3, 4)
+        scripted_pyassign_mod = torch.jit.script(TestPyAssign())
+        imported_mod = self.getExportImportCopy(scripted_pyassign_mod)
+        self.assertEqual(scripted_pyassign_mod(input), imported_mod(input))
 
-            class TestPyAssignError(nn.Module):
-                def __init__(self, obj):
-                    super(TestPyAssignError, self).__init__()
-                    self.proxy_mod = obj
+        class TestPyAssignError(nn.Module):
+            def __init__(self, obj):
+                super(TestPyAssignError, self).__init__()
+                self.proxy_mod = obj
 
-                def forward(self, x):
-                    return self.proxy_mod.two(x)
+            def forward(self, x):
+                return self.proxy_mod.two(x)
 
-            TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
+        TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
 
-            with self.assertRaisesRegex(RuntimeError,
-                                        "is not compatible with interface __torch__"):
-                torch.jit.script(TestPyAssignError(Foo()))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "is not compatible with interface __torch__"):
+            torch.jit.script(TestPyAssignError(Foo()))
 
-            # test pure python object assignment to interface fails
-            class PyClass(object):
-                def __init__(self):
-                    pass
+        # test pure python object assignment to interface fails
+        class PyClass(object):
+            def __init__(self):
+                pass
 
-            with self.assertRaisesRegex(RuntimeError,
-                                        "the value is not a TorchScript compatible type"):
-                torch.jit.script(TestPyAssignError(PyClass()))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "the value is not a TorchScript compatible type"):
+            torch.jit.script(TestPyAssignError(PyClass()))
         # TODO test: interface-interface class-interface inheritance errors,
         # NamedTuple inheritance errors
 
@@ -20549,6 +20547,25 @@ class TestTypeSharing(JitTestCase):
         b = torch.jit.trace(M(), (torch.ones(1, 1), torch.zeros(1, 1)))
         self.assertDifferentType(a, b)
 
+    def test_ignored_fns(self):
+        class M(torch.nn.Module):
+            def __init__(self, foo):
+                super(M, self).__init__()
+                self.foo = foo
+
+            @torch.jit.ignore
+            def ignored(self):
+                return self.foo
+
+            def forward(self):
+                return self.ignored()
+
+        a = torch.jit.script(M(torch.ones(1)))
+        b = torch.jit.script(M(torch.ones(2)))
+        self.assertSameType(a, b)
+        print(a())
+        print(b())
+        self.assertNotEqual(a(), b())
 
 for test in autograd_method_tests():
     add_autograd_test(*test)

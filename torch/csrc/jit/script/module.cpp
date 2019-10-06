@@ -208,6 +208,9 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       e.n->removeInput(e.offset);
       continue;
     }
+    if (e.n->kind() == prim::PythonOp) {
+      throw ErrorReport(e.n->sourceRange()) << "Couldn't export Python method.";
+    }
     if (e.n->kind() != prim::GetAttr) {
       throw ErrorReport(e.n->sourceRange())
           << "temporary: the only valid use of a module is looking up an "

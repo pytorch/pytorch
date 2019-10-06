@@ -294,6 +294,7 @@ def add_torch_libs():
         "torch/csrc/jit/python_ir.cpp",
         "torch/csrc/jit/python_tracer.cpp",
         "torch/csrc/jit/script/init.cpp",
+        "torch/csrc/jit/script/concrete_module_type.cpp",
         "torch/csrc/jit/script/python_sugared_value.cpp",
         "torch/csrc/jit/script/python_tree_views.cpp",
         "torch/csrc/multiprocessing/init.cpp",

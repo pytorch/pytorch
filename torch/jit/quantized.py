@@ -331,11 +331,21 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         if dtype == torch.int8:
             self._orig_weights_names = self._packed_weights_names
 
-        self._packed_weights = torch.jit.Attribute([getattr(self, weight) for weight in self._packed_weights_names], List[Tensor])
-        self._quantized_weights = torch.jit.Attribute([getattr(self, weight) for weight in self._quantized_weights_names], List[Tensor])
-        self._orig_weights = torch.jit.Attribute([getattr(self, weight) for weight in self._orig_weights_names], List[Tensor])
+        self._packed_weights = torch.jit.Attribute(
+            [getattr(self, weight) for weight in self._packed_weights_names],
+            List[Tensor],
+        )
+        self._quantized_weights = torch.jit.Attribute(
+            [getattr(self, weight) for weight in self._quantized_weights_names],
+            List[Tensor],
+        )
+        self._orig_weights = torch.jit.Attribute(
+            [getattr(self, weight) for weight in self._orig_weights_names], List[Tensor]
+        )
         # this one is public
-        self.all_weights = torch.jit.Attribute([getattr(self, weight) for weight in self._all_weights_names], List[Tensor])
+        self.all_weights = torch.jit.Attribute(
+            [getattr(self, weight) for weight in self._all_weights_names], List[Tensor]
+        )
 
     @torch.jit.script_method
     def check_input(self, input, batch_sizes):

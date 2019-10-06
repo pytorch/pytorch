@@ -686,6 +686,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
+    if (obj->type()->is_module()) {
+      return py::cast(script::Module(obj));
+    }
+
     auto pyCu = get_python_cu();
     auto res = tryToConvertToCustomClass(obj);
     if (res.has_value()) {

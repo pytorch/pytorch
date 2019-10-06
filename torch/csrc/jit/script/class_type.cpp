@@ -55,7 +55,9 @@ void ClassType::addMethod(Function* method) {
   TORCH_CHECK(
       getMethod(method->name()) == nullptr,
       "Can't redefine method: ",
-      method->name());
+      method->name(),
+      " on class: ",
+      python_str());
   methods_.push_back(method);
 }
 
