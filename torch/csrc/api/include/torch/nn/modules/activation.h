@@ -146,5 +146,74 @@ class TORCH_API PReLUImpl : public torch::nn::Cloneable<PReLUImpl> {
 
 TORCH_MODULE(PReLU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the ReLU function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReLU to learn
+/// about the exact behavior of this module.
+class TORCH_API ReLUImpl : public torch::nn::Cloneable<ReLUImpl> {
+ public:
+  ReLUImpl() : ReLUImpl(ReLUOptions()) {}
+  explicit ReLUImpl(const ReLUOptions& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `ReLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ReLUOptions options;
+};
+
+TORCH_MODULE(ReLU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReLU6 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the ReLU6 function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReLU6 to learn
+/// about the exact behavior of this module.
+class TORCH_API ReLU6Impl : public torch::nn::Cloneable<ReLU6Impl> {
+ public:
+  ReLU6Impl() : ReLU6Impl(ReLU6Options()) {}
+  explicit ReLU6Impl(const ReLU6Options& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `ReLU6` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ReLU6Options options;
+};
+
+TORCH_MODULE(ReLU6);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the RReLU function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.RReLU to learn
+/// about the exact behavior of this module.
+class TORCH_API RReLUImpl : public torch::nn::Cloneable<RReLUImpl> {
+ public:
+  RReLUImpl() : RReLUImpl(RReLUOptions()) {}
+  explicit RReLUImpl(const RReLUOptions& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `RReLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  RReLUOptions options;
+};
+
+TORCH_MODULE(RReLU);
+
 } // namespace nn
 } // namespace torch
