@@ -884,7 +884,7 @@ jobs:
       - run:
           name: Test
           no_output_timeout: "30min"
-          comand: |
+          command: |
             set -e
             # run xcodebuild
             if ! [ -x "$(command -v xcodebuild)" ]; then
