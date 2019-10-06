@@ -192,5 +192,28 @@ class TORCH_API ReLU6Impl : public torch::nn::Cloneable<ReLU6Impl> {
 
 TORCH_MODULE(ReLU6);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the RReLU function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.RReLU to learn
+/// about the exact behavior of this module.
+class TORCH_API RReLUImpl : public torch::nn::Cloneable<RReLUImpl> {
+ public:
+  RReLUImpl() : RReLUImpl(RReLUOptions()) {}
+  explicit RReLUImpl(const RReLUOptions& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `RReLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  RReLUOptions options;
+};
+
+TORCH_MODULE(RReLU);
+
 } // namespace nn
 } // namespace torch

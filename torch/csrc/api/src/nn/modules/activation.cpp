@@ -152,5 +152,24 @@ void ReLU6Impl::pretty_print(std::ostream& stream) const {
   stream << ")";
 }
 
+// ============================================================================
+
+RReLUImpl::RReLUImpl(const RReLUOptions& options_) : options(options_) {}
+
+Tensor RReLUImpl::forward(Tensor& input) {
+  return F::rrelu(input, options, is_training());
+}
+
+void RReLUImpl::reset() {}
+
+void RReLUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::RReLU(lower=" << options.lower()
+         << ", upper=" << options.upper();
+  if (options.inplace()) {
+    stream << std::boolalpha  << ", inplace=" << options.inplace();
+  }
+  stream << ")";
+}
+
 } // namespace nn
 } // namespace torch
