@@ -2070,6 +2070,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
+    @default_floating_dtype(torch.double)
     def test_sync_params_no_buffers(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
