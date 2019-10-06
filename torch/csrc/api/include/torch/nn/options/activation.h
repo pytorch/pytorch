@@ -20,11 +20,11 @@ struct ELUOptions {
 // ============================================================================
 
 /// Options for SELU functional and module.
-struct SELUOptions {
-  SELUOptions() {}
+struct TORCH_API SELUOptions {
+  /* implicit */ SELUOptions(bool inplace = false);
 
   /// can optionally do the operation in-place. Default: False
-  TORCH_ARG(bool, inplace) = false;
+  TORCH_ARG(bool, inplace);
 };
 
 // ============================================================================
