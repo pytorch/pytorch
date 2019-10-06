@@ -157,8 +157,8 @@ based on observed tensor data are provided, developers can provide their own
 quantization functions. Quantization can be applied selectively to different
 parts of the model or configured differently for different parts of the model.
 
-We also provide support for per channel quantization for **conv2d**\\ ()
-and **linear**\\ ()
+We also provide support for per channel quantization for **conv2d()**
+and **linear()**
 
 Quantization workflows work by adding (e.g. adding observers as
 ``.observer`` submodule) or replacing (e.g. converting ``nn.Conv2d`` to
@@ -182,7 +182,7 @@ The code is organized into the following modules
 
 -  ``torch.quantization`` : this module implements the functions you call
    directly to convert your model from FP32 to quantized form. For
-   example the **prepare() **\\ method is used in post training
+   example the **prepare()** method is used in post training
    quantization to prepares your model for the calibration step and the
    **convert()** method actually converts the weights to int8 and
    replaces the operations with their quantized counterparts. There are
@@ -193,7 +193,7 @@ The code is organized into the following modules
    **ReLU()**. It also contains the functions to convert tensors to and
    from quantized form.
 -  ``torch.nn.qat.modules``: This module implements versions of the key nn
-   modules **Conv2d**\\ () and **Linear**\\ () which will run in FP32
+   modules **Conv2d**() and **Linear()** which will run in FP32
    but with rounding applied to simulate the effect of INT8
    quantization.
 -  ``torch.nn.intrinsic.modules``: This module implements the combined (fused)
