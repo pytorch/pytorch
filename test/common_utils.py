@@ -1074,23 +1074,28 @@ def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
 
 
-def random_symmetric_matrix(l, *batches, dtype=torch.double, device='cpu'):
+def random_symmetric_matrix(l, *batches, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
     A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
 
-def random_symmetric_psd_matrix(l, *batches, dtype=torch.double, device='cpu'):
+def random_symmetric_psd_matrix(l, *batches, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
     return torch.matmul(A, A.transpose(-2, -1))
 
 
-def random_symmetric_pd_matrix(matrix_size, *batch_dims,
-                               dtype=torch.double, device='cpu'):
+def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
                     dtype=dtype, device=device)
     return torch.matmul(A, A.transpose(-2, -1)) \
-         + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
+        + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
@@ -1112,8 +1117,9 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
 
 
 def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
-                                                   dtype=torch.double,
-                                                   device='cpu', **kwargs):
+                                                   **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
     silent = kwargs.get("silent", False)
     if silent and not torch._C.has_lapack:
         return torch.ones(matrix_size, matrix_size, dtype=dtype, device=device)
