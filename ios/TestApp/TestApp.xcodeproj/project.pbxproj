@@ -7,18 +7,12 @@
     objects = {
 
 /* Begin PBXBuildFile section */
-        2A3130761A2D0D67BE05CFF3 /* libpytorch_qnnpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B7460BB1B55EE72A8C7844A4 /* libpytorch_qnnpack.a */; };
-        35F643B4D65EF4820059AAE0 /* libeigen_blas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = F6BBC05D60C1C0CB46F91488 /* libeigen_blas.a */; };
-        3F3BD5CC7587E752F958F0DC /* libcpuinfo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = EE21674274EF95E70EAC1902 /* libcpuinfo.a */; };
-        5AE4CC15443002B40C37A23B /* libclog.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D515594832A47AFAB3C3206B /* libclog.a */; };
-        5CAB7445DFF8A2A76F7C59DB /* libtorch.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5B1254D5F4A328AB657E9DDC /* libtorch.a */; };
         A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB4232F0DB200763E16 /* AppDelegate.m */; };
         A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB7232F0DB200763E16 /* ViewController.mm */; };
         A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CB9232F0DB200763E16 /* Main.storyboard */; };
         A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBC232F0DB200763E16 /* Assets.xcassets */; };
         A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */; };
         A06D4CC3232F0DB200763E16 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CC2232F0DB200763E16 /* main.m */; };
-        BC55AAA8CAD239D3E1E88194 /* libc10.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 627C0D69AA13056692BC85D1 /* libc10.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -45,12 +39,6 @@
             isa = PBXFrameworksBuildPhase;
             buildActionMask = 2147483647;
             files = (
-                BC55AAA8CAD239D3E1E88194 /* libc10.a in Frameworks */,
-                5AE4CC15443002B40C37A23B /* libclog.a in Frameworks */,
-                35F643B4D65EF4820059AAE0 /* libeigen_blas.a in Frameworks */,
-                3F3BD5CC7587E752F958F0DC /* libcpuinfo.a in Frameworks */,
-                2A3130761A2D0D67BE05CFF3 /* libpytorch_qnnpack.a in Frameworks */,
-                5CAB7445DFF8A2A76F7C59DB /* libtorch.a in Frameworks */,
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
