@@ -1092,15 +1092,19 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootRank = self.rank
             pg.gather([[t1] * self.world_size, [t1] * self.world_size], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element output list"):
+        desired_list_size = self.world_size
+        incorrect_list_size = self.world_size - 1
+        err_str = "Incorrect output list size {}. Output list size should be {}"
+        with self.assertRaisesRegex(ValueError, err_str.format(incorrect_list_size, desired_list_size)):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
-            pg.gather([[t1] * (self.world_size - 1)], [t1], opts)
+            pg.gather([[t1] * incorrect_list_size], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element output list"):
+        incorrect_list_size = self.world_size + 1
+        with self.assertRaisesRegex(ValueError, err_str.format(incorrect_list_size, desired_list_size)):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
-            pg.gather([[t1] * (self.world_size + 1)], [t1], opts)
+            pg.gather([[t1] * incorrect_list_size], [t1], opts)
 
         with self.assertRaisesRegex(ValueError, "invalid tensor type"):
             opts = c10d.GatherOptions()
