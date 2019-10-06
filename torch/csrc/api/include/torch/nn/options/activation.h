@@ -19,6 +19,16 @@ struct ELUOptions {
 
 // ============================================================================
 
+/// Options for SELU functional and module.
+struct SELUOptions {
+  SELUOptions() {}
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
+};
+
+// ============================================================================
+
 /// Options for Hardshrink functional and module.
 struct TORCH_API HardshrinkOptions {
   /* implicit */ HardshrinkOptions(double lambda = 0.5);

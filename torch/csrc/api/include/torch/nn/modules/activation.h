@@ -32,6 +32,29 @@ class TORCH_API ELUImpl : public torch::nn::Cloneable<ELUImpl> {
 
 TORCH_MODULE(ELU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the selu function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.SELU to learn
+/// about the exact behavior of this module.
+class TORCH_API SELUImpl : public torch::nn::Cloneable<SELUImpl> {
+ public:
+  SELUImpl() : SELUImpl(SELUOptions()) {}
+  explicit SELUImpl(const SELUOptions& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `SELU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  SELUOptions options;
+};
+
+TORCH_MODULE(SELU);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Hardshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the hard shrinkage function element-wise.
