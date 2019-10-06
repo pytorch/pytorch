@@ -81,5 +81,15 @@ struct TORCH_API ReLUOptions {
   TORCH_ARG(bool, inplace);
 };
 
+// ============================================================================
+
+/// Options for ReLU6 functional and module.
+struct TORCH_API ReLU6Options {
+  /* implicit */ ReLU6Options(bool inplace = false);
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace);
+};
+
 } // namespace nn
 } // namespace torch

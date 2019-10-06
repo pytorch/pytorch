@@ -52,6 +52,11 @@ inline Tensor relu(Tensor& input, const ReLUOptions& options) {
   }
 }
 
+inline Tensor relu6(Tensor& input, const ReLU6Options& options) {
+  return hardtanh(input,
+    HardtanhOptions().min_val(0).max_val(6).inplace(options.inplace()));
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

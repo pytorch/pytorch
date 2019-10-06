@@ -386,3 +386,20 @@ TEST_F(FunctionalTest, ReLU) {
     }
   }
 }
+
+TEST_F(FunctionalTest, ReLU6) {
+  const auto size = 3;
+  for (const auto inplace : {false, true}) {
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size});
+    auto y_exp = (x < 0) * 0 + ((x >= 0) * (x <= 6)) * x + (x > 6) * 6;
+    auto y = F::relu6(x, ReLU6Options().inplace(inplace));
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+    if (inplace) {
+      ASSERT_TRUE(torch::allclose(x, y_exp));
+    }
+  }
+}
