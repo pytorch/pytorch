@@ -1080,6 +1080,25 @@ TEST_F(ModulesTest, HardtanhMinValGEMaxVal) {
   ASSERT_THROWS_WITH(ht->reset(), "max_val must be greater than min_val");
 }
 
+TEST_F(ModulesTest, LeakyReLU) {
+  const auto size = 3;
+  for (const auto negative_slope : {0.0, 0.42, 1.0}) {
+    LeakyReLU model {LeakyReLUOptions().negative_slope(negative_slope)};
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = (x < 0) * x * negative_slope + (x >= 0) * x;
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1321,4 +1340,12 @@ TEST_F(ModulesTest, PrettyPrintHardtanh) {
   ASSERT_EQ(c10::str(Hardtanh(
       HardtanhOptions().min_val(-42.42).max_val(0.42).inplace(true))),
     "torch::nn::Hardtanh(min_val=-42.42, max_val=0.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintLeakyReLU) {
+  ASSERT_EQ(c10::str(LeakyReLU()),
+    "torch::nn::LeakyReLU(negative_slope=0.01)");
+  ASSERT_EQ(c10::str(LeakyReLU(
+      LeakyReLUOptions().negative_slope(0.42).inplace(true))),
+    "torch::nn::LeakyReLU(negative_slope=0.42, inplace=true)");
 }
