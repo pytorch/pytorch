@@ -43,6 +43,7 @@ target.build_configurations.each do |config|
     config.build_settings['LIBRARY_SEARCH_PATHS']   = libraries_search_path
     config.build_settings['OTHER_LINKER_FLAGS']     = other_linker_flags
     config.build_settings['ENABLE_BITCODE']         = 'No'
+    config.build_settings['DEVELOPMENT_TEAM']         = 'GW8XWHWQR7'
 end
 
 # link static libraries
