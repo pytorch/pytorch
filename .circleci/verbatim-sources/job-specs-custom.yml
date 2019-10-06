@@ -434,7 +434,6 @@
             PROFILE=427d437c-9927-4228-8e9c-d750f55ba1a3
             PROVISIONING_PROFILES="~/Library/MobileDevice/Provisioning\ Profiles/"
             mkdir -pv "${PROVISIONING_PROFILES}"
-            cd ${PROVISIONING_PROFILES}
             set +x
             export CODE_SIGN=${IOS_SIGN_KEY}
             set +x
