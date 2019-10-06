@@ -472,7 +472,7 @@
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
       - run:
           name: Test
-          no_output_timeout: "30min"
+          no_output_timeout: "30m"
           command: |
             set -e
             # run xcodebuild
