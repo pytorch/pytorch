@@ -413,6 +413,33 @@
       - checkout
       - run_brew_for_ios_build
       - run:
+          name: cert install
+          no_output_timeout: "1h"
+          command: |
+            set -e 
+            PROJ_ROOT=/Users/distiller/project
+            cd ${PROJ_ROOT}/ios/TestApp
+            # install fastlane
+            gem install bundler && bundle install
+            # install certificate
+            set +x
+            export CERT=${IOS_CERT_KEY}
+            set +x
+            echo $CERT >> cert.txt
+            base64 --decode cert.txt -o Certificates.p12
+            rm cert.txt
+            bundle exec fastlane install_cert
+            # decode provisioning profile
+            PROFILE=427d437c-9927-4228-8e9c-d750f55ba1a3
+            PROVISIONING_PROFILES="~/Library/MobileDevice/Provisioning\ Profiles/"
+            mkdir -pv "${PROVISIONING_PROFILES}"
+            set +x
+            export CODE_SIGN=${IOS_SIGN_KEY}
+            set +x
+            echo ${CODE_SIGN} >> cert.txt
+            base64 --decode cert.txt -o "${PROVISIONING_PROFILES}/${PROFILE}.mobileprovision"
+            rm cert.txt
+      - run:
           name: Build
           no_output_timeout: "1h"
           command: |
@@ -421,7 +448,6 @@
             export WORKSPACE=/Users/distiller/workspace
             export PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib"
-
             # Install conda
             curl -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
             chmod +x ~/Downloads/conda.sh
@@ -448,36 +474,16 @@
           name: Test
           no_output_timeout: "30min"
           comand: |
-          # run xcodebuild
-          if ! [ -x "$(command -v xcodebuild)" ]; then
-            echo 'Error: xcodebuild is not installed.'
-            exit 1
-          fi 
-          cd ${PROJ_ROOT}/ios/TestApp
-          # install fastlane
-          gem install bundler && bundle install
-          # install certificate
-          set +x
-          export CERT=${IOS_CERT_KEY}
-          set +x
-          echo $CERT >> cert.txt
-          base64 --decode cert.txt -o Certificates.p12
-          rm cert.txt
-          bundle exec fastlane install_cert
-          # decode provisioning profile
-          PROFILE=427d437c-9927-4228-8e9c-d750f55ba1a3
-          PROVISIONING_PROFILES="~/Library/MobileDevice/Provisioning\ Profiles/"
-          mkdir -pv "${PROVISIONING_PROFILES}"
-          set +x
-          export CODE_SIGN=${IOS_SIGN_KEY}
-          set +x
-          echo ${CODE_SIGN} >> cert.txt
-          base64 --decode cert.txt -o "${PROVISIONING_PROFILES}/${PROFILE}.mobileprovision"
-          rm cert.txt
-          # run build script
-          ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE}
-          if ! [ "$?" -eq "0" ]; then
-            echo 'xcodebuild failed!'
-            exit 1
-          fi
+            set -e
+            # run xcodebuild
+            if ! [ -x "$(command -v xcodebuild)" ]; then
+              echo 'Error: xcodebuild is not installed.'
+              exit 1
+            fi 
+            # run build script
+            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE}
+            if ! [ "$?" -eq "0" ]; then
+              echo 'xcodebuild failed!'
+              exit 1
+            fi
 
