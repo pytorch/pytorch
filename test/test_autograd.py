@@ -22,7 +22,7 @@ from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, slowTest,
                           load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
-from common_cuda import TEST_CUDA, TEST_CUDNN, TEST_CUDNN_VERSION
+from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
@@ -35,7 +35,7 @@ from common_methods_invocations import (method_tests,
                                         mask_not_all_zeros,
                                         S)
 from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                onlyCUDA, dtypes, dtypesIfCUDA)
+                                onlyCUDA, dtypes, dtypesIfCUDA, skipCUDAIfCudnnVersionLessThan)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3833,7 +3833,7 @@ class TestAutogradDeviceType(TestCase):
             gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
 
     @skipCUDAIfRocm
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 7000), "needs cudnn >= 7.0")
+    @skipCUDAIfCudnnVersionLessThan(7000)
     def test_ctc_loss_cudnn(self, device):
         batch_size = 16
         input_length = 30
@@ -3847,12 +3847,14 @@ class TestAutogradDeviceType(TestCase):
         input_lengths = batch_size * [input_length]
         target_lengths = batch_size * [target_length]
         grad_out = torch.randn(batch_size, device='cuda', dtype=torch.float)
-        loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
-        grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
+        with torch.backends.cudnn.flags(enabled=False):
+            loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+            grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
         loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cpu', torch.int32),
                                                   input_lengths, target_lengths, reduction='none')
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
+        print(grad_cudnn, grad_native)
         self.assertEqual(grad_cudnn, grad_native, prec=1e-4)
 
     @onlyCUDA
