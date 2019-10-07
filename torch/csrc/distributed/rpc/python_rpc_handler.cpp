@@ -23,12 +23,9 @@ PythonRpcHandler::PythonRpcHandler() {
 // PythonRpcHandler singleton when program exits, all memories will be cleaned
 // up by OS.
 PythonRpcHandler::~PythonRpcHandler() {
-  if (!runUDFFunction_.is_none()) {
-    runUDFFunction_ = py::none();
-  }
-  if (!loadResultFunction_.is_none()) {
-    loadResultFunction_ = py::none();
-  }
+  runUDFFunction_ = py::none();
+  loadResultFunction_ = py::none();
+  serializeFunction_ = py::none();
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
