@@ -10,11 +10,13 @@ inline Tensor affine_grid(
     const Tensor& theta,
     const IntArrayRef& size,
     bool align_corners = false) {
+  // enforce floating point dtype on theta
   TORCH_CHECK(
       theta.is_floating_point(),
       "Expected theta to have floating point type, but got ",
       theta.dtype());
 
+  // check that shapes and sizes match
   if (size.size() == 4) {
     TORCH_CHECK(
         theta.dim() == 3 && theta.size(1) == 2 && theta.size(2) == 3,
