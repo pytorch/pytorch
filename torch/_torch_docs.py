@@ -1093,11 +1093,6 @@ and `c` is returned such that:
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `c`
 
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `b, u` must be 2D matrices.
-
 Args:
     input (Tensor): input matrix :math:`b` of size :math:`(*, m, k)`,
                 where :math:`*` is zero or more batch dimensions
@@ -5561,11 +5556,6 @@ with the default keyword arguments.
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
-
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `b, A` must be 2D matrices.
 
 Args:
     input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
