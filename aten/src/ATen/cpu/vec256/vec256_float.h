@@ -158,7 +158,7 @@ public:
     return _mm256_floor_ps(values);
   }
   Vec256<float> max(const Vec256<float> &b) const {
-    return Vec256<float>(Sleef_fmaxf(values, b));
+    return Vec256<float>(Sleef_fmaxf8_u10(values, b));
   }
   Vec256<float> neg() const {
     return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
