@@ -254,5 +254,70 @@ class TORCH_API RReLUImpl : public torch::nn::Cloneable<RReLUImpl> {
 
 TORCH_MODULE(RReLU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies celu over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.CELU to learn
+/// about the exact behavior of this module.
+class TORCH_API CELUImpl : public torch::nn::Cloneable<CELUImpl> {
+ public:
+  CELUImpl() : CELUImpl(CELUOptions()) {}
+  explicit CELUImpl(const CELUOptions& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `CELU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  CELUOptions options;
+};
+
+TORCH_MODULE(CELU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Sigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies sigmoid over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Sigmoid to learn
+/// about the exact behavior of this module.
+class TORCH_API SigmoidImpl : public torch::nn::Cloneable<SigmoidImpl> {
+ public:
+  explicit SigmoidImpl() {}
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Sigmoid` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(Sigmoid);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softplus ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies softplus over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softplus to learn
+/// about the exact behavior of this module.
+class TORCH_API SoftplusImpl : public torch::nn::Cloneable<SoftplusImpl> {
+ public:
+  SoftplusImpl() : SoftplusImpl(SoftplusOptions()) {}
+  explicit SoftplusImpl(const SoftplusOptions& options_);
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Softplus` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  SoftplusOptions options;
+};
+
+TORCH_MODULE(Softplus);
+
 } // namespace nn
 } // namespace torch

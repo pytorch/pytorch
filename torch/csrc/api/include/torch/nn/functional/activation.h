@@ -66,6 +66,22 @@ inline Tensor rrelu(Tensor& input, const RReLUOptions& options, bool training=fa
   }
 }
 
+inline Tensor celu(Tensor& input, const CELUOptions& options) {
+  if (options.inplace()) {
+    return torch::celu_(input, options.alpha());
+  } else {
+    return torch::celu(input, options.alpha());
+  }
+}
+
+inline Tensor sigmoid(const Tensor& input) {
+  return torch::sigmoid(input);
+}
+
+inline Tensor softplus(const Tensor& input, const SoftplusOptions& options) {
+  return torch::softplus(input, options.beta(), options.threshold());
+}
+
 inline Tensor multi_head_attention_forward(
   const Tensor& query,
   const Tensor& key,
