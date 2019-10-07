@@ -11,7 +11,7 @@ class Conv2d(NNConv2d):
     https://pytorch.org/docs/stable/nn.html?highlight=conv2d#torch.nn.Conv2d
     for documentation.
 
-    Similar to `torch.nn.Conv2d`, with FakeQuantize modules initialized to
+    Similar to :class:`torch.nn.Conv2d`, with FakeQuantize modules initialized to
     default.
 
     Attributes:
