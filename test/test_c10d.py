@@ -949,20 +949,19 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootRank = self.rank
             pg.scatter([t1], [[t1] * self.world_size, [t1] * self.world_size], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
+        desired_list_size = self.world_size
+        incorrect_list_size = self.world_size - 1
+        err_str = "Incorrect input list size {}. Input list size should be {}"
+        with self.assertRaisesRegex(ValueError, err_str.format(incorrect_list_size, desired_list_size)):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
-            pg.scatter([t1], [[t1] * (self.world_size - 1)], opts)
+            pg.scatter([t1], [[t1] * incorrect_list_size], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
+        incorrect_list_size = self.world_size + 1
+        with self.assertRaisesRegex(ValueError, err_str.format(incorrect_list_size, desired_list_size)):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
-            pg.scatter([t1], [[t1] * (self.world_size + 1)], opts)
-
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
-            opts = c10d.ScatterOptions()
-            opts.rootRank = self.rank
-            pg.scatter([t1], [[t1] * (self.world_size + 1)], opts)
+            pg.scatter([t1], [[t1] * incorrect_list_size], opts)
 
         with self.assertRaisesRegex(ValueError, "invalid tensor type"):
             opts = c10d.ScatterOptions()
