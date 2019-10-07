@@ -22,33 +22,12 @@ import torch.onnx.symbolic_opset9
 
 @parse_args('v', 'i', 'i', 'none')
 def sort(g, self, dim, decending, out=None):
-    if out is not None:
-        _unimplemented("Sort", "Out parameter is not supported for sort")
-
-    # TODO: add decending to ONNX TopK so ascending sort is supported
-    if not decending:
-        _unimplemented("Sort", "Cannot sort in ascending order")
-
-    shape_ = g.op("Shape", self)
-    axis = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
-    start = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64)) 
-    end = g.op("Constant", value_t=torch.tensor(dim + 1, dtype=torch.int64)) 
-    slice_ = sym_help._slice_helper(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
-    return g.op("TopK", self, slice_, axis_i=dim, outputs=2)
+    return sym_help._sort_helper(g, self, dim, decending=decending, out=out)
 
 
 @parse_args('v', 'v', 'i', 'i', 'i', 'none')
 def topk(g, self, k, dim, largest, sorted, out=None):
-    if out is not None:
-        _unimplemented("TopK", "Out parameter is not supported for topk")
-    if not largest:
-        _unimplemented("TopK", "Ascending TopK is not supported")
-    k = sym_help._maybe_get_const(k, 'i')
-    if not sym_help._is_value(k):
-        k = g.op("Constant", value_t=torch.tensor(k, dtype=torch.int64))
-    from torch.onnx.symbolic_opset9 import unsqueeze
-    k = unsqueeze(g, k, 0)
-    return g.op("TopK", self, k, axis_i=dim, outputs=2)
+    return sym_help._topk_helper(g, self, k, dim, largest=largest, sorted=sorted, out=out)
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
@@ -189,3 +168,7 @@ def flip(g, input, dims):
                                   starts=[-1] * len(dims),
                                   ends=[-9223372036854775807] * len(dims),
                                   steps=[-1] * len(dims))
+
+
+def fmod(g, input, other):
+    return g.op("Mod", input, other, fmod_i=1)

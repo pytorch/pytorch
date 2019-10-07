@@ -27,7 +27,7 @@ class Tensor(torch._C._TensorBase):
         if id(self) in memo:
             return memo[id(self)]
         with torch.no_grad():
-            if self.is_sparse:
+            if self.is_sparse or self.device.type == 'xla':
                 new_tensor = self.clone()
             else:
                 new_storage = self.storage().__deepcopy__(memo)
@@ -41,6 +41,22 @@ class Tensor(torch._C._TensorBase):
         check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
+        # Note: Numpy array is chosen to be the rebuild component for XLA Tensor.
+        # We considered a few options:
+        # 1. CPU tensor can't be used here.
+        #    Otherwise in torch.load CPU storage is reconstructed with randomly
+        #    initialized data, moved onto XLA device, and then storage is updated
+        #    to the serialized content. This works perfectly for CPU/CUDA but not XLA.
+        #    XLA tensor is disconnected with storage so it doesn't get the update.
+        # 2. Python list is not a good fit due to performance reason.
+        #    `tolist()` converts every single element in the tensor into python objects
+        #    and serialize them one by one.
+        if self.device.type == 'xla':
+            args = (self.cpu().numpy(),
+                    self.dtype,
+                    str(self.device),
+                    self.requires_grad)
+            return (torch._utils._rebuild_xla_tensor, args)
         if self.is_quantized:
             if self.qscheme() == torch.per_tensor_affine:
                 quantizer_params = (torch.per_tensor_affine,
@@ -64,6 +80,16 @@ class Tensor(torch._C._TensorBase):
                     self.requires_grad,
                     OrderedDict())
             return (torch._utils._rebuild_qtensor, args)
+        elif self.is_sparse:
+            if self.layout == torch.sparse_coo:
+                args = (self.layout,
+                        (self._indices(),
+                         self._values(),
+                         self.size()))
+            else:
+                raise NotImplementedError(
+                    'sparse tensor __reduce_ex__ for layout `%s`' % (self.layout))
+            return (torch._utils._rebuild_sparse_tensor, args)
         else:
             args = (self.storage(),
                     self.storage_offset(),
@@ -398,6 +424,8 @@ class Tensor(torch._C._TensorBase):
         return id(self)
 
     def __dir__(self):
+        if self.is_quantized:
+            warnings.warn('Only a small subset of methods are supported for quantized tensors.')
         tensor_methods = dir(self.__class__)
         tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())

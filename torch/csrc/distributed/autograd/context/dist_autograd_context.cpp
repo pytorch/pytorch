@@ -13,14 +13,39 @@ int64_t DistAutogradContext::context_id() const {
 }
 
 void DistAutogradContext::addSendFunction(
-    const std::shared_ptr<SendRpcBackward>& func) {
+    const std::shared_ptr<SendRpcBackward>& func,
+    int64_t autograd_message_id) {
+  TORCH_INTERNAL_ASSERT(func != nullptr);
+
   std::lock_guard<std::mutex> guard(lock_);
-  sendAutogradFunctions_.push_back(func);
+  TORCH_INTERNAL_ASSERT(
+      sendAutogradFunctions_.find(autograd_message_id) ==
+      sendAutogradFunctions_.end());
+  sendAutogradFunctions_.emplace(autograd_message_id, func);
 }
 
-std::vector<std::shared_ptr<SendRpcBackward>> DistAutogradContext::
-    sendFunctions() const {
+void DistAutogradContext::addRecvFunction(
+    std::shared_ptr<RecvRpcBackward>& func,
+    int64_t autograd_message_id) {
+  TORCH_INTERNAL_ASSERT(func != nullptr);
+
+  std::lock_guard<std::mutex> guard(lock_);
+  TORCH_INTERNAL_ASSERT(
+      recvAutogradFunctions_.find(autograd_message_id) ==
+      recvAutogradFunctions_.end());
+  recvAutogradFunctions_.emplace(autograd_message_id, func);
+}
+
+std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>
+DistAutogradContext::sendFunctions() const {
+  std::lock_guard<std::mutex> guard(lock_);
   return sendAutogradFunctions_;
+}
+
+std::unordered_map<int64_t, std::shared_ptr<RecvRpcBackward>>
+DistAutogradContext::recvFunctions() const {
+  std::lock_guard<std::mutex> guard(lock_);
+  return recvAutogradFunctions_;
 }
 
 } // namespace autograd

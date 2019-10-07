@@ -152,7 +152,7 @@ Tensor align_to(const Tensor& tensor, DimnameList names) {
     const auto& dim = tensor_names[idx];
     TORCH_CHECK(dim.isBasic(),
         "align_to: All input dims must be named. Found unnamed dim at index ",
-        dim, " of Tensor", tensor_names);
+        idx, " of Tensor", tensor_names);
     auto it = std::find(names.begin(), names.end(), dim);
     TORCH_CHECK(it != names.end(),
         "align_to: Cannot find dim ", dim, " from Tensor", names,
@@ -248,16 +248,16 @@ Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor&
   reportNYIDimnameOverload("index_add");
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
-  reportNYIDimnameOverload("index_fill");
+  return at::index_fill(self, dimname_to_position(self, dim), index, source);
 }
 Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
-  reportNYIDimnameOverload("index_fill");
+  return self.index_fill_(dimname_to_position(self, dim), index, source);
 }
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-  reportNYIDimnameOverload("index_fill");
+  return at::index_fill(self, dimname_to_position(self, dim), index, source);
 }
 Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
-  reportNYIDimnameOverload("index_fill");
+  return self.index_fill_(dimname_to_position(self, dim), index, source);
 }
 Tensor index_copy(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("index_copy");
@@ -299,7 +299,7 @@ Tensor& squeeze_(Tensor& self, Dimname dim) {
   reportNYIDimnameOverload("squeeze");
 }
 Tensor squeeze(const Tensor& self, Dimname dim) {
-  reportNYIDimnameOverload("squeeze");
+  return at::squeeze(self, dimname_to_position(self, dim));
 }
 
 #endif
