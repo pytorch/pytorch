@@ -3834,7 +3834,7 @@ class TestAutogradDeviceType(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
-    @skipCUDAIfCudnnVersionLessThan(7000)
+    @skipCUDAIfCudnnVersionLessThan(7600)
     def test_ctc_loss_cudnn(self, device):
         batch_size = 16
         input_length = 30
