@@ -3832,6 +3832,7 @@ class TestAutogradDeviceType(TestCase):
 
             gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
 
+    @onlyCUDA
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(7000)
     def test_ctc_loss_cudnn(self, device):
