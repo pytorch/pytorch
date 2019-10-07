@@ -107,5 +107,18 @@ struct RReLUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
+// ============================================================================
+
+/// Options for CELU functional and module.
+struct CELUOptions {
+  CELUOptions() {}
+
+  /// The alpha value for the CELU formulation. Default: 1.0
+  TORCH_ARG(double, alpha) = 1.0;
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
+};
+
 } // namespace nn
 } // namespace torch

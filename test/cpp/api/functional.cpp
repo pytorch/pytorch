@@ -427,3 +427,23 @@ TEST_F(FunctionalTest, RReLU) {
     }
   }
 }
+
+TEST_F(FunctionalTest, CELU) {
+  const auto size = 3;
+  for (const auto inplace : {false, true}) {
+    for (const auto alpha : {0.42, 1.0, 4.2, 42.42}) {
+      auto x = torch::linspace(-10.0, 10.0, size * size * size);
+      x.resize_({size, size, size});
+      auto y_exp = torch::max(torch::zeros_like(x), x) +
+        torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+      auto y = F::celu(x, CELUOptions().alpha(alpha).inplace(inplace));
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+      if (inplace) {
+        ASSERT_TRUE(torch::allclose(x, y_exp));
+      }
+    }
+  }
+}

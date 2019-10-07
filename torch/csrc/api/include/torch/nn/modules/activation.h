@@ -215,5 +215,28 @@ class TORCH_API RReLUImpl : public torch::nn::Cloneable<RReLUImpl> {
 
 TORCH_MODULE(RReLU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies celu over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.CELU to learn
+/// about the exact behavior of this module.
+class TORCH_API CELUImpl : public torch::nn::Cloneable<CELUImpl> {
+ public:
+  CELUImpl() : CELUImpl(CELUOptions()) {}
+  explicit CELUImpl(const CELUOptions& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `CELU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  CELUOptions options;
+};
+
+TORCH_MODULE(CELU);
+
 } // namespace nn
 } // namespace torch

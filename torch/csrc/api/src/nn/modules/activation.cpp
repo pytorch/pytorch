@@ -171,5 +171,23 @@ void RReLUImpl::pretty_print(std::ostream& stream) const {
   stream << ")";
 }
 
+// ============================================================================
+
+CELUImpl::CELUImpl(const CELUOptions& options_) : options(options_) {}
+
+Tensor CELUImpl::forward(Tensor& input) {
+  return F::celu(input, options);
+}
+
+void CELUImpl::reset() {}
+
+void CELUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::CELU(alpha=" << options.alpha();
+  if (options.inplace()) {
+    stream << std::boolalpha  << ", inplace=" << options.inplace();
+  }
+  stream << ")";
+}
+
 } // namespace nn
 } // namespace torch
