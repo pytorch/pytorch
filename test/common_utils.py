@@ -185,7 +185,6 @@ TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-TEST_WITH_QNNPACK = os.getenv('PYTORCH_TEST_WITH_QNNPACK', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -208,6 +207,26 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+
+def skipIfCompiledWithoutNumpy(fn):
+    # Even if the numpy module is present, if `USE_NUMPY=0` is used during the
+    # build, numpy tests will fail
+    numpy_support = TEST_NUMPY
+    if numpy_support:
+        try:
+            # The numpy module is present, verify that PyTorch is compiled with
+            # numpy support
+            torch.from_numpy(numpy.array([2, 2]))
+        except RuntimeError:
+            numpy_support = False
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not numpy_support:
+            raise unittest.SkipTest("PyTorch was compiled without numpy support")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 
 def _test_function(fn, device):
@@ -638,11 +657,6 @@ class TestCase(expecttest.TestCase):
                     if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
                         # CPU half and bfloat16 tensors don't have the methods we need below
                         a = a.to(torch.float32)
-
-                    if (a.device.type == 'cuda' and a.dtype == torch.bfloat16):
-                        # CUDA bfloat16 tensors don't have the methods we need below
-                        a = a.to(torch.float32)
-
                     b = b.to(a)
 
                     if (a.dtype == torch.bool) != (b.dtype == torch.bool):
@@ -681,11 +695,21 @@ class TestCase(expecttest.TestCase):
             elif x.is_quantized and y.is_quantized:
                 self.assertEqual(x.qscheme(), y.qscheme(), prec=prec,
                                  message=message, allow_inf=allow_inf)
-                self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
-                                 message=message, allow_inf=allow_inf)
-                self.assertEqual(x.q_zero_point(), y.q_zero_point(),
-                                 prec=prec, message=message,
-                                 allow_inf=allow_inf)
+                if x.qscheme() == torch.per_tensor_affine:
+                    self.assertEqual(x.q_scale(), y.q_scale(), prec=prec,
+                                     message=message, allow_inf=allow_inf)
+                    self.assertEqual(x.q_zero_point(), y.q_zero_point(),
+                                     prec=prec, message=message,
+                                     allow_inf=allow_inf)
+                elif x.qscheme() == torch.per_channel_affine:
+                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), prec=prec,
+                                     message=message, allow_inf=allow_inf)
+                    self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
+                                     prec=prec, message=message,
+                                     allow_inf=allow_inf)
+                    self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
+                                     prec=prec, message=message)
+                self.assertEqual(x.dtype, y.dtype)
                 self.assertEqual(x.int_repr().to(torch.int32),
                                  y.int_repr().to(torch.int32), prec=prec,
                                  message=message, allow_inf=allow_inf)

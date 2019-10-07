@@ -226,7 +226,6 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::stringstream err;
   std::vector<NamedValue> new_inputs = inputs.vec();
   new_inputs.insert(new_inputs.begin(), module_);
 
@@ -245,7 +244,7 @@ std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
           c10::nullopt,
           new_inputs,
           attributes,
-          &err,
+          &failure_messages,
           allow_conversions);
       if (match) {
         return MethodValue(module_, method_name)
@@ -340,21 +339,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
-  // workaround to make self.training work
-  // it adds a buffer 'training' to the model if one doesn't exist
-  // and then loads that parameter, casting it to bool
-  if (field == "training") {
-    c10::optional<Slot> v = module_.find_attribute(field);
-    if (!v) {
-      bool training = py::cast<bool>(py::getattr(py_module_, "training"));
-      module_.register_attribute(
-          "training", BoolType::get(), std::move(training));
-      v = module_.find_attribute(field);
-    }
-    Value* the_bool = m.graph()->insertGetAttr(self_, "training");
-    return std::make_shared<SimpleValue>(the_bool);
-  }
-
   if (auto v = module_.find_module(field)) {
     return std::make_shared<ModuleValue>(
         m.graph()->insertGetAttr(self_, field),
@@ -504,19 +488,25 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   auto index = py::cast<size_t>(dispatched_fn_["index"]);
   auto arg_name = py::str(dispatched_fn_["arg_name"]);
 
+  ErrorReport error(loc);
   if (index < inputs.size()) {
     // Dispatch flag is in arg list
     result = constant_as<bool>(inputs.at(index).value(graph));
+    error << "Argument for boolean dispatch at position " << index
+          << " was not constant";
   } else if (auto i = findInputWithName(arg_name, attributes)) {
     // Dispatch flag is in kwargs
     result = constant_as<bool>(attributes[*i].value(graph));
+    error << "Keyword argument '" << arg_name
+          << "' for boolean dispatch at position was not constant";
   } else {
     // Didn't find dispatch flag, so use default value
     result = py::cast<bool>(dispatched_fn_["default"]);
+    TORCH_INTERNAL_ASSERT(result);
   }
 
   if (!result) {
-    throw ErrorReport(loc) << "value for boolean dispatch was not constant";
+    throw error;
   }
 
   std::shared_ptr<SugaredValue> value;
@@ -565,6 +555,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
       const auto v = static_cast<uint8_t>(qscheme->qscheme);
       return toSimple(g.insertConstant(v, loc));
+    } else if (THPLayout_Check(obj.ptr())) {
+      auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+      const auto l = static_cast<int8_t>(layout->layout);
+      return toSimple(g.insertConstant(l, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       return std::make_shared<ConstantPythonTupleValue>(obj);
     }
@@ -575,10 +569,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
-    return std::make_shared<ForkValue>();
+    return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
-    return std::make_shared<AnnotateValue>();
+    return SpecialFormValue::create(prim::annotate);
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
                            << " a submodule of the caller";
@@ -660,6 +654,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     if (auto callee = as_function(compiled_fn)) {
       return std::make_shared<FunctionValue>(*callee);
     }
+  }
+
+  py::bool_ isMethod = py::module::import("inspect").attr("ismethod")(obj);
+  // methods here have been explicitly annotated to not be compiled,
+  // so they do not have the same overload and compile checks as for functions
+  if (isFunction || isMethod) {
     auto rcb = py::module::import("torch.jit").attr("_gen_rcb")(obj, 0);
     return std::make_shared<PythonValue>(obj, rcb);
   }

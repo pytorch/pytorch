@@ -1,9 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/SmallVector.h>
+#include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #include <cmath>
 
 namespace at {
@@ -152,8 +154,6 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         {pad_l, pad_t, pad_l, pad_t},
         {static_cast<int>(dilation[0]), static_cast<int>(dilation[1])});
 
-    fbgemm::DoNothing<> NoOpObj{};
-
     float act_scale = act.q_scale();
     int32_t act_zero_point = act.q_zero_point();
 
@@ -194,9 +194,9 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       TORCH_CHECK(false, "[QConv2D] Unknown quantization scheme");
     }
 
-    // TODO: change convOutputShape to return NCHW sizes once perf is fixed
-    auto outShape =
-        convOutputShape(N, K, H, W, kernel, stride, padding, dilation);
+    // TODO: change the following to NCHW sizes once perf is fixed
+    SmallVector<int64_t, 4> outShape{
+        N, conv_p.OUT_DIM[0], conv_p.OUT_DIM[1], K};
     TORCH_CHECK(
         std::all_of(
             outShape.begin(), outShape.end(), [](int64_t i) { return i > 0; }),
@@ -207,63 +207,69 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     // TODO: add MemoryFormat::ChannelsLast here once perf is fixed
     Tensor output = _empty_affine_quantized(
         outShape, device(kCPU).dtype(kQUInt8), output_scale, output_zero_point);
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto buffer = at::empty(output.sizes(), output.options().dtype(at::kInt));
 
-    if (pack_ptr.q_scheme == kPerTensorAffine) {
-      fbgemm::ReQuantizeOutput<
-          ReluFused,
-          fbgemm::QuantizationGranularity::TENSOR,
-          float>
-          outputProcObj(
-              NoOpObj,
-              output_multiplier_float.data(),
-              output_zero_point,
-              act_zero_point,
-              pack_ptr.w_zp.data(),
-              nullptr, /* row offset buffer */
-              col_offsets.data(),
-              bias_ptr,
-              K,
-              groups,
-              act_times_w_scale.data());
-      fbgemm::fbgemmConv(
-          conv_p,
-          act_ptr,
-          *packB,
-          reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-          buffer.data_ptr<int32_t>(),
-          outputProcObj,
-          0 /* thread_id*/,
-          1 /* num_threads */);
+    int num_tasks = at::get_num_threads();
+    at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+      fbgemm::DoNothing<> NoOpObj{};
+      for (int task_id = begin; task_id < end; ++task_id) {
+        if (pack_ptr.q_scheme == kPerTensorAffine) {
+          fbgemm::ReQuantizeOutput<
+              ReluFused,
+              fbgemm::QuantizationGranularity::TENSOR,
+              float>
+              outputProcObj(
+                  NoOpObj,
+                  output_multiplier_float.data(),
+                  output_zero_point,
+                  act_zero_point,
+                  pack_ptr.w_zp.data(),
+                  nullptr, /* row offset buffer */
+                  col_offsets.data(),
+                  bias_ptr,
+                  K,
+                  groups,
+                  act_times_w_scale.data());
+          fbgemm::fbgemmConv(
+              conv_p,
+              act_ptr,
+              *packB,
+              reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+              buffer.data_ptr<int32_t>(),
+              outputProcObj,
+              task_id /* thread_id*/,
+              num_tasks /* num_threads */);
 
-    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
-      fbgemm::ReQuantizeOutput<
-          ReluFused,
-          fbgemm::QuantizationGranularity::OUT_CHANNEL,
-          float>
-          outputProcObj(
-              NoOpObj,
-              output_multiplier_float.data(),
-              output_zero_point,
-              act_zero_point,
-              pack_ptr.w_zp.data(),
-              nullptr, /* row offset buffer */
-              col_offsets.data(),
-              bias_ptr,
-              K,
-              groups,
-              act_times_w_scale.data());
+        } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+          fbgemm::ReQuantizeOutput<
+              ReluFused,
+              fbgemm::QuantizationGranularity::OUT_CHANNEL,
+              float>
+              outputProcObj(
+                  NoOpObj,
+                  output_multiplier_float.data(),
+                  output_zero_point,
+                  act_zero_point,
+                  pack_ptr.w_zp.data(),
+                  nullptr, /* row offset buffer */
+                  col_offsets.data(),
+                  bias_ptr,
+                  K,
+                  groups,
+                  act_times_w_scale.data());
 
-      fbgemm::fbgemmConv(
-          conv_p,
-          act_ptr,
-          *packB,
-          reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-          buffer.data_ptr<int32_t>(),
-          outputProcObj,
-          0 /* thread_id*/,
-          1 /* num_threads */);
-    }
+          fbgemm::fbgemmConv(
+              conv_p,
+              act_ptr,
+              *packB,
+              reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+              buffer.data_ptr<int32_t>(),
+              outputProcObj,
+              task_id /* thread_id*/,
+              num_tasks /* num_threads */);
+        }
+      }
+    });
 
     // TODO: remove permute once MemoryLayout is added above
     return output.permute({0, 3, 1, 2});
@@ -354,7 +360,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           kernel_zp,
           MemoryFormat::ChannelsLast);
       auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
-      for (int i = 0; i < weight_contig.numel(); ++i) {
+      auto wt_numel = weight_contig.numel();
+      for (int i = 0; i < wt_numel; ++i) {
         qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
       }
       // Original bias was float, so we requantize it here.
@@ -401,7 +408,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
         output.q_scale(),
         output.q_zero_point(),
         (uint8_t*)output.data_ptr<c10::quint8>(),
-        nullptr);
+        caffe2::mobile_pthreadpool());
 
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,
@@ -447,10 +454,10 @@ class QConv2dInt8 final : public c10::OperatorKernel {
           output_zero_point);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::conv ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 

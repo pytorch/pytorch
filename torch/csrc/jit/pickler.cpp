@@ -2,6 +2,7 @@
 #include <ATen/core/Dict.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
+#include <aten/src/ATen/quantized/Quantizer.h>
 #include <string>
 
 namespace torch {
@@ -104,6 +105,12 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
+    if (memorized_class_types_ != nullptr) {
+      // Memorize every class type the Pickler encountered
+      // This is used to make sure we capture all the run-time types
+      // and serialize them properly for class/interface polymorphism
+      memorized_class_types_->emplace_back(type);
+    }
     pushGlobal(type->name()->prefix(), type->name()->name());
     push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
@@ -309,8 +316,29 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::TUPLE);
 
   if (quantized) {
-    pushDouble(tensor.q_scale());
-    pushInt(tensor.q_zero_point());
+    push<PickleOpCode>(PickleOpCode::MARK);
+    pushGlobal("torch", toString(tensor.qscheme()));
+    // tuple of (qscheme, scale, zp) or (qscheme, scales, zps, axis)
+    switch (tensor.qscheme()) {
+      case at::kPerTensorAffine:
+        pushDouble(tensor.q_scale());
+        pushInt(tensor.q_zero_point());
+        break;
+      case at::kPerChannelAffine: {
+        const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
+            tensor.quantizer().get());
+        pushIValue(c10::List<double>(quantizer->scales()));
+        pushIValue(c10::List<int64_t>(quantizer->zero_points()));
+        pushInt(quantizer->axis());
+      } break;
+      default:
+        TORCH_CHECK(
+            false,
+            "Unsupported tensor quantization type in serialization ",
+            toString(tensor.qscheme()));
+        break;
+    }
+    push<PickleOpCode>(PickleOpCode::TUPLE);
   }
 
   // requires_grad
@@ -554,7 +582,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   auto set_type = set_schema.arguments().at(1).type();
 
   TORCH_CHECK(
-      set_type->isSubtypeOf(get_type),
+      get_type->isSubtypeOf(set_type),
       "'__getstate__'s return type (",
       get_type->python_str(),
       ") does not match '__setstate__'s argument type (",
