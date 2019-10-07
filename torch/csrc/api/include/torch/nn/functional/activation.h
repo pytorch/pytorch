@@ -77,6 +77,10 @@ inline Tensor sigmoid(const Tensor& input) {
   return torch::sigmoid(input);
 }
 
+inline Tensor softplus(const Tensor& input, const SoftplusOptions& options) {
+  return torch::softplus(input, options.beta(), options.threshold());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
