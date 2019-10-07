@@ -24,7 +24,7 @@ public abstract class PytorchTestBase {
   public void testForwardNull() throws IOException {
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue input =
-        IValue.from(Tensor.fromBlob(new long[] {1}, Tensor.allocateByteBuffer(1)));
+        IValue.from(Tensor.fromBlob(Tensor.allocateByteBuffer(1), new long[] {1}));
     assertTrue(input.isTensor());
     final IValue output = module.forward(input);
     assertTrue(output.isNull());
@@ -91,7 +91,7 @@ public abstract class PytorchTestBase {
     for (int i = 0; i < numElements; ++i) {
       inputTensorData[i] = i;
     }
-    final Tensor inputTensor = Tensor.fromBlob(inputTensorShape, inputTensorData);
+    final Tensor inputTensor = Tensor.fromBlob(inputTensorData, inputTensorShape);
 
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue input = IValue.from(inputTensor);
@@ -219,15 +219,15 @@ public abstract class PytorchTestBase {
       floats[i] = i / 1000.f;
     }
 
-    Tensor tensorBytes = Tensor.fromBlob(shape, bytes);
+    Tensor tensorBytes = Tensor.fromBlob(bytes, shape);
     assertTrue(tensorBytes.dtype() == DType.INT8);
     assertArrayEquals(bytes, tensorBytes.getDataAsByteArray());
 
-    Tensor tensorInts = Tensor.fromBlob(shape, ints);
+    Tensor tensorInts = Tensor.fromBlob(ints, shape);
     assertTrue(tensorInts.dtype() == DType.INT32);
     assertArrayEquals(ints, tensorInts.getDataAsIntArray());
 
-    Tensor tensorFloats = Tensor.fromBlob(shape, floats);
+    Tensor tensorFloats = Tensor.fromBlob(floats, shape);
     assertTrue(tensorFloats.dtype() == DType.FLOAT32);
     float[] floatsOut = tensorFloats.getDataAsFloatArray();
     assertTrue(floatsOut.length == numel);
@@ -241,7 +241,7 @@ public abstract class PytorchTestBase {
     long[] shape = new long[] {1, 3, 224, 224};
     final int numel = (int) Tensor.numel(shape);
     float[] floats = new float[numel];
-    Tensor tensorFloats = Tensor.fromBlob(shape, floats);
+    Tensor tensorFloats = Tensor.fromBlob(floats, shape);
     assertTrue(tensorFloats.dtype() == DType.FLOAT32);
     tensorFloats.getDataAsByteArray();
   }
