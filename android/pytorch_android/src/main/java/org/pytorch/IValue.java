@@ -9,7 +9,7 @@ import java.util.Map;
  * <p>
  * Calling {@code toX} methods for inappropriate types will throw {@link IllegalStateException}.
  * <p>
- * {@code IValue} objects areconstructed with {@code IValue.from(value)},
+ * {@code IValue} objects are constructed with {@code IValue.from(value)},
  * {@code IValue.tupleFrom(value1, value2, ...)}, {@code IValue.listFrom(value1, value2, ...)},
  * or one of the {@code dict} methods, depending on the key type.
  * <p>
