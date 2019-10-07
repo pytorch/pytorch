@@ -44,14 +44,6 @@ if (INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
   list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
-else()
-  # Only add "ATen Core", a minimal, easy-to-compile fragment of ATen.
-  # This codepath should only be exercised by the Android build.
-  add_subdirectory(../aten/src/ATen/core ATen_core)
-  list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
-  list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
-  list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
-  # See cmake/Codegen.cmake for header installation
 endif()
 
 # ---[ Caffe2 build
@@ -488,14 +480,16 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_resp.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_with_autograd.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_rref_proto.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
