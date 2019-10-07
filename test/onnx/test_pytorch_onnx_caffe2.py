@@ -1306,7 +1306,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
-    @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
     @skipIfUnsupportedOpsetVersion([10])
     def test_neg_slice_large_negone(self):
         class NegSlice(torch.nn.Module):
@@ -2217,6 +2216,29 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_model_test(MaskedFillModel2(), input=(x, ), train=False, batch_size=BATCH_SIZE)
+
+    def test_remainder(self):
+        class RemainderModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.remainder(input, other)
+
+        x = torch.randn(4, 2, 3)
+        y = torch.randn(1, 2, 1)
+        model = RemainderModel()
+        outputs = model(x, y)
+        self.run_model_test(model, train=False, input=(x, y), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
+
+    def test_remainder_scalar(self):
+        class RemainderModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.remainder(input, 2.55)
+
+        inputs = torch.randint(10, (2, 3))
+        model = RemainderModel()
+        outputs = model(inputs)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE,
+                            example_outputs=(outputs,))
 
     def test_baddbmm(self):
         class MyModule(torch.nn.Module):
