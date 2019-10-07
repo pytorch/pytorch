@@ -64,7 +64,8 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     else:
         broadcast_index_shape = g.op("Shape", index)
         index = g.op("Unsqueeze", index, axes_i=[-1])
-    sub_data_shape = sym_help._slice_helper(g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[9223372036854775807])
+    sub_data_shape = sym_help._slice_helper(
+        g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[9223372036854775807])
     values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
     values = g.op("Reshape", values, values_shape)
 
@@ -72,8 +73,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         dtype = self.type().scalarType()
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
         dtype = sym_help.scalar_type_to_pytorch_type[dtype]
-        zeros = g.op("ConstantOfShape",
-            g.op("Shape", self), value_t=torch.tensor([0], dtype=dtype))
+        zeros = g.op("ConstantOfShape", g.op("Shape", self), value_t=torch.tensor([0], dtype=dtype))
         result = g.op("ScatterND", zeros, index, values)
         result = add(g, self, result)
     else:
