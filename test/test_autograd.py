@@ -3854,7 +3854,6 @@ class TestAutogradDeviceType(TestCase):
                                                   input_lengths, target_lengths, reduction='none')
         self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
-        print(grad_cudnn, grad_native)
         self.assertEqual(grad_cudnn, grad_native, prec=1e-4)
 
     @onlyCUDA

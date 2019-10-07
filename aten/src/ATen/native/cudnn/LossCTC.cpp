@@ -62,19 +62,34 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
 
   cudnnCTCLossAlgo_t algo = (deterministic ? CUDNN_CTC_LOSS_ALGO_DETERMINISTIC : CUDNN_CTC_LOSS_ALGO_NON_DETERMINISTIC);
 
+  CTCLossDescriptor ctc_loss_desc;
+  ctc_loss_desc.set(CUDNN_DATA_FLOAT);
+
   Tensor probs;
-  // before 7.6 passing probs was the only option, starting with 7.1 the log probs/unnormalized log probs is the default
-  if (cudnnGetVersion() < 7600) {
+  // so the CuDNN gradient semantics have changed between 7.1 and 7.6
+  // unfortunately, I have not quite been able to figured out what the
+  // gradients actually mean with the default options and cudnn 7.6.
+  // As such, we pass in the non-softmaxed thing in 7.6 and use the
+  // not-available-in-7.1 option to the loss descriptor.
+  // I would hope that eventually, CuDNN < 7.6 disappears and then
+  // we can just use the cudnnSetCTCLossDescriptorEx.
+  if (cudnnGetVersion() <= 7600) {
     probs = log_probs->softmax(2);
   } else {
     probs = *log_probs;
+    // if CuDNN 7.1-7.5 would have the symbol, we would use
+    /*cudnnSetCTCLossDescriptorEx(ctc_loss_desc.mut_desc(), CUDNN_DATA_FLOAT,
+                                CUDNN_LOSS_NORMALIZATION_SOFTMAX,
+                                CUDNN_PROPAGATE_NAN);*/
+    // we hypothesize that the three values are stored in three 32 bit ints
+    uint32_t* descriptor_data_raw =
+        reinterpret_cast<uint32_t*>(ctc_loss_desc.mut_desc());
+    descriptor_data_raw[1] = 1;
+    descriptor_data_raw[2] = 1;
   }
   TensorDescriptor probs_desc{probs};
   Tensor grad = at::empty_like(probs);
   TensorDescriptor grad_desc{grad};
-
-  CTCLossDescriptor ctc_loss_desc;
-  ctc_loss_desc.set(CUDNN_DATA_FLOAT);
 
   size_t workspace_size;
   AT_CUDNN_CHECK(cudnnGetCTCLossWorkspaceSize(handle, probs_desc.desc(), grad_desc.desc(),
@@ -89,7 +104,6 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
                               targets->data_ptr<int>(), target_lengths.data(), input_lengths.data(),
                               costs.data_ptr(), grad_desc.desc(), grad.data_ptr(), algo,
                               ctc_loss_desc.desc(), workspace.data_ptr(), workspace_size));
-
   return std::make_tuple(costs, grad);
 }
 
