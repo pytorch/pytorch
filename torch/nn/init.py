@@ -80,6 +80,7 @@ def uniform_(tensor, a=0., b=1., generator=None):
         tensor: an n-dimensional `torch.Tensor`
         a: the lower bound of the uniform distribution
         b: the upper bound of the uniform distribution
+        generator (optional): a random generator for drawing values. Default: `None`.
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -97,6 +98,7 @@ def normal_(tensor, mean=0., std=1., generator=None):
         tensor: an n-dimensional `torch.Tensor`
         mean: the mean of the normal distribution
         std: the standard deviation of the normal distribution
+        generator (optional): a random generator for drawing values. Default: `None`.
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -235,6 +237,7 @@ def xavier_uniform_(tensor, gain=1., generator=None):
     Args:
         tensor: an n-dimensional `torch.Tensor`
         gain: an optional scaling factor
+        generator (optional): a random generator for drawing values. Default: `None`.
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -263,6 +266,7 @@ def xavier_normal_(tensor, gain=1., generator=None):
     Args:
         tensor: an n-dimensional `torch.Tensor`
         gain: an optional scaling factor
+        generator (optional): a random generator for drawing values. Default: `None`.
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -306,6 +310,7 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu', gene
             backwards pass.
         nonlinearity: the non-linear function (`nn.functional` name),
             recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
+        generator (optional): a random generator for drawing values. Default: `None`.
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -341,6 +346,7 @@ def kaiming_normal_(tensor, a=0, mode='fan_in', nonlinearity='leaky_relu', gener
             backwards pass.
         nonlinearity: the non-linear function (`nn.functional` name),
             recommended to use only with ``'relu'`` or ``'leaky_relu'`` (default).
+        generator (optional): a random generator for drawing values. Default: `None`.
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -363,6 +369,7 @@ def orthogonal_(tensor, gain=1, generator=None):
     Args:
         tensor: an n-dimensional `torch.Tensor`, where :math:`n \geq 2`
         gain: optional scaling factor
+        generator (optional): a random generator for drawing values. Default: `None`.
 
     Examples:
         >>> w = torch.empty(3, 5)
@@ -405,6 +412,7 @@ def sparse_(tensor, sparsity, std=0.01, generator=None):
         sparsity: The fraction of elements in each column to be set to zero
         std: the standard deviation of the normal distribution used to generate
             the non-zero values
+        generator (optional): a random generator for drawing values. Default: `None`.
 
     Examples:
         >>> w = torch.empty(3, 5)
