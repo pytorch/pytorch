@@ -145,21 +145,22 @@ add_docstr(torch.add,
            r"""
 .. function:: add(input, other, out=None)
 
-Adds the scalar :attr:`other` to each element of the input :attr:`input`
-and returns a new resulting tensor.
+Each element of the tensor :attr:`other` is added to each element of the
+tensor :attr:`input`.
 
 .. math::
     \text{{out}} = \text{{input}} + \text{{other}}
 
-If :attr:`input` is of type FloatTensor or DoubleTensor, :attr:`other` must be
-a real number, otherwise it should be an integer.
+The shapes of :attr:`input` and :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>`.
 
-Args:
-    {input}
-    value (Number): the number to be added to each element of :attr:`input`
+If the :class:`torch.dtype` of :attr:`input` and :attr:`other` differ,
+the :class:`torch.dtype` of the result tensor is determined following
+rules described in the type promotion :ref:`documentation <type-promotion-doc>`.
 
-Keyword arguments:
-    {out}
+If :attr:`out` is specified, the result must be
+:ref:`castable <type-promotion-doc>` to the :class:`torch.dtype`
+of the specified output tensor.
 
 Example::
 
@@ -169,27 +170,25 @@ Example::
     >>> torch.add(a, 20)
     tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
 
-.. function:: add(input, alpha=1, other, out=None)
+.. function:: add(input, other, alpha=1, out=None)
 
 Each element of the tensor :attr:`other` is multiplied by the scalar
 :attr:`alpha` and added to each element of the tensor :attr:`input`.
-The resulting tensor is returned.
-
-The shapes of :attr:`input` and :attr:`other` must be
-:ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
     \text{{out}} = \text{{input}} + \text{{alpha}} \times \text{{other}}
 
-If :attr:`other` is of type FloatTensor or DoubleTensor, :attr:`alpha` must be
-a real number, otherwise it should be an integer.
+If the result of the addition between :attr:`input` and :attr:`other` is:
+- floating point, :attr:`alpha` must be `float` or `int`
+- integral, :attr:`alpha` must be `int`
+- boolean, :attr:`alpha` must be `int` or `bool`.
 
 Args:
     input (Tensor): the first input tensor
-    alpha (Number): the scalar multiplier for :attr:`other`
     other (Tensor): the second input tensor
 
 Keyword arguments:
+    alpha (Number): the scalar multiplier for :attr:`other`
     {out}
 
 Example::
@@ -203,7 +202,7 @@ Example::
             [-1.7724],
             [-0.5811],
             [-0.8017]])
-    >>> torch.add(a, 10, b)
+    >>> torch.add(a, b, alpha=10)
     tensor([[  2.7695,   3.3930,   4.3672,   4.1450],
             [-18.6971, -18.0736, -17.0994, -17.3216],
             [ -6.7845,  -6.1610,  -5.1868,  -5.4090],
@@ -1644,12 +1643,19 @@ and returns a new resulting tensor.
 .. math::
     \text{out}_i = \frac{\text{input}_i}{\text{other}}
 
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`other`
-should be a real number, otherwise it should be an integer
+If the :class:`torch.dtype` of :attr:`input` and :attr:`other` differ,
+the :class:`torch.dtype` of the result tensor is determined following
+rules described in the type promotion :ref:`documentation <type-promotion-doc>`.
+
+If :attr:`out` is specified, the result must be
+:ref:`castable <type-promotion-doc>` to the :class:`torch.dtype`
+of the specified output tensor.
 
 Args:
     {input}
     other (Number): the number to be divided to each element of :attr:`input`
+
+Keyword arguments:
     {out}
 
 Example::
@@ -3398,8 +3404,14 @@ Multiplies each element of the input :attr:`input` with the scalar
 .. math::
     \text{out}_i = \text{other} \times \text{input}_i
 """ + r"""
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`other`
-should be a real number, otherwise it should be an integer
+
+If the :class:`torch.dtype` of :attr:`input` and :attr:`other` differ,
+the :class:`torch.dtype` of the result tensor is determined following
+rules described in the type promotion :ref:`documentation <type-promotion-doc>`.
+
+If :attr:`out` is specified, the result must be
+:ref:`castable <type-promotion-doc>` to the :class:`torch.dtype`
+of the specified output tensor.
 
 Args:
     {input}
