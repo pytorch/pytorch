@@ -41,4 +41,4 @@ if sys.version_info >= (3, 0):
         """
         _init_rpc(backend, self_name, self_rank, init_method, num_send_recv_threads)
         from .api import _agent
-        torch.distributed.autograd._init(_agent.get_worker_id().id)
+        torch.distributed.autograd._init(_agent.get_worker_info().id)
