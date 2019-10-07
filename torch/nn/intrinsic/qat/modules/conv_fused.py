@@ -183,7 +183,7 @@ class ConvBnReLU2d(ConvBn2d):
 
     Implementation details: https://arxiv.org/pdf/1806.08342.pdf
 
-    Similar to `torch.nn.Conv2d`, with FakeQuantize modules initialized to
+    Similar to :class:`torch.nn.Conv2d`, with FakeQuantize modules initialized to
     default.
 
     Attributes:
