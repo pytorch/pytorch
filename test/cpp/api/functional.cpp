@@ -211,26 +211,26 @@ TEST_F(FunctionalTest, AffineGrid) {
     auto size = torch::IntArrayRef({1, 1, 2, 2});
     ASSERT_THROWS_WITH(
         F::affine_grid(torch::empty({2, 2, 3}), {-1, 1, 2, 2}),
-        "Expected non-zero, positive output size. Got: [-1, 1, 2, 2]");
+        "Expected non-zero, positive output size. Got [-1, 1, 2, 2]");
     ASSERT_THROWS_WITH(
         F::affine_grid(torch::empty({2, 2, 3}, torch::kInt), size),
         "Expected theta to have floating point type, but got int");
     ASSERT_THROWS_WITH(
         F::affine_grid(theta[0], size),
         "Expected a batch of 2D affine matrices of shape Nx2x3 for size "
-        "[1, 1, 2, 2]. Got: [2, 3]");
+        "[1, 1, 2, 2]. Got [2, 3].");
     ASSERT_THROWS_WITH(
         F::affine_grid(theta.unsqueeze(0), size),
         "Expected a batch of 2D affine matrices of shape Nx2x3 for size "
-        "[1, 1, 2, 2]. Got: [1, 1, 2, 3]");
+        "[1, 1, 2, 2]. Got [1, 1, 2, 3].");
     ASSERT_THROWS_WITH(
         F::affine_grid(theta.repeat({1, 2, 1}), size),
         "Expected a batch of 2D affine matrices of shape Nx2x3 for size "
-        "[1, 1, 2, 2]. Got: [1, 4, 3]");
+        "[1, 1, 2, 2]. Got [1, 4, 3].");
     ASSERT_THROWS_WITH(
         F::affine_grid(theta.repeat({1, 1, 2}), size),
         "Expected a batch of 2D affine matrices of shape Nx2x3 for size "
-        "[1, 1, 2, 2]. Got: [1, 2, 6]");
+        "[1, 1, 2, 2]. Got [1, 2, 6].");
   }
   {
     auto theta = torch::empty({1, 3, 4}, torch::kDouble);
@@ -238,19 +238,19 @@ TEST_F(FunctionalTest, AffineGrid) {
     ASSERT_THROWS_WITH(
         F::affine_grid(theta[0], size),
         "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
-        "[1, 1, 2, 2, 3]. Got: [3, 4]");
+        "[1, 1, 2, 2, 3]. Got [3, 4].");
     ASSERT_THROWS_WITH(
         F::affine_grid(theta.unsqueeze(0), size),
         "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
-        "[1, 1, 2, 2, 3]. Got: [1, 1, 3, 4]");
+        "[1, 1, 2, 2, 3]. Got [1, 1, 3, 4].");
     ASSERT_THROWS_WITH(
         F::affine_grid(theta.repeat({1, 2, 1}), size),
         "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
-        "[1, 1, 2, 2, 3]. Got: [1, 6, 4]");
+        "[1, 1, 2, 2, 3]. Got [1, 6, 4].");
     ASSERT_THROWS_WITH(
         F::affine_grid(theta.repeat({1, 1, 2}), size),
         "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
-        "[1, 1, 2, 2, 3]. Got: [1, 3, 8]");
+        "[1, 1, 2, 2, 3]. Got [1, 3, 8].");
   }
 }
 
