@@ -241,11 +241,18 @@ void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
 
 void max_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "max_cpu", [&]() {
+<<<<<<< HEAD
     cpu_kernel_vec(iter,
       [](scalar_t a, scalar_t b) -> scalar_t {
         return std::max(a, b);
       },
       [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+=======
+    cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
+    return std::max(a, b);
+  },
+    [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+>>>>>>> edited BinaryOpsKernel.cpp
         return a.max(b);
       });
   });
