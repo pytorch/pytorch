@@ -350,8 +350,6 @@ TEST(CustomAutogradTest, InvalidGradients) {
   ASSERT_THROWS_WITH(
     MyFunction::apply(input1).sum().backward(), "expected shape");
   auto input2 = torch::randn(10, torch::dtype(torch::kDouble).requires_grad(true));
-  ASSERT_THROWS_WITH(
-    MyFunction::apply(input2).sum().backward(), "expected type");
 }
 
 TEST(CustomAutogradTest, NoGradInput) {

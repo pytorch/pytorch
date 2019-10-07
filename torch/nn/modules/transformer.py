@@ -10,7 +10,7 @@ from .linear import Linear
 from .normalization import LayerNorm
 
 class Transformer(Module):
-    r"""A transformer model. User is able to modify the attributes as needed. The architechture
+    r"""A transformer model. User is able to modify the attributes as needed. The architecture
     is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
     Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
     Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
@@ -33,6 +33,9 @@ class Transformer(Module):
         >>> src = torch.rand((10, 32, 512))
         >>> tgt = torch.rand((20, 32, 512))
         >>> out = transformer_model(src, tgt)
+
+    Note: A full example to apply nn.Transformer module for the word language model is available in
+    https://github.com/pytorch/examples/tree/master/word_language_model
     """
 
     def __init__(self, d_model=512, nhead=8, num_encoder_layers=6,

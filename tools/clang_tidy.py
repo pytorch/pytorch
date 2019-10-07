@@ -126,6 +126,9 @@ def get_changed_lines(revision, filename):
     for chunk in re.finditer(CHUNK_PATTERN, output, re.MULTILINE):
         start = int(chunk.group(1))
         count = int(chunk.group(2) or 1)
+        # If count == 0, a chunk was removed and can be ignored.
+        if count == 0:
+            continue
         changed_lines.append([start, start + count])
 
     return {"name": filename, "lines": changed_lines}

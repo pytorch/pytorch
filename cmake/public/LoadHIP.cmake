@@ -80,8 +80,43 @@ ELSE()
   SET(MIOPEN_PATH $ENV{MIOPEN_PATH})
 ENDIF()
 
+# RCCL_PATH
+IF(NOT DEFINED ENV{RCCL_PATH})
+  SET(RCCL_PATH ${ROCM_PATH}/rccl)
+ELSE()
+  SET(RCCL_PATH $ENV{RCCL_PATH})
+ENDIF()
+
+# ROCPRIM_PATH
+IF(NOT DEFINED ENV{ROCPRIM_PATH})
+  SET(ROCPRIM_PATH ${ROCM_PATH}/rocprim)
+ELSE()
+  SET(ROCPRIM_PATH $ENV{ROCPRIM_PATH})
+ENDIF()
+
+# HIPCUB_PATH
+IF(NOT DEFINED ENV{HIPCUB_PATH})
+  SET(HIPCUB_PATH ${ROCM_PATH}/hipcub)
+ELSE()
+  SET(HIPCUB_PATH $ENV{HIPCUB_PATH})
+ENDIF()
+
+# ROCTHRUST_PATH
+IF(NOT DEFINED ENV{ROCTHRUST_PATH})
+  SET(ROCTHRUST_PATH ${ROCM_PATH}/rocthrust)
+ELSE()
+  SET(ROCTHRUST_PATH $ENV{ROCTHRUST_PATH})
+ENDIF()
+
+# ROCTRACER_PATH
+IF(NOT DEFINED ENV{ROCTRACER_PATH})
+  SET(ROCTRACER_PATH ${ROCM_PATH}/roctracer)
+ELSE()
+  SET(ROCTRACER_PATH $ENV{ROCTRACER_PATH})
+ENDIF()
+
 IF(NOT DEFINED ENV{PYTORCH_ROCM_ARCH})
-  SET(PYTORCH_ROCM_ARCH gfx803;gfx900;gfx906)
+  SET(PYTORCH_ROCM_ARCH gfx803;gfx900;gfx906;gfx908)
 ELSE()
   SET(PYTORCH_ROCM_ARCH $ENV{PYTORCH_ROCM_ARCH})
 ENDIF()
@@ -124,6 +159,10 @@ IF(HIP_FOUND)
   set(miopen_DIR ${MIOPEN_PATH}/lib/cmake/miopen)
   set(rocfft_DIR ${ROCFFT_PATH}/lib/cmake/rocfft)
   set(hipsparse_DIR ${HIPSPARSE_PATH}/lib/cmake/hipsparse)
+  set(rccl_DIR ${RCCL_PATH}/lib/cmake/rccl)
+  set(rocprim_DIR ${ROCPRIM_PATH}/lib/cmake/rocprim)
+  set(hipcub_DIR ${HIPCUB_PATH}/lib/cmake/hipcub)
+  set(rocthrust_DIR ${ROCTHRUST_PATH}/lib/cmake/rocthrust)
 
   find_package_and_print_version(rocrand REQUIRED) 
   find_package_and_print_version(hiprand REQUIRED)
@@ -131,7 +170,11 @@ IF(HIP_FOUND)
   find_package_and_print_version(miopen REQUIRED)
   find_package_and_print_version(rocfft REQUIRED)
   find_package_and_print_version(hipsparse REQUIRED)
-
+  find_package_and_print_version(rccl)
+  find_package_and_print_version(rocprim REQUIRED)
+  find_package_and_print_version(hipcub REQUIRED)
+  find_package_and_print_version(rocthrust REQUIRED)
+  
   # TODO: hip_hcc has an interface include flag "-hc" which is only
   # recognizable by hcc, but not gcc and clang. Right now in our
   # setup, hcc is only used for linking, but it should be used to
@@ -140,12 +183,17 @@ IF(HIP_FOUND)
   # TODO: miopen_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
   FIND_LIBRARY(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
-
+  # TODO: rccl_LIBRARIES should return fullpath to the library file,
+  # however currently it's just the lib name
+  FIND_LIBRARY(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
+  # hiprtc is part of HIP
+  FIND_LIBRARY(ROCM_HIPRTC_LIB hiprtc HINTS ${HIP_PATH}/lib)
+  # roctx is part of roctracer
+  FIND_LIBRARY(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
+  set(roctracer_INCLUDE_DIRS ${ROCTRACER_PATH}/include)
 
   # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.
   set(hcc_INCLUDE_DIRS ${HCC_PATH}/include)
   set(hsa_INCLUDE_DIRS ${HSA_PATH}/include)
-
-  set(thrust_INCLUDE_DIRS ${THRUST_PATH} ${THRUST_PATH}/thrust/system/cuda/detail/cub-hip)
 
 ENDIF()

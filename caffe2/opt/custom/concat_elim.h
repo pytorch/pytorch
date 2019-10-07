@@ -10,6 +10,7 @@ namespace opt {
 
 void concatElim(nom::repr::NNModule* nn);
 void concatAddMulNaNClipElim(nom::repr::NNModule* nn);
+void gatherFuse8BitRowwiseQuantFloatMulLengthsSumElim(nom::repr::NNModule* nn);
 
 } // namespace opt
 } // namespace caffe2

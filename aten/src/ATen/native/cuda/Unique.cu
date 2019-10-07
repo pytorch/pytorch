@@ -6,6 +6,7 @@
 
 #include <tuple>
 #include <iterator>
+#include <thrust/adjacent_difference.h>
 #include <thrust/unique.h>
 #include <thrust/sort.h>
 #include <thrust/scan.h>

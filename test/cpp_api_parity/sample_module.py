@@ -1,6 +1,6 @@
 import torch
 
-from cpp_api_parity import torch_nn_modules
+from cpp_api_parity import torch_nn_modules, TorchNNModuleMetadata
 
 '''
 `SampleModule` is used by `test_cpp_api_parity.py` to test that Python / C++ API
@@ -15,13 +15,25 @@ When `SampleModule.has_parity` is false, behavior of `reset_parameters` / `forwa
 
 class SampleModule(torch.nn.Module):
     def __init__(self, has_parity, has_submodule, int_option=0, double_option=0.1,
-                 bool_option=False, string_option='0', tensor_option=torch.empty(1)):
+                 bool_option=False, string_option='0', tensor_option=torch.zeros(1),
+                 int_or_tuple_option=0):
         super(SampleModule, self).__init__()
         self.has_parity = has_parity
-        self.register_parameter('param', torch.nn.Parameter(torch.empty(3, 4)))
-        self.register_buffer('buffer', torch.empty(4, 5))
         if has_submodule:
             self.submodule = SampleModule(self.has_parity, False)
+
+        # The following attributes will be included in the `num_attrs_recursive` count.
+        self.has_submodule = has_submodule
+        self.int_option = int_option
+        self.double_option = double_option
+        self.bool_option = bool_option
+        self.string_option = string_option
+        self.tensor_option = tensor_option
+        self.int_or_tuple_option = int_or_tuple_option
+        self.register_parameter('param', torch.nn.Parameter(torch.empty(3, 4)))
+        self.register_buffer('buffer', torch.empty(4, 5))
+        self.attr = 0
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -47,17 +59,18 @@ namespace nn{
 struct C10_EXPORT SampleModuleOptions {
   SampleModuleOptions(bool has_submodule) : has_submodule_(has_submodule) {}
   TORCH_ARG(bool, has_submodule);
-  TORCH_ARG(int64_t, int_option);
-  TORCH_ARG(double, double_option);
-  TORCH_ARG(bool, bool_option);
-  TORCH_ARG(std::string, string_option);
-  TORCH_ARG(torch::Tensor, tensor_option);
+  TORCH_ARG(int64_t, int_option) = 0;
+  TORCH_ARG(double, double_option) = 0.1;
+  TORCH_ARG(bool, bool_option) = false;
+  TORCH_ARG(std::string, string_option) = "0";
+  TORCH_ARG(torch::Tensor, tensor_option) = torch::zeros({1});
+  TORCH_ARG(ExpandingArray<2>, int_or_tuple_option) = 0;
 };
 
 struct C10_EXPORT SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImpl> {
   SampleModuleImpl(bool has_submodule) : SampleModuleImpl(SampleModuleOptions(has_submodule)) {}
-  explicit SampleModuleImpl(SampleModuleOptions options) {
-    if (options.has_submodule_) {
+  explicit SampleModuleImpl(SampleModuleOptions options) : options(std::move(options)) {
+    if (options.has_submodule()) {
       submodule = register_module("submodule", std::make_shared<SampleModuleImpl>(false));
     }
     reset();
@@ -70,6 +83,7 @@ struct C10_EXPORT SampleModuleImpl : public torch::nn::Cloneable<SampleModuleImp
   torch::Tensor forward(torch::Tensor x) {
     return x + param * 2 + (submodule ? submodule->forward(x) : torch::zeros_like(x));
   }
+  SampleModuleOptions options;
   torch::Tensor param;
   torch::Tensor buffer;
   int attr;
@@ -84,26 +98,27 @@ TORCH_MODULE(SampleModule);
 module_tests = [
     dict(
         module_name='SampleModule',
+        desc='has_parity',
         constructor_args=(True, True),
         cpp_constructor_args='(true)',
         input_size=(3, 4),
-        desc='has_parity',
         has_parity=True,
     ),
     dict(
-        module_name='SampleModule',
-        constructor_args=(False, True),
+        fullname='SampleModule_no_parity',
+        constructor=lambda: SampleModule(False, True),
         cpp_constructor_args='(true)',
         input_size=(3, 4),
-        desc='no_parity',
         has_parity=False,
     ),
 ]
 
-torch_nn_modules.module_metadata_map['SampleModule'] = dict(
+torch_nn_modules.module_metadata_map['SampleModule'] = TorchNNModuleMetadata(
     cpp_default_constructor_args='(true)',
+    num_attrs_recursive=20,
     cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
-    num_attrs_recursive=6,
+    python_ignored_constructor_args=['has_parity'],
+    python_ignored_attrs=['has_parity'],
 )
 
 torch.nn.SampleModule = SampleModule

@@ -3,9 +3,12 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/tracer.h>
+#include <ATen/core/ATenDispatch.h>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
+
 namespace {
 
 at::Tensor wrap_tensor(at::Tensor&& tensor) {
@@ -46,15 +49,16 @@ IValue wrap(IValue&& ivalue) {
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
   return Operator(op, [op](Stack& stack) {
       RECORD_FUNCTION(op.schema().name(), stack);
-
       const auto input_size = op.schema().arguments().size();
       const auto output_size = op.schema().returns().size();
 
       Node* node = nullptr;
+      std::shared_ptr<jit::tracer::TracingState> tracer_state;
 
       // trace the input before unwrapping, otherwise we may lose
       // the input information
       if (jit::tracer::isTracing()) {
+        tracer_state = jit::tracer::getTracingState();
         auto symbol = Symbol::fromQualString(op.schema().name());
         const auto& graph = tracer::getTracingState()->graph;
         node = graph->create(symbol, 0);
@@ -69,12 +73,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           auto type = args[i].type();
           if (type->kind() == TypeKind::OptionalType) {
             if (iter->isNone()) {
-              Value* none =
-                  graph
-                      ->insertNode(graph->createNone(
-                          reinterpret_cast<OptionalType*>(args[i].type().get())
-                              ->getElementType()))
-                      ->output();
+              Value* none = graph->insertNode(graph->createNone())->output();
               node->addInput(none);
               continue;
             } else {
@@ -135,16 +134,26 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           }
         }
         graph->insertNode(node);
+
+        jit::tracer::setTracingState(nullptr);
       }
 
-      c10::Dispatcher::singleton().lookup(op, &stack).call(&stack);
+#ifdef USE_STATIC_DISPATCH
+      {
+        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        c10::Dispatcher::singleton().callBoxed(op, &stack);
+      }
+#else
+      c10::Dispatcher::singleton().callBoxed(op, &stack);
+#endif // USE_STATIC_DISPATCH
 
       // wrap tensor outputs as variable
       for (auto iter = stack.end() - output_size; iter != stack.end(); ++iter) {
         *iter = wrap(std::move(*iter));
       }
 
-      if (jit::tracer::isTracing()) {
+      if (tracer_state) {
+        jit::tracer::setTracingState(std::move(tracer_state));
         int i = 0;
         for (auto iter = stack.end() - output_size; iter != stack.end();
              ++iter, ++i) {
@@ -175,6 +184,12 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 class RegistrationListener final : public c10::OpRegistrationListener {
 public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
+    if(at::aten_op_is_already_moved_to_c10(op.schema().operator_name())) {
+      // Ignore ATen ops for now because they have their own code
+      // to expose them to JIT in register_aten_ops.cpp
+      // TODO Remove register_aten_ops.cpp and also use this registration here
+      return;
+    }
     torch::jit::registerOperator(createOperatorFromC10(op));
   }
 

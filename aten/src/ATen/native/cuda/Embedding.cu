@@ -3,6 +3,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
+#include <c10/macros/Macros.h>
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -10,6 +11,7 @@
 #include <THC/THCThrustAllocator.cuh>
 
 #include <thrust/execution_policy.h>
+#include <thrust/iterator/constant_iterator.h>
 #include <thrust/unique.h>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
@@ -20,10 +22,8 @@ namespace at { namespace native {
 namespace {
 
 #ifdef __HIP_PLATFORM_HCC__
-static const int WARP_SIZE = 64;
 static const int BLOCKDIMY = 16;
 #else
-static const int WARP_SIZE = 32;
 static const int BLOCKDIMY = 32;
 #endif
 
@@ -40,8 +40,8 @@ __global__ void embedding_backward_feature_kernel
 {
   extern __shared__ char buf[];
   accscalar_t* smem = (accscalar_t*)buf;
-  accscalar_t* my_s = smem + WARP_SIZE*threadIdx.y;
-  int* indices_batch = (int*)(buf + sizeof(accscalar_t)*WARP_SIZE*blockDim.y);
+  accscalar_t* my_s = smem + C10_WARP_SIZE*threadIdx.y;
+  int* indices_batch = (int*)(buf + sizeof(accscalar_t)*C10_WARP_SIZE*blockDim.y);
 
   const int s = (int)stride; // OK to make int, we don't expect 2 billion+ embedding row size
 
@@ -105,7 +105,7 @@ __global__ void embedding_backward_feature_kernel
 #else
             first_remaining_peer = __ffs(matchmask) - 1;
 #endif
-            my_s[threadIdx.x] += smem[threadIdx.x + WARP_SIZE*first_remaining_peer];
+            my_s[threadIdx.x] += smem[threadIdx.x + C10_WARP_SIZE*first_remaining_peer];
             matchmask ^= (1 << first_remaining_peer);
           }
           if(f < s)
@@ -153,7 +153,7 @@ __global__ void embedding_backward_kernel(
 
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++) {
-        int feature_dim = start_feature + ii * WARP_SIZE;
+        int feature_dim = start_feature + ii * C10_WARP_SIZE;
         if (feature_dim < stride) {
           gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
           weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
@@ -167,7 +167,7 @@ __global__ void embedding_backward_kernel(
 
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++) {
-        int feature_dim = start_feature + ii * WARP_SIZE;
+        int feature_dim = start_feature + ii * C10_WARP_SIZE;
         if (feature_dim < stride) {
             grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
         }
@@ -239,8 +239,8 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     auto indices_contig = indices.contiguous();
     auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
     int64_t stride = grad_weight.stride(0);
-    dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
-    dim3 block(WARP_SIZE, BLOCKDIMY);
+    dim3 grid(THCCeilDiv(stride, (int64_t)C10_WARP_SIZE));
+    dim3 block(C10_WARP_SIZE, BLOCKDIMY);
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF
       (grad.scalar_type(),
@@ -251,7 +251,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
          embedding_backward_feature_kernel<scalar_t, accscalar_t>
            <<<grid,
               block,
-              sizeof(accscalar_t)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
+              sizeof(accscalar_t)*C10_WARP_SIZE*BLOCKDIMY + sizeof(int)*C10_WARP_SIZE*BLOCKDIMY,
               stream>>>
            (indices_contig.data_ptr<int64_t>(),
             grad.data_ptr<scalar_t>(),
