@@ -1114,6 +1114,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    def test_unfold(self):
+        class UnfoldModel(torch.nn.Module):
+            def forward(self, x):
+                return x.unfold(dimension=2, size=2, step=2)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(UnfoldModel(), x)
+
     def test_remainder(self):
         class RemainderModel(torch.nn.Module):
             def forward(self, input, other):
