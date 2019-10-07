@@ -1131,8 +1131,9 @@ struct to_ir {
       list_type = getListCompType(lc, IntType::get());
     } else {
       throw ErrorReport(lc.range())
-          << "iterator expression is expected to be a list, iterable, or range, found "
-          << (siv ? siv->getValue()->type()->python_str() : siv->kind());
+          << "iterator expression is expected to be a list, iterable, or "
+             "range, found "
+          << sv->kind();
     }
 
     // given `[x*2 for x in my_list]` this generates the following AST:
