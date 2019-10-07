@@ -7,6 +7,7 @@ circular dependency problems
 import inspect
 import weakref
 import warnings
+import typing
 import torch._C
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
@@ -485,110 +486,43 @@ def _get_overloaded_methods(method, mod_class):
         raise Exception("Overloads are not useable when a module is redeclared within the same file: " + str(method))
     return overloads
 
-try:
-    import typing
-    from typing import Tuple, List, Dict, Optional
 
-    def is_tuple(ann):
-        # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Tuple or
-             getattr(ann, '__origin__', None) is tuple)
+def is_tuple(ann):
+    # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
+    return ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is typing.Tuple or
+            getattr(ann, '__origin__', None) is tuple)
 
-    def is_list(ann):
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.List or
-             getattr(ann, '__origin__', None) is list)
+def is_list(ann):
+    return ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is typing.List or
+            getattr(ann, '__origin__', None) is list)
 
-    def is_dict(ann):
-        return ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Dict or
-             getattr(ann, '__origin__', None) is dict)
+def is_dict(ann):
+    return ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is typing.Dict or
+            getattr(ann, '__origin__', None) is dict)
 
-    def is_optional(ann):
-        # Optional[T] is just shorthand for Union[T, None], so check for both
-        def safe_is_subclass(the_type, super_type):
-            # Don't throw if `the_type` isn't a class type (e.g. if it is
-            # another type annotation instance)
-            if not inspect.isclass(the_type):
-                return False
-            return issubclass(the_type, super_type)
+def is_optional(ann):
+    # Optional[T] is just shorthand for Union[T, None], so check for both
+    def safe_is_subclass(the_type, super_type):
+        # Don't throw if `the_type` isn't a class type (e.g. if it is
+        # another type annotation instance)
+        if not inspect.isclass(the_type):
+            return False
+        return issubclass(the_type, super_type)
 
-        union_optional = False
-        if ann.__module__ == 'typing' and \
-           (getattr(ann, '__origin__', None) is typing.Union):
-            args = getattr(ann, '__args__', ())
-            if len(args) == 2:
-                union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
-                    or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
+    union_optional = False
+    if ann.__module__ == 'typing' and (getattr(ann, '__origin__', None) is typing.Union):
+        args = getattr(ann, '__args__', ())
+        if len(args) == 2:
+            union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
+                or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
 
-        optional = ann.__module__ == 'typing' and \
-            (getattr(ann, '__origin__', None) is typing.Optional)
+    optional = ann.__module__ == 'typing' and \
+        (getattr(ann, '__origin__', None) is typing.Optional)
 
-        return optional or union_optional
-
-except ImportError:
-    # A minimal polyfill for versions of Python that don't have typing.
-    # Note that this means that they also don't support the fancy annotation syntax, so
-    # those instances will only be used in our tiny `type: ` comment interpreter.
-
-    # The __getitem__ in typing is implemented using metaclasses, but I'm too lazy for that.
-    class TupleCls(object):
-        def __getitem__(self, types):
-            return TupleInstance(types)
-
-    class TupleInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class ListInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class ListCls(object):
-        def __getitem__(self, types):
-            return TupleInstance(types)
-
-    class DictInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class DictCls(object):
-        def __getitem__(self, types):
-            return DictInstance(types)
-
-    class OptionalInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class OptionalCls(object):
-        def __getitem__(self, types):
-            return OptionalInstance(types)
-
-    Tuple = TupleCls()  # noqa: T484
-    List = ListCls()  # noqa: T484
-    Dict = DictCls()  # noqa: T484
-    Optional = DictCls()  # noqa: T484
-
-    def is_tuple(ann):
-        return isinstance(ann, TupleInstance)
-
-    def is_list(ann):
-        return isinstance(ann, ListInstance)
-
-    def is_dict(ann):
-        return isinstance(ann, DictInstance)
-
-    def is_optional(ann):
-        return isinstance(ann, OptionalInstance)
+    return optional or union_optional
 
 
 try:
