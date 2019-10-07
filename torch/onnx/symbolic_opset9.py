@@ -1970,32 +1970,29 @@ def gelu(g, self):
 
 @parse_args('v', 'i', 'v', 'v', 'f', 'i')
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
-    if input.isCompleteTensor():
-        input_sizes = input.type().sizes()
-        shape = [0, num_groups, -1]
-        input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(shape)))
+    input_sizes = input.type().sizes()
+    shape = [0, num_groups, -1]
+    input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(shape)))
 
-        # Due to shape difference. we need to apply weight and bias after
-        # instance norm computation and reshape
-        weight_ = g.op("Constant", value_t=torch.tensor([1.] * num_groups).type(
-            'torch.' + input.type().scalarType() + 'Tensor'))
-        bias_ = g.op("Constant", value_t=torch.tensor([0.] * num_groups).type(
-            'torch.' + input.type().scalarType() + 'Tensor'))
+    # Due to shape difference. we need to apply weight and bias after
+    # instance norm computation and reshape
+    weight_ = g.op("Constant", value_t=torch.tensor([1.] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
+    bias_ = g.op("Constant", value_t=torch.tensor([0.] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
 
-        norm_reshaped = g.op("InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps)
-        norm = g.op('Reshape', norm_reshaped, g.op("Shape", input))
+    norm_reshaped = g.op("InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps)
+    norm = g.op('Reshape', norm_reshaped, g.op("Shape", input))
 
-        if weight is None or weight.node().mustBeNone():
-            weight_value = torch.tensor([1.]).type(
-                'torch.' + input.type().scalarType() + 'Tensor')
-            weight = g.op("Constant", value_t=weight_value)
-        if bias is None or bias.node().mustBeNone():
-            bias_value = torch.tensor([0.]).type(
-                'torch.' + input.type().scalarType() + 'Tensor')
-            bias = g.op("Constant", value_t=bias_value)
+    if weight is None or weight.node().mustBeNone():
+        weight_value = torch.tensor([1.]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or bias.node().mustBeNone():
+        bias_value = torch.tensor([0.]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        bias = g.op("Constant", value_t=bias_value)
 
-        # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
-        axes = [i for i in range(1, len(input_sizes) - 1)]
-        return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
-    else:
-        _unimplemented("group_norm", " Cannot compute group_norm for input of unknown size.")
+    # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
+    axes = [i for i in range(1, len(input_sizes) - 1)]
+    return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
