@@ -314,3 +314,60 @@ TEST_F(FunctionalTest, OneHot) {
     ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 2, 3}));
   }
 }
+
+TEST_F(FunctionalTest, Hardtanh) {
+  const auto size = 3;
+  for (const auto min_val : {-4.2, -1.0, -0.42, 0.0}) {
+    for (const auto max_val : {0.0, 0.42, 1.0, 4.2}) {
+      for (const auto inplace : {false, true}) {
+        auto x = torch::linspace(-10.0, 10.0, size * size * size);
+        x.resize_({size, size, size});
+        auto y_exp = (x < min_val) * min_val +
+                     ((x >= min_val) * (x <= max_val)) * x +
+                     (x > max_val) * max_val;
+        auto y = F::hardtanh(x,HardtanhOptions().min_val(min_val)
+          .max_val(max_val).inplace(inplace));
+
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+        if (inplace) {
+          ASSERT_TRUE(torch::allclose(x, y_exp));
+        }
+      }
+    }
+  }
+}
+
+TEST_F(FunctionalTest, LeakyReLU) {
+  const auto size = 3;
+  for (const auto negative_slope : {0.0, 0.42, 1.0}) {
+    for (const auto inplace : {false, true}) {
+      auto x = torch::linspace(-10.0, 10.0, size * size * size);
+      x.resize_({size, size, size});
+      auto y_exp = (x < 0) * x * negative_slope + (x >= 0) * x;
+      auto y = F::leaky_relu(x, LeakyReLUOptions()
+        .negative_slope(negative_slope).inplace(inplace));
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+      if (inplace) {
+        ASSERT_TRUE(torch::allclose(x, y_exp));
+      }
+    }
+  }
+}
+
+TEST_F(FunctionalTest, LogSigmoid) {
+  const auto size = 3;
+  LogSigmoid model;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size});
+  auto y = F::logsigmoid(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+}

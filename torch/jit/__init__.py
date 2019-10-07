@@ -1257,6 +1257,7 @@ def interface(obj):
     ast = get_jit_class_def(obj, obj.__name__)
     rcb = _jit_internal.createResolutionCallback(1)
     torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
+    obj.__torch_script_interface__ = True
     return obj
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -1514,8 +1515,15 @@ if _enabled:
             else:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
-            Module._Module__construct(self)
-            Module.__setattr__(self, "training", True)
+            training = None
+            if self._c._has_attribute('training'):
+                training = self._c._get_attribute('training')
+            super(ScriptModule, self).__init__()
+            if training is not None:
+                self.training = training
+                self._c._register_attribute('training', torch._C.BoolType.get(), training)
+            elif not self._c._has_attribute('training'):
+                self._c._register_attribute('training', torch._C.BoolType.get(), self.training)
 
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
@@ -1581,11 +1589,6 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
-                if attr == 'training':
-                    if self._c._has_attribute('training'):
-                        self.__dict__['training'] = value
-                        self._c._set_attribute('training', value)
-                        return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
                     try:
@@ -1594,6 +1597,8 @@ if _enabled:
                         raise RuntimeError("Could not register attribute '{}' of type '{}' for a value of type '{}'"
                                            .format(attr, value.type, type(value.value)))
                     return
+                if self._c._has_attribute(attr):
+                    self._c._set_attribute(attr, value)
                 return super(ScriptModule, self).__setattr__(attr, value)
 
             if hasattr(self, attr):
