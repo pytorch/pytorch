@@ -117,6 +117,11 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
   ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
+  if(r.has_torch_function()){
+    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
+    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
+  }
+
   if (r.idx == 0) {
     if (r.isNone(1)) {
       auto end = r.scalar(0);
@@ -182,6 +187,10 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 
   ParsedArgs<8> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  if(r.has_torch_function()){
+    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
+    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
+  }
   if (r.idx == 0) {
     PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
         "and will be removed in 0.5. Note that arange generates values in [start; end), "
@@ -253,6 +262,10 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 
   ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  if(r.has_torch_function()){
+    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
+    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
+  }
   if (r.idx == 0) {
     if (r.isNone(3)) {
       auto high = r.toInt64(0);
@@ -363,6 +376,10 @@ static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyO
   });
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  if(r.has_torch_function()){
+    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
+    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
+  }
   if (r.idx == 0) {
     ScalarType promoted = at::promoteTypes(r.scalartype(0), r.scalartype(1));
     return torch::autograd::utils::wrap(torch::getDtype(promoted));
@@ -398,6 +415,10 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
   });
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  if(r.has_torch_function()){
+    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
+    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
+  }
   if (r.idx == 0) {
     if (r.isNone(1)) {
       return wrap(dispatch_nonzero(r.tensor(0)));
@@ -439,6 +460,10 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
 
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  if(r.has_torch_function()){
+    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
+    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
+  }
   if (r.idx == 0) {
     return wrap(r.tensor(0).get_device());
   }
