@@ -19,14 +19,14 @@ inline Tensor affine_grid(
   // check that shapes and sizes match
   if (size.size() == 4) {
     TORCH_CHECK(
-        theta.dim() == 3 && theta.size(1) == 2 && theta.size(2) == 3,
+        theta.dim() == 3 && theta.size(-2) == 2 && theta.size(-1) == 3,
         "Expected a batch of 2D affine matrices of shape Nx2x3 for size ",
         size,
         ". Got: ",
         theta.sizes());
   } else if (size.size() == 5) {
     TORCH_CHECK(
-        theta.dim() == 3 && theta.size(1) == 3 && theta.size(2) == 4,
+        theta.dim() == 3 && theta.size(-2) == 3 && theta.size(-1) == 4,
         "Expected a batch of 3D affine matrices of shape Nx3x4 for size ",
         size,
         ". Got: ",
