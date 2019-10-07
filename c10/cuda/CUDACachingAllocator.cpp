@@ -7,6 +7,7 @@
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
+#include <bitset>
 #include <deque>
 #include <iterator>
 #include <map>
@@ -63,6 +64,8 @@ constexpr size_t kLargeBuffer = 20971520;   // "large" allocations may be packed
 constexpr size_t kMinLargeAlloc = 10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kRoundLarge = 2097152;     // round up large allocs to 2 MiB
 
+typedef std::bitset<static_cast<size_t>(StatType::NUM_TYPES)> StatTypes;
+
 void update_stat(Stat& stat, int64_t amount) {
   stat.current += amount;
 
@@ -86,10 +89,11 @@ void reset_peak_stat(Stat& stat) {
   stat.peak = stat.current;
 }
 
-void update_stat_array(StatArray& stat_array, int64_t amount, const std::vector<StatType>& stat_types) {
-  for (StatType stat_type : stat_types) {
-    AT_ASSERTM(stat_type < StatType::NUM_TYPES, "Invalid stat type.");
-    update_stat(stat_array[static_cast<size_t>(stat_type)], amount);
+void update_stat_array(StatArray& stat_array, int64_t amount, const StatTypes& stat_types) {
+  for (size_t stat_type = 0; stat_type < stat_types.size(); ++stat_type) {
+    if (stat_types[stat_type]) {
+      update_stat(stat_array[stat_type], amount);
+    }
   }
 }
 
@@ -213,7 +217,9 @@ class THCCachingAllocator {
     auto& pool = get_pool(size);
 
     DeviceStats& stats = get_stats_for_device(device);
-    const std::vector<StatType> stat_types = {StatType::AGGREGATE, get_stat_type_for_pool(pool)};
+    StatTypes stat_types;
+    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
 
     auto find_free_block = [&]()->Block*{
       auto it = pool.lower_bound(&search_key);
@@ -348,7 +354,9 @@ class THCCachingAllocator {
     block->allocated = false;
 
     DeviceStats& stats = get_stats_for_device(block->device);
-    const std::vector<StatType> stat_types = {StatType::AGGREGATE, get_stat_type_for_pool(*(block->pool))};
+    StatTypes stat_types;
+    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] = true;
     update_stat_array(stats.allocation, -1, {stat_types});
     update_stat_array(stats.allocated_bytes, -block->size, {stat_types});
 
@@ -557,7 +565,9 @@ class THCCachingAllocator {
     }
 
     DeviceStats& stats = get_stats_for_device(block->device);
-    const std::vector<StatType> stat_types = {StatType::AGGREGATE, get_stat_type_for_pool(*(block->pool))};
+    StatTypes stat_types;
+    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] = true;
     update_stat_array(stats.inactive_split, net_change_inactive_split_blocks, stat_types);
     update_stat_array(stats.inactive_split_bytes, net_change_inactive_split_size, stat_types);
     update_stat_array(stats.active, -1, stat_types);
@@ -690,7 +700,9 @@ class THCCachingAllocator {
         C10_CUDA_CHECK(cudaFree((void*)block->ptr));
 
         DeviceStats& stats = get_stats_for_device(block->device);
-        const std::vector<StatType> stat_types = {StatType::AGGREGATE, get_stat_type_for_pool(*(block->pool))};
+        StatTypes stat_types;
+        stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+        stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] = true;
         update_stat_array(stats.segment, -1, stat_types);
         update_stat_array(stats.reserved_bytes, -block->size, stat_types);
 
