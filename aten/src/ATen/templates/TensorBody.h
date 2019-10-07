@@ -14,7 +14,6 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/EnableNamedTensor.h>
@@ -187,8 +186,13 @@ class CAFFE2_API Tensor {
   int64_t ndimension() const {
     return dim();
   }
+
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->is_contiguous(memory_format);
+  }
+
+  bool is_non_overlapping_and_dense() const {
+    return impl_->is_non_overlapping_and_dense();
   }
 
   at::MemoryFormat suggest_memory_format() const {

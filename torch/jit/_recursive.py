@@ -70,8 +70,15 @@ def copy_to_script_module(original, stubs):
             the_type = torch.jit.annotations.ann_to_type(class_annotations[name])
         else:
             the_type = torch._C._jit_try_infer_type(item)
+
         if the_type is not None:
-            script_module._c._register_attribute(name, the_type, item)
+            try:
+                script_module._c._register_attribute(name, the_type, item)
+            except RuntimeError as e:
+                msg = "When compiling {}, could not register attribute {} of " \
+                      "type {} with value {}\nOriginal error: {}" \
+                      .format(type(original), name, the_type, item, str(e))
+                raise RuntimeError(msg)
 
     # Copy overloads
     script_module.__dict__["_overloads"] = dict(getattr(original, "__overloads__", {}))
