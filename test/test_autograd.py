@@ -3196,26 +3196,28 @@ class TestAutograd(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     @skipIfRocm
     def test_grad_scaling_builtins(self):
-        current_scale = torch.cuda.FloatTensor([4.0])
+        rscale = torch.cuda.FloatTensor([0.25])
 
         found_inf = torch.cuda.FloatTensor([0.0])
         g = torch.cuda.FloatTensor(10).fill_(4.0)
-        torch._amp_unscale_inf_check_(g, current_scale, found_inf)
+        torch._amp_unscale_inf_check_(g, rscale, found_inf)
         self.assertTrue(found_inf.item() == 0.0)
-        self.assertTrue(torch.allclose(g, torch.ones(10, device="cuda", dtype=torch.float32)))
+        print(g)
+        self.assertTrue(torch.allclose(g, torch.ones(10, device="cuda", dtype=torch.float32), atol=1e-7))
 
         found_inf.zero_()
         g = torch.cuda.FloatTensor([float('inf')])
-        torch._amp_unscale_inf_check_(g, current_scale, found_inf)
+        torch._amp_unscale_inf_check_(g, rscale, found_inf)
         self.assertTrue(found_inf.item() == 1.0)
 
         found_inf.zero_()
         g = torch.cuda.FloatTensor([float('nan')])
-        torch._amp_unscale_inf_check_(g, current_scale, found_inf)
+        torch._amp_unscale_inf_check_(g, rscale, found_inf)
         self.assertTrue(found_inf.item() == 1.0)
 
         growth_factor = 4.0
         backoff_factor = 0.5
+        current_scale = torch.cuda.FloatTensor([4.0])
 
         found_inf.zero_()
         new_scale = torch._amp_update_scale(current_scale, found_inf, growth_factor, backoff_factor)
@@ -3225,23 +3227,20 @@ class TestAutograd(TestCase):
         new_scale = torch._amp_update_scale(current_scale, found_inf, growth_factor, backoff_factor)
         self.assertTrue(new_scale.item(), 2.0)
 
-    def _create_scaling_models_optimizers(self, scaling_enabled):
+    def _create_scaling_models_optimizers(self):
+        # Create a module+optimizer that will use scaling, and a control module+optimizer
+        # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
         mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).cuda()
         mod_scaling = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).cuda()
-        # model_scaling.load_state_dict(model_control.state_dict()) might also work
         for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
             s.data.copy_(c.data)
 
         opt_control = torch.optim.SGD(mod_control.parameters(), lr=1.0)
         opt_scaling = torch.optim.SGD(mod_scaling.parameters(), lr=1.0)
 
-        torch.amp.make_amp_optimizers(opt_scaling, init_scale=128., scaling_enabled=scaling_enabled)
-
         return mod_control, mod_scaling, opt_control, opt_scaling
 
-    def _create_scaling_case(self, scaling_enabled):
-        mod_control, mod_scaling, opt_control, opt_scaling = self._create_scaling_models_optimizers(scaling_enabled)
-
+    def _create_scaling_case(self):
         data = [(torch.randn((8, 8), device="cuda"), torch.randn((8, 8), device="cuda")),
                 (torch.randn((8, 8), device="cuda"), torch.randn((8, 8), device="cuda")),
                 (torch.randn((8, 8), device="cuda"), torch.randn((8, 8), device="cuda")),
@@ -3249,155 +3248,155 @@ class TestAutograd(TestCase):
 
         loss_fn = torch.nn.MSELoss().cuda()
 
-        return mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, 3
+        skip_iter = 3
 
+        return self._create_scaling_models_optimizers() + (data, loss_fn, skip_iter)
+
+    # Genericize a bit of the testing logic to avoid too much copy-pasting below
+    def _run_scaling_case(self, run, unskipped, skipped):
+        # Ensure scaling can be disabled without changing user control flow.
+        for enabled in True, False:
+            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = self._create_scaling_case()
+
+            # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
+            # so any potential errors with the growth factor handling will be magnified.
+            scaler = torch.cuda.amp.AmpScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
+
+            run(data, mod_control, opt_control, scaler, loss_fn, skip_iter, False)
+            run(data, mod_scaling, opt_scaling, scaler, loss_fn, skip_iter, True)
+
+            # If scaling was enabled, the scale factor should have been multiplied by the growth factor
+            # len(data) - skipped times and the backoff factor "skipped" times.
+            if enabled:
+                net_growth = scaler.get_growth_factor()**unskipped if unskipped > 0 else 1.0
+                net_backoff = scaler.get_backoff_factor()**skipped if skipped > 0 else 1.0
+                self.assertTrue(scaler.get_scale() == (128. * net_growth * net_backoff))
+            else:
+                self.assertTrue(scaler.get_scale() == 1.0)
+
+            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+                self.assertTrue(torch.allclose(c, s, atol=1e-7))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     @skipIfRocm
     def test_grad_scaling_clipping(self):
-        from torch.amp import scale_outputs, get_scale
-        for scaling_enabled in True, False:  # Ensure scaling can be disabled without changing user control flow.
-            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = \
-                self._create_scaling_case(scaling_enabled)
-
-            def run(model, optimizer, try_scaling_api):
-                max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
-                for i, (input, target) in enumerate(data):
-                    optimizer.zero_grad()
-                    output = model(input)
-                    loss = loss_fn(output, target)
-                    if try_scaling_api:
-                        scale_outputs(loss).backward()
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm * get_scale() )
-                        if i == skip_iter:
-                            model[1].weight.grad.data.fill_(float('inf'))
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                output = model(input)
+                loss = loss_fn(output, target)
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm * scaler.get_scale())
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    if (not scaler.is_enabled()) or (i != skip_iter):
                         optimizer.step()
-                    else:
-                        loss.backward()
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-                        if i != skip_iter:
-                            optimizer.step()
 
-            run(mod_control, opt_control, False)
-            run(mod_scaling, opt_scaling, True)
-
-            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertTrue(torch.allclose(c, s, atol=1e-8))
+        self._run_scaling_case(run, unskipped=3, skipped=1)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     @skipIfRocm
     def test_grad_scaling_clipping_separate_unscale(self):
-        from torch.amp import scale_outputs, get_scale
-        for scaling_enabled in True, False:  # Ensure scaling can be disabled without changing user control flow.
-            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = 
-                self._create_scaling_case(scaling_enabled)
-
-            def run(model, optimizer, try_scaling_api):
-                max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
-                for i, (input, target) in enumerate(data):
-                    optimizer.zero_grad()
-                    output = model(input)
-                    loss = loss_fn(output, target)
-                    if try_scaling_api:
-                        scale_outputs(loss).backward()
-                        if i == skip_iter:
-                            model[1].weight.grad.data.fill_(float('inf'))
-                        optimizer.unscale_grads()
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                output = model(input)
+                loss = loss_fn(output, target)
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.unscale(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    if (not scaler.is_enabled()) or (i != skip_iter):
                         optimizer.step()
-                    else:
-                        loss.backward()
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-                        if i != skip_iter:
-                            optimizer.step()
 
-            run(mod_control, opt_control, False)
-            run(mod_scaling, opt_scaling, True)
-
-            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertTrue(torch.allclose(c, s))
+        self._run_scaling_case(run, unskipped=3, skipped=1)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     @skipIfRocm
     def test_grad_scaling_penalty(self):
-        from torch.amp import scale_outputs, get_scale
-        for scaling_enabled in True, False:  # Ensure scaling can be disabled without changing user control flow.
-            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = \
-                self._create_scaling_case(scaling_enabled)
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                output = model(input)
+                loss = loss_fn(output, target)
 
-            def run(model, optimizer, S, try_scaling_api):
-                for i, (input, target) in enumerate(data):
-                    optimizer.zero_grad()
-                    output = model(input)
-                    loss = loss_fn(output, target)
+                if try_scaling_api:
+                    grad_params = torch.autograd.grad(scaler.scale(loss),
+                                                      model.parameters(), create_graph=True)
+                    grad_params = [p * (1. / scaler.get_scale()) for p in grad_params]
+                else:
+                    grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
 
-                    if try_scaling_api:
-                        grad_params = torch.autograd.grad(scale_outputs(loss),
-                                                          model.parameters(), create_graph=True)
-                        grad_params = [p * (1. / get_scale()) for p in grad_params]
-                    else:
-                        grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+                grad_norm = 0
+                for grad in grad_params:
+                    grad_norm += grad.pow(2).sum()
+                grad_norm = grad_norm.sqrt()
+                loss = loss + grad_norm
 
-                    grad_norm = 0
-                    for grad in grad_params:
-                        grad_norm += grad.pow(2).sum()
-                    grad_norm = grad_norm.sqrt()
-                    loss = loss + grad_norm
-
-                    if try_scaling_api:
-                        scale_outputs(loss).backward()
-                        if i == skip_iter:
-                            model[1].weight.grad.data.fill_(float('inf'))
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    if (not scaler.is_enabled()) or (i != skip_iter):
                         optimizer.step()
-                    else:
-                        loss.backward()
-                        if i != skip_iter:
-                            optimizer.step()
 
-            run(mod_control, opt_control, False)
-            run(mod_scaling, opt_scaling, True)
-
-            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertTrue(torch.allclose(c, s))
+        self._run_scaling_case(run, unskipped=3, skipped=1)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     @skipIfRocm
     def test_grad_scaling_accumulation(self):
-        from torch.amp import scale_outputs, get_scale
-        for scaling_enabled in True, False:  # Ensure scaling can be disabled without changing user control flow.
-            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = \
-                self._create_scaling_case(scaling_enabled)
-
-            def run(model, optimizer, try_scaling_api):
-                from torch.amp import scale_outputs, get_scale
-                iters_to_accumulate = 2
-                for i, (input, target) in enumerate(data):
-                    output = model(input)
-                    loss = loss_fn(output, target)
-                    loss = loss / iters_to_accumulate
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            iters_to_accumulate = 2
+            for i, (input, target) in enumerate(data):
+                output = model(input)
+                loss = loss_fn(output, target)
+                loss = loss / iters_to_accumulate
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                else:
+                    loss.backward()
+                if (i + 1) % iters_to_accumulate == 0:
                     if try_scaling_api:
-                        scale_outputs(loss).backward()
+                        scaler.step(optimizer)
+                        scaler.update()
+                        optimizer.zero_grad()
                     else:
-                        loss.backward()
-                    if (i + 1) % iters_to_accumulate == 0:
                         optimizer.step()
                         optimizer.zero_grad()
 
-            run(mod_control, opt_control, False)
-            run(mod_scaling, opt_scaling, True)
-
-            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertTrue(torch.allclose(c, s))
+        self._run_scaling_case(run, unskipped=2, skipped=0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     @skipIfRocm
     def test_grad_scaling_multiple(self):
-        from torch.amp import scale_outputs, get_scale, update_scale
-        for scaling_enabled in True, False:  # Ensure scaling can be disabled without changing user control flow.
+        # Test gradient scaling with 2 models and 2 optimizers that both receive gradients from 2 losses.
+        # Some of the logic here cannot reuse the generic helper functions created for the 1-optimizer cases.
+        for enabled in True, False:
             mod_control0, mod_scaling0, opt_control0, opt_scaling0, data, loss_fn, skip_iter = \
-                self._create_scaling_cases(scaling_enabled)
-            mod_control1, mod_scaling1, opt_control1, opt_scaling1 = 
-                self._create_scaling_models_optimizers(scaling_enabled)
+                self._create_scaling_case()
+            mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
+                self._create_scaling_models_optimizers()
+
+            scaler = torch.cuda.amp.AmpScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
 
             def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
                 for i, (input, target) in enumerate(data):
@@ -3409,91 +3408,29 @@ class TestAutograd(TestCase):
                     loss1 = loss_fn(3 * output0 - 5 * output1, target)
 
                     if try_scaling_api:
-                        scale_outputs(loss0, S).backward(retain_graph=True)
-                        scale_outputs(loss1, S).backward()
-                        if i == skip_iter:
+                        scaler.scale(loss0).backward(retain_graph=True)
+                        scaler.scale(loss1).backward()
+                        if i == skip_iter and scaler.is_enabled():
                             model1[1].weight.grad.data.fill_(float('inf'))
-                        optimizer0.step()
-                        optimizer1.step()
-                        update_scale()
+                        scaler.step(optimizer0)
+                        scaler.step(optimizer1)
+                        scaler.update()
                     else:
                         loss0.backward(retain_graph=True)
                         loss1.backward()
                         optimizer0.step()
-                        if i != skip_iter:
+                        if (not scaler.is_enabled()) or (i != skip_iter):
                             optimizer1.step()
 
             run(mod_control0, mod_control1, opt_control0, opt_control1, False)
             run(mod_scaling0, mod_scaling1, opt_scaling0, opt_scaling1, True)
 
+            self.assertTrue(scaler.get_scale() == (128. * scaler.get_growth_factor()**3 *
+                                                   scaler.get_backoff_factor()**1) if enabled else 1.0)
+
             for c, s in zip(chain(mod_control0.parameters(), mod_control1.parameters()),
                             chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
                 self.assertTrue(torch.allclose(c, s))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
-    def test_grad_scaling_replay(self):
-        from torch.amp import scale_outputs, get_scale, update_scale
-        mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = self._create_scaling_case()
-
-        def run(model, optimizer, try_scaling_api):
-            try_injection = True
-            for i, (input, target) in enumerate(data):
-                while True:
-                    optimizer.zero_grad()
-                    output = model(input)
-                    loss = loss_fn(output, target)
-                    if try_scaling_api:
-                        scale_outputs(loss).backward()
-                        if i == skip_iter and try_injection:
-                            model[1].weight.grad.data.fill_(float('inf'))
-                            try_injection = False
-                        if optimizer._check_inf().item():
-                            update_scale()
-                        else:
-                            break
-                    else:
-                        loss.backward()
-                        break
-                optimizer.step()
-
-        run(mod_control, opt_control, False)
-        run(mod_scaling, opt_scaling, True)
-
-        for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-            self.assertTrue(torch.allclose(c, s))
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
-    @skipIfRocm
-    def test_grad_scaling_replay_separate_unscale(self):
-        from torch.amp import scale_outputs, get_scale, update_scale
-        mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = self._create_scaling_case()
-
-        def run(model, optimizer, try_scaling_api):
-            try_injection = True
-            for i, (input, target) in enumerate(data):
-                while True:
-                    optimizer.zero_grad()
-                    output = model(input)
-                    loss = loss_fn(output, target)
-                    if try_scaling_api:
-                        scale_outputs(loss).backward()
-                        if i == skip_iter and try_injection:
-                            model[1].weight.grad.data.fill_(float('inf'))
-                            try_injection = False
-                        optimizer.unscale_grads()
-                        if not optimizer._found_inf.item():
-                            break
-                    else:
-                        loss.backward()
-                        break
-                optimizer.step()
-
-        run(mod_control, opt_control, S, False)
-        run(mod_scaling, opt_scaling, S, True)
-
-        for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-            self.assertTrue(torch.allclose(c, s))
 
     @skipIfNoLapack
     def test_symeig_no_eigenvectors(self):

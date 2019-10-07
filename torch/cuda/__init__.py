@@ -699,3 +699,4 @@ from . import sparse  # noqa: F401
 from . import profiler  # noqa: F401
 from . import nvtx  # noqa: F401
 from .streams import Stream, Event  # noqa: F401
+from . import amp  # noqa: F401

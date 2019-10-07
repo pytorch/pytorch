@@ -20,6 +20,8 @@ class AmpScaler(object):
             amp_scaler.step(optimizer)
             amp_scaler.update()
 
+    See :ref:`Gradient Scaling Examples` for usage in more complex cases.
+
     By default, ``amp_scaler.step`` internally unscales ``optimizer``'s gradients before applying them, so the
     learning rate and other hyperparameters don't need to change.  If you wish to unscale gradients manually
     prior to :meth:`step`, use :meth:`unscale`.
@@ -83,7 +85,7 @@ class AmpScaler(object):
 
         return apply_scale(outputs)
 
-    def _unscale_grads(optimizer, rscale, found_inf, allow_fp16=False):
+    def _unscale_grads(self, optimizer, rscale, found_inf, allow_fp16=False):
         for group in optimizer.param_groups:
             for param in group["params"]:
                 if param.grad is not None:
@@ -134,7 +136,7 @@ class AmpScaler(object):
             raise RuntimeError("unscale() has already been called on this optimizer this iteration.")
 
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
-        rscale = self.amp_state.scale.double().reciprocal().float()
+        rscale = self._scale.double().reciprocal().float()
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
 
         self._unscale_grads(optimizer, rscale, found_inf, allow_fp16=False)
@@ -163,7 +165,7 @@ class AmpScaler(object):
 
         note::
             If you're writing a custom optimizer, and wish to define your own scaling-safe ``step`` method that
-            ``AmpScaler.step`` may call directly without any wrapping logic, see the :ref:`Custom Optimizer Guide`.
+            :meth:`AmpScaler.step` may call directly without any wrapping logic, see the :ref:`Custom Optimizer Guide`.
 
         warning::
             Closure use is not currently supported.
@@ -186,7 +188,7 @@ class AmpScaler(object):
         if "unscaled" not in optimizer_state:
             self.unscale(optimizer)
 
-        if not optimizer_state.found_inf().item():
+        if not optimizer_state["found_inf"].item():
             return optimizer.step(*args, **kwargs)
 
     def update(self, new_scale=None):
@@ -221,10 +223,10 @@ class AmpScaler(object):
         else:
             # Consume shared inf/nan data collected from optimizers to update the scale asynchronously.
             found_inf_combined = sum(v["found_inf"] for k, v in self._per_optimizer_states.items())
-            self.scale = torch._amp_update_scale(self.scale,
-                                                 found_inf_combined,
-                                                 self._growth_factor,
-                                                 self._backoff_factor)
+            self._scale = torch._amp_update_scale(self._scale,
+                                                  found_inf_combined,
+                                                  self._growth_factor,
+                                                  self._backoff_factor)
 
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
         self._per_optimizer_states = defaultdict(dict)
@@ -268,6 +270,13 @@ class AmpScaler(object):
             new_scale (float):  Value to use as the new scale backoff factor.
         """
         self._backoff_factor = new_factor
+
+    def is_enabled(self):
+        r"""
+        Returns:
+            A bool indicating whether this instance is enabled.
+        """
+        return self._enabled
 
     def _check_inf(self, optimizer):
         dummy_rscale = torch.full((1,), 1.0, dtype=torch.float32, device="cuda")
