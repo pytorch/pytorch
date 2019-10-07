@@ -251,6 +251,14 @@ TEST_F(FunctionalTest, AffineGrid) {
         F::affine_grid(theta.repeat({1, 1, 2}), size),
         "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
         "[1, 1, 2, 2, 3]. Got [1, 3, 8].");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta, {1, 1, 1, 2, 2, 3}),
+        "affine_grid only supports 4D and 5D sizes, for 2D and 3D affine "
+        "transforms, respectively. Got size [1, 1, 1, 2, 2, 3]");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta, {1, 1}),
+        "affine_grid only supports 4D and 5D sizes, for 2D and 3D affine "
+        "transforms, respectively. Got size [1, 1]");
   }
 }
 
