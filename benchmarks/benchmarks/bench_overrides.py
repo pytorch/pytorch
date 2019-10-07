@@ -1,70 +1,31 @@
-from __future__ import absolute_import, division, print_function
-
 from .common import Benchmark
 
+import torch
 from torch import Tensor
 
-try:
-    from torch._overrides import torch_function_dispatch
-except ImportError:
-    # Define so we only get errors for individual benchmarks if
-    # `torch._overrides` doesn't exist.
-    def torch_function_dispatch(func):
-        def wrapper():
-            return None
-        return wrapper
+def mock_add(t1, t2):
+   torch.add(t1, t2)
 
-
-def _broadcast_tensors_dispatcher(*tensors):
-    return (Tensor,)
-
-
-@torch_function_dispatch(_broadcast_tensors_dispatcher)
-def mock_broadcast_tensors(*tensors):
-    pass
-
-
-def _concatenate_dispatcher(tensors, dim=None, out=None):
-    for tensor in tensors:
-        yield tensor
-    if out is not None:
-        yield out
-
-
-@torch_function_dispatch(_concatenate_dispatcher)
-def mock_concatenate(tensors, dim=0, out=None):
-    pass
-
+def mock_matmul(t1, t2):
+   torch.mm(t1, t2)
 
 class DuckTensor(object):
-    def __torch_function__(self, func, types, args, kwargs):
+    def __torch_function__(self, func, args=None, kwargs={}):
         pass
 
+class SubTensor(Tensor):
+    def __torch_function__(self, func, args=None, kwargs={}):
+        pass
 
 class TorchFunction(Benchmark):
 
     def setup(self):
-        self.torch_tensor = Tensor(1)
-        self.torch_tensors = [Tensor(1), Tensor(2)]
-        self.many_tensors = 500 * self.torch_tensors
-        self.duck_tensor = DuckTensor()
-        self.duck_tensors = [DuckTensor(), DuckTensor()]
-        self.mixed_tensors = [Tensor(1), DuckTensor()]
+        self.t1 = torch.rand(1000, 1000)
+        self.t2 = torch.rand(1000, 1000)
 
-    def time_mock_broadcast_tensors_torch(self):
-        mock_broadcast_tensors(self.torch_tensor, ())
+    def time_mock_add(self):
+        mock_add(self.t1, self.t2)
 
-    def time_mock_broadcast_tensors_duck(self):
-        mock_broadcast_tensors(self.duck_tensor, ())
+    def time_mock_matmul(self):
+        mock_matmul(self.t1, self.t2)
 
-    def time_mock_concatenate_torch(self):
-        mock_concatenate(self.torch_tensors, dim=0)
-
-    def time_mock_concatenate_many(self):
-        mock_concatenate(self.many_tensors, dim=0)
-
-    def time_mock_concatenate_duck(self):
-        mock_concatenate(self.duck_tensors, dim=0)
-
-    def time_mock_concatenate_mixed(self):
-        mock_concatenate(self.mixed_tensors, dim=0)
