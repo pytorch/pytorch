@@ -231,15 +231,15 @@ Tensor& mul_(Tensor& self, Scalar other) {
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {
-  return at::remainder(self, wrapped_scalar_tensor(other));
+  return native::remainder(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_(Tensor& self, Scalar other) {
-  return at::remainder_(self, wrapped_scalar_tensor(other));
+  return native::remainder_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
-  return at::remainder_out(result, self, wrapped_scalar_tensor(other));
+  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
