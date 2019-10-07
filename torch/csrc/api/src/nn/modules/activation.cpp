@@ -189,5 +189,17 @@ void CELUImpl::pretty_print(std::ostream& stream) const {
   stream << ")";
 }
 
+// ============================================================================
+
+Tensor SigmoidImpl::forward(const Tensor& input) {
+  return sigmoid(input);
+}
+
+void SigmoidImpl::reset() {}
+
+void SigmoidImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Sigmoid()";
+}
+
 } // namespace nn
 } // namespace torch

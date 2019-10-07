@@ -73,6 +73,10 @@ inline Tensor celu(Tensor& input, const CELUOptions& options) {
   }
 }
 
+inline Tensor sigmoid(const Tensor& input) {
+  return torch::sigmoid(input);
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

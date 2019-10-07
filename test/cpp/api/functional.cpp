@@ -447,3 +447,11 @@ TEST_F(FunctionalTest, CELU) {
     }
   }
 }
+
+TEST_F(FunctionalTest, Sigmoid) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = 1 / (1 + torch::exp(-x));
+  auto y = F::sigmoid(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
