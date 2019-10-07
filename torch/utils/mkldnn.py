@@ -56,7 +56,7 @@ class MkldnnConv2d(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def __getstate__(self):
-        return (self.weight.to_dense(), self.bias.to_dense(), self.linear)
+        return (self.weight.to_dense(), self.bias.to_dense(), self.training)
 
     @torch.jit.script_method
     def __setstate__(self, state):
