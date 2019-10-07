@@ -150,6 +150,7 @@ public:
   }
   Vec256<double> max(const Vec256<double> &b) const {
     return Vec256<double>(Sleef_fmaxd4(values, b));
+    return Vec256<double>(Sleef_maxd4_u10(values, b));
   }
   Vec256<double> frac() const;
   Vec256<double> neg() const {

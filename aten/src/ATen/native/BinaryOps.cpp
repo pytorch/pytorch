@@ -15,10 +15,7 @@ DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(logical_xor_stub);
-<<<<<<< HEAD
 DEFINE_DISPATCH(max_stub);
-=======
->>>>>>> removing commits from PR 26535
 DEFINE_DISPATCH(lt_stub);
 DEFINE_DISPATCH(le_stub);
 DEFINE_DISPATCH(gt_stub);
@@ -28,6 +25,7 @@ DEFINE_DISPATCH(ne_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(remainder_stub)
 DEFINE_DISPATCH(sub_stub);
+DEFINE_DISPATCH(max_stub);
 
 static constexpr char alpha_mismatch_err[] =
   "For integral input tensors, argument alpha must not be a floating point number.";
@@ -146,6 +144,7 @@ Tensor& atan2_(Tensor& self, const Tensor& other) {
 Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
   max_stub(iter.device_type(), iter);
+  max_out_stub(iter.device_type(), iter);
   return result;
 }
 
@@ -243,6 +242,7 @@ Tensor& logical_xor_(Tensor& self, const Tensor& other) {
   return native::logical_xor_out(self, self, other);
 }
 
+<<<<<<< HEAD
 Tensor max(const Tensor& self, Scalar other) {
   return native::max(self, wrapped_scalar_tensor(other));
 }
@@ -349,6 +349,14 @@ Tensor& ne_(Tensor& self, const Tensor& other) { return comparison_op_(self, oth
 Tensor& ne_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, ne_stub); }
 Tensor ne(const Tensor& self, Scalar other) { return comparison_op(self, other, ne_stub); }
 Tensor& ne_(Tensor& self, Scalar other) { return comparison_op_(self, other, ne_stub); }
+
+Tensor max(const Tensor& self, Scalar other) {
+  return native::max(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& max_(Tensor& self, Scalar other) {
+  return native::max_(self, wrapped_scalar_tensor(other));
+}
 
 }
 }  // namespace at

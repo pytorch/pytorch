@@ -103,7 +103,6 @@ void logical_xor_kernel(TensorIterator& iter) {
     });
 }
 
-<<<<<<< HEAD
 void max_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "max_cpu", [&]() {
     cpu_kernel_vec(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -114,10 +113,6 @@ void max_kernel(TensorIterator& iter) {
       });
   });
 
-=======
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> removing commits from PR 26535
 void lt_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND2(kBool, kBFloat16, iter.input_dtype(), "lt_cpu", [&]() {
@@ -244,6 +239,18 @@ void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
   add_kernel(iter, -alpha_scalar);
 }
 
+void max_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "max_cpu", [&]() {
+    cpu_kernel_vec(iter,
+      [](scalar_t a, scalar_t b) -> scalar_t {
+        return std::max(a, b);
+      },
+      [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+        return a.max(b);
+      });
+  });
+}
+
 } // anonymous namespace
 
 
@@ -253,12 +260,7 @@ REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
-<<<<<<< HEAD
 REGISTER_DISPATCH(max_stub, &max_kernel);
-=======
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> removing commits from PR 26535
 REGISTER_DISPATCH(lt_stub, &lt_kernel);
 REGISTER_DISPATCH(le_stub, &le_kernel);
 REGISTER_DISPATCH(gt_stub, &gt_kernel);
@@ -268,11 +270,6 @@ REGISTER_DISPATCH(ne_stub, &ne_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
-<<<<<<< HEAD
-=======
->>>>>>> porting remainder from TH to ATen
-=======
->>>>>>> removing commits from PR 26535
->>>>>>> removing commits from PR 26535
+REGISTER_DISPATCH(max_stub, &max_kernel);
 
 }} // namespace at::native

@@ -29,5 +29,6 @@ DECLARE_DISPATCH(binary_fn, ne_stub);
 DECLARE_DISPATCH(binary_fn, mul_stub);
 DECLARE_DISPATCH(binary_fn, remainder_stub);
 DECLARE_DISPATCH(binary_fn_alpha, sub_stub);
+DECLARE_DISPATCH(binary_fn, max_stub);
 
 }} // namespace at::native
