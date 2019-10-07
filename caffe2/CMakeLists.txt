@@ -480,9 +480,9 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_call.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_resp.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_with_autograd.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp

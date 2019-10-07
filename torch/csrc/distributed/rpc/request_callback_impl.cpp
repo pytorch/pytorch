@@ -4,10 +4,10 @@
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/future_message.h>
+#include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
+#include <torch/csrc/distributed/rpc/python_resp.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
-#include <torch/csrc/distributed/rpc/python_udf_call.h>
-#include <torch/csrc/distributed/rpc/python_udf_resp.h>
 #include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
 #include <torch/csrc/distributed/rpc/rref.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -50,11 +50,11 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       return c10::guts::make_unique<ScriptResp>(std::move(stack.front()));
     }
     case MessageType::PYTHON_CALL: {
-      auto& pyCall = static_cast<PythonUDFCall&>(rpc);
+      auto& pyCall = static_cast<PythonCall&>(rpc);
       std::vector<torch::Tensor> responseTensorTable;
       auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
           pyCall.pickledPayload(), pyCall.tensors(), responseTensorTable);
-      return c10::guts::make_unique<PythonUDFResp>(
+      return c10::guts::make_unique<PythonResp>(
           std::move(payload), std::move(responseTensorTable));
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
