@@ -92,10 +92,23 @@ IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR = True
 func_call = torch._C.Function.__call__
 meth_call = torch._C.ScriptMethod.__call__
 
+def get_current_profiling_mode():
+    old_exec = torch._C._jit_set_profiling_executor(True)
+    old_prof = torch._C._jit_set_profiling_mode(True)
+    torch._C._jit_set_profiling_executor(old_exec)
+    torch._C._jit_set_profiling_mode(old_prof)
+    if old_exec:
+        if old_prof:
+            return ProfilingMode.FULL
+        else:
+            return ProfilingMode.EXECUTOR
+    else:
+        return ProfilingMode.OFF
 
+"""
 def prof_callable(callable, *args, **kwargs):
     #print("prof_func_call")
-    profiling_mode = kwargs['profile'] if 'profile' in kwargs else ProfilingMode.EXECUTOR
+    profiling_mode = kwargs['profile'] if 'profile' in kwargs else get_current_profiling_mode()
     check_script = 'check_script' in kwargs
 
     # delete both profile and check_script if present
@@ -118,18 +131,37 @@ def prof_callable(callable, *args, **kwargs):
             # optimize
             # print ("args2 = ", args)
             return callable(*args, **kwargs)
+"""
 
-    with enable_profiling_mode(profiling_mode):
-        # print("enabling profiling executor")
-        return callable(*args, **kwargs)
+def prof_callable(callable, *args, **kwargs):
+    
+    if 'profile' in kwargs:    
+        if kwargs['profile'] == ProfilingMode.FULL:
+            with enable_profiling_mode(ProfilingMode.FULL):
+                del kwargs['profile']
+                callable(*args, **kwargs)
+                return callable(*args, **kwargs)
+
+    return callable(*args, **kwargs)
 
 
 def prof_func_call(*args, **kwargs):
     return prof_callable(func_call, *args, **kwargs)
 
 def prof_meth_call(*args, **kwargs):
-    return prof_callable(meth_call, *args, **kwargs)    
+    return prof_callable(meth_call, *args, **kwargs)
 
+# enable profiling graph executor for all tests in this file
+torch._C._jit_set_profiling_executor(True)
+
+# orig_trace = torch.jit.trace
+
+# def new_trace(*arg, **kwargs):
+#     print ("running new trace")
+#     with enable_profiling_mode(ProfilingMode.EXECUTOR):
+#         return orig_trace(*arg, **kwargs)
+
+# torch.jit['trace'] = new_trace
 
 # def prof_func_call(*args, **kwargs):
 #     #print("prof_func_call")
@@ -15838,6 +15870,9 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
 
         script = script_template.format(', '.join(formals), call)
 
+        print ("create_script_fn:")
+        # print(str(script))
+        print("before cu")
         CU = torch.jit.CompilationUnit(script)
         self.assertExportImport(CU.the_method.graph, tensors)
         output = output_process_fn(CU.the_method(*tensors))
@@ -15890,35 +15925,38 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     # anyways
 
 
-    print ("enable profiling")
-    with enable_profiling_mode(ProfilingMode.FULL):
-        # profile
-        recording_inputs_profiling, recording_tensors_profiling = clone_inputs(not no_grad)
-        self.runAndSaveRNG(func, recording_inputs_profiling, kwargs)
-        # print("profiling")
-        # print(str(func.last_graph))
-        #optimzie
-        recording_inputs_optimized, recording_tensors_optimized = clone_inputs(not no_grad)
-        self.runAndSaveRNG(func, recording_inputs_optimized, kwargs)
-        # print("optimize")
-        # print(str(func.last_graph))
+    #print ("enable profiling" , no_grad)
+    # with enable_profiling_mode(ProfilingMode.FULL):
+    #     # profile
+    #     recording_inputs_profiling, recording_tensors_profiling = clone_inputs(not no_grad)
+    #     print("profiling")
+    #     self.runAndSaveRNG(func, recording_inputs_profiling, kwargs)
+    #     #print(str(func.last_graph))
+    #     recording_inputs_optimized, recording_tensors_optimized = clone_inputs(not no_grad)
+    #     self.runAndSaveRNG(func, recording_inputs_optimized, kwargs)
+    #     print("optimize")
+    #     #print(str(func.last_graph))
 
 
     print ("no grad")
     # test no gradients case
     outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
-    outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
+    with enable_profiling_mode(ProfilingMode.FULL):
+        outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
+    print("no grad graph:")
+    #print(str(func.last_graph))
     self.assertEqual(outputs, outputs_test)
 
     if check_types:
         check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
 
     if no_grad:
+        print("skipping")
         # skip grad tests
         return
 
     print ("grad")
-    with enable_profiling_mode(ProfilingMode.EXECUTOR):
+    with enable_profiling_mode(ProfilingMode.FULL):
     # test single grad case
         outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
         grads = torch.autograd.grad(allSum(outputs), recording_tensors,
@@ -15956,6 +15994,9 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         for g2, g2_test in zip(grads2, grads2_test):
             if g2 is None and g2_test is None:
                 continue
+            
+            print("g2 = ", str(g2))
+            print("g2_test = ", str(g2_test))
             self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 
 
@@ -16026,7 +16067,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
-        self.assertGraphSize(graph, 4)
+        self.assertGraphSize(graph, 3)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
     def test_merges_without_cycles(self):
@@ -16073,7 +16114,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
 
-        self.assertGraphSize(graph, 4)
+        self.assertGraphSize(graph, 3)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
     def test_merges_up(self):
@@ -16578,7 +16619,7 @@ def add_autograd_test(
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
 
-                            print(str(traced_fn.last_graph))
+                            #print(str(traced_fn.last_graph))
 
 
                             # def get_optimized_graph(script_module):   
@@ -16588,6 +16629,7 @@ def add_autograd_test(
 
                             # print (get_optimized_graph(traced_fn))
 
+                            print(traced_fn.last_graph)
                             self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
                         if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
@@ -16678,15 +16720,20 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
         f_args_variable = (self_variable,) + args_variable
         f_args_tensor = (self_tensor,) + args_tensor
 
+        #print("kwargs = ", str(kwargs_variable))
         should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
+        
         if test_name not in EXCLUDE_SCRIPT:
             def run_test():
                 # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
                 #      so that we don't regress on autodiff support.
                 with disable_autodiff_subgraph_inlining():
+                    print ("before script_fn")
                     script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn)
+                    print ("after script_fn")
                     check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
                     # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
+                    print(str(script_fn.last_graph))
                     self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
             if test_name in EXCLUDE_PYTHON_PRINT:
@@ -17441,14 +17488,14 @@ class TestList(JitTestCase):
             a = [1, 2, 3]
             return a[4]
 
-        self.checkScriptRaisesRegex(bad_index, (), IndexError,
+        self.checkScriptRaisesRegex(bad_index, (), Exception,
                                     "list index out of range")
 
         def bad_negative_index():
             a = [1, 2, 3]
             return a[-5]
 
-        self.checkScriptRaisesRegex(bad_negative_index, (), IndexError,
+        self.checkScriptRaisesRegex(bad_negative_index, (), Exception,
                                     "list index out of range")
 
     def test_list_len(self):

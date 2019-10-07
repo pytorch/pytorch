@@ -37,7 +37,14 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
 
-  //std::cout << "getPlanFor profiling: " << this << std::endl;
+  {
+    const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
+    if (ppg) {
+          std::cout << "getExecutorMode: " << getExecutorMode() << std::endl;
+          std::cout << "getProfilingMode: " << getProfilingMode() << std::endl;
+          std::cout << "graph executor: " << this << std::endl;
+    }
+  }
   if (optimized_plan_) {
     return *optimized_plan_;
   }

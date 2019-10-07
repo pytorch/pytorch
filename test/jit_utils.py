@@ -44,10 +44,12 @@ def enable_profiling_mode(flag):
     # print(flag)
     # assert(isinstance(flag, Enum))
     old_prof_exec_state = torch._C._jit_set_profiling_executor(flag != ProfilingMode.OFF)
+    #print ("setting profiling flag ", str(flag == ProfilingMode.FULL), " ", flag)
     old_prof_mode_state = torch._C._jit_set_profiling_mode(flag == ProfilingMode.FULL)
     try:
         yield
     finally:
+        #print ("unsetting")
         torch._C._jit_set_profiling_executor(old_prof_exec_state)
         torch._C._jit_set_profiling_mode(old_prof_mode_state)
 
@@ -318,27 +320,33 @@ class JitTestCase(TestCase):
         Checks that a given function will throw the correct exception,
         when executed with normal python, the string frontend, and the AST frontend
         """
-        # normal python
-        with self.assertRaisesRegex(exception, regex):
-            script(*inputs)
-        # string frontend
-        with self.assertRaisesRegex(exception, regex):
-            source = textwrap.dedent(inspect.getsource(script))
-            cu = torch.jit.CompilationUnit(source)
-            ge = getattr(cu, script.__name__)
-            # profiling run
+
+        with enable_profiling_mode(profiling):
+            # normal python
             with self.assertRaisesRegex(exception, regex):
-                ge(*inputs, profile = profiling)
-            # optimized run
-            ge(*inputs, profile = profiling)
-        # python AST frontend
-        with self.assertRaisesRegex(exception, regex):
-            ge = torch.jit.script(script)
-            # profiling run
+                script(*inputs)
+            # string frontend
             with self.assertRaisesRegex(exception, regex):
-                ge(*inputs, profile = profiling)
-            # optimized run
-            ge(*inputs, profile = profiling)
+                source = textwrap.dedent(inspect.getsource(script))
+                cu = torch.jit.CompilationUnit(source)
+                ge = getattr(cu, script.__name__)
+                # profiling run
+                with self.assertRaisesRegex(exception, regex):
+                    #ge(*inputs, profile = profiling)
+                    ge(*inputs)
+                # optimized run
+                #ge(*inputs, profile = profiling)
+                ge(*inputs)
+            # python AST frontend
+            with self.assertRaisesRegex(exception, regex):
+                ge = torch.jit.script(script)
+                # profiling run
+                with self.assertRaisesRegex(exception, regex):
+                # ge(*inputs, profile = profiling)
+                    ge(*inputs)
+                # optimized run
+                #ge(*inputs, profile = profiling)
+                ge(*inputs)
 
     def checkScript(self,
                     script,
@@ -350,61 +358,70 @@ class JitTestCase(TestCase):
                     frames_up=1,
                     profiling=ProfilingMode.FULL):
         with torch.jit.optimized_execution(optimize):
-            if isinstance(script, str):
-                # Compile the string to a Script function
-                with enable_profiling_mode(profiling):
+            with enable_profiling_mode(profiling):
+                if isinstance(script, str):
+                    # Compile the string to a Script function
+                    #with enable_profiling_mode(profiling):
                     cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
 
-                # Execute the Python function so we can run it later and get its
-                # outputs
+                    # Execute the Python function so we can run it later and get its
+                    # outputs
 
-                frame = self.get_frame_vars(frames_up)
-                the_locals = {}
-                execWrapper(script, glob=frame, loc=the_locals)
-                frame.update(the_locals)
+                    frame = self.get_frame_vars(frames_up)
+                    the_locals = {}
+                    execWrapper(script, glob=frame, loc=the_locals)
+                    frame.update(the_locals)
 
-                python_fn = frame[name]
-                scripted_fn = getattr(cu, name)
-            else:
+                    python_fn = frame[name]
+                    scripted_fn = getattr(cu, name)
+                else:
 
-                # Check the string frontend first
-                source = textwrap.dedent(inspect.getsource(script))
-                self.checkScript(
-                    source,
-                    inputs,
-                    script.__name__,
-                    capture_output,
-                    profiling=profiling,
-                    frames_up=2)
+                    # Check the string frontend first
+                    source = textwrap.dedent(inspect.getsource(script))
+                    self.checkScript(
+                        source,
+                        inputs,
+                        script.__name__,
+                        capture_output,
+                        profiling=profiling,
+                        frames_up=2)
 
-                # Continue checking the Python frontend
-                scripted_fn = torch.jit.script(script, _frames_up=1)
-                python_fn = script
+                    # Continue checking the Python frontend
+                    scripted_fn = torch.jit.script(script, _frames_up=1)
+                    python_fn = script
 
-            if inputs_requires_grad:
-                recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
-            else:
-                recording_inputs = inputs
+                if inputs_requires_grad:
+                    recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
+                else:
+                    recording_inputs = inputs
 
-            if capture_output:
-                with self.capture_stdout() as script_stdout:
-                    script_outputs = scripted_fn(*recording_inputs, profile = profiling, check_script = True)
-                with self.capture_stdout() as opt_script_stdout:
-                    opt_script_outputs = scripted_fn(*recording_inputs, profile = profiling, check_script = True)
-                with self.capture_stdout() as _python_stdout:
+                if capture_output:
+                    with self.capture_stdout() as script_stdout:
+                        #script_outputs = scripted_fn(*recording_inputs, profile = profiling, check_script = True)
+                        #script_outputs = scripted_fn(*recording_inputs, profile = profiling)
+                        script_outputs = scripted_fn(*recording_inputs)
+                    with self.capture_stdout() as opt_script_stdout:
+                        #opt_script_outputs = scripted_fn(*recording_inputs, profile = profiling, check_script = True)
+                        #opt_script_outputs = scripted_fn(*recording_inputs, profile = profiling)
+                        opt_script_outputs = scripted_fn(*recording_inputs)
+                    with self.capture_stdout() as _python_stdout:
+                        python_outputs = python_fn(*inputs)
+                    if not IS_WINDOWS:
+                        self.assertExpected(script_stdout[0], subname='stdout')
+                    self.assertEqual(python_outputs, opt_script_outputs)
+                else:
+                    # profiling run
+                    #script_outputs = scripted_fn(*recording_inputs, profile = profiling, check_script = True)
+                    #script_outputs = scripted_fn(*recording_inputs, profile = profiling)
+                    script_outputs = scripted_fn(*recording_inputs)
+                    # optimized run
+                    #opt_script_outputs = scripted_fn(*recording_inputs, profile = profiling, check_script = True)
+                    #opt_script_outputs = scripted_fn(*recording_inputs, profile = profiling)
+                    opt_script_outputs = scripted_fn(*recording_inputs)
                     python_outputs = python_fn(*inputs)
-                if not IS_WINDOWS:
-                    self.assertExpected(script_stdout[0], subname='stdout')
-                self.assertEqual(python_outputs, opt_script_outputs)
-            else:
-                # profiling run
-                script_outputs = scripted_fn(*recording_inputs, profile = profiling, check_script = True)
-                # optimized run
-                opt_script_outputs = scripted_fn(*recording_inputs, profile = profiling, check_script = True)
-                python_outputs = python_fn(*inputs)
-            self.assertEqual(python_outputs, script_outputs)
-            self.assertEqual(script_outputs, opt_script_outputs)
-            return scripted_fn
+                self.assertEqual(python_outputs, script_outputs)
+                self.assertEqual(script_outputs, opt_script_outputs)
+                return scripted_fn
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    drop=None, allow_unused=False, verbose=False,
@@ -503,6 +520,8 @@ class JitTestCase(TestCase):
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue
+                print("g2 = ", g2)
+                print("g2_ge = ", g2_ge) 
                 self.assertTrue(torch.allclose(g2, g2_ge, atol=8e-4, rtol=8e-4))
 
         return ge
