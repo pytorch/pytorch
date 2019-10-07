@@ -15,7 +15,8 @@ import torch.nn.quantized.dynamic as nnqd
 from common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert, DEFAULT_DYNAMIC_MODULE_MAPPING
+    propagate_qconfig_, convert
+from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -444,6 +445,38 @@ class ModelForFusion(nn.Module):
         x = self.fc(x)
         return x
 
+class ConvBNReLU(nn.Sequential):
+    def __init__(self):
+        super(ConvBNReLU, self).__init__(
+            nn.Conv2d(3, 3, 1, 1, bias=False),
+            nn.BatchNorm2d(3),
+            nn.ReLU(inplace=False)
+        )
+
+class ModelWithSequentialFusion(nn.Module):
+    def __init__(self):
+        super(ModelWithSequentialFusion, self).__init__()
+        self.conv1 = nn.Conv2d(3, 3, 1)
+        self.relu1 = nn.ReLU(inplace=False)
+        layers = []
+        for i in range(3):
+            layers.append(ConvBNReLU())
+        self.features = nn.Sequential(*layers)
+        head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]
+        self.classifier = nn.Sequential(*head)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv1(x)
+        x = self.relu1(x)
+        x = self.features(x)
+        x = torch.reshape(x, (-1, 3 * 10 * 10))
+        x = self.classifier(x)
+        x = self.dequant(x)
+        return x
+
 
 class DummyObserver(torch.nn.Module):
     def calculate_qparams(self):
@@ -453,30 +486,27 @@ class DummyObserver(torch.nn.Module):
         return x
 
 
-class ModForWrapping(torch.nn.Module):
-    def __init__(self, quantized=False):
-        super(ModForWrapping, self).__init__()
-        self.qconfig = default_qconfig
-        if quantized:
-            self.mycat = nnq.QFunctional()
-            self.myadd = nnq.QFunctional()
-        else:
-            self.mycat = nnq.FloatFunctional()
-            self.myadd = nnq.FloatFunctional()
-            self.mycat.observer = DummyObserver()
-            self.myadd.observer = DummyObserver()
+class ModelWithFunctionals(torch.nn.Module):
+    def __init__(self):
+        super(ModelWithFunctionals, self).__init__()
+        self.mycat = nnq.FloatFunctional()
+        self.myadd = nnq.FloatFunctional()
+        self.myadd_relu = nnq.FloatFunctional()
+        # Tracing doesnt work yet for c10 ops with scalar inputs
+        # https://github.com/pytorch/pytorch/issues/27097
+        # self.my_scalar_add = nnq.FloatFunctional()
+        # self.my_scalar_mul = nnq.FloatFunctional()
 
     def forward(self, x):
         y = self.mycat.cat([x, x, x])
         z = self.myadd.add(y, y)
-        return z
+        w = self.myadd_relu.add_relu(z, z)
+        # Tracing doesnt work yet for c10 ops with scalar inputs
+        # https://github.com/pytorch/pytorch/issues/27097
+        # w = self.my_scalar_add.add_scalar(w, -0.5)
+        # w = self.my_scalar_mul.mul_scalar(w, 0.5)
+        return w
 
-    @classmethod
-    def from_float(cls, mod):
-        new_mod = cls(quantized=True)
-        new_mod.mycat = new_mod.mycat.from_float(mod.mycat)
-        new_mod.myadd = new_mod.myadd.from_float(mod.myadd)
-        return new_mod
 
 class ResNetBase(torch.nn.Module):
     def __init__(self):
@@ -566,3 +596,28 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         out = out.view(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
+
+"""Model to make sure that the observers are not inserted into custom modules.
+"""
+class ModelWithNoQconfigPropagation(nn.Module):
+    class ListOutModule(nn.Module):
+        def __init__(self):
+            super(ModelWithNoQconfigPropagation.ListOutModule, self).__init__()
+
+        def forward(self, x):
+            # returns a list of tensors, not supported by observers
+            return [x]
+
+    def __init__(self):
+        super(ModelWithNoQconfigPropagation, self).__init__()
+        self.fc1 = nn.Linear(5, 5).to(dtype=torch.float)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.no_quant_module = self.ListOutModule()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.dequant(x)
+        x = self.no_quant_module(x)
+        return x

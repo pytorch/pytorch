@@ -579,7 +579,7 @@ class SummaryWriter(object):
             dataformats (string): Image data format specification of the form
               NCHW, NHWC, CHW, HWC, HW, WH, etc.
         Shape:
-            img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformat`` agrument.
+            img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformats`` argument.
             e.g. CHW or HWC
 
             box_tensor: (torch.Tensor, numpy.array, or string/blobname): NX4,  where N is the number of
@@ -899,7 +899,7 @@ class SummaryWriter(object):
         so it allows users to interact with the rendered object. Besides the basic definitions
         such as vertices, faces, users can further provide camera parameter, lighting condition, etc.
         Please check https://threejs.org/docs/index.html#manual/en/introduction/Creating-a-scene for
-        advanced usage. Note that currently this depends on tb-nightly to show.
+        advanced usage.
 
         Args:
             tag (string): Data identifier
