@@ -372,7 +372,11 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      at::globalATenDispatch().registerOp<FuncType>(dispatch_key, legacyATenSchema_->c_str(), kernel_func);
+      if (legacyATenSchema_.has_value()) {
+        at::globalATenDispatch().registerOp<FuncType>(dispatch_key, legacyATenSchema_->c_str(), kernel_func);
+      } else {
+        at::globalATenDispatch().registerOp<FuncType>(dispatch_key, c10::toString(schemaOrName_->right()).c_str(), kernel_func);          
+      }
       return std::move(*this);
     }
 

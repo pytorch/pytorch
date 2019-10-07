@@ -256,6 +256,74 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   });
 }
 
+// Note: out is assumed to be the same size as self and other.
+// Note: Addition is only supported when self, other, out are of the same dtype.
+template <bool ReLUFused = false>
+void qadd_scalar_kernel(Tensor& out, const Tensor& self, Scalar other) {
+  TORCH_CHECK(self.qscheme() == kPerTensorAffine,
+              "Only per tensor affine is supported for now!!");
+  // To implement tensor-scalar addition in quantized space, we simply
+  // adjust the quantization parameters based on the following rules:
+  //
+  // Let s = scale, z = zero point, c = other.toFloat(), c_q = round(c/s)
+  // q_min = lowest representable value of scalar type
+  // q_max = highest representable value of scalar type
+  //
+  // Let s' = the calculated scale or the output
+  // z' = the calculated zero-point for the output
+  //
+  // If q_min > c_q
+  //   s' = [(q_max - (z - c_q)]/[q_max - q_min] * s
+  //   z' = q_min
+  //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize() , s', z')
+  // If q_max < z - c_q
+  //   s' = [z - c_q -q_min]/[q_max - q_min] * s
+  //   z' = q_max
+  //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize(), s', z')
+  // Else
+  //   s' = s
+  //   z' = z - c_q
+
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qadd_scalar", [&]() {
+    double s = self.q_scale();
+    int64_t z = self.q_zero_point();
+    double c = other.toDouble();
+    int64_t q_min = std::numeric_limits<underlying_t>::min();
+    int64_t q_max = std::numeric_limits<underlying_t>::max();
+
+    int64_t c_q = std::nearbyint(c / s);
+
+    double s_prime;
+    int64_t z_prime;
+
+    if (q_min > z - c_q) {
+      s_prime = (((double)q_max - (z - c_q))) / ((double)q_max - q_min) * s;
+      z_prime = q_min;
+      auto dequantized_add = self.dequantize() + c_q * s;
+      if (ReLUFused) {
+        dequantized_add.relu_();
+      }
+      out = at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type());
+    } else if (q_max < z - c_q) {
+      s_prime = ((double)(z - c_q) - q_min) / ((double)q_max - q_min) * s;
+      z_prime = q_max;
+      auto dequantized_add = self.dequantize() + c_q * s;
+      if (ReLUFused) {
+        dequantized_add.relu_();
+      }
+      out = at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type());
+    } else {
+      s_prime = s;
+      z_prime = z - c_q;
+      out.copy_(self);
+      out.set_quantizer_(make_per_tensor_affine_quantizer(s_prime, z_prime, self.scalar_type()));
+      if (ReLUFused) {
+        at::native::quantized_relu_(out);
+      }
+    }
+  });
+}
+  
 void qmaxpool_2d_nhwc_kernel(
     const Tensor& qx,
     int64_t iC, // input/output channels
@@ -816,6 +884,8 @@ REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
 REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
+REGISTER_DISPATCH(qadd_scalar_relu_stub, &qadd_scalar_kernel<true>);
+REGISTER_DISPATCH(qadd_scalar_stub, &qadd_scalar_kernel<false>);
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
 REGISTER_DISPATCH(
     qadaptive_avg_pool2d_nhwc_stub,

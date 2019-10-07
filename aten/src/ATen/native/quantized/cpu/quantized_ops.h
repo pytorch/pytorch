@@ -8,6 +8,8 @@ namespace native {
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qadd_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
+using qadd_scalar_fn =
+    void (*)(Tensor& /*out*/, const Tensor& /*self*/, Scalar /*other*/);
 using qmaxpool_2d_fn = void (*)(
     const Tensor& qx,
     int64_t iC, // input/output channels
@@ -79,6 +81,8 @@ DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu6_stub);
 DECLARE_DISPATCH(qadd_fn, qadd_stub);
 DECLARE_DISPATCH(qadd_fn, qadd_relu_stub);
+DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_stub);
+DECLARE_DISPATCH(qadd_scalar_fn, qadd_scalar_relu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
 DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub);

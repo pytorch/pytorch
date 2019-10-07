@@ -286,6 +286,7 @@
     SparseCPU: add_sparse
     SparseCUDA: add_sparse
     MkldnnCPU: mkldnn_add
+    QuantizedCPU: quantized_add
   supports_named_tensor: True
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
@@ -306,6 +307,7 @@
     SparseCPU: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
     MkldnnCPU: mkldnn_add_out
+    QuantizedCPU: quantized_add_out
   supports_named_tensor: True
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -314,10 +316,44 @@
   variants: function, method
   supports_named_tensor: True
 
+- func: quantized::add_scalar(Tensor self, Scalar other) -> Tensor
+  matches_jit_signature: False
+  use_c10_dispatcher: unboxed_only
+  dispatch:
+    QuantizedCPU: quantized_add_scalar
+
+- func: quantized::add_scalar_(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  matches_jit_signature: False
+  use_c10_dispatcher: unboxed_only
+  dispatch:
+    QuantizedCPU: quantized_add_scalar_
+
+- func: quantized::add_scalar.out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: False
+  dispatch:
+    QuantizedCPU: quantized_add_scalar_out
+
 - func: add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
   supports_named_tensor: True
+
+- func: quantized::add_scalar_relu(Tensor self, Scalar other) -> Tensor
+  matches_jit_signature: False
+  use_c10_dispatcher: unboxed_only
+  dispatch:
+    QuantizedCPU: quantized_add_scalar_relu
+
+- func: quantized::add_scalar_relu_(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  matches_jit_signature: False
+  use_c10_dispatcher: unboxed_only
+  dispatch:
+    QuantizedCPU: quantized_add_scalar_relu_
+
+- func: quantized::add_scalar_relu.out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  matches_jit_signature: False
+  dispatch:
+    QuantizedCPU: quantized_add_scalar_relu_out
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full

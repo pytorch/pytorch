@@ -16,6 +16,8 @@ namespace native {
 
 DEFINE_DISPATCH(qadd_relu_stub);
 DEFINE_DISPATCH(qadd_stub);
+DEFINE_DISPATCH(qadd_scalar_relu_stub);
+DEFINE_DISPATCH(qadd_scalar_stub);
 
 namespace {
 
@@ -46,74 +48,17 @@ Tensor _add_out(Tensor& out, const Tensor& self, const Tensor& other) {
 
 template <bool ReLUFused = false>
 Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
-  TORCH_CHECK(self.qscheme() == kPerTensorAffine,
-              "Only per tensor affine is supported for now!!");
-  // To implement tensor-scalar addition in quantized space, we simply
-  // adjust the quantization parameters based on the following rules:
-  //
-  // Let s = scale, z = zero point, c = other.toFloat(), c_q = round(c/s)
-  // q_min = lowest representable value of scalar type
-  // q_max = highest representable value of scalar type
-  //
-  // Let s' = the calculated scale or the output
-  // z' = the calculated zero-point for the output
-  //
-  // If q_min > c_q
-  //   s' = [(q_max - (z - c_q)]/[q_max - q_min] * s
-  //   z' = q_min
-  //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize() , s', z')
-  // If q_max < z - c_q
-  //   s' = [z - c_q -q_min]/[q_max - q_min] * s
-  //   z' = q_max
-  //   Xq' = torch.quantize_linear(Xq.dequantize() + c_q.dequantize(), s', z')
-  // Else
-  //   s' = s
-  //   z' = z - c_q
-
-  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qadd_scalar", [&]() {
-    double s = self.q_scale();
-    int64_t z = self.q_zero_point();
-    double c = other.toDouble();
-    int64_t q_min = std::numeric_limits<underlying_t>::min();
-    int64_t q_max = std::numeric_limits<underlying_t>::max();
-
-    int64_t c_q = std::nearbyint(c / s);
-
-    double s_prime;
-    int64_t z_prime;
-
-    if (q_min > z - c_q) {
-      s_prime = (((double)q_max - (z - c_q))) / ((double)q_max - q_min) * s;
-      z_prime = q_min;
-      auto dequantized_add = self.dequantize() + c_q * s;
-      if (ReLUFused) {
-        dequantized_add.relu_();
-      }
-      out = at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type());
-    } else if (q_max < z - c_q) {
-      s_prime = ((double)(z - c_q) - q_min) / ((double)q_max - q_min) * s;
-      z_prime = q_max;
-      auto dequantized_add = self.dequantize() + c_q * s;
-      if (ReLUFused) {
-        dequantized_add.relu_();
-      }
-      out = at::quantize_per_tensor(dequantized_add, s_prime, z_prime, self.scalar_type());
-    } else {
-      s_prime = s;
-      z_prime = z - c_q;
-      out.copy_(self);
-      out.set_quantizer_(make_per_tensor_affine_quantizer(s_prime, z_prime, self.scalar_type()));
-      if (ReLUFused) {
-        at::native::quantized_relu_(out);
-      }
-    }
-  });
+  if (ReLUFused) {
+    qadd_scalar_relu_stub(self.device().type(), out, self, other);
+  } else {
+    qadd_scalar_stub(self.device().type(), out, self, other);
+  }
   return out;
 }
 
 
 template <bool ReLUFused = false>
-class QAdd final : public c10::OperatorKernel {
+class QAdd final : public torch::OperatorKernel {
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   TORCH_CHECK(qa.ndimension() > 0, "qnnpack_add(): Got empty input tensor.");
@@ -209,7 +154,7 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 };
 
 template <bool ReLUFused = false>
-class QAddOut final : public c10::OperatorKernel {
+class QAddOut final : public torch::OperatorKernel {
  public:
   Tensor operator()(Tensor qa, Tensor qb, Tensor out) {
     check_inputs(qa, qb);
@@ -220,7 +165,7 @@ class QAddOut final : public c10::OperatorKernel {
 
 
 template <bool ReLUFused = false>
-class QAddScalar final : public c10::OperatorKernel {
+class QAddScalar final : public torch::OperatorKernel {
  public:
   Tensor operator()(Tensor qa, Scalar b) {
   TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
@@ -232,7 +177,7 @@ class QAddScalar final : public c10::OperatorKernel {
 };
 
 template <bool ReLUFused = false>
-class QAddScalarOut final : public c10::OperatorKernel {
+class QAddScalarOut final : public torch::OperatorKernel {
  public:
   Tensor operator()(Tensor qa, Scalar b, Tensor out) {
     check_inputs(qa, out);
@@ -240,36 +185,76 @@ class QAddScalarOut final : public c10::OperatorKernel {
   }
 };
 
-static auto registry = c10::RegisterOperators()
-.op("quantized::add(Tensor qa, Tensor qb, float scale, int zero_point)"
-     "-> Tensor qc",
-    c10::RegisterOperators::options()
-      .kernel<QAdd</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_relu(Tensor qa, Tensor qb, float scale, int zero_point)"
-     "-> Tensor qc",
-    c10::RegisterOperators::options()
-      .kernel<QAdd</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_out(Tensor qa, Tensor qb, Tensor out)"
-     "-> Tensor out",
-    c10::RegisterOperators::options()
-      .kernel<QAddOut</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_relu_out(Tensor qa, Tensor qb, Tensor out)"
-     "-> Tensor out",
-    c10::RegisterOperators::options()
-      .kernel<QAddOut</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_scalar(Tensor qa, Scalar b) -> Tensor qc",
-    c10::RegisterOperators::options()
-      .kernel<QAddScalar</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_scalar_relu(Tensor qa, Scalar b) -> Tensor qc",
-    c10::RegisterOperators::options()
-      .kernel<QAddScalar</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_scalar_out(Tensor qa, Scalar b, Tensor out)"
-     "-> Tensor out",
-    c10::RegisterOperators::options()
-      .kernel<QAddScalarOut</*ReLUFused=*/false>>(TensorTypeId::QuantizedCPUTensorId))
-.op("quantized::add_scalar_relu_out(Tensor qa, Scalar b, Tensor out)"
-     "-> Tensor out",
-    c10::RegisterOperators::options()
-      .kernel<QAddScalarOut</*ReLUFused=*/true>>(TensorTypeId::QuantizedCPUTensorId));
-}  // namespace
+} // namespace
+
+constexpr const char *kTensorTensorError = "torch.add is not supported when adding two"
+" quantized tensors. Please use torch.nn.quantized.modules.FloatFunctional";
+constexpr const char *kAlphaError = "The alpha parameter with values != 1.0 is currently"
+" not supported with quantized tensors";
+
+// ATen bindings for add
+
+Tensor& quantized_add_out(Tensor& out, const Tensor& self, const Tensor& other, Scalar alpha) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  TORCH_CHECK(alpha.toFloat() == 1.0, kAlphaError);
+  _add_scalar_out(out, self, other.item());
+  return out;
+}
+
+Tensor quantized_add_scalar(const Tensor& self, Scalar other) {
+  Tensor retval = at::empty_like(self);
+  _add_scalar_out(retval, self, other);
+  return retval;
+}
+
+Tensor& quantized_add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
+  _add_scalar_out(out, self, other);
+  return out;
+}
+
+Tensor& quantized_add_scalar_(Tensor& self, Scalar other) {
+  _add_scalar_out(self, self, other);
+  return self;
+}
+
+Tensor quantized_add(const Tensor& self, const Tensor& other, Scalar alpha) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  TORCH_CHECK(alpha.toFloat() == 1.0, kAlphaError);
+  Tensor retval = at::empty_like(self);
+  _add_scalar_out(retval, self, other.item());
+  return retval;
+}
+
+// ATen bindings for AddRelU
+
+Tensor& quantized_add_relu_out(Tensor& out, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  _add_scalar_out</*ReLUFused=*/true>(out, self, other.item());
+  return out;
+}
+
+Tensor quantized_add_scalar_relu(const Tensor& self, Scalar other) {
+  Tensor retval = at::empty_like(self);
+  _add_scalar_out</*ReLUFused=*/true>(retval, self, other);
+  return retval;
+}
+
+Tensor& quantized_add_scalar_relu_out(Tensor& out, const Tensor& self, Scalar other) {
+  _add_scalar_out</*ReLUFused=*/true>(out, self, other);
+  return out;
+}
+
+Tensor& quantized_add_scalar_relu_(Tensor& self, Scalar other) {
+  _add_scalar_out</*ReLUFused=*/true>(self, self, other);
+  return self;
+}
+
+Tensor quantized_add_relu(const Tensor& self, const Tensor& other, Scalar alpha) {
+  TORCH_CHECK(other.sizes().size() == 0, kTensorTensorError);
+  TORCH_CHECK(alpha.toFloat() == 1.0, kAlphaError);
+  Tensor retval = at::empty_like(self);
+  _add_scalar_out</*ReLUFused=*/true>(retval, self, other.item());
+  return retval;
+}
+  
 }}  // namespace at::native

@@ -382,9 +382,15 @@ def run(paths):
         for func in parse_native_yaml(path):
             declaration = {'mode': 'native'}
             try:
-                declaration['schema_string'] = "aten::" + func['func']
-                if '->' in func['func']:
-                    func_decl, return_decl = [x.strip() for x in func['func'].split('->')]
+                schema = func['func']
+                if '::' not in schema:
+                    schema_string = "aten::" + schema
+                else:
+                    schema_string = schema
+                    schema = schema.replace('::', '_')
+                declaration['schema_string'] = schema_string
+                if '->' in schema_string:
+                    func_decl, return_decl = [x.strip() for x in schema.split('->')]
                 else:
                     raise Exception('Expected return declaration')
                 fn_name, arguments = func_decl.split('(', 1)
@@ -392,7 +398,7 @@ def run(paths):
                     fn_name, overload_name = fn_name.split('.', 1)
                 else:
                     overload_name = ''
-                assert arguments[-1] == ")", "Expecting closing ) for {}".format(func['func'])
+                assert arguments[-1] == ")", "Expecting closing ) for {}".format(schema)
                 arguments = arguments[:-1]  # Expect closing )
                 declaration['name'] = func.get('name', fn_name)
                 declaration['operator_name'] = func.get('name', fn_name)
