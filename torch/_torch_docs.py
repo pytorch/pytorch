@@ -145,25 +145,28 @@ add_docstr(torch.add,
            r"""
 .. function:: add(input, other, alpha=1, out=None)
 
-Each element of the tensor :attr:`other` is multiplied by the scalar
-:attr:`alpha` and added to each element of the tensor :attr:`input`.
+Each element of the tensor ``other`` is multiplied by the scalar
+``alpha`` and added to each element of the tensor ``input``.
 The resulting tensor is returned.
 
-The shapes of :attr:`input` and :attr:`other` must be
+The shapes of ``input`` and ``other`` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
     \text{{out}} = \text{{input}} + \text{{alpha}} \times \text{{other}}
 
-The category (floating point, integer, or Boolean) of :attr:`alpha` must match
-that of the result of addition between :attr:`input` and :attr:`other`.
+If the result of the addition between ``input`` and ``other`` is:
+
+- floating point, ``alpha`` can be either floating point or integral.
+- integral, ``alpha`` must be integral.
+- Boolean, ``alpha`` can be either integral or Boolean.
 
 Args:
     input (Tensor): the first input tensor
     other (Tensor): the second input tensor
 
 Keyword arguments:
-    alpha (Number): the scalar multiplier for :attr:`other`
+    alpha (Number): the scalar multiplier for ``other``
     {out}
 
 Example::
@@ -4864,25 +4867,28 @@ add_docstr(torch.sub,
            r"""
 .. function:: sub(input, other, alpha=1, out=None)
 
-Each element of the tensor :attr:`other` is multiplied by the scalar
-:attr:`alpha` and subtracted from each element of the tensor :attr:`input`.
+Each element of the tensor ``other`` is multiplied by the scalar
+``alpha`` and subtracted from each element of the tensor ``input``.
 The resulting tensor is returned.
 
-The shapes of :attr:`input` and :attr:`other` must be
+The shapes of ``input`` and ``other`` must be
 :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    \text{{out}} = \text{{input}} - \text{{alpha}} \times \text{{other}}
+    \text{{out}} = \text{{input}} + \text{{alpha}} \times \text{{other}}
 
-The category (floating point, integer, or Boolean) of :attr:`alpha` must match
-that of the result of subtraction between :attr:`input` and :attr:`other`.
+If the result of the addition between ``input`` and ``other`` is:
+
+- floating point, ``alpha`` can be either floating point or integral.
+- integral, ``alpha`` must be integral.
+- Boolean, ``alpha`` can be either integral or Boolean.
 
 Args:
     input (Tensor): the first input tensor
     other (Tensor): the second input tensor
 
 Keyword arguments:
-    alpha (Number): the scalar multiplier for :attr:`other`
+    alpha (Number): the scalar multiplier for ``other``
     {out}
 
 Example::
