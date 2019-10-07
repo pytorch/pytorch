@@ -427,3 +427,50 @@ TEST_F(FunctionalTest, RReLU) {
     }
   }
 }
+
+TEST_F(FunctionalTest, CELU) {
+  const auto size = 3;
+  for (const auto inplace : {false, true}) {
+    for (const auto alpha : {0.42, 1.0, 4.2, 42.42}) {
+      auto x = torch::linspace(-10.0, 10.0, size * size * size);
+      x.resize_({size, size, size});
+      auto y_exp = torch::max(torch::zeros_like(x), x) +
+        torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+      auto y = F::celu(x, CELUOptions().alpha(alpha).inplace(inplace));
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+      if (inplace) {
+        ASSERT_TRUE(torch::allclose(x, y_exp));
+      }
+    }
+  }
+}
+
+TEST_F(FunctionalTest, Sigmoid) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = 1 / (1 + torch::exp(-x));
+  auto y = F::sigmoid(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Softplus) {
+  const auto size = 3;
+  for (const auto beta : {0.5, 1.0, 2.0}) {
+    for (const auto threshold : {1.0, 3.0, 5.0}) {
+      auto x = torch::linspace(-3.0, 3.0, 61);
+      x.resize_({size, size, size});
+      auto y_exp =
+        (x <= threshold) * torch::log(1 + torch::exp(x * beta)) / beta +
+        (x > threshold) * x;
+      auto y = F::softplus(x,
+        SoftplusOptions().beta(beta).threshold(threshold));
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+    }
+  }
+}
