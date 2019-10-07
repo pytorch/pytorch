@@ -30,7 +30,7 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self) {
   auto iter = TensorIterator();
   iter.add_input(self);
   iter.build();
-  cpu_serial_kernel(iter, [&](scalar_t a) {
+  cpu_kernel(iter, [&](scalar_t a) {
     if (a != 0) {
       ii = idx + dimensions;
       for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
@@ -58,7 +58,7 @@ static void nonzero_kernel(Tensor& subscript, const Tensor& self) {
     auto iter = TensorIterator();
     iter.add_input(self);
     iter.build();
-    cpu_serial_kernel(iter,
+    cpu_kernel(iter,
       [&](scalar_t a) -> void {
         if (a != 0) {
           numel++;
