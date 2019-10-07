@@ -15,7 +15,7 @@ DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(logical_xor_stub);
-DEFINE_DISPATCH(remainder_stub)
+DEFINE_DISPATCH(remainder_stub);
 
 
 static constexpr char alpha_mismatch_err[] =
