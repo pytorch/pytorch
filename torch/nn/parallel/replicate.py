@@ -149,7 +149,10 @@ def replicate(network, devices, detach=False):
                 module_idx = module_indices[child]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    setattr(replica, key, module_copies[j][module_idx])
+                    if _is_script_module(replica):
+                        replica._c._register_module(key, module_copies[j][module_idx]._c)
+                    else:
+                        setattr(replica, key, module_copies[j][module_idx])
         for key, param in module._parameters.items():
             if param is None:
                 for j in range(num_replicas):
@@ -160,12 +163,15 @@ def replicate(network, devices, detach=False):
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
                     param = param_copies[j][param_idx]
-                    setattr(replica, key, Parameter(param))
-                    # TODO: We need to manually set _parameters with a bare
-                    # non-parameter Tensor, otherwise gradients don't
-                    # accumulate in the original parameters when you call
-                    # backwards() on the DataParallel module.
-                    replica._parameters[key] = param
+                    if _is_script_module(replica):
+                        replica._c._register_parameter(key, param, False)
+                    else:
+                        setattr(replica, key, Parameter(param))
+                        # TODO: We need to manually set _parameters with a bare
+                        # non-parameter Tensor, otherwise gradients don't
+                        # accumulate in the original parameters when you call
+                        # backwards() on the DataParallel module.
+                        replica._parameters[key] = param
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
@@ -180,7 +186,11 @@ def replicate(network, devices, detach=False):
                     buffer_idx = buffer_indices_not_rg[buf]
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
-                    setattr(replica, key, buffer_copies[j][buffer_idx])
+                    if _is_script_module(replica):
+                        replica._c._register_parameter(key, buffer_copies[j][buffer_idx], True)
+                    else:
+                        setattr(replica, key, buffer_copies[j][buffer_idx])
+
 
     for j in range(num_replicas):
         _copy_scriptmodule_methods(modules, module_copies[j], module_indices)
