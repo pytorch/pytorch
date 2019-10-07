@@ -2690,10 +2690,10 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         padding_mode_enum = 2
 
     if align_corners is None:
-        warnings.warn("Default grid_sample and affine_grid behavior has changed "
-                      "to align_corners=False since 1.3.0. Please specify "
-                      "align_corners=True if the old behavior is desired. "
-                      "See the documentation of grid_sample for details.")
+        raise ValueError("Default grid_sample and affine_grid behavior will be changed "
+                         "to align_corners=False in 1.4.0. Please specify "
+                         "align_corners=True if the old behavior is desired. "
+                         "See the documentation of grid_sample for details.")
         align_corners = False
 
     return torch.grid_sampler(input, grid, mode_enum, padding_mode_enum, align_corners)
@@ -2749,10 +2749,10 @@ def affine_grid(theta, size, align_corners=None):
         (the center of the input image).
     """
     if align_corners is None:
-        warnings.warn("Default grid_sample and affine_grid behavior has changed "
-                      "to align_corners=False since 1.3.0. Please specify "
-                      "align_corners=True if the old behavior is desired. "
-                      "See the documentation of grid_sample for details.")
+        raise ValueError("Default grid_sample and affine_grid behavior will be changed "
+                         "to align_corners=False in 1.4.0. Please specify "
+                         "align_corners=True if the old behavior is desired. "
+                         "See the documentation of grid_sample for details.")
         align_corners = False
 
     # enforce floating point dtype on theta
