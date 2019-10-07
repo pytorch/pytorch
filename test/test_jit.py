@@ -662,8 +662,9 @@ class TestJit(JitTestCase):
         self.checkScript(test_simple_grad_with_grad_outputs, (x, y), inputs_requires_grad=True)
 
     def test_script_backward(self):
-        def checkGradEquals(fn, inputs):
+        def checkBackwardScript(fn, inputs):
             scripted_fn = torch.jit.script(fn)
+            FileCheck().check("torch.autograd.backward").run(scripted_fn.code)
             recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
 
             fn(*inputs)
@@ -693,9 +694,9 @@ class TestJit(JitTestCase):
             torch.autograd.backward((output,), grad_outputs)
 
         inp = torch.randn(2, 2, requires_grad=True)
-        checkGradEquals(test_tensor_backward, (inp,))
-        checkGradEquals(test_torch_autograd_backward, (inp,))
-        checkGradEquals(test_torch_autograd_backward_with_grad_tensors, (inp,))
+        checkBackwardScript(test_tensor_backward, (inp,))
+        checkBackwardScript(test_torch_autograd_backward, (inp,))
+        checkBackwardScript(test_torch_autograd_backward_with_grad_tensors, (inp,))
 
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
@@ -19644,7 +19645,7 @@ class TestClassType(JitTestCase):
 
         # TODO - support compiling classes from strings in jit.CompilationUnit
         @torch.jit.script
-        class BinOps(object):
+        class MyClass(object):
             def __init__(self, x):
                 # type: (int) -> None
                 self.x = x
@@ -19717,49 +19718,57 @@ class TestClassType(JitTestCase):
                 # type: (int, int) -> None
                 self.x = val * idx
 
+            def __call__(self, val):
+                # type: (int) -> int
+                return self.x * val * 3
+
+
         def add():
-            return BinOps(4) + 3
+            return MyClass(4) + 3
         def sub():  # noqa: E306
-            return BinOps(4) - 3
+            return MyClass(4) - 3
         def mul():  # noqa: E306
-            return BinOps(4) * 3
+            return MyClass(4) * 3
         def pow():  # noqa: E306
-            return BinOps(4) ** 3
+            return MyClass(4) ** 3
         def truediv():  # noqa: E306
-            return BinOps(4) / 3
+            return MyClass(4) / 3
         def ne():  # noqa: E306
-            return BinOps(4) != 3
+            return MyClass(4) != 3
         def eq():  # noqa: E306
-            return BinOps(4) == 3
+            return MyClass(4) == 3
         def lt():  # noqa: E306
-            return BinOps(4) < 3
+            return MyClass(4) < 3
         def gt():  # noqa: E306
-            return BinOps(4) > 3
+            return MyClass(4) > 3
         def le():  # noqa: E306
-            return BinOps(4) <= 3
+            return MyClass(4) <= 3
         def ge():  # noqa: E306
-            return BinOps(4) >= 3
+            return MyClass(4) >= 3
         def _and():  # noqa: E306
-            return BinOps(4) & 3
+            return MyClass(4) & 3
         def _or():  # noqa: E306
-            return BinOps(4) | 3
+            return MyClass(4) | 3
         def _xor():  # noqa: E306
-            return BinOps(4) ^ 3
+            return MyClass(4) ^ 3
         def getitem():  # noqa: E306
-            return BinOps(4)[1]
+            return MyClass(4)[1]
         def setitem():  # noqa: E306
-            a = BinOps(4)
+            a = MyClass(4)
             a[1] = 5
             return a.x
+        def call():  # noqa: E306
+            a = MyClass(5)
+            return a(2)
 
-        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem]
+        ops = [add, sub, mul, pow, ne, eq, lt, gt, le, ge, _and, _or, _xor, getitem, setitem, call]
 
         if not PY2:
             ops.append(truediv)
         for func in ops:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegex(RuntimeError, "__add__ method"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute __add__. Did you forget to initialize it"):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))

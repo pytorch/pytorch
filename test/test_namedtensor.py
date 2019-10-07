@@ -1871,11 +1871,6 @@ class TestNamedTensor(TestCase):
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
 
-# Disable all tests if named tensor is not available.
-for attr in dir(TestNamedTensor):
-    if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(skipIfNotTestingNamedTensor(getattr(TestNamedTensor, attr)))
-        setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':
     run_tests()
