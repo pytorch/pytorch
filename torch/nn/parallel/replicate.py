@@ -160,7 +160,7 @@ def replicate(network, devices, detach=False):
                     replica = module_copies[j][i]
                     param = param_copies[j][param_idx]
                     if _is_script_module(replica):
-                        replica._c._register_parameter(key, param_copies[j][param_idx], False)
+                        replica._c._register_parameter(key, param, False)
                     else:
                         setattr(replica, key, Parameter(param))
                         # TODO: We need to manually set _parameters with a bare
