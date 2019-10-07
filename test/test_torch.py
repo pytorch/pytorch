@@ -14002,17 +14002,12 @@ def generate_not_implemented_tests(cls):
     for op in tensor_binary_ops:
         @dtypes(*_types)
         def test(self, device, dtype):
-            # Generates the inputs
-            # Note: CPU tensors are never torch.half
-            cpu_tensor = _small_2d(dtype, 'cpu')
-            device_tensor = cpu_tensor.to(dtype=dtype, device=device)
+            # Generate the inputs
+            tensor = _small_2d(dtype, device)
 
-            # Runs the tensor op on CPU and device
-            cpu_result = getattr(cpu_tensor, op)(UnknownType())
-            device_result = getattr(device_tensor, op)(UnknownType())
-
-            self.assertEqual(cpu_result, NotImplemented)
-            self.assertEqual(device_result, NotImplemented)
+            # Runs the tensor op on the device
+            result = getattr(tensor, op)(UnknownType())
+            self.assertEqual(result, NotImplemented)
 
         test_name = "test_{}_not_implemented".format(op)
         assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
@@ -14033,7 +14028,7 @@ class TestTorch(TestCase, _TestTorchMixin):
 # pytest will fail.
 add_neg_dim_tests()
 generate_tensor_op_tests(TestTensorDeviceOps)
-generate_not_implemented_tests(TestTensorDeviceOps)
+generate_not_implemented_tests(TestTorchDeviceType)
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 instantiate_device_type_tests(TestTensorDeviceOps, globals(), except_for='cpu')
