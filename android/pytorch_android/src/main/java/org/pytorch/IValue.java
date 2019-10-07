@@ -98,7 +98,7 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript Tensor type.
    */
-  public static IValue tensor(Tensor tensor) {
+  public static IValue from(Tensor tensor) {
     final IValue iv = new IValue(TYPE_CODE_TENSOR);
     iv.mData = tensor;
     return iv;
@@ -107,7 +107,7 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript bool type.
    */
-  public static IValue bool(boolean value) {
+  public static IValue from(boolean value) {
     final IValue iv = new IValue(TYPE_CODE_BOOL);
     iv.mData = value;
     return iv;
@@ -116,7 +116,7 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript int type.
    */
-  public static IValue long64(long value) {
+  public static IValue from(long value) {
     final IValue iv = new IValue(TYPE_CODE_LONG);
     iv.mData = value;
     return iv;
@@ -125,7 +125,7 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript float type.
    */
-  public static IValue double64(double value) {
+  public static IValue from(double value) {
     final IValue iv = new IValue(TYPE_CODE_DOUBLE);
     iv.mData = value;
     return iv;
@@ -134,7 +134,7 @@ public class IValue {
   /**
    * Creates new IValue instance of torchscript str type.
    */
-  public static IValue string(String value) {
+  public static IValue from(String value) {
     final IValue iv = new IValue(TYPE_CODE_STRING);
     iv.mData = value;
     return iv;
@@ -143,7 +143,7 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript List[bool] type.
    */
-  public static IValue boolList(boolean... list) {
+  public static IValue listFrom(boolean... list) {
     final IValue iv = new IValue(TYPE_CODE_BOOL_LIST);
     iv.mData = list;
     return iv;
@@ -152,7 +152,7 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript List[int] type.
    */
-  public static IValue longList(long... list) {
+  public static IValue listFrom(long... list) {
     final IValue iv = new IValue(TYPE_CODE_LONG_LIST);
     iv.mData = list;
     return iv;
@@ -161,7 +161,7 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript List[float] type.
    */
-  public static IValue doubleList(double... list) {
+  public static IValue listFrom(double... list) {
     final IValue iv = new IValue(TYPE_CODE_DOUBLE_LIST);
     iv.mData = list;
     return iv;
@@ -170,7 +170,7 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript List[Tensor] type.
    */
-  public static IValue tensorList(Tensor... list) {
+  public static IValue listFrom(Tensor... list) {
     final IValue iv = new IValue(TYPE_CODE_TENSOR_LIST);
     iv.mData = list;
     return iv;
@@ -179,7 +179,7 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript List[T] type. All elements must have the same type.
    */
-  public static IValue list(IValue... array) {
+  public static IValue listFrom(IValue... array) {
     final int size = array.length;
     if (size > 0) {
       final int typeCode0 = array[0].mTypeCode;
@@ -198,7 +198,7 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript Tuple[T0, T1, ...] type.
    */
-  public static IValue tuple(IValue... array) {
+  public static IValue tupleFrom(IValue... array) {
     final IValue iv = new IValue(TYPE_CODE_TUPLE);
     iv.mData = array;
     return iv;
@@ -207,7 +207,7 @@ public class IValue {
   /**
    * Creates a new IValue instance oftorchscript Dict[Str, V] type.
    */
-  public static IValue dictStringKey(Map<String, IValue> map) {
+  public static IValue dictStringKeyFrom(Map<String, IValue> map) {
     final IValue iv = new IValue(TYPE_CODE_DICT_STRING_KEY);
     iv.mData = map;
     return iv;
@@ -216,73 +216,73 @@ public class IValue {
   /**
    * Creates a new IValue instance of torchscript Dict[int, V] type.
    */
-  public static IValue dictLongKey(Map<Long, IValue> map) {
+  public static IValue dictLongKeyFrom(Map<Long, IValue> map) {
     final IValue iv = new IValue(TYPE_CODE_DICT_LONG_KEY);
     iv.mData = map;
     return iv;
   }
 
-  public Tensor getTensor() {
+  public Tensor toTensor() {
     preconditionType(TYPE_CODE_TENSOR, mTypeCode);
     return (Tensor) mData;
   }
 
-  public boolean getBool() {
+  public boolean toBool() {
     preconditionType(TYPE_CODE_BOOL, mTypeCode);
     return (boolean) mData;
   }
 
-  public long getLong() {
+  public long toLong() {
     preconditionType(TYPE_CODE_LONG, mTypeCode);
     return (long) mData;
   }
 
-  public double getDouble() {
+  public double toDouble() {
     preconditionType(TYPE_CODE_DOUBLE, mTypeCode);
     return (double) mData;
   }
 
-  public String getString() {
+  public String toStr() {
     preconditionType(TYPE_CODE_STRING, mTypeCode);
     return (String) mData;
   }
 
-  public boolean[] getBoolList() {
+  public boolean[] toBoolList() {
     preconditionType(TYPE_CODE_BOOL_LIST, mTypeCode);
     return (boolean[]) mData;
   }
 
-  public long[] getLongList() {
+  public long[] toLongList() {
     preconditionType(TYPE_CODE_LONG_LIST, mTypeCode);
     return (long[]) mData;
   }
 
-  public double[] getDoubleList() {
+  public double[] toDoubleList() {
     preconditionType(TYPE_CODE_DOUBLE_LIST, mTypeCode);
     return (double[]) mData;
   }
 
-  public Tensor[] getTensorList() {
+  public Tensor[] toTensorList() {
     preconditionType(TYPE_CODE_TENSOR_LIST, mTypeCode);
     return (Tensor[]) mData;
   }
 
-  public IValue[] getList() {
+  public IValue[] toList() {
     preconditionType(TYPE_CODE_LIST, mTypeCode);
     return (IValue[]) mData;
   }
 
-  public IValue[] getTuple() {
+  public IValue[] toTuple() {
     preconditionType(TYPE_CODE_TUPLE, mTypeCode);
     return (IValue[]) mData;
   }
 
-  public Map<String, IValue> getDictStringKey() {
+  public Map<String, IValue> toDictStringKey() {
     preconditionType(TYPE_CODE_DICT_STRING_KEY, mTypeCode);
     return (Map<String, IValue>) mData;
   }
 
-  public Map<Long, IValue> getDictLongKey() {
+  public Map<Long, IValue> toDictLongKey() {
     preconditionType(TYPE_CODE_DICT_LONG_KEY, mTypeCode);
     return (Map<Long, IValue>) mData;
   }
