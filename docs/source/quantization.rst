@@ -14,11 +14,11 @@ a 4x reduction in memory bandwidth requirements.  Hardware support for  INT8 com
 is typically 2 to 4 times faster compared to FP32 compute. Quantization is primarily a technique
 to speed up inference and only the forward pass is supported for quantized operators.
 
-PyTorch supports multiple approaches to quantizing a deep learning model. In most cases the model is trained 
-in FP32 and then the model is converted to INT8. In addition, PyTorch also supports quantization aware 
-training, which models quantization errors in both the forward and backward passes using fake-quantization 
-modules. Note that the entire computation is carried out in floating point. At the end of quantization aware 
-training, pytorch provides conversion functions to convert the trained model into lower precision.
+PyTorch supports multiple approaches to quantizing a deep learning model. In most cases the model is trained
+in FP32 and then the model is converted to INT8. In addition, PyTorch also supports quantization aware
+training, which models quantization errors in both the forward and backward passes using fake-quantization
+modules. Note that the entire computation is carried out in floating point. At the end of quantization aware
+training, PyTorch provides conversion functions to convert the trained model into lower precision.
 
 At lower level, PyTorch provides a way to represent quantized tensors and
 perform operations with them. They can be used to directly construct models that
@@ -207,59 +207,59 @@ torch.quantization
 .. automodule:: torch.quantization
 
 Fake Quantize
---------------
+~~~~~~~~~~~~~~~
 .. autoclass:: FakeQuantize
 
 Fuse Modules
--------------
+~~~~~~~~~~~~~~~
 .. autofunction:: fuse_conv_bn
 .. autofunction:: fuse_conv_bn_relu
 .. autofunction:: _fuse_modules
 .. autofunction:: fuse_modules
 
 Observer
----------
+~~~~~~~~~~~~~~~
 .. autoclass:: Observer
 
 Observer Base
---------------
+~~~~~~~~~~~~~~~
 .. autoclass:: ObserverBase
 .. autofunction:: _calculate_qparams
 
 Min Max Observer
-----------------
+~~~~~~~~~~~~~~~
 .. autoclass:: MinMaxObserver
 
 Per Channel Min Max Observer
------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. autoclass:: PerChannelMinMaxObserver
 
 Histogram Observer
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: HistogramObserver
 
 Recording Observer
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: RecordingObserver
 
 Noop Observer
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: NoopObserver
 
 Quant Stub
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: QuantStub
 
 DeQuant Stub
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: DeQuantStub
 
 Quant Wrapper
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: QuantWrapper
 
 Utility Functions
-------------------
+~~~~~~~~~~~~~~~
 .. autofunction:: propagate_qconfig_helper
 .. autofunction:: propagate_qconfig
 .. autofunction:: _observer_forward_hook
@@ -279,22 +279,22 @@ torch.nn.instrinsic.qat.modules
 .. automodule:: torch.nn.intrinsic.qat.modules
 
 ConvBn2d
---------
+~~~~~~~~~~~~~~~
 .. autoclass:: ConvBn2d
     :members:
 
 ConvBnReLU2d
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: ConvBnReLU2d
     :members:
 
 ConvReLU2d
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: ConvReLU2d
     :members:
 
 LinearReLU
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: LinearReLU
     :members:
 
@@ -303,12 +303,12 @@ torch.nn.intrinsic.quantized.modules
 .. automodule:: torch.nn.intrinsic.quantized.modules
 
 ConvReLU2d
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: ConvReLU2d
     :members:
 
 LinearReLU
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: LinearReLU
     :members:
 
@@ -317,12 +317,12 @@ torch.nn.qat.modules
 .. automodule:: torch.nn.qat.modules
 
 Conv2d
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: Conv2d
     :members:
 
 Linear
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: Linear
     :members:
 
@@ -332,7 +332,7 @@ torch.nn.quantized
 .. automodule:: torch.nn.quantized.functional
 
 Functional interface
----------------------
+~~~~~~~~~~~~~~~
 .. autofunction:: relu
 .. autofunction:: linear
 .. autofunction:: conv2d
@@ -341,59 +341,59 @@ Functional interface
 .. automodule:: torch.nn.quantized.dynamic.modules
 
 Linear
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: Linear
     :members:
 
 RNNBase
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: RNNBase
     :members:
 
 .. automodule:: torch.nn.quantized.modules.activation
 
 ReLU
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: ReLU
     :members:
 
 ReLU6
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: ReLU6
     :members:
 
 .. automodule:: torch.nn.quantized.modules.conv
 
 Conv2d
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: Conv2d
     :members:
 
 .. automodule:: torch.nn.quantized.modules.functional_modules
 
 Float Functional
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: FloatFunctional
     :members:
 
 QFunctional
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: QFunctional
     :members:
 
 .. automodule:: torch.nn.quantized.modules.linear
 
 Quantize
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: Quantize
     :members:
 
 DeQuantize
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: DeQuantize
     :members:
 
 Linear
-------------------
+~~~~~~~~~~~~~~~
 .. autoclass:: Linear
     :members:
