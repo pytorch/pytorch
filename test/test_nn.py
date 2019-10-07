@@ -8825,22 +8825,31 @@ class TestNNInit(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_uniform(self):
-        for dims in [1, 2, 4]:
-            input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
-            a = self._random_float(-3, 3)
-            b = a + self._random_float(1, 5)
-            init.uniform_(input_tensor, a=a, b=b)
-            assert self._is_uniform(input_tensor, a, b)
+        for use_generator in [True, False]:
+            for dims in [1, 2, 4]:
+                input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
+                a = self._random_float(-3, 3)
+                b = a + self._random_float(1, 5)
+                if use_generator:
+                    g = torch.Generator().manual_seed(123)
+                    init.uniform_(input_tensor, a=a, b=b, generator=g)
+                else:
+                    init.uniform_(input_tensor, a=a, b=b)
+                assert self._is_uniform(input_tensor, a, b)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_normal(self):
-        for dims in [1, 2, 4]:
-            input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
-            mean = self._random_float(-3, 3)
-            std = self._random_float(1, 5)
-            init.normal_(input_tensor, mean=mean, std=std)
-
-            assert self._is_normal(input_tensor, mean, std)
+        for use_generator in [True, False]:
+            for dims in [1, 2, 4]:
+                input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
+                mean = self._random_float(-3, 3)
+                std = self._random_float(1, 5)
+                if use_generator:
+                    g = torch.Generator().manual_seed(123)
+                    init.normal_(input_tensor, mean=mean, std=std, generator=g)
+                else:
+                    init.normal_(input_tensor, mean=mean, std=std)
+                assert self._is_normal(input_tensor, mean, std)
 
     def test_constant(self):
         for dims in [1, 2, 4]:
@@ -8956,48 +8965,66 @@ class TestNNInit(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_xavier_uniform(self):
-        for use_gain in [True, False]:
-            for dims in [2, 4]:
-                input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
-                gain = 1
+        for use_generator in [True, False]:
+            for use_gain in [True, False]:
+                for dims in [2, 4]:
+                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
+                    gain = 1
 
-                if use_gain:
-                    gain = self._random_float(0.1, 2)
-                    init.xavier_uniform_(input_tensor, gain=gain)
-                else:
-                    init.xavier_uniform_(input_tensor)
+                    if use_gain:
+                        gain = self._random_float(0.1, 2)
+                        if use_generator:
+                            g = torch.Generator().manual_seed(123)
+                            init.xavier_uniform_(input_tensor, gain=gain, generator=g)
+                        else:
+                            init.xavier_uniform_(input_tensor, gain=gain)
+                    else:
+                        if use_generator:
+                            g = torch.Generator().manual_seed(123)
+                            init.xavier_uniform_(input_tensor, generator=g)
+                        else:
+                            init.xavier_uniform_(input_tensor)
 
-                fan_in = input_tensor.size(1)
-                fan_out = input_tensor.size(0)
-                if input_tensor.dim() > 2:
-                    fan_in *= input_tensor[0, 0].numel()
-                    fan_out *= input_tensor[0, 0].numel()
+                    fan_in = input_tensor.size(1)
+                    fan_out = input_tensor.size(0)
+                    if input_tensor.dim() > 2:
+                        fan_in *= input_tensor[0, 0].numel()
+                        fan_out *= input_tensor[0, 0].numel()
 
-                expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-                bounds = expected_std * math.sqrt(3)
-                assert self._is_uniform(input_tensor, -bounds, bounds)
+                    expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
+                    bounds = expected_std * math.sqrt(3)
+                    assert self._is_uniform(input_tensor, -bounds, bounds)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_xavier_normal(self):
-        for use_gain in [True, False]:
-            for dims in [2, 4]:
-                input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
-                gain = 1
+        for use_generator in [True, False]:
+            for use_gain in [True, False]:
+                for dims in [2, 4]:
+                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
+                    gain = 1
 
-                if use_gain:
-                    gain = self._random_float(0.1, 2)
-                    init.xavier_normal_(input_tensor, gain=gain)
-                else:
-                    init.xavier_normal_(input_tensor)
+                    if use_gain:
+                        gain = self._random_float(0.1, 2)
+                        if use_generator:
+                            g = torch.Generator().manual_seed(123)
+                            init.xavier_normal_(input_tensor, gain=gain, generator=g)
+                        else:
+                            init.xavier_normal_(input_tensor, gain=gain)
+                    else:
+                        if use_generator:
+                            g = torch.Generator().manual_seed(123)
+                            init.xavier_normal_(input_tensor, generator=g)
+                        else:
+                            init.xavier_normal_(input_tensor)
 
-                fan_in = input_tensor.size(1)
-                fan_out = input_tensor.size(0)
-                if input_tensor.dim() > 2:
-                    fan_in *= input_tensor[0, 0].numel()
-                    fan_out *= input_tensor[0, 0].numel()
+                    fan_in = input_tensor.size(1)
+                    fan_out = input_tensor.size(0)
+                    if input_tensor.dim() > 2:
+                        fan_in *= input_tensor[0, 0].numel()
+                        fan_out *= input_tensor[0, 0].numel()
 
-                expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-                assert self._is_normal(input_tensor, 0, expected_std)
+                    expected_std = gain * math.sqrt(2.0 / (fan_in + fan_out))
+                    assert self._is_normal(input_tensor, 0, expected_std)
 
     def test_kaiming_uniform_errors_on_inputs_smaller_than_2d(self):
         for dims in [0, 1]:
@@ -9013,58 +9040,76 @@ class TestNNInit(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_uniform(self):
-        for use_a in [True, False]:
-            for dims in [2, 4]:
-                for mode in ['fan_in', 'fan_out']:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
-                    if use_a:
-                        a = self._random_float(0.1, 2)
-                        init.kaiming_uniform_(input_tensor, a=a, mode=mode)
-                    else:
-                        a = 0
-                        init.kaiming_uniform_(input_tensor, mode=mode)
+        for use_generator in [True, False]:
+            for use_a in [True, False]:
+                for dims in [2, 4]:
+                    for mode in ['fan_in', 'fan_out']:
+                        input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
+                        if use_a:
+                            a = self._random_float(0.1, 2)
+                            if use_generator:
+                                g = torch.Generator().manual_seed(123)
+                                init.kaiming_uniform_(input_tensor, a=a, mode=mode, generator=g)
+                            else:
+                                init.kaiming_uniform_(input_tensor, a=a, mode=mode)
+                        else:
+                            a = 0
+                            if use_generator:
+                                g = torch.Generator().manual_seed(123)
+                                init.kaiming_uniform_(input_tensor, mode=mode, generator=g)
+                            else:
+                                init.kaiming_uniform_(input_tensor, mode=mode)
 
-                    fan_in = input_tensor.size(1)
-                    fan_out = input_tensor.size(0)
-                    if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0, 0].numel()
-                        fan_out *= input_tensor[0, 0].numel()
+                        fan_in = input_tensor.size(1)
+                        fan_out = input_tensor.size(0)
+                        if input_tensor.dim() > 2:
+                            fan_in *= input_tensor[0, 0].numel()
+                            fan_out *= input_tensor[0, 0].numel()
 
-                    if mode == 'fan_in':
-                        n = fan_in
-                    else:
-                        n = fan_out
+                        if mode == 'fan_in':
+                            n = fan_in
+                        else:
+                            n = fan_out
 
-                    expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
-                    bounds = expected_std * math.sqrt(3.0)
-                    assert self._is_uniform(input_tensor, -bounds, bounds)
+                        expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
+                        bounds = expected_std * math.sqrt(3.0)
+                        assert self._is_uniform(input_tensor, -bounds, bounds)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_normal(self):
-        for use_a in [True, False]:
-            for dims in [2, 4]:
-                for mode in ['fan_in', 'fan_out']:
-                    input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
-                    if use_a:
-                        a = self._random_float(0.1, 2)
-                        init.kaiming_normal_(input_tensor, a=a, mode=mode)
-                    else:
-                        a = 0
-                        init.kaiming_normal_(input_tensor, mode=mode)
+        for use_generator in [True, False]:
+            for use_a in [True, False]:
+                for dims in [2, 4]:
+                    for mode in ['fan_in', 'fan_out']:
+                        input_tensor = self._create_random_nd_tensor(dims, size_min=20, size_max=25)
+                        if use_a:
+                            a = self._random_float(0.1, 2)
+                            if use_generator:
+                                g = torch.Generator().manual_seed(123)
+                                init.kaiming_normal_(input_tensor, a=a, mode=mode, generator=g)
+                            else:
+                                init.kaiming_normal_(input_tensor, a=a, mode=mode)
+                        else:
+                            a = 0
+                            if use_generator:
+                                g = torch.Generator().manual_seed(123)
+                                init.kaiming_normal_(input_tensor, mode=mode, generator=g)
+                            else:
+                                init.kaiming_normal_(input_tensor, mode=mode)
 
-                    fan_in = input_tensor.size(1)
-                    fan_out = input_tensor.size(0)
-                    if input_tensor.dim() > 2:
-                        fan_in *= input_tensor[0, 0].numel()
-                        fan_out *= input_tensor[0, 0].numel()
+                        fan_in = input_tensor.size(1)
+                        fan_out = input_tensor.size(0)
+                        if input_tensor.dim() > 2:
+                            fan_in *= input_tensor[0, 0].numel()
+                            fan_out *= input_tensor[0, 0].numel()
 
-                    if mode == 'fan_in':
-                        n = fan_in
-                    else:
-                        n = fan_out
+                        if mode == 'fan_in':
+                            n = fan_in
+                        else:
+                            n = fan_out
 
-                    expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
-                    assert self._is_normal(input_tensor, 0, expected_std)
+                        expected_std = math.sqrt(2.0 / ((1 + a**2) * n))
+                        assert self._is_normal(input_tensor, 0, expected_std)
 
     def test_sparse_only_works_on_2d_inputs(self):
         for dims in [1, 3]:
@@ -9075,45 +9120,63 @@ class TestNNInit(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_sparse_default_std(self):
-        for use_random_std in [True, False]:
-            input_tensor = self._create_random_nd_tensor(2, size_min=30, size_max=35)
-            rows, cols = input_tensor.size(0), input_tensor.size(1)
-            sparsity = self._random_float(0.1, 0.2)
+        for use_generator in [True, False]:
+            for use_random_std in [True, False]:
+                input_tensor = self._create_random_nd_tensor(2, size_min=30, size_max=35)
+                rows, cols = input_tensor.size(0), input_tensor.size(1)
+                sparsity = self._random_float(0.1, 0.2)
 
-            std = 0.01  # default std
-            if use_random_std:
-                std = self._random_float(0.01, 0.2)
-                init.sparse_(input_tensor, sparsity=sparsity, std=std)
-            else:
-                init.sparse_(input_tensor, sparsity=sparsity)
+                std = 0.01  # default std
+                if use_random_std:
+                    std = self._random_float(0.01, 0.2)
+                    if use_generator:
+                        g = torch.Generator().manual_seed(123)
+                        init.sparse_(input_tensor, sparsity=sparsity, std=std, generator=g)
+                    else:
+                        init.sparse_(input_tensor, sparsity=sparsity, std=std)
+                else:
+                    if use_generator:
+                        g = torch.Generator().manual_seed(123)
+                        init.sparse_(input_tensor, sparsity=sparsity, generator=g)
+                    else:
+                        init.sparse_(input_tensor, sparsity=sparsity)
 
-            for col_idx in range(input_tensor.size(1)):
-                column = input_tensor[:, col_idx]
-                assert column[column == 0].nelement() >= math.ceil(sparsity * rows)
+                for col_idx in range(input_tensor.size(1)):
+                    column = input_tensor[:, col_idx]
+                    assert column[column == 0].nelement() >= math.ceil(sparsity * rows)
 
-            assert self._is_normal(input_tensor[input_tensor != 0], 0, std)
+                assert self._is_normal(input_tensor[input_tensor != 0], 0, std)
 
     @skipIfNoLapack
     def test_orthogonal(self):
-        for use_gain in [True, False]:
-            for tensor_size in [[3, 4], [4, 3], [20, 2, 3, 4], [2, 3, 4, 5]]:
-                input_tensor = torch.zeros(tensor_size)
-                gain = 1.0
+        for use_generator in [True, False]:
+            for use_gain in [True, False]:
+                for tensor_size in [[3, 4], [4, 3], [20, 2, 3, 4], [2, 3, 4, 5]]:
+                    input_tensor = torch.zeros(tensor_size)
+                    gain = 1.0
 
-                if use_gain:
-                    gain = self._random_float(0.1, 2)
-                    init.orthogonal_(input_tensor, gain=gain)
-                else:
-                    init.orthogonal_(input_tensor)
+                    if use_gain:
+                        gain = self._random_float(0.1, 2)
+                        if use_generator:
+                            g = torch.Generator().manual_seed(123)
+                            init.orthogonal_(input_tensor, gain=gain, generator=g)
+                        else:
+                            init.orthogonal_(input_tensor, gain=gain)
+                    else:
+                        if use_generator:
+                            g = torch.Generator().manual_seed(123)
+                            init.orthogonal_(input_tensor, generator=g)
+                        else:
+                            init.orthogonal_(input_tensor)
 
-                rows, cols = tensor_size[0], reduce(mul, tensor_size[1:])
-                flattened_tensor = input_tensor.view(rows, cols)
-                if rows > cols:
-                    self.assertEqual(torch.mm(flattened_tensor.t(), flattened_tensor),
-                                     torch.eye(cols) * gain ** 2, prec=1e-6)
-                else:
-                    self.assertEqual(torch.mm(flattened_tensor, flattened_tensor.t()),
-                                     torch.eye(rows) * gain ** 2, prec=1e-6)
+                    rows, cols = tensor_size[0], reduce(mul, tensor_size[1:])
+                    flattened_tensor = input_tensor.view(rows, cols)
+                    if rows > cols:
+                        self.assertEqual(torch.mm(flattened_tensor.t(), flattened_tensor),
+                                         torch.eye(cols) * gain ** 2, prec=1e-6)
+                    else:
+                        self.assertEqual(torch.mm(flattened_tensor, flattened_tensor.t()),
+                                         torch.eye(rows) * gain ** 2, prec=1e-6)
 
     def test_deprecation(self):
         x = torch.randn(3, 3)
