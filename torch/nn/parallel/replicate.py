@@ -163,6 +163,11 @@ def replicate(network, devices, detach=False):
                         replica._c._register_parameter(key, param_copies[j][param_idx], False)
                     else:
                         setattr(replica, key, Parameter(param))
+                        # TODO: We need to manually set _parameters with a bare
+                        # non-parameter Tensor, otherwise gradients don't
+                        # accumulate in the original parameters when you call
+                        # backwards() on the DataParallel module.
+                        replica._parameters[key] = param
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
