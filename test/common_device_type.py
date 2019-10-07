@@ -148,8 +148,8 @@ class DeviceTypeTestBase(TestCase):
 
     # Creates device-specific tests.
     @classmethod
-    def instantiate_test(cls, test):
-        test_name = test.__name__ + "_" + cls.device_type
+    def instantiate_test(cls, name, test):
+        test_name = name + "_" + cls.device_type
 
         dtypes = cls._get_dtypes(test)
         if dtypes is None:  # Test has no dtype variants
@@ -255,7 +255,6 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
 
         for name in generic_members:
             if name in generic_tests:  # Instantiates test member
-
                 # Requires tests be a function for Python2 compat
                 # (In Python2 tests are type checked methods wrapping functions)
                 test = getattr(generic_test_class, name)
@@ -264,7 +263,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
                 assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
                 # Instantiates the device-specific tests
-                device_type_test_class.instantiate_test(test)
+                device_type_test_class.instantiate_test(name, test)
             else:  # Ports non-test member
                 assert not hasattr(device_type_test_class, name), "Redefinition of non-test member {0}".format(name)
 
@@ -442,7 +441,7 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
                 if self.no_cudnn:
                     reason = "cuDNN not available"
                     raise unittest.SkipTest(reason)
-                if self.cudnn_version < version:
+                if self.cudnn_version is None or self.cudnn_version < version:
                     reason = "cuDNN version {0} is available but {1} required".format(self.cudnn_version, version)
                     raise unittest.SkipTest(reason)
 
