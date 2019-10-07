@@ -14010,7 +14010,8 @@ def generate_not_implemented_tests(cls):
             self.assertEqual(result, NotImplemented)
 
         test_name = "test_{}_not_implemented".format(op)
-        assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
+        assert not hasattr(cls, test_name), "{0} already in {1}".format(
+            test_name, cls.__name__)
 
         setattr(cls, test_name, test)
 
