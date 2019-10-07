@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
@@ -18,8 +19,6 @@
 
 namespace torch {
 namespace jit {
-
-void printQuotedString(std::ostream& stmt, const std::string& str);
 
 // Constants relating to maintaining the topological index of nodes.
 //
@@ -116,7 +115,20 @@ static void printStrList(
   for (auto& item : items) {
     if (i++ > 0)
       out << ", ";
-    printQuotedString(out, item);
+    c10::printQuotedString(out, item);
+  }
+  out << "]";
+}
+
+static void printTypeList(
+    std::ostream& out,
+    const std::vector<TypePtr>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    out << *item;
   }
   out << "]";
 }
@@ -136,7 +148,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      printQuotedString(out, s(name));
+      c10::printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
       printStrList(out, ss(name));
@@ -174,6 +186,12 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       break;
     case AttributeKind::gs:
       out << "[<Graphs>]";
+      break;
+    case AttributeKind::ty:
+      out << *ty(name);
+      break;
+    case AttributeKind::tys:
+      printTypeList(out, tys(name));
       break;
   }
 }
@@ -910,6 +928,7 @@ bool Node::hasSideEffects() const {
     case prim::CallFunction:
     case prim::CallMethod:
     case prim::BailoutTemplate:
+    case prim::profile:
       return true;
   }
 
@@ -1498,6 +1517,25 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   return n;
 }
 
+Node* Graph::createIsInstance(
+    Value* v,
+    at::ArrayRef<TypePtr> types,
+    bool is_list,
+    bool is_tuple) {
+  auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
+  std::vector<std::string> kinds;
+  if (is_list) {
+    kinds.push_back("list");
+  }
+  if (is_tuple) {
+    kinds.push_back("tuple");
+  }
+  n->ss_(attr::kinds, std::move(kinds));
+  n->tys_(attr::types, types.vec());
+  n->output()->setType(BoolType::get());
+  return n;
+}
+
 Value* Graph::insertFunctionCall(
     Function* callee,
     const script::MatchedSchema& matched) {
@@ -1671,6 +1709,14 @@ void ProfileOp::cloneFrom(Node* other_) {
 }
 Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
+}
+
+TypePtr NamedValue::type() const {
+  if (value_) {
+    return value_->type();
+  } else {
+    return ivalue_.type();
+  }
 }
 
 constexpr Symbol ProfileOp::Kind;
