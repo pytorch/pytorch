@@ -48,13 +48,13 @@ class PYBIND11_EXPORT PythonRpcHandler {
   PythonRpcHandler(PythonRpcHandler&&) = delete;
   PythonRpcHandler& operator=(PythonRpcHandler&&) = delete;
 
-  // Ref to `torch.distributed.internal_rpc_utils._run_function`.
+  // Ref to `torch.distributed.rpc.internal._run_function`.
   py::object pyRunFunction_;
 
-  // Ref to `torch.distributed.internal_rpc_utils._load_return_value`.
+  // Ref to `torch.distributed.rpc.internal._load_return_value`.
   py::object pyLoadReturnValue_;
 
-  // Ref to `torch.distributed.internal_rpc_utils.serialize`.
+  // Ref to `torch.distributed.rpc.internal.serialize`.
   py::object pySerialize_;
 };
 
