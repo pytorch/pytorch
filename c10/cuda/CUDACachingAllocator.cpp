@@ -163,7 +163,7 @@ class THCCachingAllocator {
  private:
 
   // lock around all operations
-  mutable std::mutex mutex;
+  mutable std::recursive_mutex mutex;
 
   // lock around calls to cudaFree (to prevent deadlocks with NCCL)
   mutable std::mutex cuda_free_mutex;
@@ -199,7 +199,7 @@ class THCCachingAllocator {
   /** allocates a block which is safe to use from the provided stream */
   void malloc(void** devPtr, size_t size, cudaStream_t stream)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
 
     int device;
     C10_CUDA_CHECK(cudaGetDevice(&device));
@@ -333,7 +333,7 @@ class THCCachingAllocator {
 
   void free(void* ptr)
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     if (!ptr) {
       return;
     }
@@ -360,7 +360,7 @@ class THCCachingAllocator {
   }
 
   void* getBaseAllocation(void* ptr, size_t* outSize) {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     if (!block) {
       AT_ERROR("invalid device pointer: ", ptr);
@@ -387,7 +387,7 @@ class THCCachingAllocator {
       return;
     }
 
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     Block* block = find_allocated_block(ptr);
     // block could be nullptr in some cases, e.g., tensor loaded from blob, or
     // shared from another process, or not pointing to a CUDA tensor.
@@ -403,7 +403,7 @@ class THCCachingAllocator {
 
   /** returns cached blocks to the system allocator **/
   void emptyCache() {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     synchronize_and_free_events(nullopt);
     free_blocks(large_blocks, large_blocks.begin(), large_blocks.end());
     free_blocks(small_blocks, small_blocks.begin(), small_blocks.end());
@@ -411,20 +411,20 @@ class THCCachingAllocator {
 
   /** Retrieves info (total size + largest block) of the memory cache **/
   void cacheInfo(int dev_id, size_t* total, size_t* largest) {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     cache_info_aux(large_blocks, dev_id, total, largest);
     cache_info_aux(small_blocks, dev_id, total, largest);
   }
 
   /** Returns a copy of the memory allocator stats for the device **/
   DeviceStats getStatsForDevice(int dev_id) {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     return get_stats_for_device(dev_id);
   }
 
   /** Resets the historical accumulation stats for the device **/
   void resetAccumulatedStats(int dev_id) {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     DeviceStats& stats = get_stats_for_device(dev_id);
 
     for (size_t statType = 0; statType < static_cast<size_t>(StatType::NUM_TYPES); ++statType) {
@@ -444,7 +444,7 @@ class THCCachingAllocator {
 
   /** Resets the historical peak stats for the device **/
   void resetPeakStats(int dev_id) {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     DeviceStats& stats = get_stats_for_device(dev_id);
 
     for (size_t statType = 0; statType < static_cast<size_t>(StatType::NUM_TYPES); ++statType) {
@@ -461,7 +461,7 @@ class THCCachingAllocator {
 
   /** Dump a complete snapshot of the memory held by the allocator. Potentially VERY expensive. **/
   std::vector<SegmentInfo> snapshot() const {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard<std::recursive_mutex> lock(mutex);
 
     std::vector<SegmentInfo> result;
     const auto all_blocks = get_all_blocks();
