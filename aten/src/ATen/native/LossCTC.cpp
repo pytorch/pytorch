@@ -341,14 +341,18 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
   auto& ctx = at::globalContext();
 
+#if CUDNN_VERSION >= 7600
+  // see cudnn/LossCTC.cpp for commentary why we only have this in >= 7.6
   bool use_cudnn =
     detail::getCUDAHooks().compiledWithCuDNN() &&
-    (detail::getCUDAHooks().versionCuDNN() >= 7000) &&
     ctx.userEnabledCuDNN() &&
     (BLANK == 0) && (targets.dim()==1) &&
     (log_probs.scalar_type() == at::kFloat) &&
     (targets.scalar_type() == at::kInt) &&
     (log_probs.type().backend() == Backend::CUDA);
+#else
+  bool use_cudnn = false;
+#endif
 
   if (use_cudnn) {
     // we don't know that input_lengths and target_lengths have the same size (they should, but we didn't check yet)

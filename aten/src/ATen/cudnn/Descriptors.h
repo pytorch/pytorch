@@ -260,6 +260,18 @@ struct AT_CUDA_API CTCLossDescriptor
   void set(cudnnDataType_t datatype) {
     AT_CUDNN_CHECK(cudnnSetCTCLossDescriptor(mut_desc(), datatype));
   }
+  void setEx(
+      cudnnDataType_t datatype,
+      cudnnLossNormalizationMode_t normMode,
+      cudnnNanPropagation_t gradMode) {
+#if CUDNN_VERSION >= 7600
+    AT_CUDNN_CHECK(
+        cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
+#else
+    AT_ERROR(
+        "CTCLossDescriptor.setEx only works when compiled with CuDNN > 7600");
+#endif
+  }
 };
 
 union Constant
