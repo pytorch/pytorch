@@ -1099,6 +1099,23 @@ TEST_F(ModulesTest, LeakyReLU) {
   }
 }
 
+TEST_F(ModulesTest, LogSigmoid) {
+  const auto size = 3;
+  LogSigmoid model;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size}).set_requires_grad(true);
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1348,4 +1365,8 @@ TEST_F(ModulesTest, PrettyPrintLeakyReLU) {
   ASSERT_EQ(c10::str(LeakyReLU(
       LeakyReLUOptions().negative_slope(0.42).inplace(true))),
     "torch::nn::LeakyReLU(negative_slope=0.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintLogSigmoid) {
+  ASSERT_EQ(c10::str(LogSigmoid()), "torch::nn::LogSigmoid()");
 }
