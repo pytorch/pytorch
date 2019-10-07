@@ -133,7 +133,7 @@ Tensor& atan2_(Tensor& self, const Tensor& other) {
 
 Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
-  max_out_stub(iter.device_type(), iter);
+  max_stub(iter.device_type(), iter);
   return result;
 }
 
