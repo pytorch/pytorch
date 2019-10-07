@@ -15,6 +15,7 @@ DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(logical_xor_stub);
+DEFINE_DISPATCH(max_stub);
 
 static constexpr char alpha_mismatch_err[] =
   "For integral input tensors, argument alpha must not be a floating point number.";
@@ -130,6 +131,21 @@ Tensor& atan2_(Tensor& self, const Tensor& other) {
   return native::atan2_out(self, self, other);
 }
 
+Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  max_out_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor max(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty_like(self);
+  return native::max_out(result, self, other);
+}
+
+Tensor& max_(Tensor& self, const Tensor& other) {
+  return native::max_out(self, self, other);
+}
+
 // These are still needed because we don't have C++ conversions from number
 // types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
 // to Python.
@@ -201,6 +217,14 @@ Tensor logical_xor(const Tensor& self, const Tensor& other) {
 
 Tensor& logical_xor_(Tensor& self, const Tensor& other) {
   return native::logical_xor_out(self, self, other);
+}
+
+Tensor max(const Tensor& self, Scalar other) {
+  return native::max(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& max_(Tensor& self, Scalar other) {
+  return native::max_(self, wrapped_scalar_tensor(other));
 }
 
 }

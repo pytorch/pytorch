@@ -234,6 +234,13 @@ public:
   Vec256<T> floor() const {
     return map(std::floor);
   }
+  Vec256<T> max(const Vec256<T> &exp) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::max(values[i], exp[i]);
+    }
+    return ret;
+  }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
     // return value back to T in the case of unary operator- incuring a
