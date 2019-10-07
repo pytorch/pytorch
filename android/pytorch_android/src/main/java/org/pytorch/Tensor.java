@@ -15,20 +15,6 @@ import java.util.Locale;
  * {@link java.nio.DirectByteBuffer} of one of the supported types.
  */
 public abstract class Tensor {
-
-  /** Code for dtype torch.uint8. {@link Tensor#dtype()} */
-  public static final int DTYPE_UINT8 = 1;
-  /** Code for dtype torch.int8. {@link Tensor#dtype()} */
-  public static final int DTYPE_INT8 = 2;
-  /** Code for dtype torch.int32. {@link Tensor#dtype()} */
-  public static final int DTYPE_INT32 = 3;
-  /** Code for dtype torch.float32. {@link Tensor#dtype()} */
-  public static final int DTYPE_FLOAT32 = 4;
-  /** Code for dtype torch.int64. {@link Tensor#dtype()} */
-  public static final int DTYPE_INT64 = 5;
-  /** Code for dtype torch.float64. {@link Tensor#dtype()} */
-  public static final int DTYPE_FLOAT64 = 6;
-
   private static final String ERROR_MSG_DATA_BUFFER_NOT_NULL = "Data buffer must be not null";
   private static final String ERROR_MSG_DATA_ARRAY_NOT_NULL = "Data array must be not null";
   private static final String ERROR_MSG_SHAPE_NOT_NULL = "Shape must be not null";
@@ -39,8 +25,7 @@ public abstract class Tensor {
   private static final String ERROR_MSG_DATA_BUFFER_MUST_BE_DIRECT =
       "Data buffer must be direct (java.nio.ByteBuffer#allocateDirect)";
 
-  /** Shape of current tensor. */
-  public final long[] shape;
+  final long[] shape;
 
   private static final int INT_SIZE_BYTES = 4;
   private static final int FLOAT_SIZE_BYTES = 4;
@@ -49,8 +34,8 @@ public abstract class Tensor {
 
   /**
    * Allocates a new direct {@link java.nio.ByteBuffer} with native byte order with specified
-   * capacity that can be used in {@link Tensor#newInt8Tensor(long[], ByteBuffer)}, {@link
-   * Tensor#newUInt8Tensor(long[], ByteBuffer)}.
+   * capacity that can be used in {@link Tensor#fromBlob(ByteBuffer, long[])},
+   * {@link Tensor#fromBlobUnsigned(ByteBuffer, long[])}.
    *
    * @param numElements capacity (number of elements) of result buffer.
    */
@@ -66,7 +51,7 @@ public abstract class Tensor {
 
   /**
    * Allocates a new direct {@link java.nio.FloatBuffer} with native byte order with specified
-   * capacity that can be used in {@link Tensor#newFloat32Tensor(long[], FloatBuffer)}.
+   * capacity that can be used in {@link Tensor#fromBlob(FloatBuffer, long[])}.
    *
    * @param numElements capacity (number of elements) of result buffer.
    */
@@ -78,7 +63,7 @@ public abstract class Tensor {
 
   /**
    * Allocates a new direct {@link java.nio.LongBuffer} with native byte order with specified
-   * capacity that can be used in {@link Tensor#newInt64Tensor(long[], LongBuffer)}.
+   * capacity that can be used in {@link Tensor#fromBlob(LongBuffer, long[])}.
    *
    * @param numElements capacity (number of elements) of result buffer.
    */
@@ -90,7 +75,7 @@ public abstract class Tensor {
 
   /**
    * Allocates a new direct {@link java.nio.DoubleBuffer} with native byte order with specified
-   * capacity that can be used in {@link Tensor#newFloat64Tensor(long[], DoubleBuffer)}.
+   * capacity that can be used in {@link Tensor#fromBlob(DoubleBuffer, long[])}.
    *
    * @param numElements capacity (number of elements) of result buffer.
    */
@@ -104,10 +89,10 @@ public abstract class Tensor {
    * Creates a new Tensor instance with dtype torch.uint8 with specified shape and data as array of
    * bytes.
    *
-   * @param shape Tensor shape
    * @param data Tensor elements
+   * @param shape Tensor shape
    */
-  public static Tensor newUInt8Tensor(long[] shape, byte[] data) {
+  public static Tensor fromBlobUnsigned(byte[] data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -121,10 +106,10 @@ public abstract class Tensor {
    * Creates a new Tensor instance with dtype torch.int8 with specified shape and data as array of
    * bytes.
    *
-   * @param shape Tensor shape
    * @param data Tensor elements
+   * @param shape Tensor shape
    */
-  public static Tensor newInt8Tensor(long[] shape, byte[] data) {
+  public static Tensor fromBlob(byte[] data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -138,10 +123,10 @@ public abstract class Tensor {
    * Creates a new Tensor instance with dtype torch.int32 with specified shape and data as array of
    * ints.
    *
-   * @param shape Tensor shape
    * @param data Tensor elements
+   * @param shape Tensor shape
    */
-  public static Tensor newInt32Tensor(long[] shape, int[] data) {
+  public static Tensor fromBlob(int[] data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -155,10 +140,10 @@ public abstract class Tensor {
    * Creates a new Tensor instance with dtype torch.float32 with specified shape and data as array
    * of floats.
    *
-   * @param shape Tensor shape
    * @param data Tensor elements
+   * @param shape Tensor shape
    */
-  public static Tensor newFloat32Tensor(long[] shape, float[] data) {
+  public static Tensor fromBlob(float[] data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -172,10 +157,10 @@ public abstract class Tensor {
    * Creates a new Tensor instance with dtype torch.int64 with specified shape and data as array of
    * longs.
    *
-   * @param shape Tensor shape
    * @param data Tensor elements
+   * @param shape Tensor shape
    */
-  public static Tensor newInt64Tensor(long[] shape, long[] data) {
+  public static Tensor fromBlob(long[] data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -192,7 +177,7 @@ public abstract class Tensor {
    * @param shape Tensor shape
    * @param data Tensor elements
    */
-  public static Tensor newFloat64Tensor(long[] shape, double[] data) {
+  public static Tensor fromBlob(long[] shape, double[] data) {
     checkArgument(data != null, ERROR_MSG_DATA_ARRAY_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -205,12 +190,12 @@ public abstract class Tensor {
   /**
    * Creates a new Tensor instance with dtype torch.uint8 with specified shape and data.
    *
-   * @param shape Tensor shape
    * @param data Direct buffer with native byte order that contains {@code Tensor#numel(shape)}
    *     elements. The buffer is used directly without copying, and changes to its content will
    *     change the tensor.
+   * @param shape Tensor shape
    */
-  public static Tensor newUInt8Tensor(long[] shape, ByteBuffer data) {
+  public static Tensor fromBlobUnsigned(ByteBuffer data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -225,12 +210,12 @@ public abstract class Tensor {
   /**
    * Creates a new Tensor instance with dtype torch.int8 with specified shape and data.
    *
-   * @param shape Tensor shape
    * @param data Direct buffer with native byte order that contains {@code Tensor#numel(shape)}
    *     elements. The buffer is used directly without copying, and changes to its content will
    *     change the tensor.
+   * @param shape Tensor shape
    */
-  public static Tensor newInt8Tensor(long[] shape, ByteBuffer data) {
+  public static Tensor fromBlob(ByteBuffer data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -245,12 +230,12 @@ public abstract class Tensor {
   /**
    * Creates a new Tensor instance with dtype torch.int32 with specified shape and data.
    *
-   * @param shape Tensor shape
    * @param data Direct buffer with native byte order that contains {@code Tensor#numel(shape)}
    *     elements. The buffer is used directly without copying, and changes to its content will
    *     change the tensor.
+   * @param shape Tensor shape
    */
-  public static Tensor newInt32Tensor(long[] shape, IntBuffer data) {
+  public static Tensor fromBlob(IntBuffer data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -265,12 +250,12 @@ public abstract class Tensor {
   /**
    * Creates a new Tensor instance with dtype torch.float32 with specified shape and data.
    *
-   * @param shape Tensor shape
    * @param data Direct buffer with native byte order that contains {@code Tensor#numel(shape)}
    *     elements. The buffer is used directly without copying, and changes to its content will
    *     change the tensor.
+   * @param shape Tensor shape
    */
-  public static Tensor newFloat32Tensor(long[] shape, FloatBuffer data) {
+  public static Tensor fromBlob(FloatBuffer data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -285,12 +270,12 @@ public abstract class Tensor {
   /**
    * Creates a new Tensor instance with dtype torch.int64 with specified shape and data.
    *
-   * @param shape Tensor shape
    * @param data Direct buffer with native byte order that contains {@code Tensor#numel(shape)}
    *     elements. The buffer is used directly without copying, and changes to its content will
    *     change the tensor.
+   * @param shape Tensor shape
    */
-  public static Tensor newInt64Tensor(long[] shape, LongBuffer data) {
+  public static Tensor fromBlob(LongBuffer data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -305,12 +290,12 @@ public abstract class Tensor {
   /**
    * Creates a new Tensor instance with dtype torch.float64 with specified shape and data.
    *
-   * @param shape Tensor shape
    * @param data Direct buffer with native byte order that contains {@code Tensor#numel(shape)}
    *     elements. The buffer is used directly without copying, and changes to its content will
    *     change the tensor.
+   * @param shape Tensor shape
    */
-  public static Tensor newFloat64Tensor(long[] shape, DoubleBuffer data) {
+  public static Tensor fromBlob(DoubleBuffer data, long[] shape) {
     checkArgument(data != null, ERROR_MSG_DATA_BUFFER_NOT_NULL);
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
     checkShape(shape);
@@ -342,12 +327,19 @@ public abstract class Tensor {
     return result;
   }
 
+  /** Shape of current tensor. */
+  public long[] shape() {
+    return Arrays.copyOf(shape, shape.length);
+  }
+
   /**
-   * Returns dtype of current tensor. Can be one of {@link Tensor#DTYPE_UINT8}, {@link
-   * Tensor#DTYPE_INT8}, {@link Tensor#DTYPE_INT32},{@link Tensor#DTYPE_FLOAT32}, {@link
-   * Tensor#DTYPE_INT64}, {@link Tensor#DTYPE_FLOAT64}.
+   * Returns dtype of current tensor.
    */
-  public abstract int dtype();
+  public abstract DType dtype();
+
+  int dtypeJniCode() {
+    return dtype().jniCode;
+  }
 
   /**
    * Returns newly allocated java byte array that contains a copy of tensor data.
@@ -423,8 +415,8 @@ public abstract class Tensor {
     }
 
     @Override
-    public int dtype() {
-      return DTYPE_UINT8;
+    public DType dtype() {
+      return DType.UINT8;
     }
 
     @Override
@@ -455,8 +447,8 @@ public abstract class Tensor {
     }
 
     @Override
-    public int dtype() {
-      return DTYPE_INT8;
+    public DType dtype() {
+      return DType.INT8;
     }
 
     @Override
@@ -487,8 +479,8 @@ public abstract class Tensor {
     }
 
     @Override
-    public int dtype() {
-      return DTYPE_INT32;
+    public DType dtype() {
+      return DType.INT32;
     }
 
     @Override
@@ -527,8 +519,8 @@ public abstract class Tensor {
     }
 
     @Override
-    public int dtype() {
-      return DTYPE_FLOAT32;
+    public DType dtype() {
+      return DType.FLOAT32;
     }
 
     @Override
@@ -551,8 +543,8 @@ public abstract class Tensor {
     }
 
     @Override
-    public int dtype() {
-      return DTYPE_INT64;
+    public DType dtype() {
+      return DType.INT64;
     }
 
     @Override
@@ -583,8 +575,8 @@ public abstract class Tensor {
     }
 
     @Override
-    public int dtype() {
-      return DTYPE_FLOAT64;
+    public DType dtype() {
+      return DType.FLOAT64;
     }
 
     @Override
@@ -634,17 +626,17 @@ public abstract class Tensor {
 
   // Called from native
   private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype) {
-    if (DTYPE_FLOAT32 == dtype) {
+    if (DType.FLOAT32.jniCode == dtype) {
       return new Tensor_float32(data.asFloatBuffer(), shape);
-    } else if (DTYPE_INT32 == dtype) {
+    } else if (DType.INT32.jniCode == dtype) {
       return new Tensor_int32(data.asIntBuffer(), shape);
-    } else if (DTYPE_INT64 == dtype) {
+    } else if (DType.INT64.jniCode == dtype) {
       return new Tensor_int64(data.asLongBuffer(), shape);
-    } else if (DTYPE_FLOAT64 == dtype) {
+    } else if (DType.FLOAT64.jniCode == dtype) {
       return new Tensor_float64(data.asDoubleBuffer(), shape);
-    } else if (DTYPE_UINT8 == dtype) {
+    } else if (DType.UINT8.jniCode == dtype) {
       return new Tensor_uint8(data, shape);
-    } else if (DTYPE_INT8 == dtype) {
+    } else if (DType.INT8.jniCode == dtype) {
       return new Tensor_int8(data, shape);
     }
     throw new IllegalArgumentException("Unknown Tensor dtype");
