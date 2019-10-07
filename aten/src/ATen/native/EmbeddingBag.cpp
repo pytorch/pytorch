@@ -81,19 +81,23 @@ void index_select_add<float>(const Tensor &select_indices,
   auto output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelect(src, output)) {
-    caffe2::EmbeddingLookupIdx(
-      /*block_size=*/ddim,
-      /*output_size=*/offsets.numel(),
-      /*index_size=*/select_indices.numel(),
-      /*data_size=*/src.size(0),
-      /*input=*/src_data,
-      /*indices=*/select_indices_data,
-      /*offsets=*/offsets.data_ptr<int64_t>(),
-      /*weights=*/nullptr,
-      /*scale_bias=*/nullptr,
-      /*normalize_by_lengths=*/false,
-      /*out=*/output_data
-    );
+    auto output_size = offsets.numel();
+    at::parallel_for(0, output_size, 0, [&](int64_t start_idx, int64_t end_idx) {
+        caffe2::EmbeddingLookupIdx(
+            /*block_size=*/ddim,
+            /*start_idx=*/start_idx,
+            /*end_idx=*/end_idx,
+            /*output_size=*/offsets.numel(),
+            /*index_size=*/select_indices.numel(),
+            /*data_size=*/src.size(0),
+            /*input=*/src_data,
+            /*indices=*/select_indices_data,
+            /*offsets=*/offsets.data_ptr<int64_t>(),
+            /*weights=*/nullptr,
+            /*scale_bias=*/nullptr,
+            /*normalize_by_lengths=*/false,
+            /*out=*/output_data);
+    });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto add_indices_data = add_indices.data_ptr<int64_t>();
@@ -160,19 +164,23 @@ void index_select_scale_add<float>(const Tensor &select_indices,
   auto output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelectScale(src, scale, output)) {
-    caffe2::EmbeddingLookupIdx(
-      /*block_size=*/ddim,
-      /*output_size=*/offsets.numel(),
-      /*index_size=*/select_indices.numel(),
-      /*data_size=*/src.size(0),
-      /*input=*/src_data,
-      /*indices=*/select_indices_data,
-      /*offsets=*/offsets.data_ptr<int64_t>(),
-      /*weights=*/scale_data,
-      /*scale_bias=*/nullptr,
-      /*normalize_by_lengths=*/false,
-      /*out=*/output_data
-    );
+    auto output_size = offsets.numel();
+    at::parallel_for(0, output_size, 0, [&](int64_t start_idx, int64_t end_idx) {
+        caffe2::EmbeddingLookupIdx(
+            /*block_size=*/ddim,
+            /*start_idx=*/start_idx,
+            /*end_idx=*/end_idx,
+            /*output_size=*/offsets.numel(),
+            /*index_size=*/select_indices.numel(),
+            /*data_size=*/src.size(0),
+            /*input=*/src_data,
+            /*indices=*/select_indices_data,
+            /*offsets=*/offsets.data_ptr<int64_t>(),
+            /*weights=*/nullptr,
+            /*scale_bias=*/nullptr,
+            /*normalize_by_lengths=*/false,
+            /*out=*/output_data);
+    });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto add_indices_data = add_indices.data_ptr<int64_t>();

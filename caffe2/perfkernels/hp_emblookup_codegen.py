@@ -50,11 +50,19 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
 
     code = []
     code.append("    // unrolling " + str(uf) + " times")
-    code.append(
-        "    for ("
-        + IndexType
-        + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
-    )
+    if use_offsets:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = start_idx; rangeIndex < end_idx; ++rangeIndex) {"
+        )
+    else:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
+
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
     for i in range(0, uf):
         j = 8 * i
@@ -222,11 +230,18 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
     code = []
     if InType == "at::Half":
         code.append("    alignas(64) at::Half vtmp1[8] = {0};")
-    code.append(
-        "    for ("
-        + IndexType
-        + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
-    )
+    if use_offsets:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = start_idx; rangeIndex < end_idx; ++rangeIndex) {"
+        )
+    else:
+        code.append(
+            "    for ("
+            + IndexType
+            + " rangeIndex = 0; rangeIndex < output_size; ++rangeIndex) {"
+        )
     code.append("      " + OutType + "* op = &out[rangeIndex * block_size];")
 
     # initialize to 0
@@ -428,6 +443,9 @@ for o in options:
 
     args = []
     args.append("    const int64_t block_size,")
+    if opts.use_offsets:
+        args.append("    const int64_t start_idx,")
+        args.append("    const int64_t end_idx,")
     args.append("    const int64_t output_size,")
     args.append("    const int64_t index_size,")
     args.append("    const int64_t data_size,")
@@ -452,7 +470,7 @@ for o in options:
         "  const {} fused_block_size = block_size + {};".format(IndexType, offset)
     )
     if opts.use_offsets:
-        code.append("  int64_t dataInd = 0;")
+        code.append("  int64_t dataInd = offsets[start_idx];")
     else:
         code.append("  " + IndexType + " dataInd = 0;")
 
@@ -470,7 +488,10 @@ for o in options:
     code.append("    // generic code")
     code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
     code.append("  }")
-    code.append("  return dataInd == index_size;")
+    if not opts.fused:
+        code.append("  return dataInd == (end_idx == output_size ? index_size : offsets[end_idx]);")
+    else:
+        code.append("  return dataInd == index_size;")
 
     code.append("}")
 
@@ -479,6 +500,9 @@ for o in options:
         code += args
         code.append("  return " + fn_base + suffix + "<" + is_weight_positional + ">(")
         code.append("      block_size,")
+        if opts.use_offsets:
+            code.append("      start_idx,")
+            code.append("      end_idx,")
         code.append("      output_size,")
         code.append("      index_size,")
         code.append("      data_size,")

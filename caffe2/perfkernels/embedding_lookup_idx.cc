@@ -18,6 +18,8 @@ template <
     bool IS_WEIGHT_POSITIONAL = false>
 static bool EmbeddingLookupGenericSlowIdx(
     const int64_t block_size,
+    const int64_t start_idx,
+    const int64_t end_idx,
     const int64_t output_size,
     const int64_t index_size,
     const int64_t data_size,
@@ -28,8 +30,8 @@ static bool EmbeddingLookupGenericSlowIdx(
     const float* scale_bias, // optional scale & bias params for uint8 input
     bool normalize_by_lengths,
     OutType* out) {
-  int64_t current = 0;
-  for (int m = 0; m < output_size; ++m) {
+  int64_t current = offsets[start_idx];
+  for (int m = start_idx; m < end_idx; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
     if (current != offsets[m]) {
       return false;
@@ -71,7 +73,7 @@ static bool EmbeddingLookupGenericSlowIdx(
     }
     out += block_size;
   }
-  return current == index_size;
+  return current == (end_idx == output_size ? index_size : offsets[end_idx]);
 }
 
 // Proxy back to generic implementation
@@ -80,6 +82,8 @@ static bool EmbeddingLookupGenericSlowIdx(
   bool                                                                                                \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base(     \
           const int64_t block_size,                                                                   \
+          const int64_t start_idx,                                                                    \
+          const int64_t end_idx,                                                                      \
           const int64_t output_size,                                                                  \
           const int64_t index_size,                                                                   \
           const int64_t data_size,                                                                    \
@@ -96,6 +100,8 @@ static bool EmbeddingLookupGenericSlowIdx(
         OutType,                                                                                      \
         IS_WEIGHT_POSITIONAL>(                                                                        \
         block_size,                                                                                   \
+        start_idx,                                                                                    \
+        end_idx,                                                                                      \
         output_size,                                                                                  \
         index_size,                                                                                   \
         data_size,                                                                                    \
@@ -113,6 +119,8 @@ static bool EmbeddingLookupGenericSlowIdx(
   bool                                                                                                \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL(             \
           const int64_t block_size,                                                                   \
+          const int64_t start_idx,                                                                    \
+          const int64_t end_idx,                                                                      \
           const int64_t output_size,                                                                  \
           const int64_t index_size,                                                                   \
           const int64_t data_size,                                                                    \
@@ -131,6 +139,8 @@ static bool EmbeddingLookupGenericSlowIdx(
     AVX2_FMA_DO(                                                                                      \
         EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL,           \
         block_size,                                                                                   \
+        start_idx,                                                                                    \
+        end_idx,                                                                                      \
         output_size,                                                                                  \
         index_size,                                                                                   \
         data_size,                                                                                    \
@@ -144,6 +154,8 @@ static bool EmbeddingLookupGenericSlowIdx(
     BASE_DO(                                                                                          \
         EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL,           \
         block_size,                                                                                   \
+        start_idx,                                                                                    \
+        end_idx,                                                                                      \
         output_size,                                                                                  \
         index_size,                                                                                   \
         data_size,                                                                                    \
@@ -158,6 +170,8 @@ static bool EmbeddingLookupGenericSlowIdx(
   template <>                                                                                         \
   void EmbeddingLookupIdx<IndexType, InType, OutType, IS_WEIGHT_POSITIONAL>(                          \
       const int64_t block_size,                                                                       \
+      const int64_t start_idx,                                                                        \
+      const int64_t end_idx,                                                                          \
       const int64_t output_size,                                                                      \
       const int64_t index_size,                                                                       \
       const int64_t data_size,                                                                        \
@@ -171,6 +185,8 @@ static bool EmbeddingLookupGenericSlowIdx(
     bool success =                                                                                    \
         EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL(           \
             block_size,                                                                               \
+            start_idx,                                                                                \
+            end_idx,                                                                                  \
             output_size,                                                                              \
             index_size,                                                                               \
             data_size,                                                                                \
@@ -184,8 +200,8 @@ static bool EmbeddingLookupGenericSlowIdx(
     if (success) {                                                                                    \
       return;                                                                                         \
     }                                                                                                 \
-    int64_t current = 0;                                                                              \
-    for (int m = 0; m < output_size; ++m) {                                                           \
+    int64_t current = offsets[start_idx];                                                             \
+    for (int m = start_idx; m < end_idx; ++m) {                                                       \
       for (int64_t i = offsets[m];                                                                    \
            i < (m == output_size - 1 ? index_size : offsets[m + 1]);                                  \
            ++i) {                                                                                     \
@@ -204,7 +220,7 @@ static bool EmbeddingLookupGenericSlowIdx(
     }                                                                                                 \
     CAFFE_ENFORCE_EQ(                                                                                 \
         current,                                                                                      \
-        index_size,                                                                                   \
+        (end_idx == output_size ? index_size : offsets[end_idx]),                                     \
         "Your input seems to be incorrect: the sum of lengths values should be "                      \
         "the size of the indices tensor, but it appears not.");                                       \
   }
