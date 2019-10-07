@@ -106,10 +106,10 @@ void logical_xor_kernel(TensorIterator& iter) {
 void max_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "max_cpu", [&]() {
     cpu_kernel_vec(iter,
-      [](scalar_t a, scalar_t b) -> scalar_t {
+      [=](scalar_t a, scalar_t b) -> scalar_t {
         return std::max(a, b);
       },
-      [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
         return a.max(b);
       });
   });
