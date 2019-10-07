@@ -4203,6 +4203,30 @@ class TestNN(NNTestCase):
             torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_CTCLoss_long_targets(self):
+        input_length = 4000
+        vocab_size = 3
+        batch_size = 4
+        target_length = 1200
+
+        log_probs = torch.randn(input_length, batch_size, vocab_size).log_softmax(2).requires_grad_()
+        targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length), dtype=torch.long)
+        input_lengths = batch_size * [input_length]
+        target_lengths = batch_size * [target_length]
+
+        res_cpu = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                               reduction='sum', zero_infinity=True)
+        grad_out = torch.randn_like(res_cpu)
+        grad_cpu, = torch.autograd.grad(res_cpu, log_probs, grad_out)
+
+        with torch.backends.cudnn.flags(enabled=False):
+            res_gpu = torch.nn.functional.ctc_loss(log_probs.cuda(), targets.cuda(), input_lengths, target_lengths,
+                                                   reduction='sum', zero_infinity=True)
+            grad_gpu, = torch.autograd.grad(res_gpu, log_probs, grad_out.cuda())
+        self.assertAlmostEqual(res_cpu, res_gpu, delta=1e-4)
+        self.assertAlmostEqual(grad_cpu, grad_gpu, delta=1e-4)
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
         target_lengths = [60, 25, 20]
         input_lengths = [50, 50, 50]
