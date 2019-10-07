@@ -303,7 +303,7 @@ def memory_summary(device=None, short=False):
 
     lines = []
     lines.append("=" * 75)
-    lines.append(" {_:17} Torch CUDA memory summary, device ID {device:<18d} ")
+    lines.append(" {_:16} PyTorch CUDA memory summary, device ID {device:<17d} ")
     lines.append("-" * 75)
     lines.append("  {_:9} CUDA OOMs: {num_ooms:<12d} | {_:6} cudaMalloc retries: {cuda_malloc_retries:<8d}  ")
     lines.append("=" * 75)
