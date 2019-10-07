@@ -11,7 +11,9 @@ inline Tensor affine_grid(
     const IntArrayRef& size,
     bool align_corners = false) {
   TORCH_CHECK(
-      theta.is_floating_point(), "Expected theta to have floating point type.");
+      theta.is_floating_point(),
+      "Expected theta to have floating point type, but got ",
+      theta.dtype());
 
   if (size.size() == 4) {
     TORCH_CHECK(

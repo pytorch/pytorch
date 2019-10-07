@@ -214,7 +214,7 @@ TEST_F(FunctionalTest, AffineGrid) {
         "Expected non-zero, positive output size. Got: [-1, 1, 2, 2]");
     ASSERT_THROWS_WITH(
         F::affine_grid(torch::empty({2, 2, 3}, torch::kInt), size),
-        "Expected theta to have floating point type.");
+        "Expected theta to have floating point type, but got int");
     ASSERT_THROWS_WITH(
         F::affine_grid(theta[0], size),
         "Expected a batch of 2D affine matrices of shape Nx2x3 for size "
