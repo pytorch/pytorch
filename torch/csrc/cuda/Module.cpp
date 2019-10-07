@@ -20,8 +20,6 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/utils/python_dicts.h>
-#include <torch/csrc/utils/python_lists.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -249,12 +247,13 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   using c10::cuda::CUDACachingAllocator::StatArray;
   using c10::cuda::CUDACachingAllocator::DeviceStats;
 
-  const auto statToDict = [=](const Stat& stat) {
-    PyObject* const dict = THPUtils_newDict();
-    THPUtils_setDictStrInt64(dict, "current", stat.current);
-    THPUtils_setDictStrInt64(dict, "peak", stat.peak);
-    THPUtils_setDictStrInt64(dict, "allocated", stat.allocated);
-    THPUtils_setDictStrInt64(dict, "freed", stat.freed);
+  const auto statToDict = [](const Stat& stat) {
+    py::dict dict;
+
+    dict["current"] = stat.current;
+    dict["peak"] = stat.peak;
+    dict["allocated"] = stat.allocated;
+    dict["freed"] = stat.freed;
     return dict;
   };
 
@@ -262,33 +261,27 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
     const std::array<const char*, static_cast<size_t>(StatType::NUM_TYPES)> statTypeNames = {
       "all", "small_pool", "large_pool"
     };
-    PyObject* const dict = THPUtils_newDict();
+    py::dict dict;
     for (size_t i = 0; i < statTypeNames.size(); ++i) {
-      THPUtils_setDictStrPyObject(dict, statTypeNames[i], statToDict(statArray[i]));
+      dict[statTypeNames[i]] = statToDict(statArray[i]);
     }
     return dict;
   };
 
-  const auto setDictStatArray = [=](PyObject* dict, const char* name, const StatArray& statArray) {
-    THPUtils_setDictStrPyObject(dict, name, statArrayToDict(statArray));
-  };
-
   const DeviceStats stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device);
-  PyObject* const result = THPUtils_newDict();
 
-  THPUtils_setDictStrInt64(result, "num_alloc_retries", stats.num_alloc_retries);
-  THPUtils_setDictStrInt64(result, "num_ooms", stats.num_ooms);
+  py::dict result;
+  result["num_alloc_retries"] = stats.num_alloc_retries;
+  result["allocation"] = statArrayToDict(stats.allocation);
+  result["segment"] = statArrayToDict(stats.segment);
+  result["active"] = statArrayToDict(stats.active);
+  result["inactive_split"] = statArrayToDict(stats.inactive_split);
+  result["allocated_bytes"] = statArrayToDict(stats.allocated_bytes);
+  result["reserved_bytes"] = statArrayToDict(stats.reserved_bytes);
+  result["active_bytes"] = statArrayToDict(stats.active_bytes);
+  result["inactive_split_bytes"] = statArrayToDict(stats.inactive_split_bytes);
 
-  setDictStatArray(result, "allocation", stats.allocation);
-  setDictStatArray(result, "segment", stats.segment);
-  setDictStatArray(result, "active", stats.active);
-  setDictStatArray(result, "inactive_split", stats.inactive_split);
-  setDictStatArray(result, "allocated_bytes", stats.allocated_bytes);
-  setDictStatArray(result, "reserved_bytes", stats.reserved_bytes);
-  setDictStatArray(result, "active_bytes", stats.active_bytes);
-  setDictStatArray(result, "inactive_split_bytes", stats.inactive_split_bytes);
-
-  return result;
+  return result.release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
@@ -319,36 +312,35 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
   using c10::cuda::CUDACachingAllocator::SegmentInfo;
   using c10::cuda::CUDACachingAllocator::BlockInfo;
 
-  const std::vector<SegmentInfo>& snapshot = c10::cuda::CUDACachingAllocator::snapshot();
-  PyObject* const result = THPUtils_newList();
-
   const auto segmentInfoToDict = [](const SegmentInfo& segmentInfo) {
-    PyObject* const segmentDict = THPUtils_newDict();
+    py::dict segmentDict;
+    segmentDict["device"] = segmentInfo.device;
+    segmentDict["address"] = segmentInfo.address;
+    segmentDict["total_size"] = segmentInfo.total_size;
+    segmentDict["allocated_size"] = segmentInfo.allocated_size;
+    segmentDict["active_size"] = segmentInfo.active_size;
+    segmentDict["segment_type"] = (segmentInfo.is_large ? "large" : "small");
 
-    THPUtils_setDictStrInt64(segmentDict, "device", segmentInfo.device);
-    THPUtils_setDictStrInt64(segmentDict, "address", segmentInfo.address);
-    THPUtils_setDictStrInt64(segmentDict, "total_size", segmentInfo.total_size);
-    THPUtils_setDictStrInt64(segmentDict, "allocated_size", segmentInfo.allocated_size);
-    THPUtils_setDictStrInt64(segmentDict, "active_size", segmentInfo.active_size);
-    THPUtils_setDictStrStr(segmentDict, "segment_type", segmentInfo.is_large ? "large" : "small");
-
-    PyObject* const blocks = THPUtils_newList();
+    py::list blocks;
     for (const auto& blockInfo : segmentInfo.blocks) {
-      PyObject* const blockDict = THPUtils_newDict();
-      THPUtils_setDictStrInt64(blockDict, "size", blockInfo.size);
-      THPUtils_setDictStrStr(blockDict, "state", (blockInfo.allocated ? "active_allocated" : (blockInfo.active ? "active_pending_free" : "inactive")));
-      THPUtils_appendListPyObject(blocks, blockDict);
+      py::dict blockDict;
+      blockDict["size"] = blockInfo.size;
+      blockDict["state"] = (blockInfo.allocated ? "active_allocated" : (blockInfo.active ? "active_pending_free" : "inactive"));
+      blocks.append(blockDict);
     }
-    THPUtils_setDictStrPyObject(segmentDict, "blocks", blocks);
+    segmentDict["blocks"] = blocks;
 
     return segmentDict;
   };
 
+  const std::vector<SegmentInfo>& snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+  py::list result;
+
   for (const auto& segmentInfo : snapshot) {
-    THPUtils_appendListPyObject(result, segmentInfoToDict(segmentInfo));
+    result.append(segmentInfoToDict(segmentInfo));
   }
 
-  return result;
+  return result.release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
