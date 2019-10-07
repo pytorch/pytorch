@@ -203,7 +203,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     for (int64_t f = b_begin; f < b_end; ++f) {
       Tensor in = input.select(1, f);
 
-      auto var_mean = native::var_mean(in);
+      auto var_mean = native::var_mean(in, false);
       scalar_t var = std::get<0>(var_mean).item<scalar_t>();
       scalar_t mean = std::get<1>(var_mean).item<scalar_t>();
       save_mean_a[f] = mean;
