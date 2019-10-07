@@ -723,7 +723,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             [self.img_data],
             inplace=False)
         result_eager = model_eager(self.img_data[0][0])
-        result_script = get_forward(model_script._c)(self.img_data[0][0])
+        result_script = model_script(self.img_data[0][0])
         self.assertEqual(result_eager, result_script)
 
     @unittest.skip("quantization for inlined linear is not working right now")
