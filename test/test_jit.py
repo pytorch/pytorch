@@ -4598,7 +4598,7 @@ a")
         def func():
             c = 1
             return c.add(1)
-        with self.assertRaisesRegex(RuntimeError, 'Cannot call methods on numbers'):
+        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
             torch.jit.script(func)
 
     # testing implicit conversion of tensors to scalars to match function arguments
@@ -10668,7 +10668,7 @@ a")
             ReassignSelfRHS()
 
     def test_unknown_builtin(self):
-        with self.assertRaisesRegex(RuntimeError, 'Unknown builtin op'):
+        with self.assertRaisesRegex(RuntimeError, 'nonexistent attribute or method'):
             @torch.jit.script
             def unknown_builtin(x):
                 return x.splork(3)
@@ -11966,12 +11966,12 @@ a")
 
         self.checkScript(f, (torch.rand(20, 20, 20),), optimize=True)
 
-        with self.assertRaisesRegex(RuntimeError, "Unknown attribute to named tuple"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
             @torch.jit.script
             def g1(x):
                 return x.max(dim=1).unknown_symbol
 
-        with self.assertRaisesRegex(RuntimeError, "Getting attributes of tuples is not supported"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
             @torch.jit.script
             def g2(x):
                 print((x, x, x).__doc__)
@@ -19720,43 +19720,43 @@ class TestClassType(JitTestCase):
                 return as_interface(x)
 
         # Test interface/class python assignment
-        with torch.jit._disable_emit_hooks():
-            class TestPyAssign(nn.Module):
-                def __init__(self):
-                    super(TestPyAssign, self).__init__()
-                    self.proxy_mod = Foo()
+        class TestPyAssign(nn.Module):
+            def __init__(self):
+                super(TestPyAssign, self).__init__()
+                self.proxy_mod = Foo()
 
-                def forward(self, x):
-                    return self.proxy_mod.two(x)
+            def forward(self, x):
+                return self.proxy_mod.two(x)
 
-            TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
+        TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
 
-            input = torch.rand(3, 4)
-            scripted_pyassign_mod = torch.jit.script(TestPyAssign())
-            self.assertEqual(scripted_pyassign_mod(input), 2 * input)
+        input = torch.rand(3, 4)
+        scripted_pyassign_mod = torch.jit.script(TestPyAssign())
+        imported_mod = self.getExportImportCopy(scripted_pyassign_mod)
+        self.assertEqual(scripted_pyassign_mod(input), imported_mod(input))
 
-            class TestPyAssignError(nn.Module):
-                def __init__(self, obj):
-                    super(TestPyAssignError, self).__init__()
-                    self.proxy_mod = obj
+        class TestPyAssignError(nn.Module):
+            def __init__(self, obj):
+                super(TestPyAssignError, self).__init__()
+                self.proxy_mod = obj
 
-                def forward(self, x):
-                    return self.proxy_mod.two(x)
+            def forward(self, x):
+                return self.proxy_mod.two(x)
 
-            TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
+        TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
 
-            with self.assertRaisesRegex(RuntimeError,
-                                        "is not compatible with interface __torch__"):
-                torch.jit.script(TestPyAssignError(Foo()))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "is not compatible with interface __torch__"):
+            torch.jit.script(TestPyAssignError(Foo()))
 
-            # test pure python object assignment to interface fails
-            class PyClass(object):
-                def __init__(self):
-                    pass
+        # test pure python object assignment to interface fails
+        class PyClass(object):
+            def __init__(self):
+                pass
 
-            with self.assertRaisesRegex(RuntimeError,
-                                        "the value is not a TorchScript compatible type"):
-                torch.jit.script(TestPyAssignError(PyClass()))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "the value is not a TorchScript compatible type"):
+            torch.jit.script(TestPyAssignError(PyClass()))
         # TODO test: interface-interface class-interface inheritance errors,
         # NamedTuple inheritance errors
 
@@ -19910,7 +19910,7 @@ class TestClassType(JitTestCase):
         for func in ops:
             self.checkScript(func, ())
 
-        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute __add__. Did you forget to initialize it"):
+        with self.assertRaisesRegex(RuntimeError, "nonexistent attribute"):
             @torch.jit.script
             def test():
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
