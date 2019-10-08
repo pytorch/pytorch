@@ -1,8 +1,8 @@
-from torch.distributed import invoke_rpc_builtin, invoke_rpc_python_udf
-from torch.distributed import invoke_remote_builtin, invoke_remote_python_udf
-from torch.distributed import _init_rref_context, _destroy_rref_context
-from torch.distributed import ProcessGroupAgent
-from torch.distributed import WorkerInfo
+from . import invoke_rpc_builtin, invoke_rpc_python_udf
+from . import invoke_remote_builtin, invoke_remote_python_udf
+from . import _init_rref_context, _destroy_rref_context
+from . import ProcessGroupAgent
+from . import WorkerInfo
 from .backend_registry import is_backend_registered, init_backend
 from .internal import _internal_rpc_pickler, PythonUDF
 

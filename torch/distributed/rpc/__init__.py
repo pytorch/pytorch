@@ -1,11 +1,21 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
+import torch
+
 
 from .backend_registry import *  # noqa: F401
 
 
-if sys.version_info >= (3, 0):
+def is_available():
+    return sys.version_info >= (3, 0) and hasattr(torch._C, "_rpc_init")
+
+
+if is_available() and not torch._C._rpc_init():
+    raise RuntimeError("Failed to initialize torch.distributed.rpc")
+
+
+if is_available():
     from .api import _init_rpc
     from .api import *  # noqa: F401
     import torch.distributed.autograd
