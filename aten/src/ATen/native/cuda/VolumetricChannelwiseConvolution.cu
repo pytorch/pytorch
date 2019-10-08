@@ -295,7 +295,77 @@ __global__ void volumetricChannelwiseConvolutionAccGradParameters(
   }
 }
 
+// these two should be in the namespace
+// I need to fill that one out 
+Tensor& conv3d_channelwise3d_forward_out_cuda_template()
+Tensor& conv3d_channelwise3d_backward_out_cuda_template()
+
 } // namespace
+
+
+// these are very much out
+Tensor& conv3d_channelwise3d_forward_out_cuda(
+  Tensor& output,
+  const Tensor& input,
+  IntList kernel_size,
+  IntList stride_size,
+  IntList pad_size,
+  IntList dilation_size
+)
+{
+  conv3d_channelwise3d_forward_out_cuda_template(
+    output, input, kernel_size, stride_size, pad_size, dilation_size
+  );
+  return output;
+
+}
+
+Tensor conv3d_channelwise3d_forward_cuda(
+  at::Tensor const& input,
+  IntList kernel_size,
+  IntList stride_size,
+  IntList pad_size,
+  IntList dilation_size
+)
+{
+  auto output = at::empty({0}, input.options());
+  conv3d_channelwise3d_forward_out_cuda_template(
+    output, input, kernel_size, stride_size, pad_size, dilation_size
+  );
+  return output;
+}
+
+Tensor& conv3d_channelwise3d_backward_out_cuda(
+  Tensor& gradInput,
+  const Tensor& gradOutput,
+  const Tensor& input,
+  IntList kernel_size,
+  IntList stride_size,
+  IntList pad_size,
+  IntList dilation_size
+)
+{
+  conv3d_channelwise3d_backward_out_cuda_template(
+    gradInput, gradOutput, kernel_size, stride_size, pad_size, dilation_size
+  )
+  return gradOutput;
+}
+
+Tensor& conv3d_channelwise3d_backward_cuda
+const Tensor& gradOutput,
+const Tensor& input,
+IntList kernel_size,
+IntList stride_size,
+IntList pad_size,
+IntList dilation_size
+)
+{
+  auto gradInput = at::zeros_like(input);
+  conv3d_channelwise3d_backward_out_cuda_template(
+    gradInput, gradOutput, kernel_size, stride_size, pad_size, dilation_size
+  )
+  return gradOutput;
+}
 
 } // namespace at
 } // namespace native
