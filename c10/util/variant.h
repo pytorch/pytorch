@@ -2274,7 +2274,7 @@ namespace c10 {
     inline constexpr variant(Arg &&arg) noexcept(
         std::is_nothrow_constructible<T, Arg>::value)
         : impl_(in_place_index_t<I>{}, lib::forward<Arg>(arg)) {
-          TORCH_INTERNAL_ASSERT(
+          static_assert(
             I == detail_::best_match<Arg, Ts...>::value,
             "Setting template parameter `I` to a custom non-default value is not supported. "
             "Please file a feature request if you see this.");
@@ -2357,7 +2357,7 @@ namespace c10 {
     inline variant &operator=(Arg &&arg) noexcept(
         (std::is_nothrow_assignable<T &, Arg>::value &&
          std::is_nothrow_constructible<T, Arg>::value)) {
-      TORCH_INTERNAL_ASSERT(
+      static_assert(
         I == detail_::best_match<Arg, Ts...>::value,
         "Setting template parameter `I` to a custom non-default value is not supported. "
         "Please file a feature request if you see this.");
