@@ -1,0 +1,26 @@
+{
+  "name": "pytorch_sphinx_theme",
+  "version": "0.0.1",
+  "private": true,
+  "devDependencies": {
+    "anchor-js": "^4.1.1",
+    "bootstrap": "4.0.0",
+    "browserify": "^13.0.0",
+    "connect-livereload": "~0.6.0",
+    "grunt": "~1.0.1",
+    "grunt-banner": "^0.6.0",
+    "grunt-browserify": "^5.0.0",
+    "grunt-contrib-clean": "^1.0.0",
+    "grunt-contrib-connect": "^1.0.2",
+    "grunt-contrib-copy": "~1.0.0",
+    "grunt-contrib-sass": "~1.0.0",
+    "grunt-contrib-uglify": "~3.3.0",
+    "grunt-contrib-watch": "~1.0.0",
+    "grunt-exec": "~1.0.1",
+    "grunt-open": "0.2.3",
+    "matchdep": "~1.0.1",
+    "popper.js": "^1.14.3",
+    "autoprefixer": "^9.1.5",
+    "grunt-postcss": "^0.9.0"
+  }
+}

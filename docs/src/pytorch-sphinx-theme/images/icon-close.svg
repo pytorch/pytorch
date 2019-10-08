@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="20px" height="21px" viewBox="0 0 20 21" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <!-- Generator: Sketch 51.2 (57519) - http://www.bohemiancoding.com/sketch -->
+    <title>Page 1</title>
+    <desc>Created with Sketch.</desc>
+    <defs></defs>
+    <g id="desktop" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="Behaviors" transform="translate(-421.000000, -1035.000000)" fill="#BBBBBA">
+            <g id="mobile" transform="translate(-3.000000, -4.000000)">
+                <g id="expanded-menu" transform="translate(92.000000, 949.000000)">
+                    <g id="Group-2" transform="translate(26.000000, 85.000000)">
+                        <g id="Page-1" transform="translate(316.000000, 15.503381) rotate(-21.000000) translate(-316.000000, -15.503381) translate(304.000000, 3.503381)">
+                            <polygon id="Fill-1" points="7.8940033 -8.03165789e-06 5.75107666 0.955277357 10.3761069 11.3312155 8.03165788e-06 15.9562457 0.955213104 18.0992527 11.3313119 13.4743028 15.9562618 23.850241 18.0993491 22.8950359 7.89416393 -8.03165789e-06"></polygon>
+                            <polygon id="Fill-2" points="17.7071311 8.06344719 18.6623362 10.2066148 23.8503053 7.89405952 22.8951002 5.75097225"></polygon>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
