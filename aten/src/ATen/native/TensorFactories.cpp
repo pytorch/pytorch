@@ -423,12 +423,18 @@ Tensor& rand_out(Tensor& result, IntArrayRef size, Generator* generator) {
   return result.uniform_(0, 1, generator);
 }
 
-Tensor rand_like(const Tensor& self) {
-  return native::rand_like(self, self.options());
+Tensor rand_like(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::rand_like(self, self.options(), optional_memory_format);
 }
 
-Tensor rand_like(const Tensor& self, const TensorOptions& options) {
-  return native::rand(self.sizes(), options);
+Tensor rand_like(
+    const Tensor& self,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, optional_memory_format);
+  return result.uniform_(0, 1, nullptr);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
