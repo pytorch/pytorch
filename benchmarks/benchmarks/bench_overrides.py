@@ -3,12 +3,6 @@ from .common import Benchmark
 import torch
 from torch import Tensor
 
-def mock_add(t1, t2):
-   torch.add(t1, t2)
-
-def mock_matmul(t1, t2):
-   torch.mm(t1, t2)
-
 class DuckTensor(object):
     def __torch_function__(self, func, args=None, kwargs={}):
         pass
@@ -20,12 +14,11 @@ class SubTensor(Tensor):
 class TorchFunction(Benchmark):
 
     def setup(self):
-        self.t1 = torch.rand(1000, 1000)
-        self.t2 = torch.rand(1000, 1000)
+        self.t1 = torch.ones(2, 2, dtype = torch.float32)
+        self.t2 = torch.zeros(2, 2, dtype = torch.float32)
 
-    def time_mock_add(self):
-        mock_add(self.t1, self.t2)
+    def time_add(self):
+        torch.add(self.t1, self.t2)
 
-    def time_mock_matmul(self):
-        mock_matmul(self.t1, self.t2)
-
+    def time_matmul(self):
+        torch.mm(self.t1, self.t2)
