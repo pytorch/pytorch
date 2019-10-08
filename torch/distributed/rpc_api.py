@@ -3,8 +3,8 @@ from . import invoke_remote_builtin, invoke_remote_python_udf
 from . import _init_rref_context, _destroy_rref_context
 from . import ProcessGroupAgent
 from . import WorkerInfo
+from .rpc import is_backend_registered, init_backend
 from .internal_rpc_utils import _internal_rpc_pickler, PythonUDF
-from .rpc_backend_registry import is_rpc_backend_registered, init_rpc_backend
 
 import functools
 import sys
@@ -78,8 +78,8 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
         _init_rref_context(_agent)
-    elif is_rpc_backend_registered(backend):
-        _agent = init_rpc_backend(
+    elif is_backend_registered(backend):
+        _agent = init_backend(
             backend,
             self_rank=self_rank,
             self_name=self_name,
