@@ -4,7 +4,6 @@ from . import _init_rref_context, _destroy_rref_context
 from . import ProcessGroupAgent
 from . import WorkerInfo
 from .rpc import is_backend_registered, init_backend
-import torch.distributed.rpc as rpc
 from .internal_rpc_utils import _internal_rpc_pickler, PythonUDF
 
 import functools
