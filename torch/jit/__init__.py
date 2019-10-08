@@ -1224,29 +1224,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _check_directly_compile_overloaded(obj)
         ast = get_jit_def(obj)
         if _rcb is None:
-            _rcb = _gen_rcb(obj, _frames_up)
+            _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         return fn
-
-def _gen_rcb(obj, _frames_up):
-    _frames_up = _frames_up + 1  # for invoking _gen_rcb()
-
-    closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
-    stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-
-    def _rcb(name):
-        # since type comments aren't captured in the function's closures,
-        # we still need to try to the rcb based on stack frames if the
-        # closure rcb fails
-        result = closure_rcb(name)
-        if result:
-            return result
-        return stack_rcb(name)
-
-    return _rcb
-
 
 def interface(obj):
     if not inspect.isclass(obj):
@@ -2013,7 +1995,7 @@ _compiled_overloaded_fns = {}
 def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
     impl_ast = torch.jit.get_jit_def(impl_fn)
     _frames_up = 0
-    _rcb = _gen_rcb(impl_fn, _frames_up)
+    _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
 
