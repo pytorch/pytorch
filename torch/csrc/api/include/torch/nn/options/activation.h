@@ -131,7 +131,7 @@ struct TORCH_API SoftplusOptions {
 struct TORCH_API SoftshrinkOptions {
   /* implicit */ SoftshrinkOptions(double lambda = 0.5);
 
-  /// the lambda value for the Softshrink formulation. Default: 0.5
+  /// the `lambda` value for the Softshrink formulation. Default: 0.5
   TORCH_ARG(double, lambda);
 };
 
