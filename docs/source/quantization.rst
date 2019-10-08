@@ -80,6 +80,12 @@ perform re-quantization are available in ``torch.nn.quantized``. Those
 operations explicitly take output quantization parameters (scale and bias) in
 the operation signature.
 
+In addition, we also support fused versions corresponding to common fusion patterns that impact quantization at:
+torch.nn.intrinsic.quantized.
+
+For quantization aware training, we support modules prepared for quantization aware training at
+torch.nn.qat and torch.nn.intrinsic.qat
+
 Current quantized operation list is sufficient to cover typical CNN and RNN
 models:
 
@@ -90,7 +96,7 @@ Quantization Workflows
 
 PyTorch provides three approaches to quantize models.
 
-1. Dynamic Quantization: This is the simplest to apply form of
+1. Post Training Dynamic Quantization: This is the simplest to apply form of
    quantization where the weights are quantized ahead of time but the
    activations are dynamically quantized  during inference. This is used
    for situations where the model execution time is dominated by loading
@@ -99,7 +105,7 @@ PyTorch provides three approaches to quantize models.
    batch size. Applying dynamic quantization to a whole model can be
    done with a single call to torch.quantization.quantize\\_dynamic().
    See the `<https://pytorch.org/tutorials/#Quantization_Experimental>` **NOTE NEEDS REVISION**
-2. Post Training Quantization: This is the most commonly used form of
+2. Post Training Static Quantization: This is the most commonly used form of
    quantization where the weights are quantized ahead of time and the
    scale factor and bias for the activation tensors is pre-computed
    based on observing the behavior of the model during a calibration
@@ -163,14 +169,23 @@ Quantization workflows work by adding (e.g. adding observers as
 means that the model stays a regular ``nn.Module``-based instance throughout the
 process and thus can work with the rest of PyTorch APIs.
 
+
 Model preparation for quantization
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+---------------------------------
+It is necessary to currently make some modifications to the model definition
+prior to quantization. This is because currently quantization works on a module
+by module basis. Specifically, for all quantization techniques, the user needs to:
+1. Convert any operations that contain quantizable parameters to modules from functionals
+2. Specify which parts of the model need to be quantized.
 
-**NOTE we are missing text here **
+For static quantization techniques which quantize activations, the user needs to do the following in addition:
+1. Specify where activations are quantized and de-quantized. This is done using QuantStub() and DeQuantStub() modules.
+2. Use torch.quantization.FloatFunctional() to wrap tensor operations that require special handling for quantization into modules. Examples
+   are operations like add and cat which require special handling to determine output quantization parameters.
+3. Fuse modules: Combine operations/modules into a single module to obtain higher accuracy and performance. This is done using the
+   torch.quantization.fuse_modules() API, which takes in lists of modules to be fused. We currently support the following fusions:
+   [Conv,Relu], [Conv,BatchNorm], [Conv, BatchNorm, Relu], [Linear, Relu]
 
-- fusion
-- replacement of modules with FloatFunctional
-- QuantStub
 
 Code Structure
 --------------
