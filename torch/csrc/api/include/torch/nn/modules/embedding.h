@@ -29,7 +29,7 @@ struct TORCH_API EmbeddingOptions {
   /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
   TORCH_ARG(bool, sparse) = false;
   /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
-  TORCH_ARG(c10::optional<torch::Tensor>, _weight) = c10::nullopt;
+  TORCH_ARG(torch::Tensor, _weight) = Tensor();
 };
 
 /// Options for the `EmbeddingBag` module.
@@ -53,7 +53,7 @@ struct TORCH_API EmbeddingBagOptions {
   /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
   TORCH_ARG(bool, sparse) = false;
   /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
-  TORCH_ARG(c10::optional<torch::Tensor>, _weight) = c10::nullopt;
+  TORCH_ARG(torch::Tensor, _weight) = Tensor();
 };
 
 /// Performs a lookup in a fixed size embedding table.
@@ -113,8 +113,8 @@ class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl>
   /// Pretty prints the `EmbeddingBag` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
-  torch::Tensor forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
-    c10::optional<torch::Tensor> per_sample_weights = c10::nullopt);
+  torch::Tensor forward(const Tensor& input, const torch::Tensor& offsets = torch::Tensor(),
+    const torch::Tensor& per_sample_weights = torch::Tensor());
 
   /// The `Options` used to configure this `EmbeddingBag` module.
   EmbeddingBagOptions options;

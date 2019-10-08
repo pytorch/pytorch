@@ -26,7 +26,7 @@ void EmbeddingImpl::reset() {
     }
   }
 
-  if (options._weight() == c10::nullopt) {
+  if (!options._weight().defined()) {
     weight = register_parameter(
         "weight", torch::empty({options.num_embeddings(), options.embedding_dim()}));
     torch::nn::init::normal_(weight);
@@ -35,8 +35,8 @@ void EmbeddingImpl::reset() {
       weight[*options.padding_idx()].fill_(0);
     }
   } else {
-    TORCH_CHECK((*options._weight()).sizes() == torch::IntArrayRef({options.num_embeddings(), options.embedding_dim()}), "Shape of _weight does not match num_embeddings and embedding_dim");
-    weight = register_parameter("weight", *options._weight());
+    TORCH_CHECK(options._weight().sizes() == torch::IntArrayRef({options.num_embeddings(), options.embedding_dim()}), "Shape of _weight does not match num_embeddings and embedding_dim");
+    weight = register_parameter("weight", options._weight());
   }
 }
 
@@ -86,37 +86,44 @@ EmbeddingBagImpl::EmbeddingBagImpl(const EmbeddingBagOptions& options_) : option
 }
 
 void EmbeddingBagImpl::reset() {
-  if (options._weight() == c10::nullopt) {
+  if (!options._weight().defined()) {
     weight = register_parameter(
         "weight", torch::empty({options.num_embeddings(), options.embedding_dim()}));
     torch::nn::init::normal_(weight);
   } else {
-    TORCH_CHECK((*options._weight()).sizes() == torch::IntArrayRef({options.num_embeddings(), options.embedding_dim()}), "Shape of weight does not match num_embeddings and embedding_dim");
-    weight = register_parameter("weight", *options._weight());
+    TORCH_CHECK(
+      options._weight().sizes() == torch::IntArrayRef({options.num_embeddings(), options.embedding_dim()}),
+      "Shape of weight does not match num_embeddings and embedding_dim");
+    weight = register_parameter("weight", options._weight());
   }
 }
 
-torch::Tensor EmbeddingBagImpl::forward(const torch::Tensor& input, c10::optional<torch::Tensor> offsets,
-c10::optional<torch::Tensor> per_sample_weights) {
+torch::Tensor EmbeddingBagImpl::forward(
+    const torch::Tensor& input,
+    const torch::Tensor& offsets,
+    const torch::Tensor& per_sample_weights) {
   torch::Tensor input_ = input;
-  TORCH_CHECK((per_sample_weights == c10::nullopt) || (input.sizes() == (*per_sample_weights).sizes()),
-    "embedding_bag: If per_sample_weights (", (*per_sample_weights).sizes(), ") is not null, then it must have the same shape as the input (", input.sizes(), ")");
+  torch::Tensor offsets_ = offsets;
+  torch::Tensor per_sample_weights_ = per_sample_weights;
+
+  TORCH_CHECK(!per_sample_weights_.defined() || input.sizes() == per_sample_weights_.sizes(),
+    "embedding_bag: If per_sample_weights (", per_sample_weights_.sizes(), ") is not null, then it must have the same shape as the input (", input.sizes(), ")");
   if (input.dim() == 2) {
-    TORCH_CHECK(offsets == c10::nullopt,
+    TORCH_CHECK(offsets_.defined(),
       "If input is 2D, then offsets has to be null, as input is treated is a mini-batch of fixed length sequences. However, found offsets of type Tensor");
-    offsets = torch::arange(0, input.numel(), input.size(1),
+    offsets_ = torch::arange(0, input.numel(), input.size(1),
                                  torch::TensorOptions().dtype(torch::kLong).device(input.device()));
     input_ = input_.reshape(-1);
-    if (per_sample_weights != c10::nullopt) {
-      per_sample_weights = (*per_sample_weights).reshape(-1);
+    if (per_sample_weights_.defined()) {
+      per_sample_weights_ = per_sample_weights_.reshape(-1);
     }
   } else if (input.dim() == 1) {
-    TORCH_CHECK(offsets != c10::nullopt, "offsets has to be a 1D Tensor but got null");
-    TORCH_CHECK((*offsets).dim() == 1, "offsets has to be a 1D Tensor");
-    TORCH_CHECK((*offsets)[0].item<int64_t>() == 0, "offsets[0] has to be 0, i.e., the first sequence in the mini-batch has to start from position 0. However, got ",
-     (*offsets)[0].item<int64_t>());
-    TORCH_CHECK((*offsets)[-1].item<int64_t>() <= input.size(0), "offsets[-1] can not be greater than input's length({)",
-              input.size(0), "}), but got offsets[-1] of {", (*offsets)[-1].item<int64_t>(), "}");
+    TORCH_CHECK(offsets_.defined(), "offsets has to be a 1D Tensor but got null");
+    TORCH_CHECK(offsets_.dim() == 1, "offsets has to be a 1D Tensor");
+    TORCH_CHECK(offsets_[0].item<int64_t>() == 0, "offsets[0] has to be 0, i.e., the first sequence in the mini-batch has to start from position 0. However, got ",
+     offsets_[0].item<int64_t>());
+    TORCH_CHECK(offsets_[-1].item<int64_t>() <= input.size(0), "offsets[-1] can not be greater than input's length({)",
+              input.size(0), "}), but got offsets[-1] of {", offsets_[-1].item<int64_t>(), "}");
   } else {
     TORCH_CHECK(false, "input has to be 1D or 2D Tensor,but got Tensor of dimension ", input.dim());
   }
@@ -139,11 +146,21 @@ c10::optional<torch::Tensor> per_sample_weights) {
     torch::embedding_renorm_(weight, input_, *options.max_norm(), options.norm_type());
   }
 
-  TORCH_CHECK((per_sample_weights == c10::nullopt) || (options.mode() == "sum"), "embedding_bag: per_sample_weights was not null. ",
-        "per_sample_weights is only supported for mode='sum' (got mode='",
-        options.mode(), "').Please open a feature request on GitHub.");
+  TORCH_CHECK(
+    !per_sample_weights_.defined() || options.mode() == "sum",
+    "embedding_bag: per_sample_weights was not null. ",
+    "per_sample_weights is only supported for mode='sum' (got mode='",
+    options.mode(), "').Please open a feature request on GitHub.");
 
-  return std::get<0>(torch::embedding_bag(weight, input_, (offsets != c10::nullopt ? *offsets : Tensor()), options.scale_grad_by_freq(), mode_enum, options.sparse(), (per_sample_weights != c10::nullopt ? *per_sample_weights : Tensor())));
+  return std::get<0>(
+    torch::embedding_bag(
+      weight,
+      input_,
+      offsets_,
+      options.scale_grad_by_freq(),
+      mode_enum,
+      options.sparse(),
+      per_sample_weights_));
 }
 
 void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
