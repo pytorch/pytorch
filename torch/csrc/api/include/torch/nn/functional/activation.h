@@ -94,6 +94,10 @@ inline Tensor tanh(const Tensor& input) {
   return input.tanh();
 }
 
+inline Tensor tanhshrink(const Tensor& input) {
+  return input - input.tanh();
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

@@ -341,5 +341,24 @@ class TORCH_API TanhImpl : public torch::nn::Cloneable<TanhImpl> {
 
 TORCH_MODULE(Tanh);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Tanhshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies Tanhshrink over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Tanhshrink to learn
+/// about the exact behavior of this module.
+class TORCH_API TanhshrinkImpl : public torch::nn::Cloneable<TanhshrinkImpl> {
+ public:
+  explicit TanhshrinkImpl() {}
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Tanhshrink` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(Tanhshrink);
+
 } // namespace nn
 } // namespace torch

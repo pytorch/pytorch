@@ -508,3 +508,11 @@ TEST_F(FunctionalTest, Tanh) {
 
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
+
+TEST_F(FunctionalTest, Tanhshrink) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x - x.tanh();
+  auto y = F::tanhshrink(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}

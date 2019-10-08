@@ -257,5 +257,17 @@ void TanhImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Tanh()";
 }
 
+// ============================================================================
+
+Tensor TanhshrinkImpl::forward(const Tensor& input) {
+  return F::tanhshrink(input);
+}
+
+void TanhshrinkImpl::reset() {}
+
+void TanhshrinkImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Tanhshrink()";
+}
+
 } // namespace nn
 } // namespace torch
