@@ -48,6 +48,7 @@ blacklist = [
     '__init_subclass__',
     '__new__',
     '__subclasshook__',
+    'cdist',
     'clamp',
     'clamp_',
     'device',

@@ -51,7 +51,8 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
   int64_t c1 = x1.size(-1);
   int64_t c2 = x2.size(-1);
   TORCH_CHECK(c1 == c2, "X1 and X2 must have the same number of columns. X1: ", c1, " X2: ", c2);
-  // 0 - default value. If p = 2 and r1 * r2 > 512 * 512, it will try to compute distance using matrix multiplication approach
+  // 0 - default value. If p = 2 and r1 > 25 or r2 > 25 (these values are based on performance metrics),
+  // it will try to compute distance using matrix multiplication approach
   // 1 - force to use matrix multiplication for p = 2
   // 2 - do not use matrix multiplication for p = 2
   int64_t mode = compute_mode.value_or(0);
@@ -87,7 +88,7 @@ Tensor cdist(const Tensor& x1, const Tensor& x2, const double p, c10::optional<i
     result = at::empty(output_shape, x1.options());
   } else if (c1 == 0) {
     result = at::zeros(output_shape, x1.options());
-  } else if (p == 2 && (mode == 1 || (mode == 0 && r1 * r2 > 512 * 512))) {
+  } else if (p == 2 && (mode == 1 || (mode == 0 && (r1 > 25 || r2 > 25)))) {
     Tensor dist = (expand_batch_product == 1) ? euclidean_dist_out(x1, x2) :
                   euclidean_dist_out(tensor1_expanded, tensor2_expanded);
     result = dist.view(output_shape);
