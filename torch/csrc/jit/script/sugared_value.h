@@ -168,6 +168,13 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
       at::ArrayRef<NamedValue> attributes,
       at::ArrayRef<NamedValue> inputs,
       size_t n_binders) override;
+
+  // try to create this builtin but if it doesn't exist or the self argument
+  // cannot possibly match, then return nullptr. Use in situations where it is
+  // not clear if it is a valid builtin
+  static std::shared_ptr<BuiltinFunction> tryCreate(
+      Symbol symbol,
+      c10::optional<NamedValue> self);
 };
 
 struct TORCH_API BuiltinModule : public SugaredValue {
@@ -294,7 +301,7 @@ struct TORCH_API ClosureValue : public SugaredValue {
   Value* value_;
 };
 
-// defines how a method obtained from a module behaves in script
+// defines how a method obtained from a module/class/interface behaves in script
 struct MethodValue : public SugaredValue {
   MethodValue(Value* self, std::vector<std::string> method_names)
       : self_(std::move(self)), method_names_(std::move(method_names)) {}
