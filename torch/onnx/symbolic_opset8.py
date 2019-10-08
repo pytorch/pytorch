@@ -73,6 +73,22 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
+def __interpolate(g, input, size, scale_factor, mode , align_corners):
+    align_corners = sym_help._maybe_get_const(align_corners, 'b')
+    if not align_corners.node().mustBeNone() and align_corners:
+        return _unimplemented("interpolate", "align_corners == True")
+
+    if not scale_factor.node().mustBeNone() and sym_help._is_value(scale_factor):
+        return _unimplemented("interpolate", "dynamic scales in opset 8")
+
+    if not size.node().mustBeNone() and sym_help._is_value(size):
+        return _unimplemented("interpolate", "dynamic size in opset 8")
+
+    scales, mode = sym_help._interpolate_get_scales_and_mode_from_args(g, input, size, scale_factor,
+                                                                       mode , align_corners)
+    return g.op("Upsample", input, mode_s=mode, scales_f=scales)
+
+
 # NOTE: We should create a wrapper for this kind of operation, after resolving the shape/type propagation
 #       issue for "cast" operators. Some symbolic functions depend on shape information of input tensor, which
 #       is lost after casting.

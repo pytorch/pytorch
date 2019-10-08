@@ -62,6 +62,8 @@ def _parse_arg(value, desc):
             return float(tval)
         elif desc == 'b':
             return bool(tval)
+        elif desc == 's':
+            return str(tval)
         elif desc == 't':
             return tval
         elif desc == 'is':
@@ -206,9 +208,9 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, 'is')
     if _is_value(output_size):
         offset = 2
-        offsets = g.op("Constant", value_t=torch.ones(offset))
+        offsets = g.op("Constant", value_t=torch.ones(offset, dtype=torch.float32))
         dividend = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx["Float"])
-        divisor = _slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
+        divisor = _slice_helper(g, g.op("Shape", input), axes=[0], ends=[9223372036854775807], starts=[offset])
         divisor = g.op("Cast", divisor, to_i=cast_pytorch_to_onnx["Float"])
         scale_dims = g.op("Div", dividend, divisor)
         scales = g.op("Concat", offsets, scale_dims, axis_i=0)
@@ -216,9 +218,53 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
         scales_constant = [1. if i < 2 else
                            float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
                            for i in range(0, dim)]
-        scales = g.op("Constant", value_t=torch.tensor(scales_constant))
+        scales = g.op("Constant", value_t=torch.tensor(scales_constant, dtype=torch.float32))
     return scales
 
+def _interpolate_get_scales(g, scale_factor, dim):
+    from torch.onnx.symbolic_opset9 import unsqueeze
+
+    if _is_packed_list(scale_factor):
+        scale_factor = _unpack_list(scale_factor)
+        scales = []
+        for dim_scale_factor in scale_factor:
+            dim_scale_factor = unsqueeze(g, dim_scale_factor, 0)
+            dim_scale_factor = g.op("Cast", dim_scale_factor, to_i=cast_pytorch_to_onnx["Float"])
+            scales.append(dim_scale_factor)
+        offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
+        scale_factor = g.op("Concat", offsets, *scales, axis_i=0)
+    else:
+        scale_factor = unsqueeze(g, scale_factor, 0)
+        scale_factor = g.op("Cast", scale_factor, to_i=cast_pytorch_to_onnx["Float"])
+        offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
+        scales = [scale_factor for i in range(dim - 2)]
+        scale_factor = g.op("Concat", offsets, *scales, axis_i=0)
+    return scale_factor
+
+
+def _interpolate_get_scales_and_mode_from_args(g, input, size, scale_factor, mode , align_corners):
+    from torch.onnx.symbolic_opset9 import unsqueeze
+    mode = _maybe_get_const(mode, 's')
+    _interpolate_warning(mode)
+
+    align_corners = _maybe_get_const(align_corners, 'b')
+    if not align_corners.node().mustBeNone() and align_corners:
+        return _unimplemented("interpolate", "align_corners == True")
+
+    dim = input.type().dim()
+
+    if not scale_factor.node().mustBeNone():
+        scale_factor = _interpolate_get_scales(g, scale_factor, dim)
+    elif not size.node().mustBeNone():
+        is_scalar = ((_maybe_get_const(size, 't').dim() == 0))
+        if is_scalar:
+            size = unsqueeze(g, size, 0)
+            size = [size for i in range(dim - 2)]
+            size = g.op("Concat", *size, axis_i=0)
+        scale_factor = _interpolate_size_to_scales(g, input, size, dim)
+    else:
+        _unimplemented("Both size and scales are None in __interpolate")
+    return scale_factor, mode
 
 def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:

@@ -429,6 +429,40 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(MyModel(), x)
 
+    def _interpolate_script(self, x, mode, use_size, is_upsample):
+
+        class MyModel(torch.jit.ScriptModule):
+            __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array']
+            def __init__(self, mode, use_size, is_upsample):
+                super(MyModel, self).__init__()
+                self.mode = mode
+                self.use_size = use_size
+                self.is_upsample = is_upsample
+                self.scale = 2.0 if self.is_upsample else 0.5
+                self.size = 24 if self.is_upsample else 1
+                if x.dim() == 3:
+                    self.scale_array = [2.]
+                    self.size_array = [16]
+                elif x.dim() == 4:
+                    self.scale_array = [2., 3.]
+                    self.size_array = [16, 32]
+                else:
+                    self.scale_array = [2., 3., 4.]
+                    self.size_array = [16, 32, 64]
+
+            @torch.jit.script_method
+            def forward(self, x):
+                if self.use_size:
+                    out = torch.nn.functional.interpolate(x, mode=self.mode, size=self.size)
+                    out_array = torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array)
+                    return out, out_array
+                out = torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale)
+                out_array = torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale_array)
+                return out, out_array
+
+        model = MyModel(mode, use_size, is_upsample)
+        self.run_test(model, x)
+
     def _interpolate_tests(self, is_upsample):
         # - cubic mode is not supported for opsets below 11;
         # - linear mode does not match for opsets below 11;
@@ -458,7 +492,9 @@ class TestONNXRuntime(unittest.TestCase):
                         mode_i = "trilinear"
                 self._interpolate(xi, mode_i, True, is_upsample)
                 if self.opset_version >= 9:  # throws unimplemented
+                    self._interpolate_script(xi, mode_i, True, is_upsample)
                     self._interpolate(xi, mode_i, False, is_upsample)
+                    self._interpolate_script(xi, mode_i, False, is_upsample)
 
     # enable when supported in ORT for opset 11
     @skipIfUnsupportedOpsetVersion([11])

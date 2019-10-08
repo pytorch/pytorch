@@ -48,7 +48,9 @@ def _interpolate(name, dim, interpolate_mode):
         align_corners = sym_help._maybe_get_scalar(align_corners)
         output_size = sym_help._maybe_get_const(output_size, 'is')
         if sym_help._is_value(output_size):
+            offset = 2
             offsets = g.op("Constant", value_t=torch.ones(offset, dtype=torch.int64))
+            output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
             output_size = g.op("Concat", offsets, output_size, axis_i=0)
         else:
             output_size = [1 if i < 2 else output_size[-(dim - i)] for i in range(0, dim)]
@@ -76,6 +78,31 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
 
+
+def __interpolate(g, input, size, scale_factor, mode , align_corners):
+    mode = sym_help._maybe_get_const(mode, 's')
+    align_corners = sym_help._maybe_get_const(align_corners, 'b')
+    coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
+        else "align_corners" if align_corners else "pytorch_half_pixel"
+    empty_tensor = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+
+    if not size.node().mustBeNone() :
+        offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
+        size = g.op("Cast", size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        size = g.op("Concat", offsets, size, axis_i=0)
+        scales = empty_tensor
+    elif not scales.node().mustBeNone() :
+        scales = sym_help._interpolate_get_scales(g, scale_factor, 4)
+        size = empty_tensor
+    return g.op("Resize",
+                input,
+                empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+                scales,
+                size,
+                coordinate_transformation_mode_s=coordinate_transformation_mode,
+                cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                mode_s=mode,  # nearest, linear, or cubic
+                nearest_mode_s="floor")  # only valid when mode="nearest"
 
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
