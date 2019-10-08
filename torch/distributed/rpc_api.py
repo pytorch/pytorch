@@ -8,7 +8,6 @@ from .rpc_backend_registry import is_rpc_backend_registered, init_rpc_backend
 
 import functools
 import sys
-import warnings
 import torch
 from enum import Enum
 
@@ -270,77 +269,3 @@ def rpc_async(to, func, args=None, kwargs=None):
     """
     fut = _invoke_rpc(to, func, args, kwargs)
     return fut
-
-
-@_require_initialized
-def rpc(to, func, args=None, kwargs=None, async_call=False):
-    r"""
-    Make an RPC call to run function ``func`` on worker ``to``. By default, it
-    blocks until the return value is locally available. RPC messages are sent
-    and received in parallel to execution of Python code. This method is
-    thread-safe.
-
-    Arguments:
-        to (int or str): id or name of the destination worker.
-        func (callable): any callable function. builtin functions (like
-                         ``torch.add``) can be sent over RPC more efficiently.
-        args (tuple): the argument tuple for the ``func`` invocation.
-        kwargs (dict): is a dictionary of keyword arguments for the ``func``
-                       invocation.
-        async_call (bool): If set to ``True``, this will be an asynchronous RPC,
-                           and returns a ``torch.distributed.FutureMessage``
-                           object immediately. Otherwise, this RPC will block
-                           until the return value is locally available.
-                           (default: ``False``)
-
-    Returns:
-        If ``async_call`` is ``False``, returns the result of running ``func``
-        on ``args`` and ``kwargs``. If ``async_call`` is ``True``, returns a
-        ``torch.distributed.FutureMessage`` object that can be waited on. When
-        completed, the return value of ``func`` on ``args`` and ``kwargs`` can
-        be retrieved from the ``FutureMessage`` object.
-
-    Example::
-
-        Synchronous example:
-
-        On worker 0:
-        >>> import torch.distributed as dist
-        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_model_parallel("worker0")
-        >>> ret = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3))
-        >>> dist.join_rpc()
-
-        On worker 1:
-        >>> import torch.distributed as dist
-        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_model_parallel("worker1")
-        >>> dist.join_rpc()
-
-        Asynchronous example:
-
-        On worker 0:
-        >>> import torch.distributed as dist
-        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_model_parallel("worker0")
-        >>> worker1 = dist.get_worker_info("worker1")
-        >>> fut1 = dist.rpc(worker1, torch.add, args=(torch.ones(2), 3), async_call=True)
-        >>> fut2 = dist.rpc(worker1, min, args=(1, 2), async_call=True)
-        >>> result = fut1.wait() + fut2.wait()
-        >>> dist.join_rpc()
-
-        On worker 1:
-        >>> import torch.distributed as dist
-        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_model_parallel("worker1")
-        >>> dist.join_rpc()
-    """
-    warnings.warn(
-        """dist.rpc is deprecated. Use dist.rpc_async for asynchronous
-    calls or dist.rpc_sync for synchronous calls instead."""
-    )
-
-    if async_call:
-        return rpc_async(to, func, args, kwargs)
-    else:
-        return rpc_sync(to, func, args, kwargs)
