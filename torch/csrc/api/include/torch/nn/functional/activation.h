@@ -15,7 +15,7 @@ inline Tensor elu(Tensor& input, const ELUOptions& options) {
   }
 }
 
-inline Tensor selu(Tensor& input, const SELUOptions& options) {
+inline Tensor selu(Tensor& input, const SELUOptions& options = {}) {
   if (options.inplace()) {
     return torch::selu_(input);
   } else {
