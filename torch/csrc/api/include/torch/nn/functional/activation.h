@@ -7,7 +7,7 @@ namespace torch {
 namespace nn{
 namespace functional {
 
-inline Tensor elu(Tensor& input, const ELUOptions& options) {
+inline Tensor elu(Tensor& input, const ELUOptions& options = {}) {
   if (options.inplace()) {
     return torch::elu_(input, options.alpha());
   } else {
@@ -16,11 +16,11 @@ inline Tensor elu(Tensor& input, const ELUOptions& options) {
 }
 
 inline Tensor hardshrink(const Tensor& input,
-                         const HardshrinkOptions& options) {
+                         const HardshrinkOptions& options = {}) {
   return torch::hardshrink(input, options.lambda());
 }
 
-inline Tensor hardtanh(Tensor& input, const HardtanhOptions& options) {
+inline Tensor hardtanh(Tensor& input, const HardtanhOptions& options = {}) {
   if (options.inplace()) {
     return torch::hardtanh_(input, options.min_val(), options.max_val());
   } else {
@@ -28,7 +28,7 @@ inline Tensor hardtanh(Tensor& input, const HardtanhOptions& options) {
   }
 }
 
-inline Tensor leaky_relu(Tensor& input, const LeakyReLUOptions& options) {
+inline Tensor leaky_relu(Tensor& input, const LeakyReLUOptions& options = {}) {
   if (options.inplace()) {
     return torch::leaky_relu_(input, options.negative_slope());
   } else {
