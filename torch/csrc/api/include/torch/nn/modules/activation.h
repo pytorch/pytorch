@@ -127,8 +127,7 @@ TORCH_MODULE(LogSigmoid);
 /// about the exact behavior of this module.
 class TORCH_API PReLUImpl : public torch::nn::Cloneable<PReLUImpl> {
  public:
-  PReLUImpl() : PReLUImpl(PReLUOptions()) {}
-  explicit PReLUImpl(const PReLUOptions& options_);
+  explicit PReLUImpl(const PReLUOptions& options_ = {});
 
   Tensor forward(const Tensor& input);
 
@@ -153,8 +152,7 @@ TORCH_MODULE(PReLU);
 /// about the exact behavior of this module.
 class TORCH_API ReLUImpl : public torch::nn::Cloneable<ReLUImpl> {
  public:
-  ReLUImpl() : ReLUImpl(ReLUOptions()) {}
-  explicit ReLUImpl(const ReLUOptions& options_);
+  explicit ReLUImpl(const ReLUOptions& options_ = {});
 
   Tensor forward(Tensor& input);
 

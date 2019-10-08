@@ -386,3 +386,15 @@ TEST_F(FunctionalTest, ReLU) {
     }
   }
 }
+
+TEST_F(FunctionalTest, ReLUDefaultOptions) {
+  const auto size = 3;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size});
+  auto y_exp = (x < 0) * 0 + (x >= 0) * x;
+  auto y = F::relu(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}

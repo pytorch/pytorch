@@ -129,7 +129,7 @@ void ReLUImpl::reset() {}
 void ReLUImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ReLU(";
   if (options.inplace()) {
-    stream << std::boolalpha  << "inplace=" << options.inplace();
+    stream << std::boolalpha << "inplace=" << options.inplace();
   }
   stream << ")";
 }
