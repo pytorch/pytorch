@@ -14,7 +14,7 @@ from torch.onnx.symbolic_opset9 import expand
 # This file exports ONNX ops for opset 11
 
 black_listed_operators = [
-    "hardtanh", ""
+    "hardtanh"
 ]
 
 
