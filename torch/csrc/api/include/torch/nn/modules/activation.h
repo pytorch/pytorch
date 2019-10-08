@@ -133,7 +133,7 @@ class TORCH_API PReLUImpl : public torch::nn::Cloneable<PReLUImpl> {
 
   void reset() override;
 
-  /// Pretty prints the `PReLUImpl` module into the given `stream`.
+  /// Pretty prints the `PReLU` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
   /// The options with which this `Module` was constructed.
