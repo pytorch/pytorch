@@ -377,8 +377,8 @@ Tensor qnnpack_avg_pool2d(
       "failed to run QNNPACK Average Pool operator");
   // TODO: remove permute once MemoryLayout is added above
   return output.permute({0, 3, 1, 2});
-#endif
 }
+#endif
 } // namespace
 
 Tensor quantized_avg_pool2d(
