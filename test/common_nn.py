@@ -2719,7 +2719,7 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
         alpha[1] = probs[0, targets_prime[1]]
         mask_third = (targets_prime[:-2] != targets_prime[2:])
         for t in range(1, input_length):
-            alpha_next = alpha.clone()
+            alpha_next = alpha.clone(memory_format=torch.contiguous_format)
             alpha_next[1:] += alpha[:-1]
             alpha_next[2:] += torch.where(mask_third, alpha[:-2], alpha.new_zeros(1))
             alpha = probs[t, targets_prime] * alpha_next
@@ -3551,7 +3551,7 @@ class ModuleTest(TestBase):
         with freeze_rng_state():
             output = test_case._forward(module, input)
             grad_output = output.new(output.shape).normal_()
-            output = output.clone()
+            output = output.clone(memory_format=torch.contiguous_format)
             d_input = deepcopy(test_case._backward(module, input, output, grad_output))
             d_param = deepcopy(test_case._get_parameters(module)[1])
 
@@ -3595,7 +3595,7 @@ class ModuleTest(TestBase):
 
             # Run backwards on CPU and GPU and compare results
             for _ in range(5):
-                cpu_gradOutput = cpu_output.clone().normal_()
+                cpu_gradOutput = cpu_output.clone(memory_format=torch.contiguous_format).normal_()
                 gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)
                 gpu_gradInput = test_case._backward(gpu_module, gpu_input, gpu_output, gpu_gradOutput)

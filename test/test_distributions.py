@@ -3946,7 +3946,7 @@ class TestTransforms(TestCase):
             x = self._generate_data(transform).requires_grad_()
             try:
                 y = transform(x)
-                x2 = transform.inv(y.clone())  # bypass cache
+                x2 = transform.inv(y.clone(memory_format=torch.contiguous_format))  # bypass cache
                 y2 = transform(x2)
             except NotImplementedError:
                 continue
@@ -4361,7 +4361,7 @@ class TestJit(TestCase):
             delta = value.new(value.shape).normal_()
             return transform(transform.inv(value) + delta)
         if value.dtype == torch.long:
-            result = value.clone()
+            result = value.clone(memory_format=torch.contiguous_format)
             result[value == 0] = 1
             result[value == 1] = 0
             return result

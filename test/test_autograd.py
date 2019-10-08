@@ -158,7 +158,7 @@ class TestAutograd(TestCase):
             self.assertEqual(v.grad, torch.full(shape, 2))
 
             v.grad.data.zero_()
-            MyFunction.apply(v.clone()).backward()
+            MyFunction.apply(v.clone(memory_format=torch.contiguous_format)).backward()
             self.assertEqual(v.grad, torch.full(shape, 2))
 
     def test_legacy_function_none_grad(self):
@@ -217,7 +217,7 @@ class TestAutograd(TestCase):
             y = x + 2
             y.backward(grad_output, retain_graph=True)
             x_grad = x.grad
-            x_grad_clone = x.grad.clone()
+            x_grad_clone = x.grad.clone(memory_format=torch.contiguous_format)
             y.backward(grad_output, create_graph=create_graph)
             return x_grad, x_grad_clone
 
@@ -770,7 +770,7 @@ class TestAutograd(TestCase):
         def scope():
             depth = 150000
             x = torch.randn(1, requires_grad=True)
-            y = x.clone()
+            y = x.clone(memory_format=torch.contiguous_format)
 
             # build a "chain" computation graph
             for _ in range(depth):
@@ -788,7 +788,7 @@ class TestAutograd(TestCase):
             depth = 100000
             randchoice = torch.randint(2, [depth, 2])
             x = torch.randn(1, requires_grad=True)
-            y = x.clone()
+            y = x.clone(memory_format=torch.contiguous_format)
 
             # Hold the two previous values
             prev_values = [None, None]
@@ -826,7 +826,7 @@ class TestAutograd(TestCase):
         def scope():
             depth = 150000
             x = torch.randn(1, requires_grad=True)
-            y = x.clone()
+            y = x.clone(memory_format=torch.contiguous_format)
 
             # build deeply nested computation graph
             for _ in range(depth):
@@ -1301,7 +1301,7 @@ class TestAutograd(TestCase):
         self.assertRaises(RuntimeError, lambda: q.backward(torch.ones(5, 5)))
 
         leaf = torch.ones(5, 5, requires_grad=True)
-        x = leaf.clone()
+        x = leaf.clone(memory_format=torch.contiguous_format)
         x.add_(10)
         self.assertEqual(x.data, torch.ones(5, 5) * 11)
         # x should be still usable
@@ -1359,7 +1359,7 @@ class TestAutograd(TestCase):
         class MyFunction(Function):
             @staticmethod
             def forward(ctx, input):
-                output = input.clone()
+                output = input.clone(memory_format=torch.contiguous_format)
                 ctx.mark_non_differentiable(output)
                 return output
 
@@ -1404,7 +1404,7 @@ class TestAutograd(TestCase):
                 return grad1 * 2 + grad2 * 2
 
         def inplace_fn(x):
-            a, b = DoubleInplace.apply(x.clone())
+            a, b = DoubleInplace.apply(x.clone(memory_format=torch.contiguous_format))
             self.assertIs(a, b)
             return a + b
 
@@ -1415,7 +1415,7 @@ class TestAutograd(TestCase):
         # Can't modify leaf variables in-place
         self.assertRaises(RuntimeError, lambda: InplaceFunction.apply(x))
         # Functions which modify views in-place must return only one output
-        self.assertRaises(RuntimeError, lambda: InplaceFunction.apply(x.clone()[0]))
+        self.assertRaises(RuntimeError, lambda: InplaceFunction.apply(x.clone(memory_format=torch.contiguous_format)[0]))
 
     @suppress_warnings
     def test_resize(self):
@@ -1529,7 +1529,7 @@ class TestAutograd(TestCase):
         idx = Variable(torch.LongTensor([1, 2, 3, -1, -2, -3]))
 
         def func(root, values):
-            x = root.clone()
+            x = root.clone(memory_format=torch.contiguous_format)
             x.put_(idx, values)
             return x
 
@@ -1542,7 +1542,7 @@ class TestAutograd(TestCase):
         idx = Variable(torch.LongTensor([1, 2, 3, 1, 2, 3]))
 
         def func(root, values):
-            x = root.clone()
+            x = root.clone(memory_format=torch.contiguous_format)
             x.put_(idx, values, accumulate=True)
             return x
 
@@ -1553,7 +1553,7 @@ class TestAutograd(TestCase):
         root = torch.randn(4, 5, requires_grad=True)
 
         def func(root):
-            x = root.clone()
+            x = root.clone(memory_format=torch.contiguous_format)
             x.fill_(2)
             return x
 
@@ -1587,7 +1587,7 @@ class TestAutograd(TestCase):
         out = torch.gather(x, dim, ind, sparse_grad=False)
         grad = torch.rand_like(out)
         out.backward(grad)
-        grad_dense = x.grad.clone()
+        grad_dense = x.grad.clone(memory_format=torch.contiguous_format)
         x.grad = None
         out = torch.gather(x, dim, ind, sparse_grad=True)
         out.backward(grad)
@@ -1826,12 +1826,12 @@ class TestAutograd(TestCase):
         class Identity(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                return x.clone()
+                return x.clone(memory_format=torch.contiguous_format)
 
             @staticmethod
             def backward(ctx, grad_output):
                 device[0] = torch.cuda.current_device()
-                return grad_output.clone()
+                return grad_output.clone(memory_format=torch.contiguous_format)
 
         v = Variable(torch.randn(1).cuda(1), requires_grad=True)
         Identity.apply(v).backward()
@@ -2822,7 +2822,7 @@ class TestAutograd(TestCase):
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
         root = torch.randn(2, 2, requires_grad=True)
-        x = root.clone()
+        x = root.clone(memory_format=torch.contiguous_format)
         v1 = x.narrow(0, 0, 1)
         v1.mul_(2)
         x.sum().backward()
@@ -2831,7 +2831,7 @@ class TestAutograd(TestCase):
     def test_inplace_view_backprop_view_of_view(self):
         # modify view and backprop through view-of-view
         root = torch.randn(2, 2, requires_grad=True)
-        x = root.clone()
+        x = root.clone(memory_format=torch.contiguous_format)
         v1 = x.narrow(0, 0, 1)
         v2 = x.narrow(0, 0, 1)
         v1.mul_(2)
@@ -2841,7 +2841,7 @@ class TestAutograd(TestCase):
     def test_inplace_view_of_view(self):
         # modify view-of-view and backprop through base
         root = torch.randn(2, 2, requires_grad=True)
-        x = root.clone()
+        x = root.clone(memory_format=torch.contiguous_format)
         v1 = x.narrow(0, 0, 1)
         v2 = v1.narrow(1, 1, 1)
         v2.mul_(2)
@@ -2854,7 +2854,7 @@ class TestAutograd(TestCase):
         b = torch.randn(2, 2, requires_grad=True)
 
         def func(root, b):
-            x = root.clone()
+            x = root.clone(memory_format=torch.contiguous_format)
             x.narrow(1, 2, 2).narrow(0, 1, 2).mul_(b)
             x.narrow(1, 0, 2).narrow(0, 1, 2).mul_(b)
             return x
@@ -2869,7 +2869,7 @@ class TestAutograd(TestCase):
         b = torch.randn(4, 2, requires_grad=True)
 
         def func(root, b):
-            x = root.clone()
+            x = root.clone(memory_format=torch.contiguous_format)
             self.assertFalse(x.requires_grad)
             x.narrow(1, 2, 2).mul_(b)
             self.assertTrue(x.requires_grad)
@@ -2923,7 +2923,7 @@ class TestAutograd(TestCase):
                 return grad, grad
 
         def func(root, b):
-            x = root.clone()
+            x = root.clone(memory_format=torch.contiguous_format)
             PyAdd.apply(x.narrow(1, 2, 2).narrow(0, 1, 2), b)
             PyAdd.apply(x.narrow(1, 0, 2).narrow(0, 1, 2), b)
             return x
@@ -2935,7 +2935,7 @@ class TestAutograd(TestCase):
     def test_inplace_view_non_contig(self):
         data = torch.ones(2, 3, 2).select(2, 1).t()
         root = Variable(data, requires_grad=True)
-        x = root.clone()
+        x = root.clone(memory_format=torch.contiguous_format)
         v1 = x.narrow(0, 0, 1)
         v2 = v1.narrow(1, 1, 1)
         v2.mul_(2)
@@ -2953,7 +2953,7 @@ class TestAutograd(TestCase):
 
         def test():
             root = torch.randn(3, 3, requires_grad=True)
-            copy = root.clone()
+            copy = root.clone(memory_format=torch.contiguous_format)
             copy.grad_fn.register_hook(IncrementOnDelete())
             view = copy.view(9)
             torch.nn.functional.relu(view, inplace=True)
@@ -2994,10 +2994,10 @@ class TestAutograd(TestCase):
         # Issue 23502: Test that b's grad_fn is preserved.
         a = torch.arange(10.0, requires_grad=True)
 
-        b = a.narrow(0, 0, 2).clone().view(-1)
+        b = a.narrow(0, 0, 2).clone(memory_format=torch.contiguous_format).view(-1)
         b.relu_()
 
-        c = b.clone()
+        c = b.clone(memory_format=torch.contiguous_format)
         del b
         gc.collect()
 
@@ -3056,7 +3056,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, gO):
-                gI = gO.clone().expand(size)
+                gI = gO.clone(memory_format=torch.contiguous_format).expand(size)
                 gI[0] = 0
                 gI[0] /= 0  # Generate a nan
                 if ctx.fail_0th:
@@ -3537,10 +3537,10 @@ def add_test(
                         if not isinstance(output_variable, tuple):
                             output_variable = (output_variable,)
                         inplace_self_variable = deepcopy(self_variable)
-                        inplace_self_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
+                        inplace_self_variable_copy = tuple(i.clone(memory_format=torch.contiguous_format) if isinstance(i, torch.Tensor) else i
                                                            for i in (inplace_self_variable,))
                         inplace_args_variable = deepcopy(args_variable)
-                        inplace_args_variable_copy = tuple(i.clone() if isinstance(i, torch.Tensor) else i
+                        inplace_args_variable_copy = tuple(i.clone(memory_format=torch.contiguous_format) if isinstance(i, torch.Tensor) else i
                                                            for i in inplace_args_variable)
 
                         inplace_output_variable = (

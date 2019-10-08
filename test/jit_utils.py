@@ -404,7 +404,7 @@ class JitTestCase(TestCase):
 
         nograd_inputs = reference_tensors
         if inputs_require_grads:
-            recording_inputs = do_input_map(lambda t: t.clone().requires_grad_(), reference_tensors)
+            recording_inputs = do_input_map(lambda t: t.clone(memory_format=torch.contiguous_format).requires_grad_(), reference_tensors)
             flattened_recording_inputs = flatten_inputs(recording_inputs)
         else:
             recording_inputs = reference_tensors

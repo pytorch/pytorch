@@ -901,7 +901,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
             if arg.dtype == torch.float:
                 arg = arg.double()
             # NOTE: We do clone() after detach() here because we need to be able to change size/storage of v afterwards
-            v = maybe_non_contig(arg).detach().clone()
+            v = maybe_non_contig(arg).detach().clone(memory_format=torch.contiguous_format)
             v.requires_grad = requires_grad and v.is_floating_point()
             return v
         elif callable(arg):

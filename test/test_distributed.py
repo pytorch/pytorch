@@ -1242,18 +1242,18 @@ class _DistTestBase(object):
         one = torch.ones([1])
 
         # Specify scatter_list argument only on source rank.
-        output = one.clone() * -1
+        output = one.clone(memory_format=torch.contiguous_format) * -1
         if rank == 0:
-            scatter_list = [one.clone() * i for i in group]
+            scatter_list = [one.clone(memory_format=torch.contiguous_format) * i for i in group]
             dist.scatter(output, src=0, scatter_list=scatter_list)
         else:
             dist.scatter(output, src=0)
         self.assertEqual(output, one * rank)
 
         # Don't specify src argument.
-        output = one.clone() * -1
+        output = one.clone(memory_format=torch.contiguous_format) * -1
         if rank == 0:
-            scatter_list = [one.clone() * i for i in group]
+            scatter_list = [one.clone(memory_format=torch.contiguous_format) * i for i in group]
             dist.scatter(output, scatter_list=scatter_list)
         else:
             dist.scatter(output)
@@ -1297,7 +1297,7 @@ class _DistTestBase(object):
 
         # Specify gather_list argument only on destination rank.
         if rank == 0:
-            gather_list = [one.clone() for _ in group]
+            gather_list = [one.clone(memory_format=torch.contiguous_format) for _ in group]
             dist.gather(one * rank, dst=0, gather_list=gather_list)
             for i in group:
                 self.assertEqual(gather_list[i], one * i)
@@ -1306,7 +1306,7 @@ class _DistTestBase(object):
 
         # Don't specify dst argument.
         if rank == 0:
-            gather_list = [one.clone() for _ in group]
+            gather_list = [one.clone(memory_format=torch.contiguous_format) for _ in group]
             dist.gather(one * rank, gather_list=gather_list)
             for i in group:
                 self.assertEqual(gather_list[i], one * i)
