@@ -26,12 +26,13 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self) {
   auto subscript_strides = subscript.strides();
   auto stride0 = subscript_strides[0] - subscript_strides[1] * self.dim();
   auto stride1 = subscript_strides[1];
-
+  int64_t numel = 0;
   auto iter = TensorIterator();
   iter.add_input(self);
   iter.build();
   cpu_serial_kernel(iter, [&](scalar_t a) {
     if (a != 0) {
+      numel++;
       ii = idx + dimensions;
       for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
         --ii;
@@ -50,24 +51,12 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self) {
       ++(*ii);
     }
   });
+  subscript.resize_({numel, self.dim()});
 }
 
 static void nonzero_kernel(Tensor& subscript, const Tensor& self) {
   AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, self.scalar_type(), "nonzero", [&] {
-    int64_t numel = 0;
-    auto iter = TensorIterator();
-    iter.add_input(self);
-    iter.build();
-    cpu_serial_kernel(iter,
-      [&](scalar_t a) -> void {
-        if (a != 0) {
-          numel++;
-        }
-    });
-    subscript.resize_({numel, self.dim()});
-    if (numel <= 0) {
-      return;
-    }
+    subscript.resize_({self.numel(), self.dim()});
     nonzero_apply<scalar_t>(subscript, self);
   });
 }
