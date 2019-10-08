@@ -443,7 +443,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       TORCH_CHECK(py::isinstance<py::function>(boundMethod));
       // TODO: Try to reduce our reliance on frame-based rcb
       auto rcb =
-          py::module::import("torch.jit").attr("_gen_rcb")(boundMethod, 0);
+          py::module::import("torch.jit").attr("_gen_rcb")(unboundMethod, 0);
       return std::make_shared<PythonValue>(boundMethod, rcb, self_);
     }
 

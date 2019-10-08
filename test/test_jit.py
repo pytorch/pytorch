@@ -3513,7 +3513,10 @@ def foo(x):
                 return MyTuple(1)
 
             def forward(self, x):
-                return self.fn()
+                if True:
+                    return MyTuple(torch.rand(2, 3))
+                else:
+                    return self.fn()
 
         # shouldn't throw a type error
         torch.jit.script(MyMod())
