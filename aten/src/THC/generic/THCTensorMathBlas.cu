@@ -305,6 +305,20 @@ static void THCTensor_(addmmImpl)(THCState *state, THCTensor *r_, THCTensor *t, 
     }
   }
 
+  // Special casing for empty matrices
+  if (r_->size(0) == 0 || r_->size(1) == 0) {
+    // No multiplication needed for case of empty result matrix.
+    return;
+  } else if (m1->size(1) == 0) {
+    // k == 0
+    if (ScalarConvert<scalar_t, double>::to(beta) != 0.0) {
+      THCTensor_(mul)(state, r_, r_, beta);
+    } else {
+      THCTensor_(zero)(state, r_);
+    }
+    return;
+  }
+
   /* r_ */
   if(r_->stride(0) == 1 &&
      r_->stride(1) != 0)
