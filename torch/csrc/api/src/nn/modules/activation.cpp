@@ -184,7 +184,7 @@ void CELUImpl::reset() {}
 void CELUImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::CELU(alpha=" << options.alpha();
   if (options.inplace()) {
-    stream << std::boolalpha  << ", inplace=" << options.inplace();
+    stream << std::boolalpha << ", inplace=" << options.inplace();
   }
   stream << ")";
 }
