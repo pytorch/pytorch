@@ -39,8 +39,7 @@ TORCH_MODULE(ELU);
 /// about the exact behavior of this module.
 class TORCH_API SELUImpl : public torch::nn::Cloneable<SELUImpl> {
  public:
-  SELUImpl() : SELUImpl(SELUOptions()) {}
-  explicit SELUImpl(const SELUOptions& options_);
+  explicit SELUImpl(const SELUOptions& options_ = {});
 
   Tensor forward(Tensor& input);
 
