@@ -322,5 +322,24 @@ class TORCH_API SoftsignImpl : public torch::nn::Cloneable<SoftsignImpl> {
 
 TORCH_MODULE(Softsign);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Tanh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies Tanh over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Tanh to learn
+/// about the exact behavior of this module.
+class TORCH_API TanhImpl : public torch::nn::Cloneable<TanhImpl> {
+ public:
+  explicit TanhImpl() {}
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Tanh` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(Tanh);
+
 } // namespace nn
 } // namespace torch

@@ -500,3 +500,11 @@ TEST_F(FunctionalTest, Softsign) {
 
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
+
+TEST_F(FunctionalTest, Tanh) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = (x.exp() - (-x).exp()) / (x.exp() + (-x).exp());
+  auto y = F::tanh(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
