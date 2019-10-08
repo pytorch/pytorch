@@ -15,6 +15,7 @@
 //   conflict with `struct in_place_t` in c10/util/Optional.h.
 // - In two functions, the template name reference `I` is changed to
 //   `detail_::best_match<Arg, Ts...>::value` to work around gcc 7.3.1 bug.
+//   However, this workaround also limits the use cases of `c10::variant`.
 //   Please see NOTE [gcc 7.3.1 bug workaround] for details.
 
 #ifndef C10_UTIL_VARIANT_H_
