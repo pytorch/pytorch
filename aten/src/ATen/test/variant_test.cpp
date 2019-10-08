@@ -5,38 +5,26 @@
 namespace testns {
 
 namespace enumtype {
-  struct EnumBase {
-    virtual std::string name() const;
-  };
   // NOTE: We need to provide the default constructor for each struct,
   // otherwise Clang 3.8 would complain:
   // ```
   // error: default initialization of an object of const type 'const enumtype::Enum1'
   // without a user-provided default constructor
   // ```
-  struct Enum1 : public EnumBase {
-    Enum1() {}
-    std::string name() const override {
-      return "Enum1";
-    }
-  };
-  struct Enum2 : public EnumBase {
-    Enum2() {}
-    std::string name() const override {
-      return "Enum2";
-    }
-  };
-  struct Enum3 : public EnumBase {
-    Enum3() {}
-    std::string name() const override {
-      return "Enum3";
-    }
-  };
+  struct Enum1 { Enum1() {}; };
+  struct Enum2 { Enum2() {}; };
+  struct Enum3 { Enum3() {}; };
 } // namespace enumtype
 
 struct enum_name {
-  std::string operator()(enumtype::EnumBase* v) const {
-    return v->name();
+  constexpr std::string operator()(enumtype::Enum1 v) const {
+    return "Enum1";
+  }
+  constexpr std::string operator()(enumtype::Enum2 v) const {
+    return "Enum1";
+  }
+  constexpr std::string operator()(enumtype::Enum2 v) const {
+    return "Enum1";
   }
 };
 
@@ -66,14 +54,14 @@ TEST(VariantTest, Basic) {
   c10::variant<testns::enumtype::Enum1, testns::enumtype::Enum2, testns::enumtype::Enum3> v;
   {
     v = testns::kEnum1;
-    ASSERT_EQ(c10::visit(testns::enum_name{}, &v), "Enum1");
+    ASSERT_EQ(c10::visit(testns::enum_name{}, v), "Enum1");
   }
   {
     v = testns::kEnum2;
-    ASSERT_EQ(c10::visit(testns::enum_name{}, &v), "Enum2");
+    ASSERT_EQ(c10::visit(testns::enum_name{}, v), "Enum2");
   }
   {
     v = testns::kEnum3;
-    ASSERT_EQ(c10::visit(testns::enum_name{}, &v), "Enum3");
+    ASSERT_EQ(c10::visit(testns::enum_name{}, v), "Enum3");
   }
 }
