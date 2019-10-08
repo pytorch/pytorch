@@ -72,8 +72,7 @@ mapped linearly to the minimum and the maximum of the quantized data
 type such that zero is represented with no quantization error.
 
 Additional data types and quantization schemes can be implemented through
-the `custom operator mechanism <https://pytorch.org/docs/stable/notes/extending.html>`.
-**NOTE NEED TO CHECK IF THIS IS RIGHT**
+the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`.
 
 Many operations for quantized tensors are available under the same API as full
 float version in ``torch`` or ``torch.nn``. Quantized version of NN modules that
