@@ -3,8 +3,8 @@ from . import invoke_remote_builtin, invoke_remote_python_udf
 from . import _init_rref_context, _destroy_rref_context
 from . import ProcessGroupAgent
 from . import WorkerInfo
-import torch.distributed.rpc as rpc
-from torch.distributed.rpc.internal import _internal_rpc_pickler, PythonUDF
+from .rpc import is_backend_registered, init_backend
+from .rpc.internal import _internal_rpc_pickler, PythonUDF
 
 import functools
 import sys
@@ -78,8 +78,8 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
         _init_rref_context(_agent)
-    elif rpc.is_backend_registered(backend):
-        _agent = rpc.init_backend(
+    elif is_backend_registered(backend):
+        _agent = init_backend(
             backend,
             self_rank=self_rank,
             self_name=self_name,
