@@ -21,10 +21,10 @@ struct enum_name {
     return "Enum1";
   }
   std::string operator()(enumtype::Enum2& v) const {
-    return "Enum1";
+    return "Enum2";
   }
   std::string operator()(enumtype::Enum3& v) const {
-    return "Enum1";
+    return "Enum3";
   }
 };
 
