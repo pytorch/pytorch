@@ -109,7 +109,7 @@ torch::Tensor EmbeddingBagImpl::forward(
   TORCH_CHECK(!per_sample_weights_.defined() || input.sizes() == per_sample_weights_.sizes(),
     "embedding_bag: If per_sample_weights (", per_sample_weights_.sizes(), ") is not null, then it must have the same shape as the input (", input.sizes(), ")");
   if (input.dim() == 2) {
-    TORCH_CHECK(offsets_.defined(),
+    TORCH_CHECK(!offsets_.defined(),
       "If input is 2D, then offsets has to be null, as input is treated is a mini-batch of fixed length sequences. However, found offsets of type Tensor");
     offsets_ = torch::arange(0, input.numel(), input.size(1),
                                  torch::TensorOptions().dtype(torch::kLong).device(input.device()));
