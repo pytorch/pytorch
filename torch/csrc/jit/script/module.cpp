@@ -371,7 +371,7 @@ void Module::train(bool on) {
   if (auto slot = find_attribute("training")) {
     module_object()->setSlot(*slot, on);
   } else {
-    register_attribute("training", BoolType::get(), on);
+    TORCH_INTERNAL_ASSERT("'training' attribute not found");
   }
 }
 

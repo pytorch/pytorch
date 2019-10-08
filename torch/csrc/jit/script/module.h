@@ -239,6 +239,7 @@ struct TORCH_API Module {
     if (auto p = find_attribute("training")) {
       return module_object()->getSlot(*p).toBool();
     }
+
     // We are in training mode by default
     return true;
   }
