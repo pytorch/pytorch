@@ -542,13 +542,12 @@ class ParameterDict(Module):
                             "iterable of key/value pairs, but got " +
                             type(parameters).__name__)
 
-        if isinstance(parameters, container_abcs.Mapping):
-            if isinstance(parameters, (OrderedDict, ParameterDict)):
-                for key, parameter in parameters.items():
-                    self[key] = parameter
-            else:
-                for key, parameter in sorted(parameters.items()):
-                    self[key] = parameter
+        if isinstance(modules, (OrderedDict, ModuleDict)):
+            for key, module in modules.items():
+                self[key] = module
+        elif isinstance(modules, container_abcs.Mapping):
+            for key, module in sorted(modules.items()):
+                self[key] = module
         else:
             for j, p in enumerate(parameters):
                 if not isinstance(p, container_abcs.Iterable):
