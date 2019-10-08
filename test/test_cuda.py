@@ -23,7 +23,7 @@ from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf
+    load_tests, slowTest, skipCUDANonDefaultStreamIf, default_floating_dtype
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -433,9 +433,9 @@ class TestCuda(TestCase):
         self.assertEqual(q_copy, q, 0)
         q_copy[0].fill_(5)
         self.assertEqual(q_copy[0], q_copy[2], 0)
-        self.assertTrue(isinstance(q_copy[0], torch.cuda.DoubleTensor))
+        self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
-        self.assertTrue(isinstance(q_copy[2], torch.cuda.DoubleTensor))
+        self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[3], torch.cuda.IntStorage))
         q_copy[1].fill_(10)
         self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
@@ -443,14 +443,14 @@ class TestCuda(TestCase):
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
-        self.assertIsInstance(x.cuda(), torch.cuda.DoubleTensor)
+        self.assertIsInstance(x.cuda().double(), torch.cuda.DoubleTensor)
         self.assertIsInstance(x.cuda().float(), torch.cuda.FloatTensor)
         self.assertIsInstance(x.cuda().float().cpu(), torch.FloatTensor)
         self.assertIsInstance(x.cuda().float().cpu().int(), torch.IntTensor)
 
         y = x.storage()
         self.assertIsInstance(y.float(), torch.FloatStorage)
-        self.assertIsInstance(y.cuda(), torch.cuda.DoubleStorage)
+        self.assertIsInstance(y.cuda().double(), torch.cuda.DoubleStorage)
         self.assertIsInstance(y.cuda().float(), torch.cuda.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
         self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
@@ -1641,6 +1641,7 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
 
+    @default_floating_dtype(torch.double)
     def test_bincount_ext(self):
         # ensure CUDA code coverage
         input_size = (5000,)
