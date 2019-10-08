@@ -20,8 +20,7 @@ py::object getFunction(const py::object& module, const char* name) {
 
 PythonRpcHandler::PythonRpcHandler() {
   AutoGIL ag;
-  py::object module =
-      py::module::import("torch.distributed.internal_rpc_utils");
+  py::object module = py::module::import("torch.distributed.rpc.internal");
   pyRunFunction_ = getFunction(module, "_run_function");
   pyLoadReturnValue_ = getFunction(module, "_load_return_value");
   pySerialize_ = getFunction(module, "serialize");
