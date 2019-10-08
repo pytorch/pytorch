@@ -36,10 +36,54 @@ def empty_cache():
 
 
 def memory_stats(device=None):
-    r"""Returns a dictionary of CUDA memory allocator stats. It is recommended to use
-    memory_stats to interface with this data.
+    r"""Returns a dictionary of CUDA memory allocator statistics for a
+    given device.
 
-    TODO(jerry): fill this in once PR is near steady-state.
+    The return value of this function is a dictionary of statistics, each of
+    which is a non-negative integer.
+
+    Core statistics:
+
+    - ``"allocated.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      number of allocation requests received by the memory allocator.
+    - ``"allocated_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      amount of allocated memory.
+    - ``"segment.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      number of reserved segments from ``cudaMalloc()``.
+    - ``"reserved_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      amount of reserved memory.
+    - ``"active.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      number of active memory blocks.
+    - ``"active_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      amount of active memory.
+    - ``"inactive_split.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      number of inactive, non-releasable memory blocks.
+    - ``"inactive_split_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      amount of inactive, non-releasable memory.
+
+    For these core statistics, values are broken down as follows.
+
+    Pool type:
+
+    - ``all``: combined statistics across all memory pools.
+    - ``large_pool``: statistics for the large allocation pool
+      (as of October 2019, for size ≥1MB allocations).
+    - ``small_pool``: statistics for the small allocation pool
+      (as of October 2019, for size <1MB allocations).
+
+    Metric type:
+
+    - ``current``: current value of this metric.
+    - ``peak``: maximum value of this metric.
+    - ``allocated``: historical total increase in this metric.
+    - ``freed``: historical total decrease in this metric.
+
+    In addition to the core statistics, we also provide some simple event
+    counters:
+
+    - ``"num_alloc_retries"``: number of failed ``cudaMalloc`` calls that
+      result in a cache flush and retry.
+    - ``"num_ooms"``: number of out-of-memory errors thrown.
 
     Arguments:
         device (torch.device or int, optional): selected device. Returns
@@ -188,7 +232,7 @@ def max_memory_allocated(device=None):
     device.
 
     By default, this returns the peak allocated memory since the beginning of
-    this program. :func:`~torch.cuda.reset_max_memory_allocated` can be used to
+    this program. :func:`~torch.cuda.reset_peak_stats` can be used to
     reset the starting point in tracking this metric. For example, these two
     functions can measure the peak allocated memory usage of each iteration in a
     training loop.
@@ -226,7 +270,7 @@ def max_memory_reserved(device=None):
     for a given device.
 
     By default, this returns the peak cached memory since the beginning of this
-    program. :func:`~torch.cuda.reset_max_memory_cached` can be used to reset
+    program. :func:`~torch.cuda.reset_peak_stats` can be used to reset
     the starting point in tracking this metric. For example, these two functions
     can measure the peak cached memory amount of each iteration in a training
     loop.
@@ -260,11 +304,36 @@ def max_memory_cached(device=None):
 
 
 def memory_snapshot():
-    r"""Check the internal consistency of the allocator's memory tracker (potentially expensive)"""
+    r"""Returns a snapshot of the CUDA memory allocator state across all devices.
+
+    Interpreting the output of this function requires familiarity with the
+    memory allocator internals.
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
+    """
     return torch._C._cuda_memorySnapshot()
 
 
-def memory_summary(device=None, short=False):
+def memory_summary(device=None, abbreviated=False):
+    r"""Returns a human-readable printout of the current memory allocator
+    statistics for a given device.
+
+    This can be useful to display periodically during training, or when
+    handling out-of-memory exceptions.
+
+    Arguments:
+        device (torch.device or int, optional): selected device. Returns
+            printout for the current device, given by :func:`~torch.cuda.current_device`,
+            if :attr:`device` is ``None`` (default).
+        abbreviated (bool, optional): whether to return an abbreviated summary
+            (default: False).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
+    """
     device = _get_device_index(device, optional=True)
     stats = memory_stats(device=device)
 
@@ -305,14 +374,14 @@ def memory_summary(device=None, short=False):
     lines.append("=" * 75)
     lines.append(" {_:16} PyTorch CUDA memory summary, device ID {device:<17d} ")
     lines.append("-" * 75)
-    lines.append("  {_:9} CUDA OOMs: {num_ooms:<12d} | {_:6} cudaMalloc retries: {cuda_malloc_retries:<8d}  ")
+    lines.append("  {_:9} CUDA OOMs: {num_ooms:<12d} | {_:6} cudaMalloc retries: {num_alloc_retries:<8d}  ")
     lines.append("=" * 75)
     lines.append("        Metric         | Cur Usage  | Peak Usage | Tot Alloc  | Tot Freed  ")
 
     for metric_key, metric_name, formatter in metrics_to_display:
         lines.append("-" * 75)
         submetrics = [("all", metric_name)]
-        if not short:
+        if not abbreviated:
             submetrics.append(("large_pool", "      from large pool"))
             submetrics.append(("small_pool", "      from small pool"))
 
