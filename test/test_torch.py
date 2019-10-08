@@ -10231,7 +10231,8 @@ class TestTorchDeviceType(TestCase):
                 with warnings.catch_warnings(record=True) as w:
                     result = torch.multinomial(dist, num_samples, replacement=False)
                     self.assertEqual(len(w), 1)
-                    self.assertEqual(torch.unique(result, sorted=True), torch.from_numpy(np.arange(0, num_samples)), "non-unique indicies")
+                    self.assertEqual(torch.unique(result, sorted=True),
+                                     torch.from_numpy(np.arange(0, num_samples)), "non-unique indicies")
 
     def test_cdist_large(self, device):
         x = torch.randn(1000, 10, device=device)
