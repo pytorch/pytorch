@@ -3258,6 +3258,7 @@ c10::QualifiedName CompilationUnit::mangle(
       newAtom.reserve(atom.size());
       // Append the part of the name up to the end of the prefix
       newAtom.append(atom, 0, pos);
+      newAtom.append(manglePrefix);
       newAtom.append(std::to_string(mangleIndex_++));
       atom = newAtom;
       return QualifiedName(atoms);
