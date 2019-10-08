@@ -15,7 +15,8 @@ import glob
 import os
 import shutil
 import common_utils as common
-
+import numpy as np
+import scipy
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
