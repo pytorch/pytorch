@@ -10232,7 +10232,7 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(len(w), 1)
                 actual = torch.unique(result, sorted=True)
                 expected = torch.from_numpy(np.arange(0, num_samples)).to(device)
-                if 0 != 1:
+                if actual.size(0) != expected.size(0):
                     raise RuntimeError("actual = " + str(actual) + " expected = " + str(expected) + " dist = " + str(dist))
                 self.assertEqual(actual, expected, "non-unique indicies")
 
