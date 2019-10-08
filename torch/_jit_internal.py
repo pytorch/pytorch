@@ -75,6 +75,48 @@ def get_closure(fn):
 
     return captures
 
+# [local resolution in python]
+# Depending on where a variable is defined, and where it is used, we may
+# or may not be able to recover its value when recursively compiling a
+# script function. Remember in the general case, a module or function is
+# first defined and then later scripted. This means we do not have a
+# chance to capture the active frames when the function is defined. Hence any
+# name resolution has to happen later on the created closure. The way
+# python captures type annotations restricts what we can recover. The
+# follow example illustrates the different cases:
+#
+#         class MyGlobalClass:
+#         ...
+#         def my_local_scope():
+#             @torch.jit.script
+#             class MyClass:
+#                 ...
+#             @torch.jit.script
+#             class MyClassUsedAsVar:
+#                 ...
+#             def eg(x: MyClass, y: MyGlobalClass):
+#                 a_local_capture : Foo
+#                 return MyClassUsedAsVar(x)
+#
+# MyGlobalClass is defined in the __globals__ dictionary of function
+# 'eg', so it is always recoverable. my_local_scope introduces a new local
+# variable scope in the function. Classes defined here are only visible as
+# local variables. For the case of MyClassUsedAsVar, it is captured
+# because it is used as a variable inside the body of the function, and we
+# can resolve it using the captures returned from `get_closure`. However,
+# the type annotations are not captured by the closure. In Python
+# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be availiable as
+# annotations on `eg``, but starting in Python 4.0, they will represented as
+# strings and no longer present. Furthermore, since the body of `eg` does
+# not reference those names, they do not appear in the list of closed over
+# variables. In Python 2.x, type annotations are in comments, leading to a
+# similar situation where their definitions are not available. We anticipate
+# that most users will not run into this issue because their modules and
+# functions will be defined at a global scope like MyGlobalClass. In cases
+# where they are not, it is possible to work around issues by declaring the
+# values global in the function.
+
+
 
 def createResolutionCallbackFromClosure(fn):
     """
