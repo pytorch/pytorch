@@ -153,7 +153,7 @@ bool FunctionParameter::check(PyObject* obj)
 {
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
+      return THPVariable_Check_With_Torch_Function(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:

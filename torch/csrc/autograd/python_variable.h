@@ -152,3 +152,18 @@ static PyObject* get_torch_function(PyObject* obj)
 {
   return PyTorch_LookupSpecial(obj, "__torch_function__");
 }
+
+// checks if SubTensor doesn't have `__torch_function__`
+static bool no_torch_function(PyObject* obj)
+{
+  PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
+  if(method != NULL){
+    return false;
+  }
+  return true;
+}
+
+inline bool THPVariable_Check_With_Torch_Function(PyObject *obj)
+{
+  return THPVariable_Check(obj) && no_torch_function(obj);
+}
