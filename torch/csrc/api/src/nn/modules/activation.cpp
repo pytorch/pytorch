@@ -269,5 +269,25 @@ void TanhshrinkImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Tanhshrink()";
 }
 
+// ============================================================================
+
+ThresholdImpl::ThresholdImpl(const ThresholdOptions& options_)
+    : options(options_) {}
+
+Tensor ThresholdImpl::forward(Tensor& input) {
+  return F::threshold(input, options);
+}
+
+void ThresholdImpl::reset() {}
+
+void ThresholdImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Threshold(threshold=" << options.threshold()
+         << ", value=" << options.value();
+  if (options.inplace()) {
+    stream << std::boolalpha  << ", inplace=" << options.inplace();
+  }
+  stream << ")";
+}
+
 } // namespace nn
 } // namespace torch

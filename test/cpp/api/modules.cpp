@@ -1289,6 +1289,25 @@ TEST_F(ModulesTest, Tanhshrink) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, Threshold) {
+  const auto size = 3;
+  for (const auto threshold : {0.5, 1.0, 2.0}) {
+    for (const auto value : {0.5, 1.0, 2.0}) {
+      for (const auto inplace : {false, true}) {
+        Threshold model {ThresholdOptions(threshold, value).inplace(inplace)};
+        auto x = torch::linspace(-3.0, 3.0, 61);
+        x.resize_({size, size, size});
+        auto y_exp = (x <= threshold) * value + (x > threshold) * x;
+        auto y = model(x);
+
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+      }
+    }
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1604,4 +1623,12 @@ TEST_F(ModulesTest, PrettyPrintTanh) {
 
 TEST_F(ModulesTest, PrettyPrintTanhshrink) {
   ASSERT_EQ(c10::str(Tanhshrink()), "torch::nn::Tanhshrink()");
+}
+
+TEST_F(ModulesTest, PrettyPrintThreshold) {
+  ASSERT_EQ(c10::str(Threshold(24.24, 42.42)),
+    "torch::nn::Threshold(threshold=24.24, value=42.42)");
+  ASSERT_EQ(c10::str(Threshold(
+      ThresholdOptions(42.42, 24.24).inplace(true))),
+    "torch::nn::Threshold(threshold=42.42, value=24.24, inplace=true)");
 }

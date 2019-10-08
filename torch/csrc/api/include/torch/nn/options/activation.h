@@ -143,5 +143,22 @@ struct TORCH_API SoftshrinkOptions {
   TORCH_ARG(double, lambda);
 };
 
+// ============================================================================
+
+/// Options for Threshold functional and module.
+struct ThresholdOptions {
+  ThresholdOptions(double threshold, double value)
+   : threshold_(threshold), value_(value) {}
+
+  /// The value to threshold at
+  TORCH_ARG(double, threshold);
+
+  /// The value to replace with
+  TORCH_ARG(double, value);
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
+};
+
 } // namespace nn
 } // namespace torch
