@@ -2591,7 +2591,7 @@ GRID_SAMPLE_PADDING_MODES = {
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=None):
-    # type: (Tensor, Tensor, str, str, bool) -> Tensor
+    # type: (Tensor, Tensor, str, str, Optional[bool]) -> Tensor
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
@@ -2699,7 +2699,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
 
 
 def affine_grid(theta, size, align_corners=None):
-    # type: (Tensor, List[int], bool) -> Tensor
+    # type: (Tensor, List[int], Optional[bool]) -> Tensor
     r"""Generates a 2D or 3D flow field (sampling grid), given a batch of
     affine matrices :attr:`theta`.
 
