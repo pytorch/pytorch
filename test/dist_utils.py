@@ -4,7 +4,8 @@ from functools import wraps
 from os import getenv
 
 import torch.distributed as dist
-from torch.distributed.rpc_api import RpcBackend
+import torch.distributed.rpc as rpc
+from torch.distributed.rpc.api import RpcBackend
 
 
 if not dist.is_available():
@@ -37,13 +38,13 @@ def dist_init(test_method):
     def wrapper(self, *arg, **kwargs):
         self.worker_id = self.rank
         dist.init_process_group(backend="gloo", init_method=self.init_method)
-        dist.init_model_parallel(
+        rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
             backend=TEST_CONFIG.backend,
             self_rank=self.rank,
             init_method=self.init_method,
         )
         test_method(self, *arg, **kwargs)
-        dist.join_rpc()
+        rpc.join_rpc()
 
     return wrapper
