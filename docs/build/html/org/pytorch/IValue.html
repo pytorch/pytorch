@@ -1,0 +1,1009 @@
+
+
+
+<!DOCTYPE html>
+<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>org.pytorch.IValue (IValue) &mdash; PyTorch master documentation</title>
+  
+
+  
+  
+  
+  
+    <link rel="canonical" href="https://pytorch.org/docs/stable/org/pytorch/IValue.html"/>
+  
+
+  
+
+  
+  
+    
+
+  
+
+  <link rel="stylesheet" href="../../_static/css/theme.css" type="text/css" />
+  <!-- <link rel="stylesheet" href="../../_static/pygments.css" type="text/css" /> -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.2/dist/katex.min.css" type="text/css" />
+  <link rel="stylesheet" href="../../_static/katex-math.css" type="text/css" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="org.pytorch.Module (Module)" href="Module.html" />
+    <link rel="prev" title="org.pytorch.Tensor (Tensor)" href="Tensor.html" /> 
+
+  
+  <script src="../../_static/js/modernizr.min.js"></script>
+
+  <!-- Preload the theme fonts -->
+
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-book.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/IBMPlexMono/IBMPlexMono-Medium.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/FreightSans/freight-sans-medium-italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="../../_static/fonts/IBMPlexMono/IBMPlexMono-SemiBold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+
+<!-- Preload the katex fonts -->
+
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Main-Bold.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size1-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size4-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size2-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Size3-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/katex@0.10.0/dist/fonts/KaTeX_Caligraphic-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous">
+</head>
+
+<div class="container-fluid header-holder tutorials-header" id="header-holder">
+  <div class="container">
+    <div class="header-container">
+      <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="https://pytorch.org/get-started">Get Started</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/features">Features</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/ecosystem">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+
+      <a class="main-menu-open-button" href="#" data-behavior="open-mobile-menu"></a>
+    </div>
+
+  </div>
+</div>
+
+
+<body class="pytorch-body">
+
+   
+
+    
+
+    <div class="table-of-contents-link-wrapper">
+      <span>Table of Contents</span>
+      <a href="#" class="toggle-table-of-contents" data-behavior="toggle-table-of-contents"></a>
+    </div>
+
+    <nav data-toggle="wy-nav-shift" class="pytorch-left-menu" id="pytorch-left-menu">
+      <div class="pytorch-side-scroll">
+        <div class="pytorch-menu pytorch-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          <div class="pytorch-left-menu-search">
+            
+
+            
+              
+              
+                <div class="version">
+                  master (1.2.0 )
+                </div>
+              
+            
+
+            
+
+
+  
+
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search Docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+            
+          </div>
+
+          
+<div>
+  <a style="color:#F05732" href="https://pytorch.org/docs/stable/org/pytorch/IValue.html">
+    You are viewing unstable developer preview docs.
+    Click here to view docs for latest stable release.
+  </a>
+</div>
+
+            
+            
+              
+            
+            
+              <p class="caption"><span class="caption-text">Notes</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/autograd.html">Autograd mechanics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/broadcasting.html">Broadcasting semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/cpu_threading_torchscript_inference.html">CPU threading and TorchScript inference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/cuda.html">CUDA semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/extending.html">Extending PyTorch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/faq.html">Frequently Asked Questions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/large_scale_deployments.html">Features for large-scale deployments</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/multiprocessing.html">Multiprocessing best practices</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/randomness.html">Reproducibility</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/serialization.html">Serialization semantics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../notes/windows.html">Windows FAQ</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Community</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../community/contribution_guide.html">PyTorch Contribution Guide</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../community/governance.html">PyTorch Governance</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../torch.html">torch</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.html">torch.nn</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.functional.html">torch.nn.functional</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensors.html">torch.Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensor_attributes.html">Tensor Attributes</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../autograd.html">torch.autograd</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../cuda.html">torch.cuda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../distributed.html">torch.distributed</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../distributions.html">torch.distributions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../hub.html">torch.hub</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../jit.html">torch.jit</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../nn.init.html">torch.nn.init</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../onnx.html">torch.onnx</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../optim.html">torch.optim</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../quantization.html">Quantization</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../random.html">torch.random</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../sparse.html">torch.sparse</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../storage.html">torch.Storage</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../bottleneck.html">torch.utils.bottleneck</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../checkpoint.html">torch.utils.checkpoint</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../cpp_extension.html">torch.utils.cpp_extension</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../data.html">torch.utils.data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../dlpack.html">torch.utils.dlpack</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../model_zoo.html">torch.utils.model_zoo</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../tensorboard.html">torch.utils.tensorboard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../type_info.html">Type Info</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">torchaudio Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="`torchaudio &lt;https://pytorch.org/audio&gt;`_">`torchaudio &lt;https://pytorch.org/audio&gt;`_</a></li>
+</ul>
+<p class="caption"><span class="caption-text">torchtext Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="`torchtext &lt;https://pytorch.org/text&gt;`_">`torchtext &lt;https://pytorch.org/text&gt;`_</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Other Languages</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference external" href="`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_">`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../../packages.html">Java API</a></li>
+</ul>
+
+            
+          
+
+        </div>
+      </div>
+    </nav>
+
+    <div class="pytorch-container">
+      <div class="pytorch-page-level-bar" id="pytorch-page-level-bar">
+        <div class="pytorch-breadcrumbs-wrapper">
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="pytorch-breadcrumbs">
+    
+      <li>
+        <a href="../../index.html">
+          
+            Docs
+          
+        </a> &gt;
+      </li>
+
+        
+          <li><a href="../../packages.html">Java API</a> &gt;</li>
+        
+      <li>org.pytorch.IValue (IValue)</li>
+    
+    
+      <li class="pytorch-breadcrumbs-aside">
+        
+            
+            <a href="../../_sources/org/pytorch/IValue.rst.txt" rel="nofollow"><img src="../../_static/images/view-page-source-icon.svg"></a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+</div>
+        </div>
+
+        <div class="pytorch-shortcuts-wrapper" id="pytorch-shortcuts-wrapper">
+          Shortcuts
+        </div>
+      </div>
+
+      <section data-toggle="wy-nav-shift" id="pytorch-content-wrap" class="pytorch-content-wrap">
+        <div class="pytorch-content-left">
+
+        
+          
+          <div class="rst-content">
+          
+            <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
+             <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
+              
+  <div class="section" id="org-pytorch-ivalue-ivalue">
+<h1>org.pytorch.IValue (IValue)<a class="headerlink" href="#org-pytorch-ivalue-ivalue" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="source-code">
+<h2>Source Code<a class="headerlink" href="#source-code" title="Permalink to this headline">¶</a></h2>
+<p>Full code can be found in <a class="reference external" href="https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/java/org/pytorch/IValue.java">Github</a>.</p>
+</div>
+<div class="section" id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
+<p>IValue represents a TorchScript variable that can be one of the supported
+(by torchscript) <a class="reference external" href="https://pytorch.org/docs/stable/jit.html#types">types</a>.
+IValue is a tagged union. For every supported type it has a factory method, method
+to check the type and a getter method to retrieve a value. Getters throw
+IllegalStateException if called for inappropriate type.</p>
+</div>
+<div class="section" id="ivaue-api-details">
+<h2>IVaue API Details<a class="headerlink" href="#ivaue-api-details" title="Permalink to this headline">¶</a></h2>
+<dl class="type">
+<dt id="org.pytorch.IValue">
+public class <code class="sig-name descname">IValue</code><a class="headerlink" href="#org.pytorch.IValue" title="Permalink to this definition">¶</a></dt>
+<dd><p>Java representation of a torchscript variable, which is implemented as tagged union that can be one of the supported types: <a class="reference external" href="https://pytorch.org/docs/stable/jit.html#types">https://pytorch.org/docs/stable/jit.html#types</a>.</p>
+<p>Calling getters for inappropriate types will throw IllegalStateException.</p>
+</dd></dl>
+
+<div class="section" id="methods">
+<h3>Methods<a class="headerlink" href="#methods" title="Permalink to this headline">¶</a></h3>
+<div class="section" id="bool">
+<h4>bool<a class="headerlink" href="#bool" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.bool(boolean)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">bool</code><span class="sig-paren">(</span>boolean<em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.bool(boolean)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript bool type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="boollist">
+<h4>boolList<a class="headerlink" href="#boollist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.boolList(boolean)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">boolList</code><span class="sig-paren">(</span>boolean...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.boolList(boolean)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript List[bool] type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="dictlongkey">
+<h4>dictLongKey<a class="headerlink" href="#dictlongkey" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.dictLongKey(Map)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">dictLongKey</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/Long.html" title="java.lang.Long">Long</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt;<em> map</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.dictLongKey(Map)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript Dict[int, V] type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="dictstringkey">
+<h4>dictStringKey<a class="headerlink" href="#dictstringkey" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.dictStringKey(Map)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">dictStringKey</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt;<em> map</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.dictStringKey(Map)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance oftorchscript Dict[Str, V] type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="double64">
+<h4>double64<a class="headerlink" href="#double64" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.double64(double)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">double64</code><span class="sig-paren">(</span>double<em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.double64(double)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript float type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="doublelist">
+<h4>doubleList<a class="headerlink" href="#doublelist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.doubleList(double)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">doubleList</code><span class="sig-paren">(</span>double...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.doubleList(double)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript List[float] type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="getbool">
+<h4>getBool<a class="headerlink" href="#getbool" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getBool()">
+public boolean <code class="sig-name descname">getBool</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getBool()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="getboollist">
+<h4>getBoolList<a class="headerlink" href="#getboollist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getBoolList()">
+public boolean[] <code class="sig-name descname">getBoolList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getBoolList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="getdictlongkey">
+<h4>getDictLongKey<a class="headerlink" href="#getdictlongkey" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getDictLongKey()">
+public <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/Long.html" title="java.lang.Long">Long</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt; <code class="sig-name descname">getDictLongKey</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getDictLongKey()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="getdictstringkey">
+<h4>getDictStringKey<a class="headerlink" href="#getdictstringkey" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getDictStringKey()">
+public <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt; <code class="sig-name descname">getDictStringKey</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getDictStringKey()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="getdouble">
+<h4>getDouble<a class="headerlink" href="#getdouble" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getDouble()">
+public double <code class="sig-name descname">getDouble</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getDouble()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="getdoublelist">
+<h4>getDoubleList<a class="headerlink" href="#getdoublelist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getDoubleList()">
+public double[] <code class="sig-name descname">getDoubleList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getDoubleList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="getlist">
+<h4>getList<a class="headerlink" href="#getlist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getList()">
+public <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>[] <code class="sig-name descname">getList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="getlong">
+<h4>getLong<a class="headerlink" href="#getlong" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getLong()">
+public long <code class="sig-name descname">getLong</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getLong()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="getlonglist">
+<h4>getLongList<a class="headerlink" href="#getlonglist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getLongList()">
+public long[] <code class="sig-name descname">getLongList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getLongList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="getstring">
+<h4>getString<a class="headerlink" href="#getstring" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getString()">
+public <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a> <code class="sig-name descname">getString</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getString()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="gettensor">
+<h4>getTensor<a class="headerlink" href="#gettensor" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getTensor()">
+public <a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">getTensor</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getTensor()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="gettensorlist">
+<h4>getTensorList<a class="headerlink" href="#gettensorlist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getTensorList()">
+public <a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a>[] <code class="sig-name descname">getTensorList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getTensorList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="gettuple">
+<h4>getTuple<a class="headerlink" href="#gettuple" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.getTuple()">
+public <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>[] <code class="sig-name descname">getTuple</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getTuple()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="isbool">
+<h4>isBool<a class="headerlink" href="#isbool" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isBool()">
+public boolean <code class="sig-name descname">isBool</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isBool()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="isboollist">
+<h4>isBoolList<a class="headerlink" href="#isboollist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isBoolList()">
+public boolean <code class="sig-name descname">isBoolList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isBoolList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="isdictlongkey">
+<h4>isDictLongKey<a class="headerlink" href="#isdictlongkey" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isDictLongKey()">
+public boolean <code class="sig-name descname">isDictLongKey</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isDictLongKey()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="isdictstringkey">
+<h4>isDictStringKey<a class="headerlink" href="#isdictstringkey" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isDictStringKey()">
+public boolean <code class="sig-name descname">isDictStringKey</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isDictStringKey()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="isdouble">
+<h4>isDouble<a class="headerlink" href="#isdouble" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isDouble()">
+public boolean <code class="sig-name descname">isDouble</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isDouble()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="isdoublelist">
+<h4>isDoubleList<a class="headerlink" href="#isdoublelist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isDoubleList()">
+public boolean <code class="sig-name descname">isDoubleList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isDoubleList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="islist">
+<h4>isList<a class="headerlink" href="#islist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isList()">
+public boolean <code class="sig-name descname">isList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="islong">
+<h4>isLong<a class="headerlink" href="#islong" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isLong()">
+public boolean <code class="sig-name descname">isLong</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isLong()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="islonglist">
+<h4>isLongList<a class="headerlink" href="#islonglist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isLongList()">
+public boolean <code class="sig-name descname">isLongList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isLongList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="isnull">
+<h4>isNull<a class="headerlink" href="#isnull" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isNull()">
+public boolean <code class="sig-name descname">isNull</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isNull()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="isstring">
+<h4>isString<a class="headerlink" href="#isstring" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isString()">
+public boolean <code class="sig-name descname">isString</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isString()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="istensor">
+<h4>isTensor<a class="headerlink" href="#istensor" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isTensor()">
+public boolean <code class="sig-name descname">isTensor</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isTensor()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="istensorlist">
+<h4>isTensorList<a class="headerlink" href="#istensorlist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isTensorList()">
+public boolean <code class="sig-name descname">isTensorList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isTensorList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="istuple">
+<h4>isTuple<a class="headerlink" href="#istuple" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.isTuple()">
+public boolean <code class="sig-name descname">isTuple</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isTuple()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="list">
+<h4>list<a class="headerlink" href="#list" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.list(IValue)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">list</code><span class="sig-paren">(</span><a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>...<em> array</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.list(IValue)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript List[T] type. All elements must have the same type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="long64">
+<h4>long64<a class="headerlink" href="#long64" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.long64(long)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">long64</code><span class="sig-paren">(</span>long<em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.long64(long)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript int type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="longlist">
+<h4>longList<a class="headerlink" href="#longlist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.longList(long)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">longList</code><span class="sig-paren">(</span>long...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.longList(long)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript List[int] type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="optionalnull">
+<h4>optionalNull<a class="headerlink" href="#optionalnull" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.optionalNull()">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">optionalNull</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.optionalNull()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="string">
+<h4>string<a class="headerlink" href="#string" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.string(String)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">string</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a><em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.string(String)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates new IValue instance of torchscript str type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="tensor">
+<h4>tensor<a class="headerlink" href="#tensor" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.tensor(Tensor)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">tensor</code><span class="sig-paren">(</span><a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a><em> tensor</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.tensor(Tensor)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript Tensor type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="tensorlist">
+<h4>tensorList<a class="headerlink" href="#tensorlist" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.tensorList(Tensor)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">tensorList</code><span class="sig-paren">(</span><a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a>...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.tensorList(Tensor)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript List[Tensor] type.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="tuple">
+<h4>tuple<a class="headerlink" href="#tuple" title="Permalink to this headline">¶</a></h4>
+<dl class="method">
+<dt id="org.pytorch.IValue.tuple(IValue)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">tuple</code><span class="sig-paren">(</span><a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>...<em> array</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.tuple(IValue)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new IValue instance of torchscript Tuple[T0, T1, …] type.</p>
+</dd></dl>
+
+</div>
+</div>
+</div>
+</div>
+
+
+             </article>
+             
+            </div>
+            <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="Module.html" class="btn btn-neutral float-right" title="org.pytorch.Module (Module)" accesskey="n" rel="next">Next <img src="../../_static/images/chevron-right-orange.svg" class="next-page"></a>
+      
+      
+        <a href="Tensor.html" class="btn btn-neutral" title="org.pytorch.Tensor (Tensor)" accesskey="p" rel="prev"><img src="../../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+      
+    </div>
+  
+
+  
+
+    <hr>
+
+  
+
+  <div role="contentinfo">
+    <p>
+        &copy; Copyright 2019, Torch Contributors.
+
+    </p>
+  </div>
+    
+      <div>
+        Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+      </div>
+     
+
+</footer>
+
+          </div>
+        </div>
+
+        <div class="pytorch-content-right" id="pytorch-content-right">
+          <div class="pytorch-right-menu" id="pytorch-right-menu">
+            <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
+              <ul>
+<li><a class="reference internal" href="#">org.pytorch.IValue (IValue)</a><ul>
+<li><a class="reference internal" href="#source-code">Source Code</a></li>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#ivaue-api-details">IVaue API Details</a><ul>
+<li><a class="reference internal" href="#methods">Methods</a><ul>
+<li><a class="reference internal" href="#bool">bool</a></li>
+<li><a class="reference internal" href="#boollist">boolList</a></li>
+<li><a class="reference internal" href="#dictlongkey">dictLongKey</a></li>
+<li><a class="reference internal" href="#dictstringkey">dictStringKey</a></li>
+<li><a class="reference internal" href="#double64">double64</a></li>
+<li><a class="reference internal" href="#doublelist">doubleList</a></li>
+<li><a class="reference internal" href="#getbool">getBool</a></li>
+<li><a class="reference internal" href="#getboollist">getBoolList</a></li>
+<li><a class="reference internal" href="#getdictlongkey">getDictLongKey</a></li>
+<li><a class="reference internal" href="#getdictstringkey">getDictStringKey</a></li>
+<li><a class="reference internal" href="#getdouble">getDouble</a></li>
+<li><a class="reference internal" href="#getdoublelist">getDoubleList</a></li>
+<li><a class="reference internal" href="#getlist">getList</a></li>
+<li><a class="reference internal" href="#getlong">getLong</a></li>
+<li><a class="reference internal" href="#getlonglist">getLongList</a></li>
+<li><a class="reference internal" href="#getstring">getString</a></li>
+<li><a class="reference internal" href="#gettensor">getTensor</a></li>
+<li><a class="reference internal" href="#gettensorlist">getTensorList</a></li>
+<li><a class="reference internal" href="#gettuple">getTuple</a></li>
+<li><a class="reference internal" href="#isbool">isBool</a></li>
+<li><a class="reference internal" href="#isboollist">isBoolList</a></li>
+<li><a class="reference internal" href="#isdictlongkey">isDictLongKey</a></li>
+<li><a class="reference internal" href="#isdictstringkey">isDictStringKey</a></li>
+<li><a class="reference internal" href="#isdouble">isDouble</a></li>
+<li><a class="reference internal" href="#isdoublelist">isDoubleList</a></li>
+<li><a class="reference internal" href="#islist">isList</a></li>
+<li><a class="reference internal" href="#islong">isLong</a></li>
+<li><a class="reference internal" href="#islonglist">isLongList</a></li>
+<li><a class="reference internal" href="#isnull">isNull</a></li>
+<li><a class="reference internal" href="#isstring">isString</a></li>
+<li><a class="reference internal" href="#istensor">isTensor</a></li>
+<li><a class="reference internal" href="#istensorlist">isTensorList</a></li>
+<li><a class="reference internal" href="#istuple">isTuple</a></li>
+<li><a class="reference internal" href="#list">list</a></li>
+<li><a class="reference internal" href="#long64">long64</a></li>
+<li><a class="reference internal" href="#longlist">longList</a></li>
+<li><a class="reference internal" href="#optionalnull">optionalNull</a></li>
+<li><a class="reference internal" href="#string">string</a></li>
+<li><a class="reference internal" href="#tensor">tensor</a></li>
+<li><a class="reference internal" href="#tensorlist">tensorList</a></li>
+<li><a class="reference internal" href="#tuple">tuple</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+  
+
+
+  
+
+     
+       <script type="text/javascript" id="documentation_options" data-url_root="../../" src="../../_static/documentation_options.js"></script>
+         <script type="text/javascript" src="../../_static/jquery.js"></script>
+         <script type="text/javascript" src="../../_static/underscore.js"></script>
+         <script type="text/javascript" src="../../_static/doctools.js"></script>
+         <script type="text/javascript" src="../../_static/language_data.js"></script>
+     
+
+  
+
+  <script type="text/javascript" src="../../_static/js/vendor/popper.min.js"></script>
+  <script type="text/javascript" src="../../_static/js/vendor/bootstrap.min.js"></script>
+  <script type="text/javascript" src="../../_static/js/theme.js"></script>
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+ 
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-90545585-1', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-117752657-2"></script>
+
+<script>
+  window.dataLayer = window.dataLayer || [];
+
+  function gtag(){dataLayer.push(arguments);}
+
+  gtag('js', new Date());
+  gtag('config', 'UA-117752657-2');
+</script>
+
+<img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
+
+
+  <!-- Begin Footer -->
+
+  <div class="container-fluid docs-tutorials-resources" id="docs-tutorials-resources">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-4 text-center">
+          <h2>Docs</h2>
+          <p>Access comprehensive developer documentation for PyTorch</p>
+          <a class="with-right-arrow" href="https://pytorch.org/docs/stable/index.html">View Docs</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Tutorials</h2>
+          <p>Get in-depth tutorials for beginners and advanced developers</p>
+          <a class="with-right-arrow" href="https://pytorch.org/tutorials">View Tutorials</a>
+        </div>
+
+        <div class="col-md-4 text-center">
+          <h2>Resources</h2>
+          <p>Find development resources and get your questions answered</p>
+          <a class="with-right-arrow" href="https://pytorch.org/resources">View Resources</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container footer-container">
+      <div class="footer-logo-wrapper">
+        <a href="https://pytorch.org/" class="footer-logo"></a>
+      </div>
+
+      <div class="footer-links-wrapper">
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/">PyTorch</a></li>
+            <li><a href="https://pytorch.org/get-started">Get Started</a></li>
+            <li><a href="https://pytorch.org/features">Features</a></li>
+            <li><a href="https://pytorch.org/ecosystem">Ecosystem</a></li>
+            <li><a href="https://pytorch.org/blog/">Blog</a></li>
+            <li><a href="https://pytorch.org/resources">Resources</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col">
+          <ul>
+            <li class="list-title"><a href="https://pytorch.org/support">Support</a></li>
+            <li><a href="https://pytorch.org/tutorials">Tutorials</a></li>
+            <li><a href="https://pytorch.org/docs/stable/index.html">Docs</a></li>
+            <li><a href="https://discuss.pytorch.org" target="_blank">Discuss</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/issues" target="_blank">Github Issues</a></li>
+            <li><a href="https://pytorch.slack.com" target="_blank">Slack</a></li>
+            <li><a href="https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md" target="_blank">Contributing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-links-col follow-us-col">
+          <ul>
+            <li class="list-title">Follow Us</li>
+            <li>
+              <div id="mc_embed_signup">
+                <form
+                  action="https://twitter.us14.list-manage.com/subscribe/post?u=75419c71fe0a935e53dfa4a3f&id=91d0dccd39"
+                  method="post"
+                  id="mc-embedded-subscribe-form"
+                  name="mc-embedded-subscribe-form"
+                  class="email-subscribe-form validate"
+                  target="_blank"
+                  novalidate>
+                  <div id="mc_embed_signup_scroll" class="email-subscribe-form-fields-wrapper">
+                    <div class="mc-field-group">
+                      <label for="mce-EMAIL" style="display:none;">Email Address</label>
+                      <input type="email" value="" name="EMAIL" class="required email" id="mce-EMAIL" placeholder="Email Address">
+                    </div>
+
+                    <div id="mce-responses" class="clear">
+                      <div class="response" id="mce-error-response" style="display:none"></div>
+                      <div class="response" id="mce-success-response" style="display:none"></div>
+                    </div>    <!-- real people should not fill this in and expect good things - do not remove this or risk form bot signups-->
+
+                    <div style="position: absolute; left: -5000px;" aria-hidden="true"><input type="text" name="b_75419c71fe0a935e53dfa4a3f_91d0dccd39" tabindex="-1" value=""></div>
+
+                    <div class="clear">
+                      <input type="submit" value="" name="subscribe" id="mc-embedded-subscribe" class="button email-subscribe-button">
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+            </li>
+          </ul>
+
+          <div class="footer-social-icons">
+            <a href="https://www.facebook.com/pytorch" target="_blank" class="facebook"></a>
+            <a href="https://twitter.com/pytorch" target="_blank" class="twitter"></a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div class="cookie-banner-wrapper">
+  <div class="container">
+    <p class="gdpr-notice">To analyze traffic and optimize your experience, we serve cookies on this site. By clicking or navigating, you agree to allow our usage of cookies. As the current maintainers of this site, Facebook’s Cookies Policy applies. Learn more, including about available controls: <a href="https://www.facebook.com/policies/cookies/">Cookies Policy</a>.</p>
+    <img class="close-button" src="../../_static/images/pytorch-x.svg">
+  </div>
+</div>
+
+  <!-- End Footer -->
+
+  <!-- Begin Mobile Menu -->
+
+  <div class="mobile-main-menu">
+    <div class="container-fluid">
+      <div class="container">
+        <div class="mobile-main-menu-header-container">
+          <a class="header-logo" href="https://pytorch.org/" aria-label="PyTorch"></a>
+          <a class="main-menu-close-button" href="#" data-behavior="close-mobile-menu"></a>
+        </div>
+      </div>
+    </div>
+
+    <div class="mobile-main-menu-links-container">
+      <div class="main-menu">
+        <ul>
+          <li>
+            <a href="#">Get Started</a>
+          </li>
+
+          <li>
+            <a href="#">Features</a>
+          </li>
+
+          <li>
+            <a href="#">Ecosystem</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/blog/">Blog</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/tutorials">Tutorials</a>
+          </li>
+
+          <li class="active">
+            <a href="https://pytorch.org/docs/stable/index.html">Docs</a>
+          </li>
+
+          <li>
+            <a href="https://pytorch.org/resources">Resources</a>
+          </li>
+
+          <li>
+            <a href="https://github.com/pytorch/pytorch">Github</a>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- End Mobile Menu -->
+
+  <script type="text/javascript" src="../../_static/js/vendor/anchor.min.js"></script>
+
+  <script type="text/javascript">
+    $(document).ready(function() {
+      mobileMenu.bind();
+      mobileTOC.bind();
+      pytorchAnchors.bind();
+      sideMenus.bind();
+      scrollToAnchor.bind();
+      highlightNavigation.bind();
+
+      // Add class to links that have code blocks, since we cannot create links in code blocks
+      $("article.pytorch-article a span.pre").each(function(e) {
+        $(this).closest("a").addClass("has-code");
+      });
+    })
+  </script>
+</body>
+</html>
