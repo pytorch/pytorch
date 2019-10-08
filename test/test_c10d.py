@@ -681,11 +681,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertEqual(torch.Tensor([1.0]), x)
 
     def test_broadcast_basics(self):
-        self._test_broadcast_basics(lambda t: t.clone(memory_format=torch.contiguous_format))
+        self._test_broadcast_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
     def test_broadcast_basics_cuda(self):
-        self._test_broadcast_basics(lambda t: t.clone(memory_format=torch.contiguous_format).cuda())
+        self._test_broadcast_basics(lambda t: t.clone().cuda())
 
     def _test_broadcast_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -765,11 +765,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertEqual(torch.Tensor([float(self.world_size * (self.world_size + 1) / 2)]), x)
 
     def test_allreduce_basics(self):
-        self._test_allreduce_basics(lambda t: t.clone(memory_format=torch.contiguous_format))
+        self._test_allreduce_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
     def test_allreduce_basics_cuda(self):
-        self._test_allreduce_basics(lambda t: t.clone(memory_format=torch.contiguous_format).cuda())
+        self._test_allreduce_basics(lambda t: t.clone().cuda())
 
     def _test_allreduce_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -817,7 +817,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         with self.assertRaisesRegex(ValueError, "unsupported layout"):
             opts = c10d.AllreduceCoalescedOptions()
-            pg.allreduce_coalesced([t3, t3.clone(memory_format=torch.contiguous_format)], opts)
+            pg.allreduce_coalesced([t3, t3.clone()], opts)
 
     @skip_if_lt_x_gpu(1)
     def test_allreduce_coalesced_checks_cuda(self):
@@ -845,7 +845,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(result_tensor, expected)
 
     def test_allreduce_coalesced_basics(self):
-        self._test_allreduce_coalesced_basics(lambda t: t.clone(memory_format=torch.contiguous_format))
+        self._test_allreduce_coalesced_basics(lambda t: t.clone())
 
     def _test_allreduce_coalesced_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -909,7 +909,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     @skip_if_not_multigpu
     def test_sparse_allreduce_basics_cuda(self):
-        self._test_sparse_allreduce_basics(lambda t: t.clone(memory_format=torch.contiguous_format).cuda())
+        self._test_sparse_allreduce_basics(lambda t: t.clone().cuda())
 
     def test_scatter_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1003,11 +1003,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(torch.Tensor([i]), outputs[i])
 
     def test_scatter_basics(self):
-        self._test_scatter_basics(lambda t: t.clone(memory_format=torch.contiguous_format))
+        self._test_scatter_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
     def test_scatter_basics_cuda(self):
-        self._test_scatter_basics(lambda t: t.clone(memory_format=torch.contiguous_format).cuda())
+        self._test_scatter_basics(lambda t: t.clone().cuda())
 
     def _test_scatter_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1043,7 +1043,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             [torch.Tensor([i + self.rank]) for _ in range(self.world_size)]
             for i in range(1000)
         ]
-        self._test_scatter_stress(inputs, lambda t: t.clone(memory_format=torch.contiguous_format))
+        self._test_scatter_stress(inputs, lambda t: t.clone())
 
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/15963")
     @skip_if_not_multigpu
@@ -1052,7 +1052,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             [torch.Tensor([i + self.rank]) for _ in range(self.world_size)]
             for i in range(1000)
         ]
-        self._test_scatter_stress(inputs, lambda t: t.clone(memory_format=torch.contiguous_format).cuda())
+        self._test_scatter_stress(inputs, lambda t: t.clone().cuda())
 
     def test_gather_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1143,11 +1143,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(expected, outputs)
 
     def test_gather_basics(self):
-        self._test_gather_basics(lambda t: t.clone(memory_format=torch.contiguous_format))
+        self._test_gather_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
     def test_gather_basics_cuda(self):
-        self._test_gather_basics(lambda t: t.clone(memory_format=torch.contiguous_format).cuda())
+        self._test_gather_basics(lambda t: t.clone().cuda())
 
     def _test_gather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1186,12 +1186,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_gather_stress(self):
         inputs = [torch.Tensor([i + self.rank]) for i in range(1000)]
-        self._test_gather_stress(inputs, lambda t: t.clone(memory_format=torch.contiguous_format))
+        self._test_gather_stress(inputs, lambda t: t.clone())
 
     @skip_if_not_multigpu
     def test_gather_stress_cuda(self):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
-        self._test_gather_stress(inputs, lambda t: t.clone(memory_format=torch.contiguous_format).cuda())
+        self._test_gather_stress(inputs, lambda t: t.clone().cuda())
 
     def test_allgather_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1252,11 +1252,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(expected_output, output)
 
     def test_allgather_basics(self):
-        self._test_allgather_basics(lambda t: t.clone(memory_format=torch.contiguous_format))
+        self._test_allgather_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
     def test_allgather_basics_cuda(self):
-        self._test_allgather_basics(lambda t: t.clone(memory_format=torch.contiguous_format).cuda())
+        self._test_allgather_basics(lambda t: t.clone().cuda())
 
     def _test_allgather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1286,12 +1286,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_allgather_stress(self):
         inputs = [torch.Tensor([i + self.rank]) for i in range(1000)]
-        self._test_allgather_stress(inputs, lambda t: t.clone(memory_format=torch.contiguous_format))
+        self._test_allgather_stress(inputs, lambda t: t.clone())
 
     @skip_if_not_multigpu
     def test_allgather_stress_cuda(self):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
-        self._test_allgather_stress(inputs, lambda t: t.clone(memory_format=torch.contiguous_format).cuda())
+        self._test_allgather_stress(inputs, lambda t: t.clone().cuda())
 
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1338,11 +1338,11 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     self.assertEqual(output, tmp)
 
     def test_reduce_basics(self):
-        self._test_reduce_basics(lambda t: t.clone(memory_format=torch.contiguous_format))
+        self._test_reduce_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
     def test_reduce_basics_cuda(self):
-        self._test_reduce_basics(lambda t: t.clone(memory_format=torch.contiguous_format).cuda())
+        self._test_reduce_basics(lambda t: t.clone().cuda())
 
     def _test_reduce_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1353,7 +1353,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             for root in range(self.world_size):
                 opts = c10d.ReduceOptions()
                 opts.rootRank = root
-                tmp = inputs[i].clone(memory_format=torch.contiguous_format)
+                tmp = inputs[i].clone()
                 outputs.append(tmp)
                 work = pg.reduce([tmp], opts)
                 work_handles.append(work)
@@ -3141,7 +3141,7 @@ class CommTest(MultiProcessTestCase):
         # The tensors to pass to broadcast are idential to the target
         # only on the process that is the root of the broadcast.
         if self.rank == 0:
-            tensors = list(tensor.clone(memory_format=torch.contiguous_format) for tensor in target)
+            tensors = list(tensor.clone() for tensor in target)
         else:
             tensors = list(torch.empty_like(tensor) for tensor in target)
 

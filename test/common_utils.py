@@ -333,7 +333,7 @@ def to_gpu(obj, type_map=None):
         assert obj.is_leaf
         t = type_map.get(obj.type(), get_gpu_type(obj.type()))
         with torch.no_grad():
-            res = obj.clone(memory_format=torch.contiguous_format).type(t)
+            res = obj.clone().type(t)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):

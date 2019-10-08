@@ -725,7 +725,7 @@ class TestJit(JitTestCase):
 
         def run(f):
             y = f(x)
-            grad = torch.autograd.grad(y, x)[0].clone(memory_format=torch.contiguous_format)
+            grad = torch.autograd.grad(y, x)[0].clone()
             return y, grad
 
         traced_fn = torch.jit.trace(fn, torch.ones(1))
@@ -809,7 +809,7 @@ class TestJit(JitTestCase):
         """Different arg configurations should trigger different traces"""
         x = Variable(torch.FloatTensor(4, 4).uniform_())
         x_double = Variable(x.data.double())
-        x_grad = Variable(x.data.clone(memory_format=torch.contiguous_format), requires_grad=True)
+        x_grad = Variable(x.data.clone(), requires_grad=True)
         y = Variable(torch.randn(4))
 
         configurations = [
@@ -1617,7 +1617,7 @@ graph(%Ra, %Rb):
         x = torch.tensor([0.], requires_grad=True)
 
         def fn(x):
-            y = x.clone(memory_format=torch.contiguous_format)
+            y = x.clone()
             y.add_(2)
             y.add_(3)
             return y
@@ -1855,7 +1855,7 @@ graph(%Ra, %Rb):
 
     def test_trace_indexed_assignment(self):
         def stuff(x, y):
-            x = x.clone(memory_format=torch.contiguous_format)
+            x = x.clone()
             x[0] = y
             return x
         example = torch.rand(3, 4)
@@ -3012,7 +3012,7 @@ graph(%Ra, %Rb):
 
     def test_export_tensoroption_to(self):
         def foo(x):
-            return x[0].clone(memory_format=torch.contiguous_format).detach().cpu() + x
+            return x[0].clone().detach().cpu() + x
 
         traced = torch.jit.trace(foo, (torch.rand([2])))
         example_outputs = traced(torch.rand([2]))
@@ -6864,7 +6864,7 @@ a")
                 return F.dropout(x, training=self.training)
 
         script_input = torch.rand(4, 3, 299, 299)
-        eager_input = script_input.clone(memory_format=torch.contiguous_format)
+        eager_input = script_input.clone()
 
         with freeze_rng_state():
             script_mod = ScriptMod()
@@ -8294,7 +8294,7 @@ a")
         def __init__(self):
             super(TestScript.DerivedStateModule, self).__init__()
             self.param = torch.nn.Parameter(torch.ones(3, 4, dtype=torch.float))
-            self.register_buffer('derived', torch.neg(self.param).detach().clone(memory_format=torch.contiguous_format))
+            self.register_buffer('derived', torch.neg(self.param).detach().clone())
 
             # This is a flag so we can test that the pack method was called
             self.register_buffer('pack_called', torch.zeros(1, dtype=torch.long))
@@ -8871,13 +8871,13 @@ a")
         y = m(x, seq_lens)
         loss = torch.sum(y)
         loss.backward()
-        grad = x.grad.clone(memory_format=torch.contiguous_format)
+        grad = x.grad.clone()
         x.grad.zero_()
 
         y_traced = m_traced(x, seq_lens)
         loss_traced = torch.sum(y_traced)
         loss_traced.backward()
-        grad_traced = x.grad.clone(memory_format=torch.contiguous_format)
+        grad_traced = x.grad.clone()
 
         self.assertEqual(y_traced, x)
         self.assertEqual(y_traced, y)
@@ -8995,13 +8995,13 @@ a")
             y = m(x, seq_lens)
             loss = torch.sum(y)
             loss.backward()
-            grad = x.grad.clone(memory_format=torch.contiguous_format)
+            grad = x.grad.clone()
             x.grad.zero_()
 
             y_traced = m_traced(x, seq_lens)
             loss_traced = torch.sum(y_traced)
             loss_traced.backward()
-            grad_traced = x.grad.clone(memory_format=torch.contiguous_format)
+            grad_traced = x.grad.clone()
 
             self.assertEqual(y_traced, y)
             self.assertEqual(grad, grad_traced)
@@ -9600,12 +9600,12 @@ a")
         input = torch.randn(1, 3, 224, 224, requires_grad=True)
         output_orig = m_orig(input)
         output_orig.sum().backward()
-        grad_orig = input.grad.clone(memory_format=torch.contiguous_format)
+        grad_orig = input.grad.clone()
         input.grad.zero_()
 
         output_import = m_import(input)
         output_import.sum().backward()
-        grad_import = input.grad.clone(memory_format=torch.contiguous_format)
+        grad_import = input.grad.clone()
 
         self.assertEqual(output_orig, output_import)
         self.assertEqual(grad_orig, grad_import)
@@ -9721,11 +9721,11 @@ a")
         input = torch.randn(1, 3, 224, 224, requires_grad=True)
         output_orig = resnet18(input)
         output_orig.sum().backward()
-        grad_orig = input.grad.clone(memory_format=torch.contiguous_format)
+        grad_orig = input.grad.clone()
         input.grad.zero_()
         output_import = resnet18_imported(input)
         output_import.sum().backward()
-        grad_import = input.grad.clone(memory_format=torch.contiguous_format)
+        grad_import = input.grad.clone()
 
         self.assertEqual(output_orig, output_import)
         self.assertEqual(grad_orig, grad_import)
@@ -10477,9 +10477,9 @@ a")
         x = torch.rand(3, 2)
 
         # Clone trainable params
-        b = b_init.clone(memory_format=torch.contiguous_format)
+        b = b_init.clone()
         b.requires_grad_()
-        w = w_init.clone(memory_format=torch.contiguous_format)
+        w = w_init.clone()
         w.requires_grad_()
 
         # Test symbolic differentiation
@@ -10487,9 +10487,9 @@ a")
         y.sum().backward()
 
         # clone params for autograd reference
-        b_ref = b_init.clone(memory_format=torch.contiguous_format)
+        b_ref = b_init.clone()
         b_ref.requires_grad_()
-        w_ref = w_init.clone(memory_format=torch.contiguous_format)
+        w_ref = w_init.clone()
         w_ref.requires_grad_()
         y_ref = torch.addmm(b_ref, x, w_ref)
         y_ref.sum().backward()
@@ -13183,7 +13183,7 @@ a")
 
     def test_lhs_indexing(self):
         def foo(a, b):
-            a = a.clone(memory_format=torch.contiguous_format)
+            a = a.clone()
             a[0] = b
             return a
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
@@ -13226,7 +13226,7 @@ a")
 
     def test_lhs_indexing_increment_list(self):
         def foo(a, b):
-            a = a.clone(memory_format=torch.contiguous_format)
+            a = a.clone()
             ls = [a, b]
             ls[0] += b
             return ls
@@ -13241,7 +13241,7 @@ a")
 
     def test_lhs_indexing_multi(self):
         def foo(a, b):
-            a = a.clone(memory_format=torch.contiguous_format)
+            a = a.clone()
             foo, a[0], bar = (1, b, 3)
             return foo, a, bar
         self.checkScript(foo, (torch.rand(2, 3), torch.rand(3)))
@@ -16595,7 +16595,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
 
     def clone_inputs(requires_grad):
         inputs = [
-            arg.detach().clone(memory_format=torch.contiguous_format).requires_grad_(requires_grad and arg.requires_grad)
+            arg.detach().clone().requires_grad_(requires_grad and arg.requires_grad)
             if isinstance(arg, torch.Tensor) else arg for arg in args
         ]
         return inputs, [input for input in inputs if isinstance(input, torch.Tensor) and input.requires_grad]
@@ -19410,7 +19410,7 @@ class TestClassType(JitTestCase):
             @torch.jit.script_method
             def forward(self, a):
                 foo = FooTest(a)
-                foo_clone = foo.clone(memory_format=torch.contiguous_format)
+                foo_clone = foo.clone()
                 return foo_clone.x
 
         m = MyMod()

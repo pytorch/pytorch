@@ -701,7 +701,7 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.initial_seed(), 2)
             x.uniform_()
             torch.manual_seed(2)
-            y = x.clone(memory_format=torch.contiguous_format).uniform_()
+            y = x.clone().uniform_()
             self.assertEqual(x, y)
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
@@ -713,7 +713,7 @@ class TestCuda(TestCase):
             x.uniform_()
             a = torch.bernoulli(torch.full_like(x, 0.5))
             torch.cuda.manual_seed(2)
-            y = x.clone(memory_format=torch.contiguous_format).uniform_()
+            y = x.clone().uniform_()
             b = torch.bernoulli(torch.full_like(x, 0.5))
             self.assertEqual(x, y)
             self.assertEqual(a, b)
@@ -798,7 +798,7 @@ class TestCuda(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_multigpu_storage_clone(self):
         x = torch.randn(4, 4, device='cuda:1').storage()
-        y = x.clone(memory_format=torch.contiguous_format)
+        y = x.clone()
         self.assertEqual(x.get_device(), y.get_device())
         for t in ['byte', 'char', 'short', 'int', 'long', 'half', 'double']:
             self.assertEqual(getattr(x, t)().get_device(), x.get_device())
@@ -1792,7 +1792,7 @@ class TestCuda(TestCase):
                 self.stream1 = torch.cuda.Stream()
 
             def forward(self, x):
-                x0 = x.clone(memory_format=torch.contiguous_format)
+                x0 = x.clone()
                 torch._C._cuda_setStream(self.stream0._cdata)
                 y0 = x0 * 2
                 self.event.record(stream=torch.cuda.current_stream())

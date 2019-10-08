@@ -126,7 +126,7 @@ class TestIndexing(TestCase):
         self.assertEqual(x[idx].numel(), 0)
 
         # empty assignment should have no effect but not throw an exception
-        y = x.clone(memory_format=torch.contiguous_format)
+        y = x.clone()
         y[idx] = -1
         self.assertEqual(x, y)
 
@@ -253,8 +253,8 @@ class TestIndexing(TestCase):
 
         # non-scalar indexed with scalars
         a = torch.randn(2, 3, device=device)
-        a_set_with_number = a.clone(memory_format=torch.contiguous_format)
-        a_set_with_scalar = a.clone(memory_format=torch.contiguous_format)
+        a_set_with_number = a.clone()
+        a_set_with_scalar = a.clone()
         b = torch.randn(3, device=device)
 
         a_set_with_number[0] = b
@@ -279,12 +279,12 @@ class TestIndexing(TestCase):
         self.assertEqual(x[1:2, 1:3].tolist(), [[4, 5]])
 
         # Check that it is a copy
-        unmodified = x.clone(memory_format=torch.contiguous_format)
+        unmodified = x.clone()
         x[1:2, [1, 2]].zero_()
         self.assertEqual(x, unmodified)
 
         # But assignment should modify the original
-        unmodified = x.clone(memory_format=torch.contiguous_format)
+        unmodified = x.clone()
         x[1:2, [1, 2]] = 0
         self.assertNotEqual(x, unmodified)
 
