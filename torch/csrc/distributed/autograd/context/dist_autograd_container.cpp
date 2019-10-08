@@ -12,6 +12,9 @@ constexpr int kMaxWorkerId = 65535;
 // Each thread has a single autograd_context_id valid at any point in time.
 static thread_local int64_t current_context_id_ = -1;
 
+// Lock to ensure DistAutogradContainer is initialized only once.
+static std::mutex dist_container_init_lock_;
+
 DistAutogradContainer::DistAutogradContainer()
     : next_context_id_(0),
       worker_id_(0),
@@ -20,6 +23,8 @@ DistAutogradContainer::DistAutogradContainer()
       max_id_(0) {}
 
 DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
+  std::lock_guard<std::mutex> guard(dist_container_init_lock_);
+
   TORCH_CHECK(
       worker_id >= 0 && worker_id <= kMaxWorkerId,
       "worker_id needs to be in the range [0, 65535]")
