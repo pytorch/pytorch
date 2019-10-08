@@ -165,7 +165,7 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_miopen(const at::Tensor& input) const -> bool {
 
-  return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf))
+  return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
          && detail::getCUDAHooks().compiledWithMIOpen()
          && input.is_cuda()
          && input.dim() <= MIOPEN_DIM_MAX
