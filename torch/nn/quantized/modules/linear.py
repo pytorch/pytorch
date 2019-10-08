@@ -2,9 +2,9 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 
-from torch._jit_internal import Optional
+from torch._jit_internal import Optional  # noqa: F401
 import torch.nn as nn
-import torch.nn._intrinsic as nni
+import torch.nn.intrinsic as nni
 from torch.nn.modules import Module
 from torch.nn.quantized.modules.utils import _quantize_weight
 
@@ -158,7 +158,8 @@ class Linear(torch.nn.Module):
             b,
             w,
             self.scale,
-            self.zero_point
+            self.zero_point,
+            self.training
         )
 
     # ===== Deserialization methods =====
@@ -181,12 +182,13 @@ class Linear(torch.nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
-        # type: (Tuple[int, int, Optional[torch.Tensor], torch.Tensor, float, int]) -> None
+        # type: (Tuple[int, int, Optional[torch.Tensor], torch.Tensor, float, int, bool]) -> None
         self.in_features = state[0]
         self.out_features = state[1]
         self.set_weight_bias(state[3], state[2])
         self.scale = state[4]
         self.zero_point = state[5]
+        self.training = state[6]
 
     # Function rather than property to make sure that JIT serialization doesn't
     # register this as an attribute

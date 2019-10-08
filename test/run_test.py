@@ -27,7 +27,7 @@ TESTS = [
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
-    'dist_autograd',
+    'dist_autograd_fork',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -49,7 +49,6 @@ TESTS = [
     'quantized_tensor',
     'quantized_nn_mods',
     'quantizer',
-    'rpc',
     'sparse',
     'torch',
     'type_info',
@@ -64,12 +63,27 @@ TESTS = [
     'function_schema',
 ]
 
-# skip < 3.6 b/c fstrings added in 3.6
+# skip < 3.6 b/c fstrings added in 3.6 for jit_py3
+# skip < 3.6 for rpc_spawn and dist_autograd_spawn temporarily because
+# a segmenation fault was triggered on python 3.5,
+# rpc_spawn and dist_autograd_spawn tests were added in
+# https://github.com/pytorch/pytorch/pull/25656
+# skip < 3.6 for rpc_fork as it imports mock that is only available in 3.6, mock
+# was added to rpc_fork in https://github.com/pytorch/pytorch/pull/26997
 if PY36:
-    TESTS.append('jit_py3')
+    TESTS.extend([
+        'jit_py3',
+        'rpc_fork',
+        'rpc_spawn',
+        'dist_autograd_spawn',
+    ])
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'rpc_fork',
+    'rpc_spawn',
+    'dist_autograd_fork',
+    'dist_autograd_spawn',
 ]
 
 ROCM_BLACKLIST = [
@@ -79,6 +93,10 @@ ROCM_BLACKLIST = [
     'distributed',
     'multiprocessing',
     'nccl',
+    'rpc_fork',
+    'rpc_spawn',
+    'dist_autograd_fork',
+    'dist_autograd_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}

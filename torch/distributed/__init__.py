@@ -20,8 +20,8 @@ if is_available():
     # this.
     from .distributed_c10d import _backend  # noqa: F401
     if sys.version_info >= (3, 0):
-        from .rpc import _init_rpc
-        from .rpc import *  # noqa: F401
+        from .rpc_api import _init_rpc
+        from .rpc_api import *  # noqa: F401
 
         def init_model_parallel(self_name,
                                 backend=RpcBackend.PROCESS_GROUP,
@@ -53,5 +53,5 @@ if is_available():
                 num_send_recv_threads(int): Number of threads for send/recv work.
             """
             _init_rpc(backend, self_name, self_rank, init_method, num_send_recv_threads)
-            from .rpc import _agent
-            autograd._init(_agent.get_worker_id().id)
+            from .rpc_api import _agent
+            autograd._init(_agent.get_worker_info().id)
