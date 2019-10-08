@@ -1263,8 +1263,10 @@ def slice(g, self, dim, start, end, step):
         _unimplemented("slice", "step!=1 is currently not supported")
     if start.node().kind() != 'onnx::Constant' or \
             end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
-        _unimplemented("DynamicSlice", "DynamicSlice experimental op in opset 9 is not supported by ONNXRuntime " +
-                       "anymore. Please use statically allocated variables or upgrade to a higher ONNX version.")
+        if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+            raise RuntimeError('Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice '
+                               'is a deprecated experimental op. Please use statically allocated '
+                               'variables or export to a higher opset version.')
     else:
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
