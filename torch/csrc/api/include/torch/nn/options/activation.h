@@ -106,9 +106,7 @@ struct TORCH_API RReLUOptions {
 // ============================================================================
 
 /// Options for CELU functional and module.
-struct CELUOptions {
-  CELUOptions() {}
-
+struct TORCH_API CELUOptions {
   /// The alpha value for the CELU formulation. Default: 1.0
   TORCH_ARG(double, alpha) = 1.0;
 
