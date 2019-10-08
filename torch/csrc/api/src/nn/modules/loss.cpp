@@ -41,13 +41,16 @@ MultiMarginLossImpl::MultiMarginLossImpl(
     }
 
 void MultiMarginLossImpl::reset() {
-  register_buffer("weight", options.weight().value());
+  TORCH_CHECK((options.p() == 1) || (options.p() == 2), "only p == 1 and p == 2 supported");
+  TORCH_CHECK(!options.weight().defined() || options.weight().dim() == 1);
+
+  register_buffer("weight", options.weight());
 }
 
 void MultiMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::MultiMarginLoss(p=" << options.p() << 
             ", margin=" << options.margin() <<
-            ", weight=" << options.weight().value() <<
+            ", weight=" << options.weight() <<
             ", reduction=" << options.reduction() << ")";
 }
 

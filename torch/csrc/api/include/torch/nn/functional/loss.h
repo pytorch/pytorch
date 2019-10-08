@@ -21,12 +21,17 @@ inline Tensor multi_margin_loss(
     const Tensor& input,
     const Tensor& target,
     const MultiMarginLossOptions& options = {}) {
+  TORCH_CHECK(options.p() == 1 || options.p() == 2, "only p == 1 and p == 2 supported");
+  if (options.weight().defined()) {
+    TORCH_CHECK(options.weight().dim() == 1, "weight must be one-dimensional");
+  }
+
   return torch::multi_margin_loss(
     input,
     target,
     options.p(),
     options.margin(),
-    options.weight().value(),
+    options.weight(),
     options.reduction()
   );
 }
