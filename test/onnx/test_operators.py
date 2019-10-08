@@ -15,8 +15,7 @@ import glob
 import os
 import shutil
 import common_utils as common
-import numpy as np
-import scipy
+
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -816,7 +815,7 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
 
     def test_det(self):
-        x = torch.randn(2, 3, 5, 5)
+        x = torch.randn(2, 3, 5, 5, device=torch.device('cpu')))
         self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
 
 
