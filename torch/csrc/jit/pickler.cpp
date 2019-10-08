@@ -360,33 +360,6 @@ void Pickler::pushClass(PicklerClass cls) {
   pushGlobal("torch.jit._pickle", getClassName(cls));
 }
 
-void Pickler::pushSpecializedList(
-    const IValue& ivalue,
-    PicklerClass cls,
-    const std::function<void(const IValue&)>& item_pusher) {
-  pushClass(cls);
-
-  // Reduce arguments are spread (e.g. `*args`) before calling the global,
-  // so wrap in a tuple
-  push<PickleOpCode>(PickleOpCode::MARK);
-
-  push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
-  // Mark list
-  push<PickleOpCode>(PickleOpCode::MARK);
-
-  // Add all items
-  item_pusher(ivalue);
-
-  // Finish list
-  push<PickleOpCode>(PickleOpCode::APPENDS);
-
-  // Finish tuple
-  push<PickleOpCode>(PickleOpCode::TUPLE);
-
-  // Call reduce
-  push<PickleOpCode>(PickleOpCode::REDUCE);
-}
-
 void Pickler::pushDouble(double value) {
   AT_ASSERT(sizeof(double) == 8);
   char* bytes = reinterpret_cast<char*>(&value);
