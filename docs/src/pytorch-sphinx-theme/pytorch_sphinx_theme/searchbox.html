@@ -1,0 +1,16 @@
+{%- if builder != 'singlehtml' %}
+
+{% if theme_pytorch_project == 'tutorials' %}
+  {% set search_project = 'Tutorials' %}
+{% else %}
+  {% set search_project = 'Docs' %}
+{% endif %}
+
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="{{ pathto('search') }}" method="get">
+    <input type="text" name="q" placeholder="Search {{ search_project }}" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+{%- endif %}

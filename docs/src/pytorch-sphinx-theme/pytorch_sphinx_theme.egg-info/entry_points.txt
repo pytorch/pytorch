@@ -1,0 +1,3 @@
+[sphinx.html_themes]
+pytorch_sphinx_theme = pytorch_sphinx_theme
+

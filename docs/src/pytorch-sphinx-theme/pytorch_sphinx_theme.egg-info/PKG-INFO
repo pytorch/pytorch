@@ -1,0 +1,19 @@
+Metadata-Version: 1.1
+Name: pytorch-sphinx-theme
+Version: 0.0.24
+Summary: PyTorch Sphinx Theme
+Home-page: https://github.com/pytorch/pytorch_sphinx_theme
+Author: Shift Lab
+Author-email: info@shiftlabny.com
+License: MIT License
+Description: UNKNOWN
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Web Environment
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: System Administrators
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Topic :: Internet
+Classifier: Topic :: Software Development :: Documentation

@@ -1,0 +1,12 @@
+README.md
+pytorch_sphinx_theme.py
+setup.cfg
+setup.py
+pytorch_sphinx_theme/__init__.py
+pytorch_sphinx_theme.egg-info/PKG-INFO
+pytorch_sphinx_theme.egg-info/SOURCES.txt
+pytorch_sphinx_theme.egg-info/dependency_links.txt
+pytorch_sphinx_theme.egg-info/entry_points.txt
+pytorch_sphinx_theme.egg-info/not-zip-safe
+pytorch_sphinx_theme.egg-info/requires.txt
+pytorch_sphinx_theme.egg-info/top_level.txt
