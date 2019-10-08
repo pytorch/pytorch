@@ -1262,6 +1262,15 @@ TEST_F(ModulesTest, Softshrink) {
   }
 }
 
+TEST_F(ModulesTest, Softsign) {
+  Softsign model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x / (1 + x.abs());
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1565,4 +1574,8 @@ TEST_F(ModulesTest, PrettyPrintSoftshrink) {
   ASSERT_EQ(c10::str(Softshrink()), "torch::nn::Softshrink(0.5)");
   ASSERT_EQ(c10::str(Softshrink(SoftshrinkOptions(42.42))),
             "torch::nn::Softshrink(42.42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftsign) {
+  ASSERT_EQ(c10::str(Softsign()), "torch::nn::Softsign()");
 }

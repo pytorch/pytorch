@@ -233,5 +233,17 @@ void SoftshrinkImpl::pretty_print(std::ostream& stream) const {
          << "torch::nn::Softshrink(" << options.lambda() << ")";
 }
 
+// ============================================================================
+
+Tensor SoftsignImpl::forward(const Tensor& input) {
+  return F::softsign(input);
+}
+
+void SoftsignImpl::reset() {}
+
+void SoftsignImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softsign()";
+}
+
 } // namespace nn
 } // namespace torch

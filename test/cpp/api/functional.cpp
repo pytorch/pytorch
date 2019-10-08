@@ -492,3 +492,11 @@ TEST_F(FunctionalTest, Softshrink) {
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
 }
+
+TEST_F(FunctionalTest, Softsign) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x / (1 + x.abs());
+  auto y = F::softsign(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}

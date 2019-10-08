@@ -303,5 +303,24 @@ class TORCH_API SoftshrinkImpl : public torch::nn::Cloneable<SoftshrinkImpl> {
 
 TORCH_MODULE(Softshrink);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softsign ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies Softsign over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softsign to learn
+/// about the exact behavior of this module.
+class TORCH_API SoftsignImpl : public torch::nn::Cloneable<SoftsignImpl> {
+ public:
+  explicit SoftsignImpl() {}
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Softsign` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(Softsign);
+
 } // namespace nn
 } // namespace torch
