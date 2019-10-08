@@ -35,7 +35,7 @@ namespace enumtype {
 } // namespace enumtype
 
 struct enum_name {
-  constexpr std::string operator()(enumtype::EnumBase* v) const {
+  std::string operator()(enumtype::EnumBase* v) const {
     return v->name();
   }
 };
