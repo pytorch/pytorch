@@ -104,19 +104,7 @@ SoftmaxImpl::SoftmaxImpl(const SoftmaxOptions& options_)
 void SoftmaxImpl::reset() {}
 
 void SoftmaxImpl::pretty_print(std::ostream& stream) const {
-  int dim = options.dim();
-  torch::Dtype dtype = options.dtype();
-  stream << "torch::nn::Softmax(";
-  if (dim != -1) {
-    stream << "dim=" << options.dim();
-    if (dtype != torch::Dtype::Undefined) {
-      stream << ", ";
-    }
-  }
-  if (dtype != torch::Dtype::Undefined) {
-    stream << "dtype=" << options.dtype();
-  }
-  stream << ")";
+  stream << "torch::nn::Softmax(dim=" << options.dim() << ")";
 }
 
 Tensor SoftmaxImpl::forward(const Tensor& input) {

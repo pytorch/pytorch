@@ -40,26 +40,11 @@ inline Tensor logsigmoid(const Tensor& input) {
   return torch::log_sigmoid(input);
 }
 
-inline int _get_softmax_dim(const std::string& name, int ndim) {
-  TORCH_WARN("Implicit dimension choice for ", name, " has been deprecated. "
-             "Change the call to include dim=X as an argument.");
-  int ret;
-  if (ndim == 0 || ndim == 1 || ndim == 3) {
-    ret = 0;
-  } else {
-    ret = 1;
-  }
-  return ret;
-}
-
-inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options) {
+inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
+                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
   int dim = options.dim();
-  torch::Dtype dtype = options.dtype();
   Tensor ret;
 
-  if (dim == -1) {
-    dim = _get_softmax_dim("softmax", input.dim());
-  }
   if (dtype == torch::Dtype::Undefined) {
     ret = input.softmax(dim);
   } else {

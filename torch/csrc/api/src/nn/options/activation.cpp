@@ -6,8 +6,7 @@ namespace nn {
 
 HardshrinkOptions::HardshrinkOptions(double lambda) : lambda_(lambda) {}
 
-SoftmaxOptions::SoftmaxOptions(int dim, torch::Dtype dtype)
-  : dim_(dim), dtype_(dtype) {}
+SoftmaxOptions::SoftmaxOptions(int dim) : dim_(dim) {}
 
 } // namespace nn
 } // namespace torch

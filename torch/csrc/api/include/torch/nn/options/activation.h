@@ -61,15 +61,10 @@ struct LeakyReLUOptions {
 
 /// Options for the Softmax functional and module.
 struct TORCH_API SoftmaxOptions {
-  SoftmaxOptions(int dim = -1, torch::Dtype dtype = torch::Dtype::Undefined);
+  SoftmaxOptions(int dim);
 
   // Dimension along which Softmax will be computed.
   TORCH_ARG(int, dim);
-
-  // The desired data type of returned tensor.
-  // If specified, the input tensor is casted to dtype before the operation
-  // is performed. This is useful for preventing data type overflows.
-  TORCH_ARG(torch::Dtype, dtype);
 };
 
 } // namespace nn
