@@ -79,6 +79,10 @@ pool2d_shape_check(
               "Calculated output size: (",
               nOutputPlane, "x", outputHeight, "x", outputWidth, "). ",
               "Output size is too small");
+  
+  TORCH_CHECK(inputHeight >= kH && inputWidth >= kW,
+              "input image ", "(H: ", inputHeight, " W: ", inputWidth, ") smaller than ",
+              "kernel size ", "(kH: ", kH, " kW: ", kW, ")");
 }
 
 // DilatedMaxPool2d (backward)
