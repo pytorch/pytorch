@@ -15363,6 +15363,32 @@ class TestRecursiveScript(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "has not been initialized"):
             torch.jit.script(M())
 
+    def test_script_after_eval(self):
+        class M(nn.Module):
+            def forward(self):
+                if self.training:
+                    return 2
+                else:
+                    return 0
+
+        m = M()
+        sm1 = torch.jit.script(m)
+        m.eval()
+        sm2 = torch.jit.script(m)
+
+        # m is in eval mode, training should be False
+        self.assertFalse(m.training)
+
+        # sm1 was created while m had training = True
+        self.assertTrue(sm1.training)
+        self.assertEqual(sm1.training, sm1._c._get_attribute('training'))
+        self.assertEqual(sm1(), 2)
+
+        # sm2 was created after m was eval'ed
+        self.assertFalse(sm2.training)
+        self.assertEqual(sm2.training, sm2._c._get_attribute('training'))
+        self.assertEqual(sm2(), 0)
+
     def test_module_name(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
