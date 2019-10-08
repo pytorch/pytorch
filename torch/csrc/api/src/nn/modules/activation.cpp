@@ -217,5 +217,77 @@ void SoftplusImpl::pretty_print(std::ostream& stream) const {
          << ", threshold=" << options.threshold() << ")";
 }
 
+// ============================================================================
+
+SoftshrinkImpl::SoftshrinkImpl(const SoftshrinkOptions& options_)
+    : options(options_) {}
+
+Tensor SoftshrinkImpl::forward(const Tensor& input) {
+  return F::softshrink(input, options);
+}
+
+void SoftshrinkImpl::reset() {}
+
+void SoftshrinkImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::Softshrink(" << options.lambda() << ")";
+}
+
+// ============================================================================
+
+Tensor SoftsignImpl::forward(const Tensor& input) {
+  return F::softsign(input);
+}
+
+void SoftsignImpl::reset() {}
+
+void SoftsignImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softsign()";
+}
+
+// ============================================================================
+
+Tensor TanhImpl::forward(const Tensor& input) {
+  return input.tanh();
+}
+
+void TanhImpl::reset() {}
+
+void TanhImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Tanh()";
+}
+
+// ============================================================================
+
+Tensor TanhshrinkImpl::forward(const Tensor& input) {
+  return F::tanhshrink(input);
+}
+
+void TanhshrinkImpl::reset() {}
+
+void TanhshrinkImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Tanhshrink()";
+}
+
+// ============================================================================
+
+ThresholdImpl::ThresholdImpl(const ThresholdOptions& options_)
+    : options(options_) {}
+
+Tensor ThresholdImpl::forward(Tensor& input) {
+  return F::threshold(input, options);
+}
+
+void ThresholdImpl::reset() {}
+
+void ThresholdImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Threshold(threshold=" << options.threshold()
+         << ", value=" << options.value();
+  if (options.inplace()) {
+    stream << std::boolalpha  << ", inplace=" << options.inplace();
+  }
+  stream << ")";
+}
+
 } // namespace nn
 } // namespace torch

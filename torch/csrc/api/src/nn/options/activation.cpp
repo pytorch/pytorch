@@ -9,5 +9,7 @@ ReLUOptions::ReLUOptions(bool inplace) : inplace_(inplace) {}
 
 ReLU6Options::ReLU6Options(bool inplace) : inplace_(inplace) {}
 
+SoftshrinkOptions::SoftshrinkOptions(double lambda) : lambda_(lambda) {}
+
 } // namespace nn
 } // namespace torch
