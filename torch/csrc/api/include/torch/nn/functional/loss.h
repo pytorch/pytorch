@@ -17,6 +17,22 @@ inline Tensor hinge_embedding_loss(
       options.reduction());
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

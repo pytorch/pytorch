@@ -27,5 +27,24 @@ struct TORCH_API HingeEmbeddingLossOptions {
   TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
 };
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 } // namespace nn
 } // namespace torch

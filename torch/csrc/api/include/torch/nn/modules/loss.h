@@ -61,5 +61,36 @@ struct TORCH_API HingeEmbeddingLossImpl : Module {
 /// PyTorch's module storage semantics.
 TORCH_MODULE(HingeEmbeddingLoss);
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 } // namespace nn
 } // namespace torch

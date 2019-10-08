@@ -32,5 +32,26 @@ Tensor HingeEmbeddingLossImpl::forward(
   return F::hinge_embedding_loss(input, target, options);
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 } // namespace nn
 } // namespace torch

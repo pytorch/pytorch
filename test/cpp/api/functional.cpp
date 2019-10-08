@@ -161,6 +161,18 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
