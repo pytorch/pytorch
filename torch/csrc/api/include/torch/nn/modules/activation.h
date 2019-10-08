@@ -16,8 +16,7 @@ namespace nn {
 /// about the exact behavior of this module.
 class TORCH_API ELUImpl : public torch::nn::Cloneable<ELUImpl> {
  public:
-  ELUImpl() : ELUImpl(ELUOptions()) {}
-  explicit ELUImpl(const ELUOptions& options_);
+  explicit ELUImpl(const ELUOptions& options_ = {});
 
   Tensor forward(Tensor& input);
 
@@ -39,8 +38,7 @@ TORCH_MODULE(ELU);
 /// about the exact behavior of this module.
 class TORCH_API HardshrinkImpl : public torch::nn::Cloneable<HardshrinkImpl> {
  public:
-  HardshrinkImpl() : HardshrinkImpl(HardshrinkOptions()) {}
-  explicit HardshrinkImpl(const HardshrinkOptions& options_);
+  explicit HardshrinkImpl(const HardshrinkOptions& options_ = {});
 
   Tensor forward(const Tensor& input);
 
@@ -62,8 +60,7 @@ TORCH_MODULE(Hardshrink);
 /// about the exact behavior of this module.
 class TORCH_API HardtanhImpl : public torch::nn::Cloneable<HardtanhImpl> {
  public:
-  HardtanhImpl() : HardtanhImpl(HardtanhOptions()) {}
-  explicit HardtanhImpl(const HardtanhOptions& options_);
+  explicit HardtanhImpl(const HardtanhOptions& options_ = {});
 
   Tensor forward(Tensor& input);
 
@@ -85,8 +82,7 @@ TORCH_MODULE(Hardtanh);
 /// about the exact behavior of this module.
 class TORCH_API LeakyReLUImpl : public torch::nn::Cloneable<LeakyReLUImpl> {
  public:
-  LeakyReLUImpl() : LeakyReLUImpl(LeakyReLUOptions()) {}
-  explicit LeakyReLUImpl(const LeakyReLUOptions& options_);
+  explicit LeakyReLUImpl(const LeakyReLUOptions& options_ = {});
 
   Tensor forward(Tensor& input);
 
@@ -108,8 +104,6 @@ TORCH_MODULE(LeakyReLU);
 /// about the exact behavior of this module.
 class TORCH_API LogSigmoidImpl : public torch::nn::Cloneable<LogSigmoidImpl> {
  public:
-  LogSigmoidImpl() {}
-
   Tensor forward(const Tensor& input);
 
   void reset() override;
