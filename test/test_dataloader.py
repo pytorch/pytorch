@@ -17,7 +17,7 @@ from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
                           IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
-                          load_tests, TEST_WITH_TSAN)
+                          load_tests, TEST_WITH_TSAN, default_floating_dtype)
 
 try:
     import psutil
@@ -1485,6 +1485,7 @@ class TestDataLoader(TestCase):
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    @default_floating_dtype(torch.double)
     def test_numpy_scalars(self):
         import numpy as np
 
