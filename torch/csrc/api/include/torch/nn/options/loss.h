@@ -9,11 +9,11 @@ namespace nn {
 
 /// Options for a L1 loss module.
 struct TORCH_API L1LossOptions {
-  L1LossOptions(Reduction::Reduction reduction = Reduction::Mean)
+  L1LossOptions(torch::Reduction::Reduction reduction = torch::Reduction::Mean)
       : reduction_(reduction) {}
 
   /// Specifies the reduction to apply to the output.
-  TORCH_ARG(Reduction::Reduction, reduction);
+  TORCH_ARG(torch::Reduction::Reduction, reduction);
 };
 
 // ============================================================================
@@ -24,7 +24,7 @@ struct TORCH_API HingeEmbeddingLossOptions {
   /// reach in order to incur zero loss. Default: 1
   TORCH_ARG(double, margin) = 1.0;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
 // ============================================================================
@@ -56,7 +56,7 @@ struct TORCH_API CosineEmbeddingLossOptions {
   /// to 0.5 is suggested. Default: 0.0
   TORCH_ARG(double, margin) = 0.0;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
 // ============================================================================
