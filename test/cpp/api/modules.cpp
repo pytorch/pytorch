@@ -1243,6 +1243,71 @@ TEST_F(ModulesTest, Softplus) {
   }
 }
 
+TEST_F(ModulesTest, Softshrink) {
+  const auto size = 3;
+  for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
+    Softshrink model {SoftshrinkOptions(lambda)};
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
+TEST_F(ModulesTest, Softsign) {
+  Softsign model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x / (1 + x.abs());
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, Tanh) {
+  Tanh model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = (x.exp() - (-x).exp()) / (x.exp() + (-x).exp());
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, Tanhshrink) {
+  Tanhshrink model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x - x.tanh();
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, Threshold) {
+  const auto size = 3;
+  for (const auto threshold : {0.5, 1.0, 2.0}) {
+    for (const auto value : {0.5, 1.0, 2.0}) {
+      for (const auto inplace : {false, true}) {
+        Threshold model {ThresholdOptions(threshold, value).inplace(inplace)};
+        auto x = torch::linspace(-3.0, 3.0, 61);
+        x.resize_({size, size, size});
+        auto y_exp = (x <= threshold) * value + (x > threshold) * x;
+        auto y = model(x);
+
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+      }
+    }
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1540,4 +1605,30 @@ TEST_F(ModulesTest, PrettyPrintSoftplus) {
   ASSERT_EQ(c10::str(Softplus(
       SoftplusOptions().beta(0.24).threshold(42.42))),
     "torch::nn::Softplus(beta=0.24, threshold=42.42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftshrink) {
+  ASSERT_EQ(c10::str(Softshrink()), "torch::nn::Softshrink(0.5)");
+  ASSERT_EQ(c10::str(Softshrink(SoftshrinkOptions(42.42))),
+            "torch::nn::Softshrink(42.42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftsign) {
+  ASSERT_EQ(c10::str(Softsign()), "torch::nn::Softsign()");
+}
+
+TEST_F(ModulesTest, PrettyPrintTanh) {
+  ASSERT_EQ(c10::str(Tanh()), "torch::nn::Tanh()");
+}
+
+TEST_F(ModulesTest, PrettyPrintTanhshrink) {
+  ASSERT_EQ(c10::str(Tanhshrink()), "torch::nn::Tanhshrink()");
+}
+
+TEST_F(ModulesTest, PrettyPrintThreshold) {
+  ASSERT_EQ(c10::str(Threshold(24.24, 42.42)),
+    "torch::nn::Threshold(threshold=24.24, value=42.42)");
+  ASSERT_EQ(c10::str(Threshold(
+      ThresholdOptions(42.42, 24.24).inplace(true))),
+    "torch::nn::Threshold(threshold=42.42, value=24.24, inplace=true)");
 }

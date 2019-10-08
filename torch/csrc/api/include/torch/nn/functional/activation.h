@@ -82,6 +82,31 @@ inline Tensor softplus(const Tensor& input, const SoftplusOptions& options) {
   return torch::softplus(input, options.beta(), options.threshold());
 }
 
+inline Tensor softshrink(const Tensor& input, const SoftshrinkOptions& options) {
+  return torch::softshrink(input, options.lambda());
+}
+
+inline Tensor softsign(const Tensor& input) {
+  return input / (input.abs() + 1);
+}
+
+inline Tensor tanh(const Tensor& input) {
+  TORCH_WARN("nn.functional.tanh is deprecated. Use torch.tanh instead.");
+  return input.tanh();
+}
+
+inline Tensor tanhshrink(const Tensor& input) {
+  return input - input.tanh();
+}
+
+inline Tensor threshold(Tensor& input, const ThresholdOptions& options) {
+  if (options.inplace()) {
+    return torch::threshold_(input, options.threshold(), options.value());
+  } else {
+    return torch::threshold(input, options.threshold(), options.value());
+  }
+}
+
 inline Tensor multi_head_attention_forward(
   const Tensor& query,
   const Tensor& key,
