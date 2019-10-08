@@ -1,8 +1,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <c10/cuda/CUDAGuard.h>
-#ifndef __HIP_PLATFORM_HCC__
 #include <nvToolsExt.h>
-#endif
 
 #include <sstream>
 
@@ -35,19 +33,13 @@ struct CUDAMethods : public CUDAStubs {
     return ms*1000.0;
   }
   void nvtxMarkA(const char* name) override {
-#ifndef __HIP_PLATFORM_HCC__
     ::nvtxMark(name);
-#endif
   }
   void nvtxRangePushA(const char* name) override {
-#ifndef __HIP_PLATFORM_HCC__
     ::nvtxRangePushA(name);
-#endif
   }
   void nvtxRangePop() override {
-#ifndef __HIP_PLATFORM_HCC__
     ::nvtxRangePop();
-#endif
   }
   void onEachDevice(std::function<void(int)> op) override {
     at::cuda::OptionalCUDAGuard device_guard;
