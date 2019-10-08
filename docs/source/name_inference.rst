@@ -14,7 +14,7 @@ named tensors:
 2. propagate names from input tensors to output tensors
 
 Below is a list of all operations that are supported with named tensors
-and their associated name inference rules. 
+and their associated name inference rules.
 
 If you don't see an operation listed here, but it would help your use case, please
 `search if an issue has already been filed <https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+named+tensor%22>`_ and if not, `file one <https://github.com/pytorch/pytorch/issues/new/choose>`_.
@@ -37,7 +37,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    ":meth:`Tensor.addmv`, :func:`torch.addmv`",:ref:`contracts_away_dims-doc`
    :meth:`Tensor.addmv_`,:ref:`contracts_away_dims-doc`
    :meth:`Tensor.align_as`,See documentation
-   ":meth:`Tensor.align_to`",See documentation
+   :meth:`Tensor.align_to`,See documentation
    ":meth:`Tensor.all`, :func:`torch.all`",None
    ":meth:`Tensor.any`, :func:`torch.any`",None
    ":meth:`Tensor.asin`, :func:`torch.asin`",:ref:`keeps_input_names-doc`
@@ -85,6 +85,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.element_size`,None
    :func:`torch.empty`,:ref:`factory-doc`
    :func:`torch.empty_like`,:ref:`factory-doc`
+   ":meth:`Tensor.eq`, :func:`torch.eq`",:ref:`unifies_names_from_inputs-doc`
    ":meth:`Tensor.erf`, :func:`torch.erf`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.erf_`,None
    ":meth:`Tensor.erfc`, :func:`torch.erfc`",:ref:`keeps_input_names-doc`
@@ -104,8 +105,10 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.floor_`,None
    ":meth:`Tensor.frac`, :func:`torch.frac`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.frac_`,None
+   ":meth:`Tensor.ge`, :func:`torch.ge`",:ref:`unifies_names_from_inputs-doc`
    ":meth:`Tensor.get_device`, :func:`torch.get_device`",None
    :attr:`Tensor.grad`,None
+   ":meth:`Tensor.gt`, :func:`torch.gt`",:ref:`unifies_names_from_inputs-doc`
    :meth:`Tensor.half`,:ref:`keeps_input_names-doc`
    :meth:`Tensor.has_names`,See documentation
    ":meth:`Tensor.index_fill`, :func:`torch.index_fill`",:ref:`keeps_input_names-doc`
@@ -122,6 +125,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    :func:`torch.is_tensor`,None
    :meth:`Tensor.item`,None
    ":meth:`Tensor.kthvalue`, :func:`torch.kthvalue`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.le`, :func:`torch.le`",:ref:`unifies_names_from_inputs-doc`
    ":meth:`Tensor.log`, :func:`torch.log`",:ref:`keeps_input_names-doc`
    ":meth:`Tensor.log10`, :func:`torch.log10`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.log10_`,None
@@ -135,6 +139,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.logical_not_`,None
    ":meth:`Tensor.logsumexp`, :func:`torch.logsumexp`",:ref:`removes_dimensions-doc`
    :meth:`Tensor.long`,:ref:`keeps_input_names-doc`
+   ":meth:`Tensor.lt`, :func:`torch.lt`",:ref:`unifies_names_from_inputs-doc`
    :func:`torch.manual_seed`,None
    ":meth:`Tensor.masked_fill`, :func:`torch.masked_fill`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.masked_fill_`,None
@@ -151,6 +156,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    ":meth:`Tensor.narrow`, :func:`torch.narrow`",:ref:`keeps_input_names-doc`
    :attr:`Tensor.ndim`,None
    :meth:`Tensor.ndimension`,None
+   ":meth:`Tensor.ne`, :func:`torch.ne`",:ref:`unifies_names_from_inputs-doc`
    ":meth:`Tensor.neg`, :func:`torch.neg`",:ref:`keeps_input_names-doc`
    :meth:`Tensor.neg_`,None
    :func:`torch.normal`,:ref:`keeps_input_names-doc`
@@ -219,6 +225,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    :func:`torch.var_mean`,:ref:`removes_dimensions-doc`
    :meth:`Tensor.zero_`,None
    :func:`torch.zeros`,:ref:`factory-doc`
+
 
 .. _keeps_input_names-doc:
 
@@ -295,16 +302,18 @@ For example,
 
     # tensor: Tensor[   N, None]
     # other:  Tensor[None,    C]
-    >>> tensor = torch.randn(3, 3, names=('N', 'C'))
     >>> tensor = torch.randn(3, 3, names=('N', None))
     >>> other = torch.randn(3, 3, names=(None, 'C'))
     >>> (tensor + other).names
     ('N', 'C')
 
-checks ``match(tensor.names[-1], other.names[-1]) && match(tensor.names[-2], tensor.names[-2])``.
-Then, because we matched ``None`` in :attr:`tensor` with ``'C'``,
-it checks to make sure ``'C'`` doesn't exist in :attr:`tensor` (it does not).
-Next, it checks to make sure ``'N'`` doesn't exists in :attr:`other` (it does not).
+Check names:
+
+- ``match(tensor.names[-1], other.names[-1])`` is ``True``
+- ``match(tensor.names[-2], tensor.names[-2])`` is ``True``
+- Because we matched ``None`` in :attr:`tensor` with ``'C'``,
+  check to make sure ``'C'`` doesn't exist in :attr:`tensor` (it does not).
+- Check to make sure ``'N'`` doesn't exists in :attr:`other` (it does not).
 
 Finally, the output names are computed with
 ``[unify('N', None), unify(None, 'C')] = ['N', 'C']``
@@ -350,7 +359,7 @@ If the operator takes in positional index :attr:`dim`, it is also able to take a
 name as :attr:`dim`.
 
 - Check names: If :attr:`dim` is passed as a name, check that it exists in the tensor.
-- Propagate names: Permute dimension names in the same way as the dimensions are
+- Propagate names: Permute dimension names in the same way as the dimensions that are
   being permuted.
 
 ::

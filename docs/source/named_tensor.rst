@@ -144,7 +144,7 @@ specific than ``None``.
     ('X',)
 
 For a comprehensive list of name inference rules, see :ref:`name_inference_reference-doc`.
-There are two main ones that are important to go over:
+Here are two common operations that may be useful to go over:
 
 - Binary arithmetic ops: :ref:`unifies_names_from_inputs-doc`
 - Matrix multiplication ops: :ref:`contracts_away_dims-doc`
@@ -153,7 +153,7 @@ Explicit alignment by names
 ---------------------------
 
 Use :meth:`~Tensor.align_as` or :meth:`~Tensor.align_to` to align tensor dimensions
-by name to a specified ordering before performing operations.
+by name to a specified ordering. This is useful for performing "broadcasting by names".
 
 ::
 
@@ -177,16 +177,16 @@ Manipulating dimensions
 -----------------------
 
 Use :meth:`~Tensor.align_to` to permute large amounts of dimensions without
-mentioning all of them as in :meth:`~Tensor.permute`.
+mentioning all of them as in required by :meth:`~Tensor.permute`.
 
 ::
 
-    >>> tensor = torch.randn(2, 2, 2, 2, 2, 2, 2)
+    >>> tensor = torch.randn(2, 2, 2, 2, 2, 2)
     >>> named_tensor = tensor.refine_names('A', 'B', 'C', 'D', 'E', 'F')
 
-    # Move the F (dim 6) and E dimension (dim 5) to the front while keeping
+    # Move the F (dim 5) and E dimension (dim 4) to the front while keeping
     # the rest in the same order
-    >>> tensor.permute(6, 5, 1, 2, 3, 4)
+    >>> tensor.permute(5, 4, 0, 1, 2, 3)
     >>> named_tensor.align_to('F', 'E', ...)  # Use '...' instead in Python 2
 
 Use :meth:`~Tensor.flatten` and :meth:`~Tensor.unflatten` to flatten and unflatten
@@ -241,7 +241,7 @@ Operators
 ^^^^^^^^^
 
 See :ref:`name_inference_reference-doc` for a full list of the supported torch and
-tensor operations. We do NOT support the following that is not covered by the link:
+tensor operations. We do not yet support the following that is not covered by the link:
 
 - indexing, advanced indexing.
 
@@ -257,7 +257,7 @@ For ``torch.nn.functional`` operators, we support the following:
 Subsystems
 ^^^^^^^^^^
 
-Autograd is supported, see :ref:named_tensors_autograd-doc`.
+Autograd is supported, see :ref:`named_tensors_autograd-doc`.
 Because gradients are currently unnamed, optimizers may work but are untested.
 
 NN modules are currently unsupported. This can lead to the following when calling

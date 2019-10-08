@@ -80,6 +80,16 @@ class Tensor(torch._C._TensorBase):
                     self.requires_grad,
                     OrderedDict())
             return (torch._utils._rebuild_qtensor, args)
+        elif self.is_sparse:
+            if self.layout == torch.sparse_coo:
+                args = (self.layout,
+                        (self._indices(),
+                         self._values(),
+                         self.size()))
+            else:
+                raise NotImplementedError(
+                    'sparse tensor __reduce_ex__ for layout `%s`' % (self.layout))
+            return (torch._utils._rebuild_sparse_tensor, args)
         else:
             args = (self.storage(),
                     self.storage_offset(),
@@ -518,9 +528,9 @@ class Tensor(torch._C._TensorBase):
         A ``None`` dim can be refined to have any name; a named dim can only be
         refined to have the same name.
 
-        As named tensors coexist with unnamed tensors, refining names gives a nice
-        way to write named-tensor-aware code that works with both named and unnamed
-        tensors.
+        Because named tensors can coexist with unnamed tensors, refining names
+        gives a nice way to write named-tensor-aware code that works with both
+        named and unnamed tensors.
 
         :attr:`names` may contain up to one Ellipsis (``...``).
         The Ellipsis is expanded greedily; it is expanded in-place to fill
@@ -579,7 +589,7 @@ class Tensor(torch._C._TensorBase):
 
         Examples::
 
-            >>> tensor = torch.randn(2, 2, 2, 2, 2, 2, 2)
+            >>> tensor = torch.randn(2, 2, 2, 2, 2, 2)
             >>> named_tensor = tensor.refine_names('A', 'B', 'C', 'D', 'E', 'F')
 
             # Move the F and E dims to the front while keeping the rest in order
