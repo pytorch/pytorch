@@ -3556,7 +3556,20 @@ def foo(x):
             def forward(self, x):
                 return x + M.my_method(x)
 
+        class N(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @staticmethod
+            def my_method(x):
+                return x * 100
+
+            def forward(self, x):
+                return x - M.my_method(x) + N.my_method(x)
+
         self.checkModule(M(), (torch.ones(2, 2),))
+
+        self.checkModule(N(), (torch.ones(2, 2),))
 
     def test_invalid_prefix_annotation(self):
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
