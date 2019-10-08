@@ -474,6 +474,13 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("attrs") = true,
           py::arg("params") = true)
       .def(
+          "dump_to_str",
+          &Module::dump_to_str,
+          py::arg("code") = true,
+          py::arg("attrs") = true,
+          py::arg("params") = true,
+          py::arg("indent") = 0)
+      .def(
           "_define",
           [](Module& m,
              py::object py_m,
