@@ -4,8 +4,8 @@ import time
 import unittest
 
 import torch
-import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
+import torch.distributed.rpc as rpc
 from dist_utils import INIT_METHOD_TEMPLATE, dist_init
 
 
@@ -34,8 +34,8 @@ def my_py_add(t1, t2):
 
 
 def my_py_nested_call(t1, t2, nest_dst_rank):
-    return dist.rpc_sync("worker{}".format(nest_dst_rank),
-                         torch.add, args=(t1, t2))
+    return rpc.rpc_sync("worker{}".format(nest_dst_rank),
+                        torch.add, args=(t1, t2))
 
 
 @unittest.skipIf(
@@ -132,9 +132,9 @@ class DistAutogradTest(object):
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = dist.rpc_sync("worker{}".format(dst_rank), fn, args=(t1, t2))
-            dist.rpc_sync("worker{}".format(dst_rank),
-                          _set_rpc_done_from_prev_rank, args=(context_id,))
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), fn, args=(t1, t2))
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         _set_rpc_done_from_prev_rank, args=(context_id,))
 
             self._verify_send_recv_functions_in_client(context_id, t1, t2, ret)
 
@@ -174,12 +174,12 @@ class DistAutogradTest(object):
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
             nest_dst_rank = (dst_rank + 1) % self.world_size
-            ret = dist.rpc_sync("worker{}".format(dst_rank),
-                                my_py_nested_call, args=(t1, t2, nest_dst_rank))
-            dist.rpc_sync("worker{}".format(dst_rank),
-                          _set_rpc_done_from_prev_rank, args=(context_id,))
-            dist.rpc_sync("worker{}".format(nest_dst_rank),
-                          _set_rpc_done_from_prev_prev_rank, args=(context_id,))
+            ret = rpc.rpc_sync("worker{}".format(dst_rank),
+                               my_py_nested_call, args=(t1, t2, nest_dst_rank))
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         _set_rpc_done_from_prev_rank, args=(context_id,))
+            rpc.rpc_sync("worker{}".format(nest_dst_rank),
+                         _set_rpc_done_from_prev_prev_rank, args=(context_id,))
 
             # For self.rank, it has four pairs of send and recv funcitons
             # One pair is for current context id when this rank is worked as
@@ -250,7 +250,7 @@ class DistAutogradTest(object):
             tensors = []
             for i in range(num_tensors):
                 tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
-            ret = dist.rpc_sync(
+            ret = rpc.rpc_sync(
                 "worker{}".format(dst_rank), torch.stack, args=(tensors,)
             )
             self.assertEqual(torch.stack(tensors), ret)
