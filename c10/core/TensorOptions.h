@@ -6,6 +6,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorTypeSet.h>
+#include <c10/core/TensorAxes.h>
 
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
@@ -141,30 +142,19 @@ struct C10_API TensorOptions {
     this->set_dtype(dtype);
   }
 
+  /// Constructs a `TensorOptions` object and initializes its `dtype`, `device`,
+  /// `layout` and `is_variable` properties with values from a given TensorAxes
+  /// object.
+  /* implicit */ TensorOptions(TensorAxes axes) : TensorOptions() {
+    this->set_dtype(axes.dtype());
+    this->set_device(axes.device());
+    this->set_layout(axes.layout());
+    this->set_is_variable(axes.is_variable());
+  }
+
   /// legacy constructor to support ScalarType
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
     this->set_dtype(dtype);
-  }
-
-  /// True if all elements of the `TensorOptions` match that of the other.
-  bool operator==(const TensorOptions& other) const noexcept {
-    return
-        has_dtype_ == other.has_dtype_ &&
-        has_layout_ == other.has_layout_ &&
-        has_device_ == other.has_device_ &&
-        has_requires_grad_ == other.has_requires_grad_ &&
-        has_is_variable_ == other.has_is_variable_ &&
-        (!has_dtype_ || dtype_ == other.dtype_) &&
-        (!has_layout_ || layout_ == other.layout_) &&
-        (!has_device_ || device_ == other.device_) &&
-        (!requires_grad_ || requires_grad_ == other.requires_grad_) &&
-        (!is_variable_ || is_variable_ == other.is_variable_);
-  }
-
-  /// True if any of the elements of this `TensorOptions` do not match that of
-  /// the other.
-  bool operator!=(const TensorOptions& other) const noexcept {
-    return !(*this == other);
   }
 
   /// Return a copy of `TensorOptions` with `device` set to the given one, or
@@ -234,7 +224,6 @@ struct C10_API TensorOptions {
     r.set_is_variable(is_variable);
     return r;
   }
-
 
   /// Sets the `pinned_memory` property on the `TensorOptions`.
   C10_NODISCARD TensorOptions pinned_memory(c10::optional<bool> pinned_memory) const noexcept {
@@ -384,60 +373,7 @@ struct C10_API TensorOptions {
   }
 
   inline TensorTypeId computeTensorTypeId() const {
-    switch (layout()) {
-      case Layout::Strided:
-        switch (device().type()) {
-          case DeviceType::CPU:
-            if (isComplexType(typeMetaToScalarType(dtype()))) {
-              return TensorTypeId::ComplexCPUTensorId;
-            }
-            if (isQIntType(typeMetaToScalarType(dtype()))) {
-              return TensorTypeId::QuantizedCPUTensorId;
-            }
-            return TensorTypeId::CPUTensorId;
-          case DeviceType::CUDA:
-            if (isComplexType(typeMetaToScalarType(dtype()))) {
-              return TensorTypeId::ComplexCUDATensorId;
-            }
-            return TensorTypeId::CUDATensorId;
-          case DeviceType::MKLDNN:
-            return TensorTypeId::MKLDNNTensorId;
-          case DeviceType::OPENGL:
-            return TensorTypeId::OpenGLTensorId;
-          case DeviceType::OPENCL:
-            return TensorTypeId::OpenCLTensorId;
-          case DeviceType::IDEEP:
-            return TensorTypeId::IDEEPTensorId;
-          case DeviceType::HIP:
-            return TensorTypeId::HIPTensorId;
-          case DeviceType::MSNPU:
-            return TensorTypeId::MSNPUTensorId;
-          case DeviceType::XLA:
-            return TensorTypeId::XLATensorId;
-          default:
-            AT_ERROR("Unsupported device type for dense layout: ", device().type());
-        }
-      case Layout::Sparse:
-        switch (device().type()) {
-          case DeviceType::CPU:
-            return TensorTypeId::SparseCPUTensorId;
-          case DeviceType::CUDA:
-            return TensorTypeId::SparseCUDATensorId;
-          case DeviceType::HIP:
-            return TensorTypeId::SparseHIPTensorId;
-          default:
-            AT_ERROR("Unsupported device type for sparse layout: ", device().type());
-        }
-      case Layout::Mkldnn:
-        switch (device().type()) {
-          case DeviceType::CPU:
-            return TensorTypeId::MkldnnCPUTensorId;
-          default:
-            AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
-        }
-      default:
-        AT_ERROR("Unsupported layout: ", layout());
-    }
+    return TensorAxes(dtype(), device(), layout()).tensorTypeId();
   }
 
  private:
