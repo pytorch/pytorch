@@ -16,25 +16,25 @@ from torch._utils_internal import get_source_lines_and_file
 boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
 
-def createResolutionCallback(frames_up=0):
+def createResolutionCallbackFromFrame(frames_up=0):
     """
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
-    the function which called createResolutionCallback (by default).
+    the function which called createResolutionCallbackFromFrame (by default).
 
     This is used to enable access in-scope Python variables inside
     TorchScript fragments.
 
     frames_up is number of additional frames to go up on the stack.
     The default value is 0, which correspond to the frame of the caller
-    of createResolutionCallback. Also for example, if frames_up is set
-    to 1, then the frame of the caller's caller of createResolutionCallback
+    of createResolutionCallbackFromFrame. Also for example, if frames_up is set
+    to 1, then the frame of the caller's caller of createResolutionCallbackFromFrame
     will be taken.
 
     For example, the following program prints 2::
 
         def bar():
-            cb = createResolutionCallback(1)
+            cb = createResolutionCallbackFromFrame(1)
             print(cb("foo"))
 
         def baz():

@@ -3413,7 +3413,7 @@ def foo(x):
                 cu.define(full)
 
     def test_namedtuple_python(self):
-        global MyTuple, MyMod
+        global MyTuple, MyMod  # see [local resolution in python]
         MyTuple = namedtuple('MyTuple', ['a'])
 
         @torch.jit.unused
@@ -19817,6 +19817,7 @@ class TestClassType(JitTestCase):
         # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
+        global Foo, MyClass  # see [local resolution in python]
         @torch.jit.script
         class Foo(object):
             def __init__(self, x):
