@@ -504,7 +504,7 @@ class TestQuantizedOps(TestCase):
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            kernel=st.sampled_from((2, 3, 5)),
-           stride=st.sampled_from((1, 2)),
+           stride=st.sampled_from((None, 1, 2)),
            padding=st.integers(0, 2),
            ceil_mode=st.sampled_from((True, False)),
            count_include_pad=st.sampled_from((True, False)),
@@ -559,7 +559,7 @@ class TestQuantizedOps(TestCase):
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.qint8)),
            kernel=st.sampled_from((4, 5)),
-           stride=st.sampled_from((1, 2)),
+           stride=st.sampled_from((None, 1, 2)),
            padding=st.integers(0, 2),
            ceil_mode=st.sampled_from((True, False)),
            count_include_pad=st.sampled_from((True, False)),
@@ -573,15 +573,20 @@ class TestQuantizedOps(TestCase):
         """
         X, (scale, zero_point, torch_type) = X
         H, W = X.shape[-2:]
+
         if X.shape[1] < 176:
             X = np.repeat(X, 176 / X.shape[1], 1)
+
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
+
         qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
                                        zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
+
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.avg_pool2d(
             qX.int_repr().to(torch.double), kernel_size=kernel, stride=stride, padding=padding,
             ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
+
         self.assertTrue(qX.stride() != sorted(qX.stride()))
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool2d,
