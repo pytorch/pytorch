@@ -937,7 +937,21 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
 
 @parse_args('v', 'i', 'i', 'i')
 def unfold(g, input, dimension, size, step):
-    return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+    if input.isCompleteTensor():
+        sizedim = input.type().sizes()[dimension]
+        low_indices = range(0, sizedim, step)
+        hi_indices = range(size, sizedim + 1, step)
+        stack = [sym_help._slice_helper(g, input, axes=[dimension], starts=[low], ends=[hi])
+                 for low, hi in zip(low_indices, hi_indices)]
+        ndim = input.type().dim()
+        perm = list(range(0, ndim))
+        perm.append(perm.pop(dimension))
+        unsqueeze = [g.op("Unsqueeze", g.op("Transpose", t, perm_i=perm), axes_i=[dimension]) for t in stack]
+        return g.op("Concat", *unsqueeze, axis_i=dimension)
+    else:
+        return _unimplemented("Unfold", "input size not accessible")
 
 
 @parse_args('v', 'v', 'i')
@@ -972,7 +986,7 @@ def index_select(g, self, dim, index):
         index = g.op("Constant", value_t=torch.LongTensor([index_const]))
     elif index_dim is not None:
         if index_dim == 0:
-            # Index is a scalar. Reshape it to a size 1 tensor. 
+            # Index is a scalar. Reshape it to a size 1 tensor.
             index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
     return g.op("Gather", self, index, axis_i=dim)
 
@@ -1042,7 +1056,7 @@ def cosine_similarity(g, x1, x2, dim, eps):
 
 
 # ignore clone operators that are inserted by PyTorch autograd
-def clone(g, input):
+def clone(g, input, unused_memory_format):
     return input
 
 
@@ -1950,12 +1964,20 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
 
-def baddbmm(g, self, batch1, batch2, beta, alpha):  
-    dtype = self.type().scalarType()    
-    batch_mul = matmul(g, batch1, batch2)       
-    mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))       
+def baddbmm(g, self, batch1, batch2, beta, alpha):
+    dtype = self.type().scalarType()
+    batch_mul = matmul(g, batch1, batch2)
+    mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     mul_b = mul(g, self, g.op("Cast", beta, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     return add(g, mul_a, mul_b)
+
+def remainder(g, input, other):
+    div = g.op("Div", input, other)
+    if sym_help._is_fp(input):
+        div = g.op("Floor", div)
+    quo = g.op("Mul", div, other)
+    return g.op("Sub", input, quo)
+
 
 def gelu(g, self):
     _sqrt2 = 1.4142135623730951
