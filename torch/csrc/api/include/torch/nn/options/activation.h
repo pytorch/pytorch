@@ -146,7 +146,7 @@ struct MultiheadAttentionOptions {
 
 /// Options for CELU functional and module.
 struct TORCH_API CELUOptions {
-  /// The alpha value for the CELU formulation. Default: 1.0
+  /// The `alpha` value for the CELU formulation. Default: 1.0
   TORCH_ARG(double, alpha) = 1.0;
 
   /// can optionally do the operation in-place. Default: False
@@ -157,7 +157,7 @@ struct TORCH_API CELUOptions {
 
 /// Options for Softplus functional and module.
 struct TORCH_API SoftplusOptions {
-  /// the beta value for the Softplus formulation. Default: 1
+  /// the `beta` value for the Softplus formulation. Default: 1
   TORCH_ARG(double, beta) = 1.0;
 
   /// values above this revert to a linear function. Default: 20
