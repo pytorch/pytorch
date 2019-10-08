@@ -280,5 +280,28 @@ class TORCH_API SoftplusImpl : public torch::nn::Cloneable<SoftplusImpl> {
 
 TORCH_MODULE(Softplus);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the soft shrinkage function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softshrink to learn
+/// about the exact behavior of this module.
+class TORCH_API SoftshrinkImpl : public torch::nn::Cloneable<SoftshrinkImpl> {
+ public:
+  SoftshrinkImpl() : SoftshrinkImpl(SoftshrinkOptions()) {}
+  explicit SoftshrinkImpl(const SoftshrinkOptions& options_);
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Softshrink` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  SoftshrinkOptions options;
+};
+
+TORCH_MODULE(Softshrink);
+
 } // namespace nn
 } // namespace torch

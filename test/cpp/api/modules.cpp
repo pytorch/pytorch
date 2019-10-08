@@ -1243,6 +1243,25 @@ TEST_F(ModulesTest, Softplus) {
   }
 }
 
+TEST_F(ModulesTest, Softshrink) {
+  const auto size = 3;
+  for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
+    Softshrink model {SoftshrinkOptions(lambda)};
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1540,4 +1559,10 @@ TEST_F(ModulesTest, PrettyPrintSoftplus) {
   ASSERT_EQ(c10::str(Softplus(
       SoftplusOptions().beta(0.24).threshold(42.42))),
     "torch::nn::Softplus(beta=0.24, threshold=42.42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftshrink) {
+  ASSERT_EQ(c10::str(Softshrink()), "torch::nn::Softshrink(0.5)");
+  ASSERT_EQ(c10::str(Softshrink(SoftshrinkOptions(42.42))),
+            "torch::nn::Softshrink(42.42)");
 }

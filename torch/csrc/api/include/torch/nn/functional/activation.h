@@ -81,6 +81,10 @@ inline Tensor softplus(const Tensor& input, const SoftplusOptions& options) {
   return torch::softplus(input, options.beta(), options.threshold());
 }
 
+inline Tensor softshrink(const Tensor& input, const SoftshrinkOptions& options) {
+  return torch::softshrink(input, options.lambda());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

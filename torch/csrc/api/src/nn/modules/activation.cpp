@@ -217,5 +217,21 @@ void SoftplusImpl::pretty_print(std::ostream& stream) const {
          << ", threshold=" << options.threshold() << ")";
 }
 
+// ============================================================================
+
+SoftshrinkImpl::SoftshrinkImpl(const SoftshrinkOptions& options_)
+    : options(options_) {}
+
+Tensor SoftshrinkImpl::forward(const Tensor& input) {
+  return F::softshrink(input, options);
+}
+
+void SoftshrinkImpl::reset() {}
+
+void SoftshrinkImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::Softshrink(" << options.lambda() << ")";
+}
+
 } // namespace nn
 } // namespace torch
