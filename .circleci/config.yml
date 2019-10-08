@@ -304,7 +304,7 @@ jobs:
           set -e
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          docker pull ${DOCKER_IMAGE} >/dev/null
+          time docker pull ${DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
           # TODO We may want to move the rebase logic to a separate step after checkout
@@ -363,7 +363,7 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-            docker push ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
           fi
 
   pytorch_linux_test:
@@ -391,7 +391,7 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
@@ -445,7 +445,7 @@ jobs:
           chmod +x /home/circleci/project/ci_build_script.sh
 
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          docker pull ${DOCKER_IMAGE} >/dev/null
+          time docker pull ${DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
@@ -460,7 +460,7 @@ jobs:
               export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-            docker push ${COMMIT_DOCKER_IMAGE}
+            time docker push ${COMMIT_DOCKER_IMAGE}
           fi
 
   caffe2_linux_test:
@@ -515,7 +515,7 @@ jobs:
             export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
             export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
@@ -551,12 +551,7 @@ jobs:
             # Reinitialize path (see man page for path_helper(8))
             eval `/usr/libexec/path_helper -s`
 
-            # Use Homebrew Python if configured to do so
-            if [ "${PYTHON_INSTALLATION}" == "homebrew" ]; then
-              export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
-            fi
-
-            pip -q install numpy
+            export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
 
             # Install Anaconda if we need to
             if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
@@ -568,6 +563,8 @@ jobs:
               export PATH="${TMPDIR}/anaconda/bin:${PATH}"
               source ${TMPDIR}/anaconda/bin/activate
             fi
+
+            pip -q install numpy
 
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
@@ -606,7 +603,6 @@ jobs:
             if which sccache > /dev/null; then
               sccache --show-stats
             fi
-
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
@@ -923,7 +919,7 @@ jobs:
           set -e
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
@@ -957,7 +953,7 @@ jobs:
           set -ex
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           # master branch docs push
@@ -981,7 +977,7 @@ jobs:
           # Save the docs build so we can debug any problems
           export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
           docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
-          docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
+          time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
 
   pytorch_cpp_doc_push:
     environment:
@@ -1002,7 +998,7 @@ jobs:
           set -ex
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           # master branch docs push
@@ -1026,7 +1022,7 @@ jobs:
           # Save the docs build so we can debug any problems
           export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
           docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
-          docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
+          time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
 
   pytorch_macos_10_13_py3_build:
     environment:
@@ -1171,14 +1167,14 @@ jobs:
           echo "docker_image_libtorch_android_arm_v8a: "${docker_image_libtorch_android_arm_v8a}
 
           # x86_32
-          docker pull ${docker_image_libtorch_android_x86_32} >/dev/null
+          time docker pull ${docker_image_libtorch_android_x86_32} >/dev/null
           export id_x86_32=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           # arm-v7a
-          docker pull ${docker_image_libtorch_android_arm_v7a} >/dev/null
+          time docker pull ${docker_image_libtorch_android_arm_v7a} >/dev/null
           export id_arm_v7a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v7a})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v7a" bash) 2>&1'
@@ -1188,7 +1184,7 @@ jobs:
           docker cp $id_arm_v7a:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_arm_v7a
 
           # x86_64
-          docker pull ${docker_image_libtorch_android_x86_64} >/dev/null
+          time docker pull ${docker_image_libtorch_android_x86_64} >/dev/null
           export id_x86_64=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_64})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_64" bash) 2>&1'
@@ -1198,7 +1194,7 @@ jobs:
           docker cp $id_x86_64:/var/lib/jenkins/workspace/build_android/install ~/workspace/build_android_install_x86_64
 
           # arm-v8a
-          docker pull ${docker_image_libtorch_android_arm_v8a} >/dev/null
+          time docker pull ${docker_image_libtorch_android_arm_v8a} >/dev/null
           export id_arm_v8a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v8a})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v8a" bash) 2>&1'
@@ -1220,7 +1216,7 @@ jobs:
 
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
-          docker push ${output_image}
+          time docker push ${output_image}
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -1251,7 +1247,7 @@ jobs:
           echo "docker_image_libtorch_android_x86_32_gradle: "${docker_image_libtorch_android_x86_32_gradle}
 
           # x86_32
-          docker pull ${docker_image_libtorch_android_x86_32_gradle} >/dev/null
+          time docker pull ${docker_image_libtorch_android_x86_32_gradle} >/dev/null
           export id_x86_32=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32_gradle})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export SONATYPE_NEXUS_USERNAME=${SONATYPE_NEXUS_USERNAME}" && echo "export SONATYPE_NEXUS_PASSWORD=${SONATYPE_NEXUS_PASSWORD}" && echo "export ANDROID_SIGN_KEY=${ANDROID_SIGN_KEY}" && echo "export ANDROID_SIGN_PASS=${ANDROID_SIGN_PASS}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/publish_android_snapshot.sh") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
@@ -1259,7 +1255,7 @@ jobs:
 
           output_image=${docker_image_libtorch_android_x86_32_gradle}-publish-snapshot
           docker commit "$id_x86_32" ${output_image}
-          docker push ${output_image}
+          time docker push ${output_image}
 
   pytorch_android_gradle_build-x86_32:
     environment:
@@ -1291,7 +1287,7 @@ jobs:
           echo "docker_image_libtorch_android_x86_32: "${docker_image_libtorch_android_x86_32}
 
           # x86
-          docker pull ${docker_image_libtorch_android_x86_32} >/dev/null
+          time docker pull ${docker_image_libtorch_android_x86_32} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
 
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -1302,7 +1298,7 @@ jobs:
 
           output_image=${docker_image_libtorch_android_x86_32}-gradle
           docker commit "$id" ${output_image}
-          docker push ${output_image}
+          time docker push ${output_image}
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -1333,7 +1329,7 @@ jobs:
             export PATH="~/anaconda/bin:${PATH}"
             source ~/anaconda/bin/activate
             # Install dependencies
-            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
+            conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
             # sync submodules
             cd ${PROJ_ROOT}
             git submodule sync
@@ -1518,11 +1514,6 @@ workflows:
           name: pytorch_linux_xenial_py3_5_build
           requires:
             - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.5-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.5:347"
       - pytorch_linux_test:
@@ -1530,11 +1521,6 @@ workflows:
           requires:
             - setup
             - pytorch_linux_xenial_py3_5_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.5-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.5:347"
           resource_class: large
@@ -1944,7 +1930,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-gcc4.8-ubuntu14.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:325"
       - caffe2_linux_test:
           name: caffe2_py2_gcc4_8_ubuntu14_04_test
           requires:
@@ -1956,7 +1942,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-gcc4.8-ubuntu14.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:325"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
@@ -1968,7 +1954,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:325"
       - caffe2_linux_test:
           name: caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test
           requires:
@@ -1981,14 +1967,14 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:325"
           resource_class: gpu.medium
       - caffe2_linux_build:
           name: caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:325"
       - caffe2_linux_test:
           name: caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_test
           requires:
@@ -1996,14 +1982,14 @@ workflows:
             - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
           build_environment: "caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:325"
           resource_class: gpu.medium
       - caffe2_linux_build:
           name: caffe2_py3_5_cuda10_1_cudnn7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.5-cuda10.1-cudnn7-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.5-cuda10.1-cudnn7-ubuntu16.04:325"
       - caffe2_linux_test:
           name: caffe2_py3_5_cuda10_1_cudnn7_ubuntu16_04_test
           requires:
@@ -2011,35 +1997,35 @@ workflows:
             - caffe2_py3_5_cuda10_1_cudnn7_ubuntu16_04_build
           build_environment: "caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.5-cuda10.1-cudnn7-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.5-cuda10.1-cudnn7-ubuntu16.04:325"
           resource_class: gpu.medium
       - caffe2_linux_build:
           name: caffe2_py2_mkl_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py2-mkl-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:325"
       - caffe2_linux_test:
           name: caffe2_py2_mkl_ubuntu16_04_test
           requires:
             - setup
             - caffe2_py2_mkl_ubuntu16_04_build
           build_environment: "caffe2-py2-mkl-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:325"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_onnx_py2_gcc5_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-onnx-py2-gcc5-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:325"
       - caffe2_linux_test:
           name: caffe2_onnx_py2_gcc5_ubuntu16_04_test
           requires:
             - setup
             - caffe2_onnx_py2_gcc5_ubuntu16_04_build
           build_environment: "caffe2-onnx-py2-gcc5-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:325"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_py2_clang3_8_ubuntu16_04_build
@@ -2051,7 +2037,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-clang3.8-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.8-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.8-ubuntu16.04:325"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_py2_clang3_9_ubuntu16_04_build
@@ -2063,35 +2049,35 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-clang3.9-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.9-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.9-ubuntu16.04:325"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_py2_clang7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py2-clang7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang7-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang7-ubuntu16.04:325"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_onnx_py3_6_clang7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-onnx-py3.6-clang7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:325"
       - caffe2_linux_test:
           name: caffe2_onnx_py3_6_clang7_ubuntu16_04_test
           requires:
             - setup
             - caffe2_onnx_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:325"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_py2_android_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py2-android-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-android-ubuntu16.04:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-android-ubuntu16.04:325"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_py2_cuda9_0_cudnn7_centos7_build
@@ -2103,7 +2089,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-centos7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:325"
       - caffe2_linux_test:
           name: caffe2_py2_cuda9_0_cudnn7_centos7_test
           requires:
@@ -2116,7 +2102,7 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-centos7-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:315"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:325"
           resource_class: gpu.medium
       - caffe2_macos_build:
           name: caffe2_py2_ios_macos10_13_build
