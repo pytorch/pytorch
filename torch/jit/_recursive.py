@@ -103,6 +103,10 @@ class ConcreteTypeStore(object):
         assert isinstance(nn_module, torch.nn.Module)
         concrete_type = torch._C.ConcreteModuleType()
         concrete_type.add_pyclass(type(nn_module))
+        if isinstance(nn_module, (torch.nn.ModuleDict, torch.jit._ConstModuleDict)):
+            concrete_type.set_module_dict()
+        if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.jit._ConstModuleList)):
+            concrete_type.set_module_list()
 
         added_names = set()
         for name, item in nn_module._parameters.items():
@@ -120,7 +124,7 @@ class ConcreteTypeStore(object):
 
         for name, item in nn_module._modules.items():
             sub_concrete_type = self.infer_concrete_type(item)
-            concrete_type.add_module(name, sub_concrete_type.jit_type, sub_concrete_type)
+            concrete_type.add_module(name, sub_concrete_type)
             added_names.add(name)
 
         for name, item in nn_module._buffers.items():
@@ -525,15 +529,6 @@ def wrap_cpp_module(cpp_module):
 
     script_module._finalize()
     return script_module
-
-# These exist to be called from C++, because pybind does not provide a builtin
-# binding for issubclass
-def is_module_dict(cls):
-    return issubclass(cls, torch.jit._ConstModuleDict) or issubclass(cls, torch.nn.ModuleDict)
-
-def is_module_list(cls):
-    return issubclass(cls, torch.jit._ConstModuleList) or issubclass(cls, torch.nn.ModuleList) \
-        or issubclass(cls, torch.nn.Sequential)
 
 def compile_unbound_method(concrete_type, fn):
     if _jit_internal.is_ignored_fn(fn):

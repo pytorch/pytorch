@@ -267,11 +267,11 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
 
   std::shared_ptr<SugaredValue> makeSugared(Value* v) const override {
     v->setType(getClassType());
-    return std::make_shared<ModuleValue>(v, *concreteType_);
+    return std::make_shared<ModuleValue>(v, concreteType_);
   }
 
   ClassTypePtr getClassType() const override {
-    return concreteType_->jitType();
+    return concreteType_->getJitType();
   }
 
  private:
@@ -983,7 +983,7 @@ void initJitScriptBindings(PyObject* module) {
       m, "ConcreteModuleType")
       .def(py::init<>())
       .def_property_readonly("py_class", &ConcreteModuleType::getPyClass)
-      .def_property_readonly("jit_type", &ConcreteModuleType::jitType)
+      .def_property_readonly("jit_type", &ConcreteModuleType::getJitType)
       .def("get_constants", &ConcreteModuleType::getConstantsPy)
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
       .def("get_module_names", &ConcreteModuleType::getModuleNamesPy)
@@ -993,6 +993,16 @@ void initJitScriptBindings(PyObject* module) {
       .def("add_pyclass", &ConcreteModuleType::addPyClass)
       .def("add_overload", &ConcreteModuleType::addOverload)
       .def("add_jit_type", &ConcreteModuleType::addJitType)
+      .def(
+          "set_module_dict",
+          [](ConcreteModuleType& self) {
+            self.setIterableModuleKind(IterableModuleKind::DICT);
+          })
+      .def(
+          "set_module_list",
+          [](ConcreteModuleType& self) {
+            self.setIterableModuleKind(IterableModuleKind::LIST);
+          })
       .def(
           "create_new_type_from_this",
           &ConcreteModuleType::createNewTypeFromThis)
@@ -1015,7 +1025,7 @@ void initJitScriptBindings(PyObject* module) {
             for (auto& callback : rcbs) {
               resolvers.push_back(pythonResolver(callback));
             }
-            const auto& selfType = concreteType->jitType();
+            const auto& selfType = concreteType->getJitType();
             const auto& prefix = selfType->name().value();
             const auto self = ModuleSelf(std::move(concreteType));
             auto cu = selfType->compilation_unit();
@@ -1043,9 +1053,8 @@ void initJitScriptBindings(PyObject* module) {
         return pythonResolver(rcb)->resolveType(name, range);
       });
 
-  m.def("_run_emit_module_hook", [](const Module& m) {
-    didFinishEmitModule(m);
-  });
+  m.def(
+      "_run_emit_module_hook", [](const Module& m) { didFinishEmitModule(m); });
 
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");

@@ -35,7 +35,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       py::object the_self,
       c10::optional<py::object> rcb = c10::nullopt,
       Value* module_self = nullptr)
-      : self(std::move(the_self)), rcb(std::move(rcb)), moduleSelf_(module_self) {}
+      : self(std::move(the_self)),
+        rcb(std::move(rcb)),
+        moduleSelf_(module_self) {}
 
   FunctionSchema getSchema(
       const size_t n_args,
@@ -198,9 +200,8 @@ struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
   std::vector<StrongFunctionPtr> compiled_overloads_;
 };
 struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
-  ModuleValue(Value* self, ConcreteModuleType concreteType)
-      : self_(self),
-        concreteType_(std::move(concreteType)) {}
+  ModuleValue(Value* self, std::shared_ptr<ConcreteModuleType> concreteType)
+      : self_(self), concreteType_(std::move(concreteType)) {}
 
   std::string kind() const override {
     return "module";
@@ -243,7 +244,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       const SourceRange& loc,
       Function& m);
   Value* self_;
-  ConcreteModuleType concreteType_;
+  std::shared_ptr<ConcreteModuleType> concreteType_;
 };
 
 struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {

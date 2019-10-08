@@ -324,7 +324,7 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
   std::vector<std::shared_ptr<SugaredValue>> result;
 
   std::vector<std::string> submoduleNames;
-  const auto& selfType = concreteType_.jitType();
+  const auto& selfType = concreteType_->getJitType();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     const auto& attrType = selfType->getAttribute(i);
     if (isModuleType(attrType)) {
@@ -337,8 +337,7 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
     Value* module_v = m.graph()->insertGetAttr(self_, name);
     auto mod_v = std::make_shared<ModuleValue>(
-        module_v,
-        *concreteType_.findSubmoduleConcreteType(name));
+        module_v, concreteType_->findSubmoduleConcreteType(name));
 
     if (get_keys && get_values) {
       std::vector<std::shared_ptr<SugaredValue>> tup;
@@ -363,16 +362,15 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     Function& m,
     const std::string& field) {
   // 1. Look inside script::Module object for the field.
-  const auto& selfType = concreteType_.jitType();
+  const auto& selfType = concreteType_->getJitType();
   if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
     if (isModuleType(selfType->getAttribute(field))) {
       // ...if it's a submodule, return it as a new ModuleValue.
       const auto submoduleConcreteType =
-          concreteType_.findSubmoduleConcreteType(field);
+          concreteType_->findSubmoduleConcreteType(field);
       TORCH_INTERNAL_ASSERT(submoduleConcreteType);
       return std::make_shared<ModuleValue>(
-          m.graph()->insertGetAttr(self_, field),
-          *submoduleConcreteType);
+          m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
     } else {
       // ...otherwise, methods, parameters, attributes, and buffers are all
       // first class so they get returned as SimpleValues
@@ -381,7 +379,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   }
 
   // 2. Check if it's a user-provided constant property.
-  if (auto constant = concreteType_.findConstant(field)) {
+  if (auto constant = concreteType_->findConstant(field)) {
     // If it is, just insert the constant and return a SimpleValue for it.
     return toSugaredValue(*constant, m, loc, true);
   }
@@ -389,11 +387,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // 3. Special case: for module dicts we manually desugar items(), keys(),
   // values() calls into the appropriate method.
   // TODO: These could be represented as first class methods probably.
-  const auto is_mod_dict_py =
-      py::module::import("torch.jit._recursive")
-          .attr("is_module_dict")(concreteType_.getPyClass());
-  const bool is_mod_dict = py::cast<bool>(is_mod_dict_py);
-  if (is_mod_dict) {
+  if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (field == "items" || field == "keys" || field == "values") {
       bool get_keys = false;
       bool get_values = false;
@@ -411,12 +405,12 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   }
 
   // 4. Check if this is the name of an overloaded method.
-  if (const auto overloads = concreteType_.findOverloads(field)) {
+  if (const auto overloads = concreteType_->findOverloads(field)) {
     return std::make_shared<OverloadedMethodValue>(self_, *overloads);
   }
 
   // 5. Check if it's a function attribute.
-  if (const auto fnAttr = concreteType_.findFunctionAttribute(field)) {
+  if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
     return std::make_shared<FunctionValue>(*fnAttr);
   }
 
@@ -424,7 +418,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // ScriptModule was derived from. The only class properties we handle are
   // methods.
   py::object unboundMethod = py::getattr(
-      concreteType_.getPyClass(),
+      concreteType_->getPyClass(),
       field.c_str(),
       pybind11::cast<pybind11::none>(Py_None));
   if (py::isinstance<py::function>(unboundMethod)) {
@@ -437,9 +431,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
                            .attr("is_ignored_fn")(unboundMethod));
     if (isIgnoredFn) {
       // Create a generated ScriptModule type with module_ set as cpp_module
-      auto boundMethod =
-          py::module::import("torch.jit._recursive")
-              .attr("lazy_bind")(concreteType_, unboundMethod);
+      auto boundMethod = py::module::import("torch.jit._recursive")
+                             .attr("lazy_bind")(concreteType_, unboundMethod);
       TORCH_CHECK(py::isinstance<py::function>(boundMethod));
       // TODO: Try to reduce our reliance on frame-based rcb
       auto rcb =
@@ -459,7 +452,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // We've exhausted all possibilities. Bailout with a hint to the user.
   std::string hint;
-  if (auto failureReason = concreteType_.findFailedAttribute(field)) {
+  if (auto failureReason = concreteType_->findFailedAttribute(field)) {
     hint = *failureReason;
   }
 
@@ -471,23 +464,15 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
     const SourceRange& loc,
     Function& m,
     const c10::optional<size_t>& size_hint) {
-  const auto is_mod_dict_py =
-      py::module::import("torch.jit._recursive")
-          .attr("is_module_dict")(concreteType_.getPyClass());
-  const auto is_mod_list_py =
-      py::module::import("torch.jit._recursive")
-          .attr("is_module_list")(concreteType_.getPyClass());
-
-  const bool is_mod_dict = py::cast<bool>(is_mod_dict_py);
-  const bool is_mod_list = py::cast<bool>(is_mod_list_py);
-  if (!is_mod_list && !is_mod_dict) {
+  const auto iterableModuleKind = concreteType_->getIterableModuleKind();
+  if (iterableModuleKind == IterableModuleKind::NONE) {
     return SugaredValue::asTuple(loc, m, size_hint);
   }
 
   // iterating over a dictionary returns the keys, iterating over a
   // list returns the values
-  const bool get_keys = is_mod_dict;
-  const bool get_values = !is_mod_dict;
+  const bool get_keys = iterableModuleKind == IterableModuleKind::DICT;
+  const bool get_values = iterableModuleKind == IterableModuleKind::LIST;
   return desugarModuleContainer(get_keys, get_values, loc, m);
 }
 

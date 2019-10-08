@@ -9,6 +9,8 @@
 namespace torch {
 namespace jit {
 namespace script {
+enum class IterableModuleKind { NONE, LIST, DICT };
+
 // You can think of an nn.Module as a template that corresponds to a family of
 // JIT types. The template "arguments" are things like the constant values.
 // e.g.
@@ -42,9 +44,11 @@ namespace script {
 class VISIBILITY_HIDDEN ConcreteModuleType {
  public:
   // ConcreteModuleType has two states.
-  // 1. Building: First we build it up, during the ScriptModule conversion process
+  // 1. Building: First we build it up, during the ScriptModule conversion
+  // process
   //      ... to transition, we freeze the type by associating with a JIT type.
-  // 2. Querying: Then we ask use it as a source of truth during method compilation.
+  // 2. Querying: Then we ask use it as a source of truth during method
+  // compilation.
   //              During this time the ModuleType is effectively const.
   // Yes, it could be two different types. Not terribly worth the verbosity.
 
@@ -54,14 +58,12 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   void addPyClass(py::object pyClass);
   void addConstant(std::string name, py::object value);
   void addAttribute(std::string name, TypePtr type, bool isParameter);
-  void addModule(
-      std::string name,
-      TypePtr type,
-      std::shared_ptr<ConcreteModuleType> meta);
+  void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
   void addFailedAttribute(std::string name, std::string failureReason);
+  void setIterableModuleKind(IterableModuleKind kind);
 
   /**
    * Freezing methods
@@ -76,10 +78,12 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   /**
    * Query methods (jitType must be non-null)
    */
-  ClassTypePtr jitType() const;
+  ClassTypePtr getJitType() const;
   py::object getPyClass() const;
+  IterableModuleKind getIterableModuleKind() const;
   c10::optional<py::object> findConstant(const std::string& name) const;
-  c10::optional<std::vector<std::string>> findOverloads(const std::string& name) const;
+  c10::optional<std::vector<std::string>> findOverloads(
+      const std::string& name) const;
   c10::optional<Function*> findFunctionAttribute(const std::string& name) const;
   std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
       const std::string& name) const;
@@ -98,12 +102,46 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   friend bool operator==(
       const ConcreteModuleType& lhs,
       const ConcreteModuleType& rhs) {
+    // This check is first sicne it's the most discriminating
+    if (!lhs.pyClass_.is(rhs.pyClass_)) {
+      return false;
+    }
+
+    if (lhs.iterableModuleKind_ != rhs.iterableModuleKind_) {
+      return false;
+    }
+
+    // We need to change the meaning of module equality depending on whether the
+    // module is iterable or not.
+    bool modulesEqual = false;
+    if (lhs.iterableModuleKind_ == IterableModuleKind::NONE) {
+      // ordering doesn't matter, so compare modules sorted by name
+      auto lhsSorted = lhs.modules_;
+      std::sort(
+          lhsSorted.begin(),
+          lhsSorted.end(),
+          [](const ModuleInfo& a, const ModuleInfo& b) {
+            return a.name < b.name;
+          });
+
+      auto rhsSorted = rhs.modules_;
+      std::sort(
+          rhsSorted.begin(),
+          rhsSorted.end(),
+          [](const ModuleInfo& a, const ModuleInfo& b) {
+            return a.name < b.name;
+          });
+
+      modulesEqual = lhsSorted == rhsSorted;
+    } else {
+      modulesEqual = lhs.modules_ == rhs.modules_;
+    }
+
     // clang-format off
     return
-      lhs.pyClass_.is(rhs.pyClass_) &&
+      modulesEqual &&
       lhs.constants_ == rhs.constants_ &&
       lhs.attributes_ == rhs.attributes_ &&
-      lhs.modules_ == rhs.modules_ &&
       lhs.overloads_ == rhs.overloads_ &&
       lhs.functionAttributes_ == rhs.functionAttributes_;
     // clang-format on
@@ -138,11 +176,10 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
 
   struct ModuleInfo {
     std::string name;
-    TypePtr type;
     std::shared_ptr<ConcreteModuleType> meta;
 
     friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs) {
-      return *(lhs.type) == *(rhs.type) && lhs.name == rhs.name;
+      return *(lhs.meta) == *(rhs.meta);
     }
   };
 
@@ -160,6 +197,12 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, FunctionTypePtr> functionAttributes_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
+
+  // If something is a ModuleDict/ModuleList, it means:
+  //   1. The order of the submodules matters for comparing the type
+  //   2. The compiler is allowed to treat it like a dict/tuple
+  IterableModuleKind iterableModuleKind_ = IterableModuleKind::NONE;
+
   // The original `nn.Module` class that we derived this ScriptModule from.
   py::object pyClass_;
 

@@ -4,7 +4,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-ClassTypePtr ConcreteModuleType::jitType() const {
+ClassTypePtr ConcreteModuleType::getJitType() const {
   TORCH_INTERNAL_ASSERT(jitType_);
   return jitType_;
 }
@@ -89,6 +89,15 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
   return it->meta;
 }
 
+void ConcreteModuleType::setIterableModuleKind(IterableModuleKind kind) {
+  TORCH_INTERNAL_ASSERT(!jitType_);
+  iterableModuleKind_ = kind;
+}
+
+IterableModuleKind ConcreteModuleType::getIterableModuleKind() const {
+  TORCH_INTERNAL_ASSERT(jitType_);
+  return iterableModuleKind_;
+}
 
 void ConcreteModuleType::addJitType(ClassTypePtr type) {
   TORCH_INTERNAL_ASSERT(!jitType_)
@@ -121,12 +130,9 @@ void ConcreteModuleType::addAttribute(
 
 void ConcreteModuleType::addModule(
     std::string name,
-    TypePtr type,
     std::shared_ptr<ConcreteModuleType> meta) {
-  TORCH_INTERNAL_ASSERT(type);
   TORCH_INTERNAL_ASSERT(!jitType_);
-  modules_.emplace_back(
-      ModuleInfo{std::move(name), std::move(type), std::move(meta)});
+  modules_.emplace_back(ModuleInfo{std::move(name), std::move(meta)});
 }
 
 void ConcreteModuleType::addOverload(
@@ -164,7 +170,8 @@ void ConcreteModuleType::dump() const {
   }
   std::cout << "\nSubmodules: \n";
   for (const auto& info : modules_) {
-    std::cout << "\t" << info.name << ": " << info.type->python_str() << "\n";
+    std::cout << "\t" << info.name << ": "
+              << info.meta->getJitType()->python_str() << "\n";
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : overloads_) {
