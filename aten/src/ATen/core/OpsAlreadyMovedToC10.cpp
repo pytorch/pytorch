@@ -399,7 +399,6 @@ bool aten_op_is_already_moved_to_c10(const c10::OperatorName& opName) {
         {"aten::_weight_norm_cuda_interface", ""},
         {"aten::_weight_norm_cuda_interface_backward", ""},
         {"aten::_weight_norm_differentiable_backward", ""},
-        {"aten::zeros_like", ""},
         {"aten::_standard_gamma_grad", ""},
         {"aten::_standard_gamma", ""},
         {"aten::_dirichlet_grad", ""},
@@ -1177,6 +1176,7 @@ bool aten_op_is_not_moved_to_c10_yet(const c10::OperatorName& opName) {
     #endif
         {"aten::zeros", ""},
         {"aten::zeros", "out"},
+        {"aten::zeros_like", ""},
         {"aten::zeros_like", "dtype"},
         {"aten::_sparse_sum", "dtype"},
         {"aten::_sparse_sum", "dim_dtype"},

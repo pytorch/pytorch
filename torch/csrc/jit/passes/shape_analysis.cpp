@@ -863,7 +863,7 @@ class ShapePropagator {
             "aten::randint_like(Tensor self, int high) -> Tensor",
             "aten::randint_like(Tensor self, int low, int high) -> Tensor",
             "aten::randn_like(Tensor self) -> Tensor",
-            "aten::zeros_like(Tensor self) -> Tensor",
+            "aten::zeros_like(Tensor self, *, MemoryFormat? memory_format=contiguous_format) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           auto input_type = node->input(0)->type()->cast<TensorType>();
@@ -1418,7 +1418,7 @@ class ShapePropagator {
             "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
             "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
             "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-            "aten::zeros_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::zeros_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto type =

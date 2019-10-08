@@ -12480,15 +12480,6 @@ class TestTorchDeviceType(TestCase):
 
         self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
 
-    def test_memory_format_ones_like_strides(self, device):
-        def input_generator_fn(device):
-            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
-
-        def transformation_fn(tensor, **kwargs):
-            return torch.ones_like(tensor, **kwargs)
-
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
-
     def test_memory_format_rand_like_strides(self, device):
         def input_generator_fn(device):
             return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
@@ -12497,6 +12488,17 @@ class TestTorchDeviceType(TestCase):
             return torch.rand_like(tensor, **kwargs)
 
         self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
+
+    def test_memory_format_factory_like_functions_preserve_strides(self, device):
+        def input_generator_fn(device):
+            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
+
+        transformation_fns = [
+            lambda t, **kwargs: torch.zeros_like(t, **kwargs),
+            lambda t, **kwargs: torch.ones_like(t, **kwargs)]
+
+        for transformation_fn in transformation_fns:
+            self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
 
     def test_memory_format_type_shortcuts(self, device):
         def input_generator_fn(device):

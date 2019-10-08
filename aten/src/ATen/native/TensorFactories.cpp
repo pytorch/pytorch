@@ -730,17 +730,24 @@ Tensor& zeros_out(Tensor& result, IntArrayRef size) {
   return result.zero_();
 }
 
-Tensor zeros_like(const Tensor& self) {
-  return native::zeros_like(self, self.options());
+Tensor zeros_like(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::zeros_like(self, self.options(), optional_memory_format);
 }
 
-Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
+Tensor zeros_like(
+    const Tensor& self,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   if (options.layout() == kSparse && self.is_sparse()) {
     auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
+    res.sparse_resize_and_clear_(
+        self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
   }
-  return native::zeros(self.sizes(), options);
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.zero_();
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
