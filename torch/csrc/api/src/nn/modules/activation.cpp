@@ -229,8 +229,7 @@ Tensor SoftshrinkImpl::forward(const Tensor& input) {
 void SoftshrinkImpl::reset() {}
 
 void SoftshrinkImpl::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha
-         << "torch::nn::Softshrink(" << options.lambda() << ")";
+  stream << "torch::nn::Softshrink(" << options.lambda() << ")";
 }
 
 // ============================================================================
