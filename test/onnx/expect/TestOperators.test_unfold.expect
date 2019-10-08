@@ -1,0 +1,121 @@
+ir_version: 4
+producer_name: "pytorch"
+producer_version: "1.3"
+graph {
+  node {
+    input: "0"
+    output: "1"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 2
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 2
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "0"
+    output: "2"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 2
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 4
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 2
+      type: INTS
+    }
+  }
+  node {
+    input: "1"
+    output: "3"
+    op_type: "Unsqueeze"
+    attribute {
+      name: "axes"
+      ints: 2
+      type: INTS
+    }
+  }
+  node {
+    input: "2"
+    output: "4"
+    op_type: "Unsqueeze"
+    attribute {
+      name: "axes"
+      ints: 2
+      type: INTS
+    }
+  }
+  node {
+    input: "3"
+    input: "4"
+    output: "5"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 2
+      type: INT
+    }
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "5"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

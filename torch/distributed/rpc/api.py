@@ -1,15 +1,13 @@
-#!/usr/bin/env python3
-
-from . import invoke_rpc_builtin, invoke_rpc_python_udf, invoke_remote_builtin
-from . import init_rref_context
-from . import ProcessGroupAgent
-from . import WorkerId
-from .rpc_backend_registry import is_rpc_backend_registered, init_rpc_backend
-from .internal_rpc_utils import _internal_rpc_pickler, PythonUDF
+from torch.distributed import invoke_rpc_builtin, invoke_rpc_python_udf
+from torch.distributed import invoke_remote_builtin, invoke_remote_python_udf
+from torch.distributed import _init_rref_context, _destroy_rref_context
+from torch.distributed import ProcessGroupAgent
+from torch.distributed import WorkerInfo
+from .backend_registry import is_backend_registered, init_backend
+from .internal import _internal_rpc_pickler, PythonUDF
 
 import functools
 import sys
-import warnings
 import torch
 from enum import Enum
 
@@ -38,6 +36,7 @@ def join_rpc():
     if _agent:
         _agent.join()
         _agent = None
+        _destroy_rref_context()
 
 
 @_require_initialized
@@ -70,7 +69,7 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
         raise RuntimeError("RPC is already initialized")
 
     if backend == RpcBackend.PROCESS_GROUP:
-        from .distributed_c10d import _get_default_group
+        from torch.distributed.distributed_c10d import _get_default_group
 
         group = _get_default_group()
         if (self_rank != -1) and (self_rank != group.rank()):
@@ -78,40 +77,41 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
                                self_rank, group.rank()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
-        init_rref_context(_agent)
-    elif is_rpc_backend_registered(backend):
-        _agent = init_rpc_backend(
+        _init_rref_context(_agent)
+    elif is_backend_registered(backend):
+        _agent = init_backend(
             backend,
             self_rank=self_rank,
             self_name=self_name,
-            init_method=init_method,
+            init_method=init_method
         )
-        init_rref_context(_agent)
+        _init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
 
 
 @_require_initialized
-def get_worker_id(worker_name=None):
+def get_worker_info(worker_name=None):
     r"""
-    Get worker id of a given worker name. Use this worker id to avoid passing
-    an expensive string to ``rpc`` on every invocation.
+    Get WorkerInfo of a given worker name. Use this WorkerInfo to avoid passing
+    an expensive string to ``rpc`` on every invocation. The WorkerInfo contains
+    the name of the worker and the id of the worker.
 
     Arguments:
         worker_name (str): the string name of a worker. If ``None``, return the
                            the id of the current worker. (default ``None``)
     """
     if worker_name:
-        return _agent.get_worker_id(worker_name)
+        return _agent.get_worker_info(worker_name)
     else:
-        return _agent.get_worker_id()
+        return _agent.get_worker_info()
 
 
-def _to_worker_id(name_or_id):
-    if isinstance(name_or_id, WorkerId):
+def _to_worker_info(name_or_id):
+    if isinstance(name_or_id, WorkerInfo):
         return name_or_id
     elif isinstance(name_or_id, str):
-        return get_worker_id(name_or_id)
+        return get_worker_info(name_or_id)
     else:
         raise ValueError("Unsupported RPC worker ID type {}".format(name_or_id))
 
@@ -140,27 +140,35 @@ def remote(to, func, args=None, kwargs=None):
 
         On worker 0:
         >>> import torch.distributed as dist
+        >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_rpc("worker0")
-        >>> worker1 = dist.get_worker_id("worker1")
-        >>> rref1 = dist.remote(worker1, torch.add, args=(torch.ones(2), 3))
-        >>> rref2 = dist.remote(worker1, torch.add, args=(torch.ones(2), 1))
+        >>> rpc.init_rpc("worker0")
+        >>> worker1 = rpc.get_worker_info("worker1")
+        >>> rref1 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 3))
+        >>> rref2 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 1))
         >>> x = rref1.to_here() + rref2.to_here()
-        >>> dist.join_rpc()
+        >>> rpc.join_rpc()
 
         On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
         >>> dist.init_rpc("worker1")
-        >>> dist.join_rpc()
+        >>> rpc.join_rpc()
     """
     qualified_name = torch.jit._find_builtin(func)
 
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
-    return invoke_remote_builtin(
-        _agent, _to_worker_id(to), qualified_name, *args, **kwargs)
+    info = _to_worker_info(to)
+    if qualified_name is not None:
+        return invoke_remote_builtin(
+            _agent, info, qualified_name, *args, **kwargs)
+    else:
+        (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
+            PythonUDF(func, args, kwargs))
+        return invoke_remote_python_udf(
+            _agent, info, pickled_python_udf, tensors)
 
 
 def _invoke_rpc(to, func, args=None, kwargs=None):
@@ -172,15 +180,16 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
 
+    info = _to_worker_info(to)
     if qualified_name is not None:
         fut = invoke_rpc_builtin(
-            _agent, _to_worker_id(to), qualified_name, *args, **kwargs
+            _agent, info, qualified_name, *args, **kwargs
         )
     else:
         (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
             PythonUDF(func, args, kwargs))
         fut = invoke_rpc_python_udf(
-            _agent, _to_worker_id(to), pickled_python_udf, tensors)
+            _agent, info, pickled_python_udf, tensors)
     return fut
 
 
@@ -205,16 +214,18 @@ def rpc_sync(to, func, args=None, kwargs=None):
     Example::
         On worker 0:
         >>> import torch.distributed as dist
+        >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_model_parallel("worker0")
-        >>> ret = dist.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
-        >>> dist.join_rpc()
+        >>> rpc.init_model_parallel("worker0")
+        >>> ret = rpc.rpc_sync("worker1", torch.add, args=(torch.ones(2), 3))
+        >>> rpc.join_rpc()
 
         On worker 1:
         >>> import torch.distributed as dist
+        >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_model_parallel("worker1")
-        >>> dist.join_rpc()
+        >>> rpc.init_model_parallel("worker1")
+        >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
     return fut.wait()
@@ -245,92 +256,21 @@ def rpc_async(to, func, args=None, kwargs=None):
 
         On worker 0:
         >>> import torch.distributed as dist
+        >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_model_parallel("worker0")
-        >>> worker1 = dist.get_worker_id("worker1")
-        >>> fut1 = dist.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
-        >>> fut2 = dist.rpc_async(worker1, min, args=(1, 2))
+        >>> rpc.init_model_parallel("worker0")
+        >>> worker1 = rpc.get_worker_id("worker1")
+        >>> fut1 = rpc.rpc_async(worker1, torch.add, args=(torch.ones(2), 3))
+        >>> fut2 = rpc.rpc_async(worker1, min, args=(1, 2))
         >>> result = fut1.wait() + fut2.wait()
-        >>> dist.join_rpc()
+        >>> rpc.join_rpc()
 
         On worker 1:
         >>> import torch.distributed as dist
+        >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_model_parallel("worker1")
-        >>> dist.join_rpc()
+        >>> rpc.init_model_parallel("worker1")
+        >>> rpc.join_rpc()
     """
     fut = _invoke_rpc(to, func, args, kwargs)
     return fut
-
-
-@_require_initialized
-def rpc(to, func, args=None, kwargs=None, async_call=False):
-    r"""
-    Make an RPC call to run function ``func`` on worker ``to``. By default, it
-    blocks until the return value is locally available. RPC messages are sent
-    and received in parallel to execution of Python code. This method is
-    thread-safe.
-
-    Arguments:
-        to (int or str): id or name of the destination worker.
-        func (callable): any callable function. builtin functions (like
-                         ``torch.add``) can be sent over RPC more efficiently.
-        args (tuple): the argument tuple for the ``func`` invocation.
-        kwargs (dict): is a dictionary of keyword arguments for the ``func``
-                       invocation.
-        async_call (bool): If set to ``True``, this will be an asynchronous RPC,
-                           and returns a ``torch.distributed.FutureMessage``
-                           object immediately. Otherwise, this RPC will block
-                           until the return value is locally available.
-                           (default: ``False``)
-
-    Returns:
-        If ``async_call`` is ``False``, returns the result of running ``func``
-        on ``args`` and ``kwargs``. If ``async_call`` is ``True``, returns a
-        ``torch.distributed.FutureMessage`` object that can be waited on. When
-        completed, the return value of ``func`` on ``args`` and ``kwargs`` can
-        be retrieved from the ``FutureMessage`` object.
-
-    Example::
-
-        Synchronous example:
-
-        On worker 0:
-        >>> import torch.distributed as dist
-        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_model_parallel("worker0")
-        >>> ret = dist.rpc("worker1", torch.add, args=(torch.ones(2), 3))
-        >>> dist.join_rpc()
-
-        On worker 1:
-        >>> import torch.distributed as dist
-        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_model_parallel("worker1")
-        >>> dist.join_rpc()
-
-        Asynchronous example:
-
-        On worker 0:
-        >>> import torch.distributed as dist
-        >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> dist.init_model_parallel("worker0")
-        >>> worker1 = dist.get_worker_id("worker1")
-        >>> fut1 = dist.rpc(worker1, torch.add, args=(torch.ones(2), 3), async_call=True)
-        >>> fut2 = dist.rpc(worker1, min, args=(1, 2), async_call=True)
-        >>> result = fut1.wait() + fut2.wait()
-        >>> dist.join_rpc()
-
-        On worker 1:
-        >>> import torch.distributed as dist
-        >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_model_parallel("worker1")
-        >>> dist.join_rpc()
-    """
-    warnings.warn(
-        """dist.rpc is deprecated. Use dist.rpc_async for asynchronous
-    calls or dist.rpc_sync for synchronous calls instead."""
-    )
-    if async_call:
-        return rpc_async(to, func, args, kwargs)
-    else:
-        return rpc_sync(to, func, args, kwargs)

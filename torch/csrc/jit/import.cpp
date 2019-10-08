@@ -131,7 +131,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       (*type.type_->getMethod("__setstate__"))({obj, input});
       setGraphExecutorOptimize(true);
       postSetStateValidate(obj);
-      return std::move(obj);
+      return obj;
     } else {
       auto dict = std::move(input).toGenericDict();
       auto obj = c10::ivalue::Object::create(type, n);
