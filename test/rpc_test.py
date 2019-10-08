@@ -12,8 +12,7 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from common_utils import load_tests
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
-from torch.distributed import ProcessGroupAgent
-from torch.distributed.rpc import RpcBackend
+from torch.distributed.rpc import ProcessGroupAgent, RpcBackend
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 
 
