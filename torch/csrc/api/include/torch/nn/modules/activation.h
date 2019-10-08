@@ -334,8 +334,6 @@ TORCH_MODULE(Softshrink);
 /// about the exact behavior of this module.
 class TORCH_API SoftsignImpl : public torch::nn::Cloneable<SoftsignImpl> {
  public:
-  explicit SoftsignImpl() {}
-
   Tensor forward(const Tensor& input);
 
   void reset() override;
@@ -353,8 +351,6 @@ TORCH_MODULE(Softsign);
 /// about the exact behavior of this module.
 class TORCH_API TanhImpl : public torch::nn::Cloneable<TanhImpl> {
  public:
-  explicit TanhImpl() {}
-
   Tensor forward(const Tensor& input);
 
   void reset() override;
@@ -372,8 +368,6 @@ TORCH_MODULE(Tanh);
 /// about the exact behavior of this module.
 class TORCH_API TanhshrinkImpl : public torch::nn::Cloneable<TanhshrinkImpl> {
  public:
-  explicit TanhshrinkImpl() {}
-
   Tensor forward(const Tensor& input);
 
   void reset() override;
