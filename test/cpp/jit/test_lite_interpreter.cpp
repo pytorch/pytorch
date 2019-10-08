@@ -70,5 +70,27 @@ void testLiteInterpreterConv() {
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
+
+void testLiteInterpreterModel() {
+  std::vector<torch::jit::IValue> inputs;
+  inputs.push_back(torch::ones({1, 3, 224, 224})); //{1, 1, 28, 28} for lenet
+  auto m = load("/Users/myuan/data/fbnet/fbnet.pt");
+  auto ref = m.forward(inputs);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.run_method("forward", bcinputs);
+  }
+
+  auto reft = ref.toTensor();
+  auto rest = res.toTensor();
+  std::cout << reft.slice(/*dim=*/1, /*start=*/0, /*end=*/5) << std::endl;
+  std::cout << rest.slice(/*dim=*/1, /*start=*/0, /*end=*/5) << std::endl;
+}
+
 } // namespace torch
 } // namespace jit
