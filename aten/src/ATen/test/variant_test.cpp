@@ -17,13 +17,13 @@ namespace enumtype {
 } // namespace enumtype
 
 struct enum_name {
-  constexpr std::string operator()(enumtype::Enum1 v) const {
+  constexpr std::string operator()(enumtype::Enum1& v) const {
     return "Enum1";
   }
-  constexpr std::string operator()(enumtype::Enum2 v) const {
+  constexpr std::string operator()(enumtype::Enum2& v) const {
     return "Enum1";
   }
-  constexpr std::string operator()(enumtype::Enum3 v) const {
+  constexpr std::string operator()(enumtype::Enum3& v) const {
     return "Enum1";
   }
 };
