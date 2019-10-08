@@ -2275,7 +2275,7 @@ namespace c10 {
         std::is_nothrow_constructible<T, Arg>::value)
         : impl_(in_place_index_t<I>{}, lib::forward<Arg>(arg)) {
           static_assert(
-            std::is_same<I, detail_::best_match<Arg, Ts...>::value>::value,
+            std::is_same<I, detail_::best_match<Arg, Ts...>>::value,
             "Setting template parameter `I` to a custom non-default value is not supported. "
             "Please file a feature request if you see this.");
         }
@@ -2358,7 +2358,7 @@ namespace c10 {
         (std::is_nothrow_assignable<T &, Arg>::value &&
          std::is_nothrow_constructible<T, Arg>::value)) {
       static_assert(
-        std::is_same<I, detail_::best_match<Arg, Ts...>::value>::value,
+        std::is_same<I, detail_::best_match<Arg, Ts...>>::value,
         "Setting template parameter `I` to a custom non-default value is not supported. "
         "Please file a feature request if you see this.");
       impl_.template assign<I>(lib::forward<Arg>(arg));
