@@ -563,50 +563,42 @@ class TestQuantizedOps(TestCase):
            padding=st.integers(0, 2),
            ceil_mode=st.sampled_from((True, False)),
            count_include_pad=st.sampled_from((True, False)),
-           divisor_override=st.sampled_from((None, None)),
-           qengine=st.sampled_from(("qnnpack", "none")))
-    def test_avg_pool2d_nhwc(self, X, kernel, stride, padding, ceil_mode, count_include_pad, divisor_override, qengine):
+           divisor_override=st.sampled_from((None, None)))
+    def test_avg_pool2d_nhwc(self, X, kernel, stride, padding, ceil_mode, count_include_pad, divisor_override):
         """
         Note: 1) we currently cannot test the divisor_override, because quantized op will clamp the result
         within range. However, the float op will not.
         2) we cannot test the qint32, since the float point precision is much lower than int32 for big number,
         which will make the test be very flaky.
         """
-        with override_quantized_engine(qengine):
-            X, (scale, zero_point, torch_type) = X
-            H, W = X.shape[-2:]
-            if (qengine == 'qnnpack'):
-                ceil_mode = False
-                count_include_pad = True
-                torch_type = torch.quint8
-
-            if X.shape[1] < 176:
-                X = np.repeat(X, 176 / X.shape[1], 1)
-            X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
-            qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
-                                           zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
-            # Run reference on int_repr + round to avoid double rounding error.
-            X_ref = torch.nn.functional.avg_pool2d(
-                qX.int_repr().to(torch.double), kernel_size=kernel, stride=stride, padding=padding,
-                ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
-
-            self.assertTrue(qX.stride() != sorted(qX.stride()))
-            ops_under_test = {
-                "nn.functional": torch.nn.functional.avg_pool2d,
-                "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d
-            }
-            error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
-            for name, op in ops_under_test.items():
-                X_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
-                           count_include_pad=count_include_pad, divisor_override=divisor_override)
-                self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
-                self.assertEqual(X_ref, X_hat.int_repr().to(torch.double), prec=1.0,
-                                 message="{} results are off".format(name))
-                self.assertEqual(scale, X_hat.q_scale(),
-                                 message=error_message.format(name + '.scale', scale, X_hat.q_scale()))
-                self.assertEqual(zero_point, X_hat.q_zero_point(),
-                                 message=error_message.format(name + '.zero_point', scale,
-                                 X_hat.q_zero_point()))
+        X, (scale, zero_point, torch_type) = X
+        H, W = X.shape[-2:]
+        if X.shape[1] < 176:
+            X = np.repeat(X, 176 / X.shape[1], 1)
+        X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
+        qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
+                                       zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
+        # Run reference on int_repr + round to avoid double rounding error.
+        X_ref = torch.nn.functional.avg_pool2d(
+            qX.int_repr().to(torch.double), kernel_size=kernel, stride=stride, padding=padding,
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
+        self.assertTrue(qX.stride() != sorted(qX.stride()))
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.avg_pool2d,
+            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d
+        }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            X_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
+                       count_include_pad=count_include_pad, divisor_override=divisor_override)
+            self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
+            self.assertEqual(X_ref, X_hat.int_repr().to(torch.double), prec=1.0,
+                             message="{} results are off".format(name))
+            self.assertEqual(scale, X_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, X_hat.q_scale()))
+            self.assertEqual(zero_point, X_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                             X_hat.q_zero_point()))
 
     @no_deadline
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
