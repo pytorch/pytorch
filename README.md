@@ -175,7 +175,7 @@ conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
 On Linux
 ```bash
 # Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda90 # or [magma-cuda92 | magma-cuda100 ] depending on your cuda version
+conda install -c pytorch magma-cuda90 # or [magma-cuda92 | magma-cuda100 | magma-cuda101 ] depending on your cuda version
 ```
 
 #### Get the PyTorch Source
