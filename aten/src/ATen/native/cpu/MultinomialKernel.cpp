@@ -60,7 +60,7 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
       cum_dist_ptr[j * cum_dist_stride_0] = sum;
     }
 
-    if (!exceed_precision) {
+    if (!lost_precision) {
       TORCH_CHECK(sum > 0, "invalid multinomial distribution (sum of probabilities <= 0)");
       TORCH_CHECK(with_replacement || (n_categories - n_zeros >= n_sample),
                   "invalid multinomial distribution (with replacement=False, not enough non-negative category to sample)");
