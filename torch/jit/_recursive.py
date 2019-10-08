@@ -20,8 +20,13 @@ blacklist = [
     "_parameters",
     "_buffers",
     "_modules",
-    "dump_patches",
     "_initializing",
+    "_backward_hooks",
+    "_forward_hooks",
+    "_forward_pre_hooks",
+    "_state_dict_hooks",
+    "_load_state_dict_pre_hooks",
+    "dump_patches",
 ]
 
 def make_stub(func):
@@ -322,8 +327,8 @@ def create_script_module(nn_module, stubs, fresh_type=False):
             setattr(script_module, name, item)
 
     script_module._concrete_type = concrete_type
+
     # finalize here so that everything is correctly available when we are compiling
-    # TODO: seem finnicky
     script_module._finalize()
 
     # Compile methods if necessary

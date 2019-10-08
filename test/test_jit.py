@@ -3521,6 +3521,46 @@ def foo(x):
         # shouldn't throw a type error
         torch.jit.script(MyMod())
 
+    def test_eval_python(self):
+        def _test(m):
+            self.assertTrue(m(torch.ones(2, 2)))
+            self.assertTrue(m.training)
+            self.assertTrue(m._c._get_attribute('training'))
+
+            m.eval()
+
+            self.assertFalse(m.training)
+            self.assertFalse(m._c._get_attribute('training'))
+            self.assertFalse(m(torch.ones(2, 2)))
+
+            if not PY2:
+                buffer = io.BytesIO()
+                torch.jit.save(m, buffer)
+                buffer.seek(0)
+
+                loaded = torch.jit.load(buffer)
+
+                self.assertFalse(loaded.training)
+                self.assertFalse(loaded._c._get_attribute('training'))
+
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x):
+                return self.training
+
+        class OldM(torch.jit.ScriptModule):
+            def __init__(self):
+                super(OldM, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.training
+
+        _test(torch.jit.script(M()))
+        _test(OldM())
+
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
             def __init__(self):
@@ -8379,7 +8419,7 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return (3, True)
+                return (3, self.training)
 
             @torch.jit.export
             def __setstate__(self, state):
@@ -8410,7 +8450,7 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return (3, True)
+                return (3, self.training)
 
             @torch.jit.export
             def __setstate__(self, state):
@@ -15321,7 +15361,7 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return torch.ops.quantized.linear_unpack(self._packed_weight)[0]
+                return (torch.ops.quantized.linear_unpack(self._packed_weight)[0], self.training)
 
             def forward(self):
                 return self._packed_weight
@@ -15329,7 +15369,8 @@ a")
             @torch.jit.export
             def __setstate__(self, state):
                 self._packed_weight.set_(
-                    torch.ops.quantized.linear_prepack(state))
+                    torch.ops.quantized.linear_prepack(state[0]))
+                self.training = state[1]
 
             @property
             def weight(self):
@@ -20566,8 +20607,6 @@ class TestTypeSharing(JitTestCase):
         a = torch.jit.script(M(torch.ones(1)))
         b = torch.jit.script(M(torch.ones(2)))
         self.assertSameType(a, b)
-        print(a())
-        print(b())
         self.assertNotEqual(a(), b())
 
 for test in autograd_method_tests():

@@ -1578,6 +1578,10 @@ if _enabled:
             self.__dict__['_initializing'] = True
             self._c = cpp_module
             super(RecursiveScriptModule, self).__init__()
+            # Delete the 'training' attribute set up by `Module.__init__`. It
+            # will get set on the underlying cpp module, so we delete it here
+            # to avoid this version shadowing the cpp module version.
+            delattr(self, 'training')
 
         def _finalize(self):
             self._parameters = OrderedParameterDict(self._c)
