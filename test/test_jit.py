@@ -3443,6 +3443,46 @@ def foo(x):
         mod = torch.jit.script(MyMod())
         FileCheck().check_dag("NamedTuple").check_dag("Exception").run(mod.forward.graph)
 
+    def test_eval_python(self):
+        def _test(m):
+            self.assertTrue(m(torch.ones(2, 2)))
+            self.assertTrue(m.training)
+            self.assertTrue(m._c._get_attribute('training'))
+
+            m.eval()
+
+            self.assertFalse(m.training)
+            self.assertFalse(m._c._get_attribute('training'))
+            self.assertFalse(m(torch.ones(2, 2)))
+
+            if not PY2:
+                buffer = io.BytesIO()
+                torch.jit.save(m, buffer)
+                buffer.seek(0)
+
+                loaded = torch.jit.load(buffer)
+
+                self.assertFalse(loaded.training)
+                self.assertFalse(loaded._c._get_attribute('training'))
+
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x):
+                return self.training
+
+        class OldM(torch.jit.ScriptModule):
+            def __init__(self):
+                super(OldM, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.training
+
+        _test(torch.jit.script(M()))
+        _test(OldM())
+
     def test_inherit_method(self):
         class A(torch.jit.ScriptModule):
             def __init__(self):
@@ -3955,7 +3995,7 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        fc = FileCheck().check(':6:11')
+        fc = FileCheck().check(':7:11')
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -8316,11 +8356,12 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return (3,)
+                return (3, self.training)
 
             @torch.jit.export
             def __setstate__(self, state):
                 self.a = state[0]
+                self.training = state[1]
 
             def forward(self, x):
                 return x + self.a
@@ -8346,11 +8387,12 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return (3,)
+                return (3, self.training)
 
             @torch.jit.export
             def __setstate__(self, state):
                 self.a = state[0]
+                self.training = state[1]
 
             def forward(self, x):
                 return x + self.a
@@ -13476,12 +13518,13 @@ a")
 
             @torch.jit.script_method
             def __getstate__(self):
-                return (self.buffer1, self.buffer2, 74)
+                return (self.buffer1, self.buffer2, 74, self.training)
 
             @torch.jit.script_method
             def __setstate__(self, state):
                 self.buffer1 = state[0] + 10
                 self.buffer2 = state[1] + 10
+                self.training = state[3]
 
 
         class M(torch.jit.ScriptModule):
@@ -13496,13 +13539,14 @@ a")
 
             @torch.jit.script_method
             def __getstate__(self):
-                return (self.buffer1, self.buffer2, 74, self.submodule)
+                return (self.buffer1, self.buffer2, 74, self.submodule, self.training)
 
             @torch.jit.script_method
             def __setstate__(self, state):
                 self.buffer1 = state[0] + 10
                 self.buffer2 = state[1] + 10
                 self.submodule = state[3]
+                self.training = state[4]
 
         with TemporaryFileName() as fname:
             m = M(23, submodule=Root(99))
@@ -13533,12 +13577,13 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return 5
+                return (5, self.training)
 
             @torch.jit.export
             def __setstate__(self, state):
-                self.buffer1 = torch.ones(2, 2) + state
+                self.buffer1 = torch.ones(2, 2) + state[0]
                 self.buffer2 = torch.ones(2, 2) + 10
+                self.training = state[1]
 
         with TemporaryFileName() as fname:
             m = torch.jit.script(NoArgState())
@@ -15164,12 +15209,13 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return (self.tensor,)
+                return (self.tensor, self.training)
 
             @torch.jit.export
             def __setstate__(self, state):
-                # type: (Tuple[Tensor])
+                # type: (Tuple[Tensor, bool])
                 self.tensor = state[0]
+                self.training = state[1]
 
             def forward(self, x):
                 return x + self.tensor
@@ -15249,7 +15295,7 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return torch.ops.quantized.linear_unpack(self._packed_weight)[0]
+                return (torch.ops.quantized.linear_unpack(self._packed_weight)[0], self.training)
 
             def forward(self):
                 return self._packed_weight
@@ -15257,7 +15303,8 @@ a")
             @torch.jit.export
             def __setstate__(self, state):
                 self._packed_weight.set_(
-                    torch.ops.quantized.linear_prepack(state))
+                    torch.ops.quantized.linear_prepack(state[0]))
+                self.training = state[1]
 
             @property
             def weight(self):
@@ -19720,43 +19767,43 @@ class TestClassType(JitTestCase):
                 return as_interface(x)
 
         # Test interface/class python assignment
-        with torch.jit._disable_emit_hooks():
-            class TestPyAssign(nn.Module):
-                def __init__(self):
-                    super(TestPyAssign, self).__init__()
-                    self.proxy_mod = Foo()
+        class TestPyAssign(nn.Module):
+            def __init__(self):
+                super(TestPyAssign, self).__init__()
+                self.proxy_mod = Foo()
 
-                def forward(self, x):
-                    return self.proxy_mod.two(x)
+            def forward(self, x):
+                return self.proxy_mod.two(x)
 
-            TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
+        TestPyAssign.__annotations__ = {'proxy_mod': OneTwo}
 
-            input = torch.rand(3, 4)
-            scripted_pyassign_mod = torch.jit.script(TestPyAssign())
-            self.assertEqual(scripted_pyassign_mod(input), 2 * input)
+        input = torch.rand(3, 4)
+        scripted_pyassign_mod = torch.jit.script(TestPyAssign())
+        imported_mod = self.getExportImportCopy(scripted_pyassign_mod)
+        self.assertEqual(scripted_pyassign_mod(input), imported_mod(input))
 
-            class TestPyAssignError(nn.Module):
-                def __init__(self, obj):
-                    super(TestPyAssignError, self).__init__()
-                    self.proxy_mod = obj
+        class TestPyAssignError(nn.Module):
+            def __init__(self, obj):
+                super(TestPyAssignError, self).__init__()
+                self.proxy_mod = obj
 
-                def forward(self, x):
-                    return self.proxy_mod.two(x)
+            def forward(self, x):
+                return self.proxy_mod.two(x)
 
-            TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
+        TestPyAssignError.__annotations__ = {'proxy_mod': OneTwoThree}
 
-            with self.assertRaisesRegex(RuntimeError,
-                                        "is not compatible with interface __torch__"):
-                torch.jit.script(TestPyAssignError(Foo()))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "is not compatible with interface __torch__"):
+            torch.jit.script(TestPyAssignError(Foo()))
 
-            # test pure python object assignment to interface fails
-            class PyClass(object):
-                def __init__(self):
-                    pass
+        # test pure python object assignment to interface fails
+        class PyClass(object):
+            def __init__(self):
+                pass
 
-            with self.assertRaisesRegex(RuntimeError,
-                                        "the value is not a TorchScript compatible type"):
-                torch.jit.script(TestPyAssignError(PyClass()))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "the value is not a TorchScript compatible type"):
+            torch.jit.script(TestPyAssignError(PyClass()))
         # TODO test: interface-interface class-interface inheritance errors,
         # NamedTuple inheritance errors
 
