@@ -155,15 +155,19 @@ struct TORCH_API Engine {
       GraphTask& graph_task,
       std::shared_ptr<Node> graph_root);
 
-  // Enqueues a task for execution on the CPU thread. This method assumes that
+  // Enqueues a blocked task for execution on the CPU thread. A blocked task is
+  // basically a task that isn't triggered automatically to be
+  // 'ready to execute' by the autograd engine. This task needs to be unblocked
+  // for execution via an external mechanism. This method assumes that
   // the appropriate GraphTask has already been initialized appropriately.
   // Another important part is that this does not increment 'outstanding_tasks_'
   // in the appropriate GraphTask. It is assumed we've already done this before
-  // hand for this task. This is useful in the distributed autograd case where
-  // we need to increment 'outstanding_tasks_' first to indicate the local
-  // autograd engine needs to wait for this task, but the task might actually
-  // be received later over the network for execution.
-  void enqueue_on_cpu(NodeTask task);
+  // hand for this task (to ensure we block for its execution). This is useful
+  // in the distributed autograd case where we need to increment
+  // 'outstanding_tasks_' first to indicate the local autograd engine needs to
+  // wait for this task, but the task might actually be received later over the
+  // network for execution.
+  void enqueue_blocked_task_on_cpu(NodeTask task);
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
     return nullptr;

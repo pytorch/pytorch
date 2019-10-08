@@ -1,12 +1,13 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_udf_call.h>
 #include <torch/csrc/distributed/rpc/python_udf_resp.h>
+#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
-#include <torch/csrc/distributed/rpc/script_rref_proto.h>
 
 namespace torch {
 namespace distributed {
@@ -20,17 +21,26 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
     case MessageType::PYTHON_CALL: {
       return PythonUDFCall::fromMessage(request);
     }
-    case MessageType::REMOTE_CALL: {
+    case MessageType::SCRIPT_REMOTE_CALL: {
       return ScriptRemoteCall::fromMessage(request);
     }
-    case MessageType::RREF_FETCH_CALL: {
+    case MessageType::PYTHON_REMOTE_CALL: {
+      return PythonRemoteCall::fromMessage(request);
+    }
+    case MessageType::SCRIPT_RREF_FETCH_CALL: {
       return ScriptRRefFetchCall::fromMessage(request);
     }
-    case MessageType::RREF_USER_CREATE: {
-      return ScriptRRefCreate::fromMessage(request);
+    case MessageType::PYTHON_RREF_FETCH_CALL: {
+      return PythonRRefFetchCall::fromMessage(request);
     }
     case MessageType::RREF_USER_DELETE: {
-      return ScriptRRefDelete::fromMessage(request);
+      return RRefUserDelete::fromMessage(request);
+    }
+    case MessageType::RREF_CHILD_ACCEPT: {
+      return RRefChildAccept::fromMessage(request);
+    }
+    case MessageType::RREF_FORK_REQUEST: {
+      return RRefForkRequest::fromMessage(request);
     }
     case MessageType::MESSAGE_WITH_AUTOGRAD_REQ: {
       return autograd::RpcWithAutograd::fromMessage(request);
@@ -52,6 +62,15 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
     }
     case MessageType::PYTHON_RET: {
       return PythonUDFResp::fromMessage(response);
+    }
+    case MessageType::REMOTE_RET: {
+      return RemoteRet::fromMessage(response);
+    }
+    case MessageType::RREF_FETCH_RET: {
+      return RRefFetchRet::fromMessage(response);
+    }
+    case MessageType::RREF_ACK: {
+      return RRefAck::fromMessage(response);
     }
     case MessageType::EXCEPTION: {
       std::string err(response.payload().begin(), response.payload().end());

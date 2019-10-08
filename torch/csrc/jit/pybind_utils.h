@@ -143,6 +143,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPQScheme_Check(input.ptr())) {
     return InferredType(IntType::get());
+  } else if (THPLayout_Check(input.ptr())) {
+    return InferredType(IntType::get());
   }
 
   // Try container types
@@ -321,14 +323,14 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
 }
 
 inline IValue createGenericDict(
-    py::handle obj,
+    py::dict obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
-  for (auto key : obj) {
+  for (auto entry : obj) {
     elems.insert(
-        toIValue(key, key_type), toIValue(obj[key], value_type));
+        toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
   return IValue(std::move(elems));
 }
@@ -369,6 +371,10 @@ inline IValue toIValue(
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
         return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
@@ -445,7 +451,7 @@ inline IValue toIValue(
     case TypeKind::DictType: {
       const auto& dict_type = type->expect<DictType>();
       return createGenericDict(
-          obj, dict_type->getKeyType(), dict_type->getValueType());
+          py::cast<py::dict>(obj), dict_type->getKeyType(), dict_type->getValueType());
     }
     case TypeKind::OptionalType: {
       // check if it's a none obj since optional accepts NoneType
@@ -474,6 +480,37 @@ inline IValue toIValue(
       }
       return userObj;
     }
+    case TypeKind::InterfaceType: {
+      auto interfaceType = type->expect<InterfaceType>();
+      // When converting an pyobj to an interface, we inspect the value
+      // to found the compiled TorchScript class, check if it conform
+      // with the interface or not, and then create a ivalue::Object
+      // from that class type.
+      py::str qualified_name = py::module::import("torch.jit")
+                                   .attr("_qualified_name")(obj.get_type());
+      auto pyCu = get_python_cu();
+      const auto classType =
+          pyCu->get_class(c10::QualifiedName(qualified_name));
+      if (!classType) {
+        throw std::runtime_error(c10::str(
+            "Assigning the object ",
+            py::str(obj),
+            " to an interface fails because the value is not "
+            "a TorchScript compatible type, did you forget to",
+            "turn it into a user defined TorchScript class?"));
+      }
+      std::stringstream why_not;
+      if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
+        throw py::cast_error(c10::str(
+            "Object ",
+            py::str(obj),
+            " is not compatible with interface ",
+            interfaceType->python_str(),
+            "\n",
+            why_not.str()));
+      }
+      return toIValue(std::move(obj), classType);
+    }
     case TypeKind::NumberType: {
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
@@ -482,6 +519,10 @@ inline IValue toIValue(
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
         return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
       }
       if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
@@ -492,7 +533,6 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
-    case TypeKind::InterfaceType:
       break;
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");

@@ -61,16 +61,13 @@ void DistEngine::computeDependencies(
     DistAutogradContext& autogradContext,
     const edge_list& rootEdges,
     const variable_list& grads,
-    std::shared_ptr<Node>& graphRoot,
+    std::shared_ptr<Node> graphRoot,
     edge_list& outputEdges) {
+  TORCH_INTERNAL_ASSERT(graphRoot, "graphRoot is null!");
+
   // Build the graph task and graph root.
   auto graphTask = std::unique_ptr<GraphTask>(new GraphTask(
       /* keep_graph */ false, /* create_graph */ false, /* depth */ 0));
-
-  if (graphRoot == nullptr) {
-    // Create a graphRoot only if needed.
-    graphRoot = std::make_shared<GraphRoot>(rootEdges, grads);
-  }
 
   // Run BFS to traverse the graph locally. The roots of the graph are
   // GraphRoot and all send functions for this autograd context.
@@ -82,13 +79,10 @@ void DistEngine::computeDependencies(
 
   // Add all the send functions to the queue as roots.
   for (const auto& mapEntry : sendFunctions) {
-    // Make sure we don't enqueue the same function twice.
-    if (mapEntry.second != graphRoot) {
-      // Increment 'outstanding_tasks_' for GraphTask for each send_function
-      // since we want the local autograd engine to wait for all of them.
-      graphTask->outstanding_tasks_++;
-      queue.push(mapEntry.second.get());
-    }
+    // Increment 'outstanding_tasks_' for GraphTask for each send_function
+    // since we want the local autograd engine to wait for all of them.
+    graphTask->outstanding_tasks_++;
+    queue.push(mapEntry.second.get());
   }
 
   edge_list recvBackwardEdges;
@@ -210,20 +204,28 @@ void DistEngine::executeSendFunction(
   if (initializedContextIds_.find(autogradContext.contextId()) ==
       initializedContextIds_.end()) {
     edge_list outputEdges;
-    computeDependencies(autogradContext, {}, {}, sendFunction, outputEdges);
+    // Pass in a dummy graphRoot since all send functions are the roots.
+    auto dummyRoot = std::make_shared<GraphRoot>(edge_list(), variable_list());
+    computeDependencies(autogradContext, {}, {}, dummyRoot, outputEdges);
 
     // Mark the autograd context id as initialized and unlock.
     initializedContextIds_.insert(autogradContext.contextId());
     lock.unlock();
 
-    runEngineAndAccumulateGradients(autogradContext, sendFunction, outputEdges);
+    // Enqueue the current send function.
+    auto& graphTask = autogradContext.retrieveGraphTask();
+    engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
+        &graphTask, sendFunction, torch::autograd::InputBuffer(0)));
+
+    // Run the autograd engine.
+    runEngineAndAccumulateGradients(autogradContext, dummyRoot, outputEdges);
 
     // Wait for all of the outstanding rpcs to complete.
     autogradContext.waitForOutStandingRpcs();
   } else {
     lock.unlock();
     auto& graphTask = autogradContext.retrieveGraphTask();
-    engine_.enqueue_on_cpu(torch::autograd::NodeTask(
+    engine_.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
         &graphTask, sendFunction, torch::autograd::InputBuffer(0)));
   }
 }
@@ -239,7 +241,8 @@ void DistEngine::execute(const variable_list& roots) {
   variable_list grads;
   validateRootsAndRetrieveEdges(roots, rootEdges, grads);
 
-  std::shared_ptr<Node> graphRoot;
+  std::shared_ptr<Node> graphRoot =
+      std::make_shared<GraphRoot>(rootEdges, grads);
   edge_list outputEdges;
   // Compute dependencies locally, starting from all roots and all 'send'
   // functions.

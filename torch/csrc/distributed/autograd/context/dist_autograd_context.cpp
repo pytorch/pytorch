@@ -74,6 +74,9 @@ torch::autograd::GraphTask& DistAutogradContext::retrieveGraphTask() {
 void DistAutogradContext::setGraphTask(
     std::unique_ptr<torch::autograd::GraphTask> graphTask) {
   std::lock_guard<std::mutex> guard(lock_);
+  TORCH_INTERNAL_ASSERT(
+      !graphTask_,
+      "Cannot set GraphTask multiple times for the same autograd context");
   graphTask_ = std::move(graphTask);
 }
 

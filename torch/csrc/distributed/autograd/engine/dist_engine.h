@@ -70,7 +70,7 @@ class TORCH_API DistEngine {
       DistAutogradContext& context,
       const torch::autograd::edge_list& rootEdges,
       const torch::autograd::variable_list& grads,
-      std::shared_ptr<torch::autograd::Node>& graphRoot,
+      std::shared_ptr<torch::autograd::Node> graphRoot,
       torch::autograd::edge_list& outputEdges);
 
   // Run the local autograd engine using the provided graphTask and graphRoot

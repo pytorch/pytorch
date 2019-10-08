@@ -22,7 +22,7 @@ Message createException(const Message& request, const std::exception& e) {
 
 } // anonymous namespace
 
-Message RequestCallback::operator()(Message& request) {
+Message RequestCallback::operator()(Message& request) const {
   try {
     return processMessage(request);
   } catch (std::exception& e) {

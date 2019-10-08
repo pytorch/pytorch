@@ -85,8 +85,8 @@ struct ReadyQueue {
 
   // incrementOutStandingTasks indicates whether or not we should increment
   // 'outstanding_tasks_' for the associated GraphTask. This should mostly
-  // always be true, see the doc for 'enqueue_on_cpu' for when we might set
-  // this to false.
+  // always be true, see the doc for 'enqueue_blocked_task_on_cpu' for when we
+  // might set this to false.
   void push(NodeTask item, bool incrementOutStandingTasks = true);
   void pushShutdownTask();
   NodeTask pop();
@@ -637,8 +637,6 @@ auto Engine::execute(const edge_list& roots,
                      bool keep_graph,
                      bool create_graph,
                      const edge_list& outputs) -> variable_list {
-  std::call_once(start_threads_flag_, &Engine::start_threads, this);
-
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
@@ -660,7 +658,7 @@ auto Engine::execute(const edge_list& roots,
   return execute_with_graph_task(graph_task, graph_root);
 }
 
-void Engine::enqueue_on_cpu(NodeTask task) {
+void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
   std::call_once(start_threads_flag_, &Engine::start_threads, this);
   ready_queue(at::kCPU).push(
       std::move(task), /* incrementOutStandingTasks */ false);

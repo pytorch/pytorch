@@ -13,7 +13,6 @@ const Message& FutureMessage::wait() {
     std::string err(message_.payload().begin(), message_.payload().end());
     throw std::runtime_error(err);
   }
-
   return message_;
 }
 
@@ -48,7 +47,7 @@ void FutureMessage::addCallback(const FutureMessage::Callback& callback) {
 }
 
 void FutureMessage::fireCallbacks() {
-  TORCH_CHECK(completed(), "Firing callbacks_ on incomplete FutureMessage.");
+  TORCH_CHECK(completed(), "Firing callbacks on incomplete FutureMessage.");
   // There is no need to protect callbacks_ with the lock.
   // Once completed_ is set to true, no one can add new callback to the list.
   for (auto& callback : callbacks_) {

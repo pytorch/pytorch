@@ -53,7 +53,8 @@ class TORCH_API DistAutogradContext {
   // Retrieve the GraphTask.
   torch::autograd::GraphTask& retrieveGraphTask();
 
-  // Set the appropriate graph task.
+  // Set the appropriate graph task for the backward pass. Can be called only
+  // once.
   void setGraphTask(std::unique_ptr<torch::autograd::GraphTask> graphTask);
 
   // Adds a future message recording an outstanding RPC.

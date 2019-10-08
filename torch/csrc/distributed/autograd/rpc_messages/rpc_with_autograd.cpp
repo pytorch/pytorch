@@ -89,10 +89,13 @@ Message RpcWithAutograd::toMessage() && {
 
 std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
     const Message& message) {
+  MessageType originalMessageType = message.type();
   TORCH_INTERNAL_ASSERT(
-      MessageType::MESSAGE_WITH_AUTOGRAD_REQ == message.type() ||
-      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == message.type());
+      MessageType::MESSAGE_WITH_AUTOGRAD_REQ == originalMessageType ||
+      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == originalMessageType);
 
+  std::vector<torch::Tensor> tensors = message.tensors();
+  int64_t messageId = message.id();
   // Decode message type, autograd context id, autograd message id and worker
   // id.
   auto payload = message.payload();
@@ -128,24 +131,23 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   payload.resize(payload.size() - autogradPayLoadSize);
 
   // Create new message type and build wrapped RPC.
-  std::vector<torch::Tensor> tensors = message.tensors();
   Message wrappedMessage(
-      std::move(payload), std::move(tensors), wrappedMessageType, message.id());
+      std::move(payload), std::move(tensors), wrappedMessageType, messageId);
 
   std::unique_ptr<RpcCommandBase> wrappedRpc;
-  if (message.type() == MessageType::MESSAGE_WITH_AUTOGRAD_REQ) {
-    wrappedRpc = std::move(deserializeRequest(wrappedMessage));
+  if (originalMessageType == MessageType::MESSAGE_WITH_AUTOGRAD_REQ) {
+    wrappedRpc = deserializeRequest(wrappedMessage);
   } else {
-    wrappedRpc = std::move(deserializeResponse(wrappedMessage));
+    wrappedRpc = deserializeResponse(wrappedMessage);
   }
 
   return c10::guts::make_unique<RpcWithAutograd>(
       workerId,
-      message.type(),
+      originalMessageType,
       autogradMetadata,
       std::move(wrappedRpc),
       wrappedMessageType,
-      message.tensors());
+      std::move(tensors));
 }
 
 std::vector<torch::Tensor>& RpcWithAutograd::tensors() {
