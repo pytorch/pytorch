@@ -100,6 +100,14 @@ class DistAutogradTest(object):
                 dist_autograd._retrieve_context(context_id)
 
     @dist_init
+    def test_nested_context(self):
+        with dist_autograd.context() as context_id:
+            # Nested contexts not supported.
+            with self.assertRaisesRegex(RuntimeError, "Already have an autograd context id for this thread"):
+                with dist_autograd.context() as context_id:
+                    pass
+
+    @dist_init
     def test_autograd_functions(self):
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:

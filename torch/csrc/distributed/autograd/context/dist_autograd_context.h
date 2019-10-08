@@ -60,11 +60,12 @@ class TORCH_API DistAutogradContext {
   // Adds a future message recording an outstanding RPC.
   void addOutStandingRpc(std::shared_ptr<rpc::FutureMessage> futureMessage);
 
-  // Waits for all outstanding RPCs for this context to finish.
-  void waitForOutStandingRpcs();
+  // Waits for all outstanding RPCs for this context to finish and clears all
+  // outstanding rpcs held in this context. This should be called only once.
+  void clearAndWaitForOutStandingRpcs();
 
   // Returns all gradients.
-  const c10::Dict<torch::Tensor, torch::Tensor>& getGradients() const;
+  const c10::Dict<torch::Tensor, torch::Tensor> getGradients() const;
 
   DistAutogradContext(const DistAutogradContext&) = delete;
   DistAutogradContext& operator=(const DistAutogradContext&) = delete;

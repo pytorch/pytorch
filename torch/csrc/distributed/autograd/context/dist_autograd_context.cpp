@@ -86,10 +86,11 @@ void DistAutogradContext::addOutStandingRpc(
   outStandingRpcs_.push_back(futureMessage);
 }
 
-void DistAutogradContext::waitForOutStandingRpcs() {
+void DistAutogradContext::clearAndWaitForOutStandingRpcs() {
   // Copy futures under lock, but wait for them outside the lock.
   std::unique_lock<std::mutex> lock(lock_);
   auto outStandingRpcs = outStandingRpcs_;
+  outStandingRpcs_.clear();
   lock.unlock();
 
   for (const auto& outStandingRpc : outStandingRpcs) {
@@ -108,8 +109,9 @@ std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
   return it->second;
 }
 
-const c10::Dict<torch::Tensor, torch::Tensor>& DistAutogradContext::
+const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
     getGradients() const {
+  std::lock_guard<std::mutex> guard(lock_);
   return accumulatedGrads_;
 }
 

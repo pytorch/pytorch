@@ -130,14 +130,13 @@ void DistEngine::computeDependencies(
 
   // Now lets compute which functions need to be executed. The algorithm is as
   // follows:
-  // 1. Use 'init_to_execute' with the existing GraphRoot and outputEdges.
-  // 2. Create a dummy GraphRoot which points to all 'send' functions for this
-  //    context and run 'init_to_execute' again, but with empty 'outputs'
-  //    (since we already processed outputs in 1.). This ensures we mark
+  // 1. Create a dummy GraphRoot which points to all 'send' functions for this
+  //    context and the original graphRoot. Run 'init_to_execute' with the
+  //    outputEdges and the dummy GraphRoot. This ensures we mark
   //    appropriate functions as needed if they are reachable only from a
   //    specific 'send' function locally and not necessarily from the provided
   //    roots.
-  // 3. For all edges in 'outputEdges' which point to 'RecvRpcBackward', mark
+  // 2. For all edges in 'outputEdges' which point to 'RecvRpcBackward', mark
   //    those functions as needed for execution. The reason for this is that
   //    'init_to_execute', will mark these as not needed. But 'RecvRpcBackward'
   //    is unique in the sense that we use it as a leaf node in graph to compute
@@ -221,7 +220,7 @@ void DistEngine::executeSendFunction(
     runEngineAndAccumulateGradients(autogradContext, dummyRoot, outputEdges);
 
     // Wait for all of the outstanding rpcs to complete.
-    autogradContext.waitForOutStandingRpcs();
+    autogradContext.clearAndWaitForOutStandingRpcs();
   } else {
     lock.unlock();
     auto& graphTask = autogradContext.retrieveGraphTask();
@@ -263,7 +262,7 @@ void DistEngine::execute(const variable_list& roots) {
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
 
   // Wait for all of the outstanding rpcs to complete.
-  autogradContext.waitForOutStandingRpcs();
+  autogradContext.clearAndWaitForOutStandingRpcs();
 }
 
 } // namespace autograd
