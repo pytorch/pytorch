@@ -557,9 +557,9 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
-                       qparams=hu.qparams(dtypes=torch.quint8)),
+                       qparams=hu.qparams(dtypes=torch.qint8)),
            kernel=st.sampled_from((4, 5)),
-           stride=st.sampled_from((None, 1, 2)),
+           stride=st.sampled_from((1, 2)),
            padding=st.integers(0, 2),
            ceil_mode=st.sampled_from((True, False)),
            count_include_pad=st.sampled_from((True, False)),
@@ -578,6 +578,8 @@ class TestQuantizedOps(TestCase):
             if (qengine == 'qnnpack'):
                 ceil_mode = False
                 count_include_pad = True
+                torch_type = torch.quint8
+
             if X.shape[1] < 176:
                 X = np.repeat(X, 176 / X.shape[1], 1)
             X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
