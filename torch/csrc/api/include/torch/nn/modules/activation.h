@@ -240,6 +240,8 @@ TORCH_MODULE(CELU);
 /// about the exact behavior of this module.
 class TORCH_API SigmoidImpl : public torch::nn::Cloneable<SigmoidImpl> {
  public:
+  explicit SigmoidImpl() {};
+
   Tensor forward(const Tensor& input);
 
   void reset() override;
@@ -279,8 +281,7 @@ TORCH_MODULE(Softplus);
 /// about the exact behavior of this module.
 class TORCH_API SoftshrinkImpl : public torch::nn::Cloneable<SoftshrinkImpl> {
  public:
-  SoftshrinkImpl() : SoftshrinkImpl(SoftshrinkOptions()) {}
-  explicit SoftshrinkImpl(const SoftshrinkOptions& options_);
+  explicit SoftshrinkImpl(const SoftshrinkOptions& options_ = {});
 
   Tensor forward(const Tensor& input);
 
