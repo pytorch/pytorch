@@ -263,8 +263,8 @@ class RNNBase(Module):
         replica = super(RNNBase, self)._replicate_for_data_parallel()
         # Need to copy these caches, otherwise the replica will share the same
         # flat weights list.
-        replica._flat_weights = replica._flat_weights.copy()
-        replica._flat_weights_names = replica._flat_weights_names.copy()
+        replica._flat_weights = replica._flat_weights[:]
+        replica._flat_weights_names = replica._flat_weights_names[:]
         return replica
 
 
