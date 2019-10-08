@@ -339,6 +339,7 @@ The following operators are supported:
 * avg_pool2d
 * avg_pool2d
 * avg_pool3d
+* baddbmm
 * cat
 * ceil
 * clamp
@@ -346,6 +347,7 @@ The following operators are supported:
 * clamp_min
 * concat
 * cos
+* cumsum
 * dim_arange
 * div
 * dropout
@@ -357,10 +359,12 @@ The following operators are supported:
 * expand_as
 * flatten
 * floor
+* frobenius_norm
 * full
 * full_like
 * gather
 * ge
+* gelu
 * glu
 * gt
 * hardtanh
@@ -368,11 +372,13 @@ The following operators are supported:
 * index_fill
 * index_select
 * instance_norm
+* interpolate
 * isnan
 * layer_norm
 * le
 * leaky_relu
 * log
+* log1p
 * log2
 * log_sigmoid
 * log_softmax
@@ -384,6 +390,7 @@ The following operators are supported:
 * min
 * mm
 * mul
+* multinomial
 * narrow
 * ne
 * neg
@@ -407,7 +414,9 @@ The following operators are supported:
 * replication_pad
 * reshape
 * reshape_as
+* round
 * rrelu
+* rsqrt
 * rsub
 * scatter
 * scatter_add
@@ -420,10 +429,12 @@ The following operators are supported:
 * slice
 * softmax
 * softplus
+* sort
 * split
 * sqrt
 * squeeze
 * stack
+* std
 * sub (nonzero alpha not supported)
 * sum
 * t
@@ -435,6 +446,7 @@ The following operators are supported:
 * transpose
 * type_as
 * unfold (experimental support with ATen-Caffe2 integration)
+* unique
 * unsqueeze
 * upsample_nearest1d
 * upsample_nearest2d
@@ -668,7 +680,8 @@ Q: Does ONNX support implicit scalar datatype casting?
 
   No, but the exporter will try to handle that part.  Scalars are converted to constant tensors in ONNX.
   The exporter will try to figure out the right datatype for scalars.  However for cases that it failed
-  to do so, you will need to manually provide the datatype information.  We are trying to improve the datatype
+  to do so, you will need to manually provide the datatype information.  This often happens with scripted models,
+  where the datatypes are not recorded.  We are trying to improve the datatype
   propagation in the exporter such that manual changes are not required in the future. ::
 
     class ImplicitCastType(torch.jit.ScriptModule):
