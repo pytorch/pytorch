@@ -470,6 +470,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
   endif()
 
+  if (USE_NCCL)
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
+  endif()
+
   if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
@@ -611,6 +616,11 @@ ELSEIF(USE_CUDA)
 ELSE()
   add_library(torch ${Caffe2_CPU_SRCS})
 ENDIF()
+
+if (USE_NCCL)
+  target_link_libraries(torch PRIVATE __caffe2_nccl)
+  target_compile_definitions(torch PRIVATE USE_NCCL)
+endif()
 
 
 # ==========================================================
