@@ -106,7 +106,7 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     size_t n_binders) {
   std::vector<NamedValue> inputsWithSelf;
   if (moduleSelf_) {
-    inputsWithSelf.push_back(NamedValue("self", moduleSelf_));
+    inputsWithSelf.emplace_back(NamedValue("self", moduleSelf_));
   }
   inputsWithSelf.insert(inputsWithSelf.end(), inputs_.begin(), inputs_.end());
   inputs_ = inputsWithSelf;
