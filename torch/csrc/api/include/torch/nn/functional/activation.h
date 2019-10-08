@@ -67,7 +67,7 @@ inline Tensor rrelu(Tensor& input, const RReLUOptions& options = {},
   }
 }
 
-inline Tensor celu(Tensor& input, const CELUOptions& options) {
+inline Tensor celu(Tensor& input, const CELUOptions& options = {}) {
   if (options.inplace()) {
     return torch::celu_(input, options.alpha());
   } else {
@@ -79,7 +79,8 @@ inline Tensor sigmoid(const Tensor& input) {
   return torch::sigmoid(input);
 }
 
-inline Tensor softplus(const Tensor& input, const SoftplusOptions& options) {
+inline Tensor softplus(const Tensor& input,
+                       const SoftplusOptions& options = {}) {
   return torch::softplus(input, options.beta(), options.threshold());
 }
 

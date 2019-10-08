@@ -134,7 +134,7 @@ class TORCH_API PReLUImpl : public torch::nn::Cloneable<PReLUImpl> {
 
   void reset() override;
 
-  /// Pretty prints the `PReLUImpl` module into the given `stream`.
+  /// Pretty prints the `PReLU` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
   /// The options with which this `Module` was constructed.
@@ -257,8 +257,7 @@ TORCH_MODULE(RReLU);
 /// about the exact behavior of this module.
 class TORCH_API CELUImpl : public torch::nn::Cloneable<CELUImpl> {
  public:
-  CELUImpl() : CELUImpl(CELUOptions()) {}
-  explicit CELUImpl(const CELUOptions& options_);
+  explicit CELUImpl(const CELUOptions& options_ = {});
 
   Tensor forward(Tensor& input);
 
@@ -280,8 +279,6 @@ TORCH_MODULE(CELU);
 /// about the exact behavior of this module.
 class TORCH_API SigmoidImpl : public torch::nn::Cloneable<SigmoidImpl> {
  public:
-  explicit SigmoidImpl() {}
-
   Tensor forward(const Tensor& input);
 
   void reset() override;
@@ -299,8 +296,7 @@ TORCH_MODULE(Sigmoid);
 /// about the exact behavior of this module.
 class TORCH_API SoftplusImpl : public torch::nn::Cloneable<SoftplusImpl> {
  public:
-  SoftplusImpl() : SoftplusImpl(SoftplusOptions()) {}
-  explicit SoftplusImpl(const SoftplusOptions& options_);
+  explicit SoftplusImpl(const SoftplusOptions& options_ = {});
 
   Tensor forward(const Tensor& input);
 
