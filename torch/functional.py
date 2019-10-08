@@ -606,7 +606,7 @@ def cartesian_prod(*tensors):
     return torch._C._VariableFunctions.cartesian_prod(tensors)
 
 def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
-    """Computes batched the p-norm distance between each pair of the two collections of row vectors.
+    r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
 
     Args:
         x1 (Tensor): input tensor of shape :math:`B \times P \times M`.
