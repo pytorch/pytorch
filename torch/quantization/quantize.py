@@ -12,11 +12,11 @@ import torch.nn.quantized as nnq
 from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
                                DEFAULT_MODULE_MAPPING,
                                DEFAULT_QAT_MODULE_MAPPING,
-                               DEFAULT_SKIP_LIST)
+                               DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST)
 from .stubs import DeQuantStub, QuantWrapper
 from .QConfig import default_dynamic_qconfig, float16_dynamic_qconfig
 
-def _propagate_qconfig_helper(module, qconfig_dict, skip_list=None,
+def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
                               qconfig_parent=None, prefix=''):
     r"""This is a helper function for `propagate_qconfig_`
 
@@ -24,6 +24,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, skip_list=None,
         module: input module
         qconfig_dict: dictionary that maps from name of submodule to quantization
                      configuration
+        white_list: list of quantizable modules
         qconfig_parent: quantization config of parent module, we will fallback to
                        this config when there is no specified config for current
                        module
@@ -33,32 +34,22 @@ def _propagate_qconfig_helper(module, qconfig_dict, skip_list=None,
     Return:
         None, module is modified inplace with qconfig attached
     """
-    if skip_list is None:
-        skip_list = DEFAULT_SKIP_LIST
-    if type(module) in skip_list:
-        module.qconfig = None
-    if not hasattr(module, 'qconfig'):
-        module.qconfig = qconfig_parent
-        if qconfig_dict:
-            if prefix in qconfig_dict:
-                module.qconfig = qconfig_dict[prefix]
-            elif type(module) in qconfig_dict:
-                module.qconfig = qconfig_dict[type(module)]
-
-    # Don't quantize empty Sequential, empty Sequential is same as
-    # Identity, but we can't put Sequential into skip list because
-    # we also have non-empty Sequential and the qconfig needs to
-    # be propagated to child in that case
     # TODO: Add test
-    if len(module._modules) == 0 and type(module) == nn.Sequential:
-        module.qconfig = None
+    if white_list is None:
+        white_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
 
+    module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
+    module_qconfig = qconfig_dict.get(prefix, module_qconfig)
+    module_qconfig = getattr(module, 'qconfig', module_qconfig)
+
+    if type(module) in white_list:
+        module.qconfig = module_qconfig
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
-        _propagate_qconfig_helper(child, qconfig_dict, skip_list,
-                                  module.qconfig, module_prefix)
+        _propagate_qconfig_helper(child, qconfig_dict, white_list,
+                                  module_qconfig, module_prefix)
 
-# TODO(jerryzh): expose skip_list
+# TODO(jerryzh): expose white_list
 def propagate_qconfig_(module, qconfig_dict=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
     attribute on each leaf module
@@ -89,12 +80,10 @@ def add_observer_(module):
     has a valid qconfig attribute.
 
     Args:
-        module: input module with qconfig attributes for all the leaf modules
-        that we want to quantize
+        module: input module with qconfig attributes for all the leaf modules that we want to quantize
 
     Return:
-        None, module is modified inplace with added observer modules and
-            forward_hooks
+        None, module is modified inplace with added observer modules and forward_hooks
     """
     for child in module.children():
         if type(child) == nnq.FloatFunctional:
@@ -261,7 +250,8 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     Args:
         model: input model
         run_fn: a function for evaluating the prepared model, can be a
-            function that simply runs the prepared model or a training loop
+                function that simply runs the prepared model or a training 
+                loop
         run_args: positional arguments for `run_fn`
 
     Return:
@@ -280,8 +270,8 @@ def convert(module, mapping=None, inplace=False):
     parameters) to a quantized module.
     Args:
         module: calibrated module with observers
-        mapping: a dictionary that maps from float module type to quantized
-           module type, can be overwrritten to allow swapping user defined Modules
+        mapping: a dictionary that maps from float module type to quantized module type, can 
+                 be overwrritten to allow swapping user defined Modules
         inplace: carry out model transformations in-place, the original module is mutated
     """
     if mapping is None:
