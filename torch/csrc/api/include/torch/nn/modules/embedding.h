@@ -89,7 +89,18 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
 class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
 public:
     using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
-    static Embedding from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze = true);
+    static Embedding from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze = true) {
+      TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
+      if (options != c10::nullopt) {
+        TORCH_CHECK((*options).num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", (*options).num_embeddings());
+        TORCH_CHECK((*options).embedding_dim() == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", (*options).embedding_dim());
+      } else {
+        options = EmbeddingOptions(embeddings.size(0), embeddings.size(1));
+      }
+      Embedding embedding((*options)._weight(embeddings));
+      embedding->weight.set_requires_grad(!freeze);
+      return embedding;
+    }
 };
 
 // TORCH_MODULE(Embedding);
