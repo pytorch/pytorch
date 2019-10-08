@@ -92,7 +92,6 @@ ROCM_BLACKLIST = [
     'cpp_extensions',
     'distributed',
     'multiprocessing',
-    'nccl',
     'rpc_fork',
     'rpc_spawn',
     'dist_autograd_fork',
