@@ -69,7 +69,7 @@ typedef std::bitset<static_cast<size_t>(StatType::NUM_TYPES)> StatTypes;
 void update_stat(Stat& stat, int64_t amount) {
   stat.current += amount;
 
-  AT_ASSERTM(stat.current >= 0, "Negative tracked stat in CUDA allocator (likely logic error).");
+  TORCH_INTERNAL_ASSERT(stat.current >= 0, "Negative tracked stat in CUDA allocator (likely logic error).");
 
   stat.peak = std::max(stat.current, stat.peak);
   if (amount > 0) {
@@ -520,7 +520,7 @@ class THCCachingAllocator {
   // All private methods do not acquire the allocator mutex.
 
   DeviceStats& get_stats_for_device(int device) {
-    AT_ASSERT(device >= 0);
+    TORCH_CHECK(device >= 0);
     if ((size_t) device >= device_stats.size()) {
       device_stats.resize(device + 1);
     }
