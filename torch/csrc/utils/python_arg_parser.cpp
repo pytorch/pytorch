@@ -153,7 +153,7 @@ bool FunctionParameter::check(PyObject* obj)
 {
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_Check_With_Torch_Function(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
+      return THPVariable_CheckExact(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:
@@ -595,8 +595,9 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       if (new_class) {
         PyObject *method = get_torch_function(obj);
 
-        if (method != NULL) {
+        if (method != nullptr) {
           int arg_index;
+
           arg_index = num_overloaded_args;
 
           for (j = 0; j < num_overloaded_args; j++) {
@@ -611,6 +612,8 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
           ++num_overloaded_args;
         }
       }
+    } else if(THPVariable_Check(obj)){
+      dst[i++] = obj;
     } else if (raise_exception) {
       if (is_kwd) {
         // foo(): argument 'other' must be str, not int

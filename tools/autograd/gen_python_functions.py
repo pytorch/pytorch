@@ -83,10 +83,8 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
     PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
     return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
   }
-  else{
-    ${declare_namedtuple_return_types}
-    ${dispatch}
-  }
+  ${declare_namedtuple_return_types}
+  ${dispatch}
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

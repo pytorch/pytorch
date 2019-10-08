@@ -231,17 +231,13 @@ inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, Parse
   return raw_parse(args, kwargs, dst.args);
 }
 
-bool PythonArgs::has_torch_function(){
-  if(overloaded_args[0] != NULL){
-    return true;
-  }
-  return false;
+inline bool PythonArgs::has_torch_function(){
+  return (overloaded_args[0] != nullptr) ? true : false;
 }
 
 inline std::string PythonArgs::get_func_name(){
   return signature.name;
 }
-
 
 inline at::Tensor PythonArgs::tensor(int i) {
   if (args[i] && THPVariable_CheckExact(args[i])) {
