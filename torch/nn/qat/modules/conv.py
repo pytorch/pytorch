@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn import Conv2d as NNConv2d
-from torch.nn._intrinsic import ConvReLU2d
+from torch.nn.intrinsic import ConvReLU2d
 
 class Conv2d(NNConv2d):
     r"""

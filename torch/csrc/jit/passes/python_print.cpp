@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
@@ -12,65 +13,6 @@ using c10::QualifiedName;
 
 namespace torch {
 namespace jit {
-
-// unix isprint but insensitive to locale
-static bool isPrint(char s) {
-  return s > 0x1f && s < 0x7f;
-}
-
-void printQuotedString(std::ostream& stmt, const std::string& str) {
-  stmt << "\"";
-  for (auto s : str) {
-    switch (s) {
-      case '\\':
-        stmt << "\\\\";
-        break;
-      case '\'':
-        stmt << "\\'";
-        break;
-      case '\"':
-        stmt << "\\\"";
-        break;
-      case '\a':
-        stmt << "\\a";
-        break;
-      case '\b':
-        stmt << "\\b";
-        break;
-      case '\f':
-        stmt << "\\f";
-        break;
-      case '\n':
-        stmt << "\\n";
-        break;
-      case '\r':
-        stmt << "\\r";
-        break;
-      case '\t':
-        stmt << "\\t";
-        break;
-      case '\v':
-        stmt << "\\v";
-        break;
-      default:
-        if (isPrint(s)) {
-          stmt << s;
-        } else {
-          // C++ io has stateful formatting settings. Messing with
-          // them is probably worse than doing this manually.
-          char buf[4] = "000";
-          buf[2] += s % 8;
-          s /= 8;
-          buf[1] += s % 8;
-          s /= 8;
-          buf[0] += s;
-          stmt << "\\" << buf;
-        }
-        break;
-    }
-  }
-  stmt << "\"";
-}
 
 static bool isValidIdentifierChar(char c, size_t pos) {
   return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
@@ -288,10 +230,13 @@ struct PythonPrintImpl {
       return false;
 
     // isinstance appearing in an if expression
-    // causes type refinement to occur, we dont
-    // want to since it has already been handled
-    if (v->node()->kind() == prim::isinstance)
+    // causes type refinement to occur, but we have
+    // already handled the refinement and inserted cast
+    // expressions. By not inlining it into the if condition,
+    // we prevent it from happening again.
+    if (v->node()->kind() == prim::isinstance) {
       return false;
+    }
 
     return true;
   }
@@ -851,12 +796,12 @@ struct PythonPrintImpl {
     if (v.isTensor()) {
       ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if (v.isString()) {
-      printQuotedString(ss, v.toStringRef());
+      c10::printQuotedString(ss, v.toStringRef());
     } else if (v.isDevice()) {
       std::stringstream device_stream;
       device_stream << v.toDevice();
       ss << "torch.device(";
-      printQuotedString(ss, device_stream.str());
+      c10::printQuotedString(ss, device_stream.str());
       ss << ")";
     } else if (v.isTensorList()) {
       ss << "[";
@@ -1038,7 +983,7 @@ struct PythonPrintImpl {
         } else {
           stmt << "getattr(" << useOf(obj) << ", ";
           std::stringstream field_stream;
-          printQuotedString(field_stream, field);
+          c10::printQuotedString(field_stream, field);
           stmt << field_stream.str() << ")";
         }
       } break;
