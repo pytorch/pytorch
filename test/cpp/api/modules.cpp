@@ -807,13 +807,13 @@ TEST_F(ModulesTest, from_pretrained_Embedding) {
   ASSERT_TRUE(torch::allclose(embedding(input), torch::tensor({4.0000, 5.1000, 6.3000})));
 }
 
-// TEST_F(ModulesTest, from_pretrained_EmbeddingBag) {
-//   auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
-//   EmbeddingBag embeddingbag = torch::nn::EmbeddingBag::from_pretrained(weight);
-//   auto input = torch::zeros({{1, 2}}, torch::kLong);
-//   input[0] = torch::tensor({1, 0});
-//   ASSERT_TRUE(torch::allclose(embeddingbag(input), torch::tensor({2.5000, 3.7000, 4.6500})));
-// }
+TEST_F(ModulesTest, from_pretrained_EmbeddingBag) {
+  auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
+  EmbeddingBag embeddingbag = torch::nn::EmbeddingBag::from_pretrained(weight);
+  auto input = torch::zeros({{1, 2}}, torch::kLong);
+  input[0] = torch::tensor({1, 0});
+  ASSERT_TRUE(torch::allclose(embeddingbag(input), torch::tensor({2.5000, 3.7000, 4.6500})));
+}
 
 TEST_F(ModulesTest, HingeEmbeddingLoss) {
   HingeEmbeddingLoss loss(HingeEmbeddingLossOptions().margin(2));

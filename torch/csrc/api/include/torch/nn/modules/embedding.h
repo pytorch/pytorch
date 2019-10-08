@@ -80,66 +80,68 @@ class TORCH_API EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   Tensor weight;
 };
 
-// class TORCH_API Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
-// public:
-//     using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
-//     static Embedding from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze = true);
-// };
-
-class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
-public:
-    using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
-    static Embedding from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze = true) {
-      TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
-      if (options != c10::nullopt) {
-        TORCH_CHECK((*options).num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", (*options).num_embeddings());
-        TORCH_CHECK((*options).embedding_dim() == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", (*options).embedding_dim());
-      } else {
-        options = EmbeddingOptions(embeddings.size(0), embeddings.size(1));
-      }
-      Embedding embedding((*options)._weight(embeddings));
-      embedding->weight.set_requires_grad(!freeze);
-      return embedding;
-    }
-};
-
-// TORCH_MODULE(Embedding);
-
-// From macro expansion:
-// class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
-//  public:
-//   using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
-// };
-
-// class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl> {
-//   public:
-//     EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
-//       : EmbeddingBagImpl(EmbeddingBagOptions(num_embeddings, embedding_dim)) {}
-//     explicit EmbeddingBagImpl(const EmbeddingBagOptions& options_);
-
-//     void reset() override;
-
-//     /// Pretty prints the `EmbeddingBag` module into the given `stream`.
-//     void pretty_print(std::ostream& stream) const override;
-
-//     torch::Tensor forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
-//       c10::optional<torch::Tensor> per_sample_weights = c10::nullopt);
-
-//     /// The `Options` used to configure this `EmbeddingBag` module.
-//     EmbeddingBagOptions options;
-//     /// The embedding table.
-//     Tensor weight;
-// };
-
-// class TORCH_API EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
-// public:
-//     using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
-//     static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingBagOptions> options = c10::nullopt, bool freeze = true);
-// };
-
 /// A `ModuleHolder` subclass for `EmbeddingImpl`.
 /// See the documentation for `EmbeddingImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
+class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
+ public:
+  using torch::nn::ModuleHolder<EmbeddingImpl>::ModuleHolder;
+
+  static Embedding from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingOptions> options = c10::nullopt, bool freeze = true) {
+    TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
+    if (options != c10::nullopt) {
+      TORCH_CHECK((*options).num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", (*options).num_embeddings());
+      TORCH_CHECK((*options).embedding_dim() == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", (*options).embedding_dim());
+    } else {
+      options = EmbeddingOptions(embeddings.size(0), embeddings.size(1));
+    }
+    Embedding embedding((*options)._weight(embeddings));
+    embedding->weight.set_requires_grad(!freeze);
+    return embedding;
+  }
+};
+
+class TORCH_API EmbeddingBagImpl : public torch::nn::Cloneable<EmbeddingBagImpl> {
+ public:
+  EmbeddingBagImpl(int64_t num_embeddings, int64_t embedding_dim)
+    : EmbeddingBagImpl(EmbeddingBagOptions(num_embeddings, embedding_dim)) {}
+  explicit EmbeddingBagImpl(const EmbeddingBagOptions& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `EmbeddingBag` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  torch::Tensor forward(const Tensor& input, c10::optional<torch::Tensor> offsets = c10::nullopt,
+    c10::optional<torch::Tensor> per_sample_weights = c10::nullopt);
+
+  /// The `Options` used to configure this `EmbeddingBag` module.
+  EmbeddingBagOptions options;
+  /// The embedding table.
+  Tensor weight;
+};
+
+/// A `ModuleHolder` subclass for `EmbeddingBagImpl`.
+/// See the documentation for `EmbeddingBagImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
+ public:
+  using torch::nn::ModuleHolder<EmbeddingBagImpl>::ModuleHolder;
+
+  static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, c10::optional<EmbeddingBagOptions> options = c10::nullopt, bool freeze = true) {
+    TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
+    if (options != c10::nullopt) {
+      TORCH_CHECK((*options).num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", (*options).num_embeddings());
+      TORCH_CHECK((*options).embedding_dim() == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", (*options).embedding_dim());
+    } else {
+      options = EmbeddingBagOptions(embeddings.size(0), embeddings.size(1));
+    }
+    EmbeddingBag embeddingbag((*options)._weight(embeddings));
+    embeddingbag->weight.set_requires_grad(!freeze);
+    return embeddingbag;
+  }
+};
 } // namespace nn
 } // namespace torch
