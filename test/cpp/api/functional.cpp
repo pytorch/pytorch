@@ -387,6 +387,18 @@ TEST_F(FunctionalTest, ReLU) {
   }
 }
 
+TEST_F(FunctionalTest, ReLUDefaultOptions) {
+  const auto size = 3;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size});
+  auto y_exp = (x < 0) * 0 + (x >= 0) * x;
+  auto y = F::relu(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(FunctionalTest, ReLU6) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
@@ -402,6 +414,18 @@ TEST_F(FunctionalTest, ReLU6) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
     }
   }
+}
+
+TEST_F(FunctionalTest, ReLU6DefaultOptions) {
+  const auto size = 3;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size});
+  auto y_exp = (x < 0) * 0 + ((x >= 0) * (x <= 6)) * x + (x > 6) * 6;
+  auto y = F::relu6(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
 TEST_F(FunctionalTest, RReLU) {
@@ -426,4 +450,20 @@ TEST_F(FunctionalTest, RReLU) {
       }
     }
   }
+}
+
+TEST_F(FunctionalTest, RReLUDefaultOptions) {
+  const auto size = 3;
+  const auto lower = 1.0 / 8.0;
+  const auto upper = 1.0 / 3.0;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size});
+  auto x_copy = x.clone();
+  auto y = F::rrelu(x);
+  auto z = ((x_copy >= 0) * (x_copy == y) +
+    (x_copy < 0) * (y >= x_copy * upper) * (y <= lower * x_copy)) * 1.0;
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
 }
