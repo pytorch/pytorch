@@ -372,7 +372,15 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
     // see: https://github.com/pytorch/pytorch/issues/21680
     res = std::get<0>(at::_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, /*deterministic=*/true, zero_infinity));
   } else {
-    res = std::get<0>(at::_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, zero_infinity));
+    // if the targets are on CPU (which you need for CuDNN, let's move them to
+    // GPU as a service for the user)
+    res = std::get<0>(at::_ctc_loss(
+        log_probs,
+        targets.to(log_probs.device(), kLong),
+        input_lengths,
+        target_lengths,
+        BLANK,
+        zero_infinity));
     if (zero_infinity) {
       res = at::where(res == Scalar(std::numeric_limits<double>::infinity()), at::zeros({}, res.options()), res);
     }
@@ -392,8 +400,8 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
   TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lenghts must be integral");
   TORCH_CHECK(isIntegralType(target_lengths.scalar_type(), /*includeBool=*/false), "target_lengths must be integral");
 
-  Tensor ilc = input_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
-  Tensor tlc = target_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
+  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
   IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
   IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
   return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction, zero_infinity);
