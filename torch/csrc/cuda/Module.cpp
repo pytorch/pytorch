@@ -272,6 +272,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
 
   py::dict result;
   result["num_alloc_retries"] = stats.num_alloc_retries;
+  result["num_ooms"] = stats.num_ooms;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);
   result["active"] = statArrayToDict(stats.active);
