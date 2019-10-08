@@ -2,8 +2,8 @@
 #include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/python_udf_call.h>
-#include <torch/csrc/distributed/rpc/python_udf_resp.h>
+#include <torch/csrc/distributed/rpc/python_call.h>
+#include <torch/csrc/distributed/rpc/python_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 #include <torch/csrc/distributed/rpc/message.h>
@@ -87,7 +87,7 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
     }
     case MessageType::PYTHON_RET: {
       // TODO: Try to avoid a copy here.
-      auto& resp = static_cast<PythonUDFResp&>(rpc);
+      auto& resp = static_cast<PythonResp&>(rpc);
 
       return PythonRpcHandler::getInstance().loadPythonUDFResult(
           resp.pickledPayload(), resp.tensors());
@@ -178,7 +178,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     std::vector<torch::Tensor>& tensors) {
   return agent.send(
       dst,
-      PythonUDFCall(
+      PythonCall(
           std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
           tensors)
           .toMessage());
