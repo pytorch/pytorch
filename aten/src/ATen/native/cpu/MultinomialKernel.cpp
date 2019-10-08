@@ -139,6 +139,7 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
       scalar_t sum_high = 0;
       scalar_t sum_low = 0;
       scalar_t val;
+      int64_t last_index = -1;
       for (int64_t j = 0; j < n_categories; j++) {
         val = self_ptr[i * self_stride_0 + j * self_stride_1];
         TORCH_CHECK(val >= 0, "invalid multinomial distribution (encountering probability entry < 0)");
@@ -149,11 +150,14 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
         sum_high += h;
         sum_low += l;
         if (val == 0) {
+          last_index = j;
           n_zeros += 1;
         }
         cum_dist_high_ptr[j * cum_dist_stride_0] = sum_high;
         cum_dist_low_ptr[j * cum_dist_stride_0] = sum_low;
       }
+
+      TORCH_CHECK(n_zeros > 0, "ERROR: invalid multinomial distribution n_sample = ", n_sample, " n_categories = ", n_categories, " last_zerp_j = ", j, " n_zeros = ", n_zeros);
 
       TORCH_CHECK((sum_high + sum_low) > 0, "invalid multinomial distribution (sum of probabilities <= 0)");
       TORCH_CHECK(with_replacement || (n_categories - n_zeros >= n_sample),

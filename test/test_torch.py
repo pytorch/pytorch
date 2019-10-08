@@ -10233,7 +10233,7 @@ class TestTorchDeviceType(TestCase):
                 actual = torch.unique(result, sorted=True)
                 expected = torch.from_numpy(np.arange(0, num_samples)).to(device)
                 if 0 != 1:
-                    raise RuntimeError("actual = " + str(actual) + " expected = " + str(expected))
+                    raise RuntimeError("actual = " + str(actual) + " expected = " + str(expected) + " dist = " + str(dist))
                 self.assertEqual(actual, expected, "non-unique indicies")
 
     def test_cdist_large(self, device):
