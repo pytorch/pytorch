@@ -68,16 +68,12 @@ class Module(object):
     _version = 1
 
     def __init__(self):
-        self.__construct()
-        # initialize self.training separately from the rest of the internal
-        # state, as it is managed differently by nn.Module and ScriptModule
-        self.training = True
-
-    def __construct(self):
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
         torch._C._log_api_usage_once("python.nn_module")
+
+        self.training = True
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
         self._backward_hooks = OrderedDict()
