@@ -85,6 +85,9 @@ DistAutogradContext& DistAutogradContainer::getOrCreateContext(
 
 const DistAutogradContext& DistAutogradContainer::newContext() {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  TORCH_CHECK(
+      !hasValidContext(),
+      "Next context can be created only when there is no valid context.");
   // Check for overflow into workerId_ section.
   TORCH_INTERNAL_ASSERT(next_context_id_ < max_id_);
 
@@ -144,6 +147,10 @@ DistAutogradContext& DistAutogradContainer::retrieveContext(
 
 int64_t DistAutogradContainer::getMaxId() {
   return max_id_;
+}
+
+void DistAutogradContainer::set_current_context_id(int64_t context_id) {
+  current_context_id_ = context_id;
 }
 
 } // namespace autograd

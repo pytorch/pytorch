@@ -137,15 +137,29 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       // Attach 'recv' autograd function.
       DistAutogradContext* autogradContext = addRecvRpcBackward(
           rpcWithAutograd.autogradMetadata(), rpcWithAutograd.tensors());
+      // For this recv thread, before processRpc(), set current_context_id_ to
+      // be context_id passed from client. In this way, if there is nested
+      // rpc call in python rpc call, original context_id from client can be
+      // passed in the chain calls.
+      auto& autogradContainer = DistAutogradContainer::getInstance();
+      if (autogradContext != nullptr) {
+        autogradContainer.set_current_context_id(autogradContext->context_id());
+      }
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
       auto wrappedRpcResponse =
           processRpc(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
 
+      // After processRpc() is done, clean up current_context_id_ to be -1,
+      // for a recv thread, current_context_id_ should always be invalid after
+      // processRpc() is done.
+      if (autogradContext != nullptr) {
+        autogradContainer.set_current_context_id(-1);
+      }
+
       // Wrap the response with autograd, need a new autograd message id for
       // each send/recv pair.
-      auto& autogradContainer = DistAutogradContainer::getInstance();
       AutogradMetadata responseAutogradMetadata(
           autogradMetadata.autogradContextId,
           autogradContainer.newAutogradMessageId());
@@ -160,6 +174,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
         addSendRpcBackward(
             *autogradContext, responseAutogradMetadata, response->tensors());
       }
+
       return std::move(response);
     }
     default: {

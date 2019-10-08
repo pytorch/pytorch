@@ -8,7 +8,14 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
+using torch::distributed::rpc::AutogradMetadata;
+using torch::distributed::rpc::FutureMessage;
 using torch::distributed::rpc::Message;
+using torch::distributed::rpc::MessageType;
+using torch::distributed::rpc::RpcAgent;
+using torch::distributed::rpc::RpcCommandBase;
+using torch::distributed::rpc::RpcWithAutograd;
+using torch::distributed::rpc::WorkerInfo;
 
 void addSendRpcBackward(
     DistAutogradContext& autogradContext,
@@ -50,6 +57,33 @@ DistAutogradContext* addRecvRpcBackward(
     return &autogradContext;
   }
   return nullptr;
+}
+
+std::shared_ptr<FutureMessage> sendMessageWithAutograd(
+    RpcAgent& agent,
+    const WorkerInfo& dst,
+    std::unique_ptr<RpcCommandBase> rpcCommand) {
+  auto& autogradContainer = DistAutogradContainer::getInstance();
+  if (autogradContainer.hasValidContext()) {
+    // Retrieve the appropriate context to modify.
+    auto& autogradContext = autogradContainer.currentContext();
+
+    // Wrap the original rpc with autograd information.
+    AutogradMetadata autogradMetadata(
+        autogradContext.context_id(), autogradContainer.newAutogradMessageId());
+    RpcWithAutograd rpcWithAutograd(
+        MessageType::MESSAGE_WITH_AUTOGRAD_REQ,
+        autogradMetadata,
+        std::move(rpcCommand));
+
+    // Record autograd information for 'send'.
+    addSendRpcBackward(
+        autogradContext, autogradMetadata, rpcWithAutograd.tensors());
+
+    return agent.send(dst, std::move(rpcWithAutograd).toMessage());
+  } else {
+    return agent.send(dst, std::move(*rpcCommand).toMessage());
+  }
 }
 
 } // namespace autograd

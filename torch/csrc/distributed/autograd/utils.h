@@ -1,6 +1,8 @@
 #pragma once
 
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/rpc/future_message.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
 
 namespace torch {
@@ -29,6 +31,13 @@ TORCH_API void addSendRpcBackward(
 TORCH_API DistAutogradContext* addRecvRpcBackward(
     const torch::distributed::rpc::AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors);
+
+// This method is a wrapper utility used internally to attach autograd info
+// and autograd function for each type of rpc call, and then send the message
+std::shared_ptr<torch::distributed::rpc::FutureMessage> sendMessageWithAutograd(
+    torch::distributed::rpc::RpcAgent& agent,
+    const torch::distributed::rpc::WorkerInfo& dst,
+    std::unique_ptr<torch::distributed::rpc::RpcCommandBase> rpcCommand);
 
 } // namespace autograd
 } // namespace distributed
