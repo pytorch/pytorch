@@ -128,8 +128,7 @@ TORCH_MODULE(LogSigmoid);
 /// about the exact behavior of this module.
 class TORCH_API PReLUImpl : public torch::nn::Cloneable<PReLUImpl> {
  public:
-  PReLUImpl() : PReLUImpl(PReLUOptions()) {}
-  explicit PReLUImpl(const PReLUOptions& options_);
+  explicit PReLUImpl(const PReLUOptions& options_ = {});
 
   Tensor forward(const Tensor& input);
 
@@ -192,8 +191,7 @@ TORCH_MODULE(MultiheadAttention);
 /// about the exact behavior of this module.
 class TORCH_API ReLUImpl : public torch::nn::Cloneable<ReLUImpl> {
  public:
-  ReLUImpl() : ReLUImpl(ReLUOptions()) {}
-  explicit ReLUImpl(const ReLUOptions& options_);
+  explicit ReLUImpl(const ReLUOptions& options_ = {});
 
   Tensor forward(Tensor& input);
 
@@ -215,8 +213,7 @@ TORCH_MODULE(ReLU);
 /// about the exact behavior of this module.
 class TORCH_API ReLU6Impl : public torch::nn::Cloneable<ReLU6Impl> {
  public:
-  ReLU6Impl() : ReLU6Impl(ReLU6Options()) {}
-  explicit ReLU6Impl(const ReLU6Options& options_);
+  explicit ReLU6Impl(const ReLU6Options& options_ = {});
 
   Tensor forward(Tensor& input);
 
@@ -238,8 +235,7 @@ TORCH_MODULE(ReLU6);
 /// about the exact behavior of this module.
 class TORCH_API RReLUImpl : public torch::nn::Cloneable<RReLUImpl> {
  public:
-  RReLUImpl() : RReLUImpl(RReLUOptions()) {}
-  explicit RReLUImpl(const RReLUOptions& options_);
+  explicit RReLUImpl(const RReLUOptions& options_ = {});
 
   Tensor forward(Tensor& input);
 

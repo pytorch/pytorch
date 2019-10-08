@@ -45,7 +45,7 @@ inline Tensor prelu(const Tensor& input, const Tensor& weight) {
   return torch::prelu(input, weight);
 }
 
-inline Tensor relu(Tensor& input, const ReLUOptions& options) {
+inline Tensor relu(Tensor& input, const ReLUOptions& options = {}) {
   if (options.inplace()) {
     return torch::relu_(input);
   } else {
@@ -53,12 +53,13 @@ inline Tensor relu(Tensor& input, const ReLUOptions& options) {
   }
 }
 
-inline Tensor relu6(Tensor& input, const ReLU6Options& options) {
+inline Tensor relu6(Tensor& input, const ReLU6Options& options = {}) {
   return hardtanh(input,
     HardtanhOptions().min_val(0).max_val(6).inplace(options.inplace()));
 }
 
-inline Tensor rrelu(Tensor& input, const RReLUOptions& options, bool training=false) {
+inline Tensor rrelu(Tensor& input, const RReLUOptions& options = {},
+                    bool training=false) {
   if (options.inplace()) {
     return torch::rrelu_(input, options.lower(), options.upper(), training);
   } else {
