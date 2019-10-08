@@ -10217,7 +10217,7 @@ class TestTorchDeviceType(TestCase):
                         expected = brute_cdist(x, y, p=p)
                         self.assertTrue(torch.allclose(expected, actual))
 
-    def test_multinomial_unnormalized(self):
+    def test_multinomial_unnormalized(self, device):
         for device in torch.testing.get_all_device_types():
             for dtype in [torch.float, torch.double]:
                 part_size = 15
