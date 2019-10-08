@@ -14,19 +14,19 @@ namespace enumtype {
   // error: default initialization of an object of const type 'const enumtype::Enum1'
   // without a user-provided default constructor
   // ```
-  struct Enum1 {
+  struct Enum1 : public EnumBase {
     Enum1() {}
     std::string name() const override {
       return "Enum1";
     }
   };
-  struct Enum2 {
+  struct Enum2 : public EnumBase {
     Enum2() {}
     std::string name() const override {
       return "Enum2";
     }
   };
-  struct Enum3 {
+  struct Enum3 : public EnumBase {
     Enum3() {}
     std::string name() const override {
       return "Enum3";
