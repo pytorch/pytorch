@@ -129,7 +129,7 @@ void ReLUImpl::reset() {}
 void ReLUImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ReLU(";
   if (options.inplace()) {
-    stream << std::boolalpha  << "inplace=" << options.inplace();
+    stream << std::boolalpha << "inplace=" << options.inplace();
   }
   stream << ")";
 }
@@ -147,7 +147,7 @@ void ReLU6Impl::reset() {}
 void ReLU6Impl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ReLU6(";
   if (options.inplace()) {
-    stream << std::boolalpha  << "inplace=" << options.inplace();
+    stream << std::boolalpha << "inplace=" << options.inplace();
   }
   stream << ")";
 }
@@ -166,7 +166,7 @@ void RReLUImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::RReLU(lower=" << options.lower()
          << ", upper=" << options.upper();
   if (options.inplace()) {
-    stream << std::boolalpha  << ", inplace=" << options.inplace();
+    stream << std::boolalpha << ", inplace=" << options.inplace();
   }
   stream << ")";
 }
