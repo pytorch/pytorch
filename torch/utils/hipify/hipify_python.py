@@ -32,9 +32,9 @@ import shutil
 import sys
 import os
 
-from pyHIPIFY import constants
-from pyHIPIFY.cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
-from pyHIPIFY.cuda_to_hip_mappings import MATH_TRANSPILATIONS
+from . import constants
+from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
+from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
 
 # Hardcode the PyTorch template map
 """This dictionary provides the mapping from PyTorch kernel template types
@@ -366,9 +366,13 @@ RE_ASSERT = re.compile(r"\bassert[ ]*\(")
 
 
 def replace_math_functions(input_string):
-    """ FIXME: Temporarily replace std:: invocations of math functions with non-std:: versions to prevent linker errors
-        NOTE: This can lead to correctness issues when running tests, since the correct version of the math function (exp/expf) might not get called.
-        Plan is to remove this function once HIP supports std:: math function calls inside device code
+    """FIXME: Temporarily replace std:: invocations of math functions
+        with non-std:: versions to prevent linker errors NOTE: This
+        can lead to correctness issues when running tests, since the
+        correct version of the math function (exp/expf) might not get
+        called.  Plan is to remove this function once HIP supports
+        std:: math function calls inside device code
+
     """
     output_string = input_string
     for func in MATH_TRANSPILATIONS:
@@ -594,7 +598,7 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
             CAFFE2_TRIE.add(src)
             CAFFE2_MAP[src] = dst
 RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.pattern())
-RE_PYTORCH_PREPROCESSOR = re.compile(r'\b{0}\b'.format(PYTORCH_TRIE.pattern()))
+RE_PYTORCH_PREPROCESSOR = re.compile(r'(?<=\W)({0})(?=\W)'.format(PYTORCH_TRIE.pattern()))
 
 RE_QUOTE_HEADER = re.compile(r'#include "([^"]+)"')
 RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')

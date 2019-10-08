@@ -902,6 +902,42 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
+Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
+  auto eps = 1e-12;
+  auto inp_pl_eps = input + eps;
+  auto one_m_inp_pl_eps = 1 - input + eps;
+  // gradient wrt input
+  auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
+  gI *= (grad * grad_output);
+
+  if (weight.defined()) {
+    gI *= weight;
+  }
+  if (reduction == Reduction::Mean) {
+    return gI / input.numel();
+  } else if (reduction == Reduction::Sum) {
+    return gI.sum();
+  }
+  return gI;
+}
+
+Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
+  auto eps = 1e-12;
+  // gradient wrt grad_output
+  auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
+  ggO *= grad;
+
+  if (weight.defined()) {
+    ggO *= weight;
+  }
+  if (reduction == Reduction::Mean) {
+    return ggO / input.numel();
+  } else if (reduction == Reduction::Sum) {
+    return ggO.sum();
+  }
+  return ggO;
+}
+
 Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto output = l1_loss_backward(grad, input, target, Reduction::None);
   if (reduction == Reduction::Mean) {
