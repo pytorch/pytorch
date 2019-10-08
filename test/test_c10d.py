@@ -28,7 +28,7 @@ from torch.nn.parallel import DistributedDataParallel
 from common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout
-from common_utils import TestCase, load_tests, run_tests
+from common_utils import TestCase, load_tests, run_tests, default_floating_dtype
 from common_utils import retry_on_address_already_in_use_error
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -2070,6 +2070,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
+    @default_floating_dtype(torch.double)
     def test_sync_params_no_buffers(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
@@ -2097,6 +2098,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
+    @default_floating_dtype(torch.double)
     def test_sync_params_with_buffers(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
