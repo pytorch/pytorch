@@ -59,7 +59,11 @@ def copy_to_script_module(original, stubs):
     class_annotations = getattr(original, '__annotations__', {})
     for name in dir(original):
         if hasattr(script_module, name):
-            # Don't re-copy properties
+            # Only re-copy existing attributes
+            if script_module._c._has_attribute(name) and name not in constants_set:
+                item = getattr(original, name)
+                setattr(script_module, name, item)
+                script_module._c._set_attribute(name, item)
             continue
         item = getattr(original, name)
         if name in class_annotations:
