@@ -24,4 +24,3 @@ inline Tensor normalize(
 } // namespace functional
 } // namespace nn
 } // namespace torch
-
