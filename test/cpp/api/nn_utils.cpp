@@ -56,7 +56,7 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   for (auto norm_type : norm_types) {
     for (int i = 0; i < grads.size(); i++) {
       linear_layer->parameters()[i].grad() =
-          grads[i].clone().view_as(linear_layer->parameters()[i].data());
+          grads[i].clone(at::MemoryFormat::Contiguous).view_as(linear_layer->parameters()[i].data());
     }
     auto norm_before = compute_norm(norm_type);
     auto layer_params = linear_layer->parameters();
@@ -92,8 +92,8 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   auto p1 = torch::randn({10, 10});
   auto p2 = torch::randn({10, 10});
   auto g = torch::arange(1., 101).view({10, 10});
-  p1.grad() = g.clone();
-  p2.grad() = g.clone();
+  p1.grad() = g.clone(at::MemoryFormat::Contiguous);
+  p2.grad() = g.clone(at::MemoryFormat::Contiguous);
   for (const auto norm_type : norm_types) {
     utils::clip_grad_norm_(p1, max_norm, norm_type);
     std::vector<torch::Tensor> params = {p2};
