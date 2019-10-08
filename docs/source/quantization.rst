@@ -39,7 +39,7 @@ to quantized values.
 
 The mapping is performed by converting the floating point tensors using
 
-***include image of the formula from the design doc here***
+**include image of the formula from the design doc here**
 
 Note that, we ensure that zero in floating point is repsresented with no error after quantization,
 thereby ensuring that operations like padding do not cause additional quantization error.
@@ -72,8 +72,8 @@ mapped linearly to the minimum and the maximum of the quantized data
 type such that zero is represented with no quantization error.
 
 Additional data types and quantization schemes can be implemented through
-the custom operator mechanism.
-[Note: Will be good to point a link here]
+the `custom operator mechanism <https://pytorch.org/docs/stable/notes/extending.html>`.
+**NOTE NEED TO CHECK IF THIS IS RIGHT**
 
 Many operations for quantized tensors are available under the same API as full
 float version in ``torch`` or ``torch.nn``. Quantized version of NN modules that
@@ -84,7 +84,7 @@ the operation signature.
 Current quantized operation list is sufficient to cover typical CNN and RNN
 models:
 
-TODO: explicit list here
+**NOTE  explicit list here**
 
 Quantization Workflows
 ----------------------
@@ -99,7 +99,7 @@ PyTorch provides three approaches to quantize models.
    This is true for for LSTM and Transformer type models with small
    batch size. Applying dynamic quantization to a whole model can be
    done with a single call to torch.quantization.quantize\\_dynamic().
-   See the ***tutorial-link-here***\\ *. *
+   See the `<https://pytorch.org/tutorials/#Quantization_Experimental>` **NOTE NEEDS REVISION**
 2. Post Training Quantization: This is the most commonly used form of
    quantization where the weights are quantized ahead of time and the
    scale factor and bias for the activation tensors is pre-computed
@@ -128,7 +128,7 @@ PyTorch provides three approaches to quantize models.
       quantizes the weights, computes and stores the scale and bias
       value to be used each activation tensor, and replaces key
       operators quantized implementations.
-   7. See the ***tutorial-link-here ***\\ for more information\\ *. *
+   See the `<https://pytorch.org/tutorials/#Quantization_Experimental>` **NOTE NEEDS REVISION**
 
 3. Quantization Aware Training: In the rare cases where post training
    quantization does not provide adequate accuracy training can be done
@@ -148,7 +148,7 @@ PyTorch provides three approaches to quantize models.
    5. Train or fine tune the model.
    6. Identical to step (6) for post training quantization
 
-   7. See the ***tutorial-link-here ***\\ for more information\\ *. *
+   See the `<https://pytorch.org/tutorials/#Quantization_Experimental>` **NOTE NEEDS REVISION**
 
 While default implementations of observers to select the scale factor and bias
 based on observed tensor data are provided, developers can provide their own
@@ -167,7 +167,8 @@ process and thus can work with the rest of PyTorch APIs.
 Model preparation for quantization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-TODO:
+**NOTE we are missing text here **
+
 - fusion
 - replacement of modules with FloatFunctional
 - QuantStub
