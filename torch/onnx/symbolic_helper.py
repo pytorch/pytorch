@@ -54,6 +54,8 @@ def _parse_arg(value, desc):
         return value
     if desc == 'v' or not _is_value(value):
         return value
+    if value.node().mustBeNone():
+        return None
     if value.node().kind() == 'onnx::Constant':
         tval = value.node()['value']
         if desc == 'i':
