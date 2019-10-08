@@ -259,6 +259,7 @@ struct TORCH_API Module {
     if (auto p = find_attribute("training")) {
       return p->value().toBool();
     }
+
     // We are in training mode by default
     return true;
   }
