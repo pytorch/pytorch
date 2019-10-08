@@ -985,7 +985,7 @@ TEST_F(ModulesTest, MultiMarginLoss) {
   auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::requires_grad());
   auto target = torch::tensor({2, 1, 0}, torch::kLong);
   auto output = loss->forward(input, target);
-  auto expected = torch::tensor({0.3056}, torch::kFloat);
+  auto expected = torch::tensor({0.305556}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 

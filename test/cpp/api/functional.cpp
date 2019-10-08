@@ -167,8 +167,7 @@ TEST_F(FunctionalTest, MultiMarginLoss) {
   auto target = torch::tensor({2, 1, 0}, torch::kLong);
   auto output = F::multi_margin_loss(
     input, target, MultiMarginLossOptions().margin(2).weight(weight));
-  auto expected = torch::tensor({0.3056}, torch::kFloat);
-
+  auto expected = torch::tensor({0.305556}, torch::kFloat);
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
