@@ -1386,6 +1386,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_contiguous_ = false;
     is_channels_last_contiguous_ = false;
     is_channels_last_ = false;
+    is_non_overlapping_and_dense_ = false;
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         strides_.resize(sizes_.size(), 0);
@@ -1397,6 +1398,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           }
         }
         is_contiguous_ = true;
+        is_non_overlapping_and_dense_ = true;
         return;
       }
       case MemoryFormat::ChannelsLast: {
@@ -1406,6 +1408,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
         is_channels_last_contiguous_ = true;
         is_channels_last_ = true;
+        is_non_overlapping_and_dense_ = true;
         return;
       }
       case MemoryFormat::Preserve:
@@ -1415,6 +1418,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_strides_like_channels_last() const {
     return is_channels_last_;
+  }
+
+  bool is_non_overlapping_and_dense() const {
+    return is_non_overlapping_and_dense_;
   }
 
 private:
@@ -1497,6 +1504,8 @@ private:
 
   bool compute_strides_like_channels_last() const;
 
+  bool compute_non_overlapping_and_dense() const;
+
 protected:
   /**
    * Recompute the cached numel of a tensor.  Call this if you modify sizes.
@@ -1513,6 +1522,7 @@ protected:
     is_contiguous_ = compute_contiguous();
     is_channels_last_contiguous_ = compute_channels_last_contiguous();
     is_channels_last_ = is_channels_last_contiguous_ || compute_strides_like_channels_last();
+    is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
   }
 
   /**
@@ -1542,6 +1552,9 @@ protected:
       dest_impl->type_set_ = dest_impl->type_set_.remove(TensorTypeId::VariableTensorId);
     }
     dest_impl->is_contiguous_ = src_impl->is_contiguous_;
+    dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
+    dest_impl->is_channels_last_ = src_impl->is_channels_last_;
+    dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
     dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
     dest_impl->reserved_ = src_impl->reserved_;
     dest_impl->set_version_counter(version_counter);
@@ -1636,6 +1649,11 @@ protected:
   // Channels last contiguous tensor is channel last tensor which occupies
   // contiguous memory block.
   bool is_channels_last_contiguous_ = false;
+
+  // Dense tensor is the tensor that store values in a contiguous block of memory.
+  // Non-overlapping tensor is the tensor in which elements occupy individual
+  // non-repetitive memory.
+  bool is_non_overlapping_and_dense_ = false;
 
   bool is_wrapped_number_ = false;
 

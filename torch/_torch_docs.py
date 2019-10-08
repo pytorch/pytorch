@@ -899,12 +899,12 @@ cdist(x1, x2, p=2) -> Tensor
 
 Computes the p-norm distance between each pair of the two collections of row vectors.
 
-If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the 
+If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the
 output will have shape :math:`P \times R`.
 
-This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)` 
-if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to 
-`scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest 
+This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)`
+if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to
+`scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest
 scipy function is `scipy.spatial.distance.cdist(xn, lambda x, y: np.abs(x - y).max())`.
 
 Args:
@@ -1054,11 +1054,6 @@ and `c` is returned such that:
 `torch.cholesky_solve(b, u)` can take in 2D inputs `b, u` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `c`
-
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `b, u` must be 2D matrices.
 
 Args:
     input (Tensor): input matrix :math:`b` of size :math:`(*, m, k)`,
@@ -4569,7 +4564,7 @@ add_docstr(torch.set_num_threads,
            r"""
 set_num_threads(int)
 
-Sets the number of threads used for parallelizing CPU operations.
+Sets the number of threads used for intraop parallelism on CPU.
 WARNING:
 To ensure that the correct number of threads is used, set_num_threads
 must be called before running eager, JIT or autograd code.
@@ -5485,11 +5480,6 @@ with the default keyword arguments.
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
-
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `b, A` must be 2D matrices.
 
 Args:
     input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
