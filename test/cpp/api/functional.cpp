@@ -161,6 +161,17 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, CosineEmbeddingLoss) {
+  auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}});
+  auto input2 = torch::tensor({{2, 3, 5}, {9, 12, 0}});
+  auto target = torch::tensor({1, -1});
+  auto output = F::cosine_embedding_loss(
+      input1, input2, target, CosineEmbeddingLossOptions().margin(0.5));
+  auto expected = torch::tensor({0.1004}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected, 1e-4));
+}
+
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
@@ -486,6 +497,19 @@ TEST_F(FunctionalTest, CELU) {
       }
     }
   }
+}
+
+TEST_F(FunctionalTest, CELUDefaultOptions) {
+  const auto size = 3;
+  const auto alpha = 1.0;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size});
+  auto y_exp = torch::max(torch::zeros_like(x), x) +
+    torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+  auto y = F::celu(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
 }
 
 TEST_F(FunctionalTest, Sigmoid) {

@@ -66,7 +66,7 @@ inline Tensor rrelu(Tensor& input, const RReLUOptions& options = {},
   }
 }
 
-inline Tensor celu(Tensor& input, const CELUOptions& options) {
+inline Tensor celu(Tensor& input, const CELUOptions& options = {}) {
   if (options.inplace()) {
     return torch::celu_(input, options.alpha());
   } else {
