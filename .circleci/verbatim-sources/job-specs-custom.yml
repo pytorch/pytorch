@@ -433,8 +433,8 @@
             # decode provisioning profile
             PROFILE=TestApp_CI.mobileprovision
             PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
-            mkdir -pv ${PROVISIONING_PROFILES}
-            cd ${PROVISIONING_PROFILES}
+            mkdir -pv "${PROVISIONING_PROFILES}"
+            cd "${PROVISIONING_PROFILES}"
             echo ${IOS_SIGN_KEY} >> cert.txt
             base64 --decode cert.txt -o ${PROFILE}
             rm cert.txt
