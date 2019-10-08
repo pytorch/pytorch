@@ -32,26 +32,25 @@ Tensor HingeEmbeddingLossImpl::forward(
   return F::hinge_embedding_loss(input, target, options);
 }
 
+// ============================================================================
 
+TripletMarginLossImpl::TripletMarginLossImpl(
+    const TripletMarginLossOptions& options_)
+    : options(options_) {}
 
+void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::TripletMarginLoss(p=" << options.p() << 
+            ", margin=" << options.margin() <<
+            ", weight=" << options.swap() <<
+            ", reduction=" << options.reduction() << ")";
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Tensor TripletMarginLossImpl::forward(
+    const Tensor& anchor,
+    const Tensor& positive,
+    const Tensor& negative) {
+  return F::triplet_margin_loss(anchor, positive, negative, options);
+}
 
 } // namespace nn
 } // namespace torch
