@@ -468,7 +468,7 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
-          "_dump",
+          "dump",
           &Module::dump,
           py::arg("code") = true,
           py::arg("attrs") = true,
