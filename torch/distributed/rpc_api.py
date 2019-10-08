@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from . import invoke_rpc_builtin, invoke_rpc_python_udf
 from . import invoke_remote_builtin, invoke_remote_python_udf
 from . import _init_rref_context, _destroy_rref_context
