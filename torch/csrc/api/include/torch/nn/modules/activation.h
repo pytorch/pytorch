@@ -295,8 +295,6 @@ TORCH_MODULE(Softshrink);
 /// about the exact behavior of this module.
 class TORCH_API SoftsignImpl : public torch::nn::Cloneable<SoftsignImpl> {
  public:
-  explicit SoftsignImpl() {}
-
   Tensor forward(const Tensor& input);
 
   void reset() override;
