@@ -51,6 +51,7 @@ struct TORCH_API EmbeddingBagOptions {
   /// into consideration. ``"mean"`` computes the average of the values in the bag, ``"max"`` computes the max value over each bag.
   TORCH_ARG(string, mode) = "mean";
   /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
+  /// Note: this option is not supported when ``mode="max"``.
   TORCH_ARG(bool, sparse) = false;
   /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
   TORCH_ARG(torch::Tensor, _weight) = Tensor();
