@@ -273,8 +273,6 @@ TORCH_MODULE(CELU);
 /// about the exact behavior of this module.
 class TORCH_API SigmoidImpl : public torch::nn::Cloneable<SigmoidImpl> {
  public:
-  explicit SigmoidImpl() {};
-
   Tensor forward(const Tensor& input);
 
   void reset() override;
