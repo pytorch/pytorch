@@ -572,3 +572,20 @@ TEST_F(FunctionalTest, Softshrink) {
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
 }
+
+TEST_F(FunctionalTest, SoftshrinkDefaultOptions) {
+  const auto size = 3;
+  const auto lambda = 0.5;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size}).set_requires_grad(true);
+  auto y = F::softshrink(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
