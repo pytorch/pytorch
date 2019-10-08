@@ -16,6 +16,11 @@ from collections import OrderedDict
 import threading
 
 import torch
+
+# TODO: remove this global setting
+# NN tests use double as the default dtype
+torch.set_default_dtype(torch.double)
+
 from torch._six import inf, nan
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
@@ -31,7 +36,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, load_tests
+    get_function_arglist, load_tests, default_floating_dtype
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
@@ -201,24 +206,6 @@ class PackedSequenceTest(TestCase):
                     self.assertEqual(a, b.to('cpu', dtype=torch.int32))
                     self.assertIs(b, b.to(dtype=torch.int32))
                     self.assertEqual(b.long(), b.to(dtype=torch.int64))
-
-
-def default_tensor_type(type):
-    type_str = torch.typename(type)
-
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            old_type = torch.Tensor().type()
-            torch.set_default_tensor_type(type_str)
-            try:
-                return fn(*args, **kwargs)
-            finally:
-                torch.set_default_tensor_type(old_type)
-
-        return wrapper
-
-    return decorator
 
 
 def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
@@ -5496,7 +5483,7 @@ class TestNN(NNTestCase):
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
+    @default_floating_dtype(torch.float)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         self._test_RNN_cpu_vs_cudnn(0)
 
@@ -5522,7 +5509,7 @@ class TestNN(NNTestCase):
         self.assertEqual(m(input), expected_output)
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
-    @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
+    @default_floating_dtype(torch.float)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
