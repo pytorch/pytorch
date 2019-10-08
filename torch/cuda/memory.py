@@ -67,9 +67,9 @@ def memory_stats(device=None):
 
     - ``all``: combined statistics across all memory pools.
     - ``large_pool``: statistics for the large allocation pool
-      (as of October 2019, for size ≥1MB allocations).
+      (as of October 2019, for size >= 1MB allocations).
     - ``small_pool``: statistics for the small allocation pool
-      (as of October 2019, for size <1MB allocations).
+      (as of October 2019, for size < 1MB allocations).
 
     Metric type:
 
@@ -288,7 +288,7 @@ def max_memory_reserved(device=None):
 
 
 def memory_cached(device=None):
-    r"""Deprecated; see :func:`~torch.cuda.memory_reserved`."""
+    r"""Deprecated; see :func:`~torch.cuda.memory_reserved`."""
     warnings.warn(
         "torch.cuda.memory_cached has been renamed to torch.cuda.memory_reserved",
         DeprecationWarning)
@@ -296,7 +296,7 @@ def memory_cached(device=None):
 
 
 def max_memory_cached(device=None):
-    r"""Deprecated; see :func:`~torch.cuda.max_memory_reserved`."""
+    r"""Deprecated; see :func:`~torch.cuda.max_memory_reserved`."""
     warnings.warn(
         "torch.cuda.max_memory_cached has been renamed to torch.cuda.max_memory_reserved",
         DeprecationWarning)
