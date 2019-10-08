@@ -73,6 +73,14 @@ Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
 
+Tensor& log_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log_stub); }
+Tensor log(const Tensor& self) { return unary_op_impl(self, at::log_out); }
+Tensor& log_(Tensor& self) { return unary_op_impl_(self, at::log_out); }
+
+Tensor& log10_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log10_stub); }
+Tensor log10(const Tensor& self) { return unary_op_impl(self, at::log10_out); }
+Tensor& log10_(Tensor& self) { return unary_op_impl_(self, at::log10_out); }
+
 Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
@@ -223,12 +231,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
-inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, src);
-#endif
-}
-
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
@@ -271,8 +273,6 @@ IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(frac)
-IMPLEMENT_UNARY_OP_VEC(log)
-IMPLEMENT_UNARY_OP_VEC(log10)
 IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
 IMPLEMENT_UNARY_OP_VEC(reciprocal)

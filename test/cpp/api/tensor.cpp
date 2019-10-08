@@ -171,7 +171,21 @@ TEST(TensorTest, ContainsCorrectValuesForManyValues) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
+  tensor = at::tensor(at::ArrayRef<int>({1, 2, 3}));
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
+  ASSERT_TRUE(exactly_equal(tensor[0], 1));
+  ASSERT_TRUE(exactly_equal(tensor[1], 2));
+  ASSERT_TRUE(exactly_equal(tensor[2], 3));
+
   tensor = at::tensor({1.5, 2.25, 3.125});
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], 1.5));
+  ASSERT_TRUE(almost_equal(tensor[1], 2.25));
+  ASSERT_TRUE(almost_equal(tensor[2], 3.125));
+
+  tensor = at::tensor(at::ArrayRef<double>({1.5, 2.25, 3.125}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
@@ -188,7 +202,23 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
+  tensor = torch::tensor(at::ArrayRef<int>({1, 2, 3}));
+  ASSERT_TRUE(tensor.is_variable());
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
+  ASSERT_TRUE(exactly_equal(tensor[0], 1));
+  ASSERT_TRUE(exactly_equal(tensor[1], 2));
+  ASSERT_TRUE(exactly_equal(tensor[2], 3));
+
   tensor = torch::tensor({1.5, 2.25, 3.125});
+  ASSERT_TRUE(tensor.is_variable());
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], 1.5));
+  ASSERT_TRUE(almost_equal(tensor[1], 2.25));
+  ASSERT_TRUE(almost_equal(tensor[2], 3.125));
+
+  tensor = torch::tensor(at::ArrayRef<double>({1.5, 2.25, 3.125}));
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
@@ -198,6 +228,34 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
 }
 
 TEST(TensorTest, MultidimTensorCtor) {
+  {
+    auto tensor = torch::tensor({{1, 2}});
+    ASSERT_EQ(tensor.dtype(), torch::kInt);
+    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({1, 2}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kInt).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    auto tensor = torch::tensor({{1.0, 2.0}});
+    ASSERT_EQ(tensor.dtype(), torch::kDouble);
+    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({1, 2}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kDouble).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    auto tensor = torch::tensor({{1, 2}}, torch::dtype(torch::kInt));
+    ASSERT_EQ(tensor.dtype(), torch::kInt);
+    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({1, 2}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kInt).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    auto tensor = torch::tensor({{{1, 2}}});
+    ASSERT_EQ(tensor.dtype(), torch::kInt);
+    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({1, 1, 2}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kInt).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
   {
     auto tensor = torch::tensor({{1, 2}, {3, 4}});
     ASSERT_EQ(tensor.dtype(), torch::kInt);
@@ -390,10 +448,10 @@ TEST(TensorTest, DataPtr) {
 }
 
 TEST(TensorTest, Data) {
-  const auto tensor = torch::empty({3, 3});
+  const auto tensor = torch::rand({3, 3});
   ASSERT_TRUE(torch::equal(tensor, tensor.data()));
 
-  const auto tensor2 = at::empty({3, 3});
+  const auto tensor2 = at::rand({3, 3});
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
 
@@ -414,6 +472,13 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
   x.backward();
   ASSERT_TRUE(torch::equal(x.grad(),
               torch::ones_like(x)));
+}
+
+TEST(TensorTest, BackwardNonScalarOutputs) {
+  auto x = torch::randn({5, 5}, torch::requires_grad());
+  auto y = x * x;
+  ASSERT_THROWS_WITH(y.backward(),
+    "grad can be implicitly created only for scalar outputs");
 }
 
 TEST(TensorTest, IsLeaf) {

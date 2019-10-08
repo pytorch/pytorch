@@ -4,7 +4,6 @@ import sys
 import math
 import tempfile
 import time
-import torch
 import unittest
 import warnings
 from copy import deepcopy
@@ -12,6 +11,12 @@ from collections import OrderedDict
 from itertools import product
 from operator import mul
 from functools import reduce
+import torch
+
+# TODO: remove this global setting
+# Autograd tests use double as the default dtype
+torch.set_default_dtype(torch.double)
+
 from torch import nn
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
@@ -3891,6 +3896,30 @@ class TestAutogradDeviceType(TestCase):
             out.sum().backward()
             self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
+    def _test_rnn_mod(self, mod, inp):
+        from functools import partial
+
+        def flatten_out(mod, inp):
+            out = mod(inp)
+            return tuple([t if isinstance(t, torch.Tensor) else tt for t in out for tt in t])
+        gradcheckfunc = partial(flatten_out, mod)
+        with torch.backends.cudnn.flags(enabled=False):
+            torch.autograd.gradcheck(gradcheckfunc, inp)
+            torch.autograd.gradgradcheck(gradcheckfunc, inp)
+
+    def test_LSTM_grad_and_gradgrad(self, device):
+        hsize = 4
+        inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
+        for bias in [True, False]:
+            mod = torch.nn.LSTM(hsize, hsize, bias=bias).to(device).to(torch.float64)
+            self._test_rnn_mod(mod, inp)
+
+    def test_GRU_grad_and_gradgrad(self, device):
+        hsize = 4
+        inp = torch.rand(1, 3, hsize, device=device, dtype=torch.float64, requires_grad=True)
+        for bias in [True, False]:
+            mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(torch.float64)
+            self._test_rnn_mod(mod, inp)
 
 instantiate_device_type_tests(TestAutogradDeviceType, globals())
 

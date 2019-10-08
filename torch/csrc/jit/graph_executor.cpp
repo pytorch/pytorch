@@ -27,6 +27,7 @@
 #include <torch/csrc/jit/passes/lower_grad_of.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -50,14 +51,6 @@
 
 namespace torch {
 namespace jit {
-
-thread_local bool kOptimize = true;
-void setGraphExecutorOptimize(bool o) {
-  kOptimize = o;
-}
-bool getGraphExecutorOptimize() {
-  return kOptimize;
-}
 
 namespace {
 c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
@@ -714,6 +707,9 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
 
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
+
+  // Fuse the dequant - op - quant patterns into quantized ops
+  QuantFusion(graph);
 
   FuseGraph(graph);
 }

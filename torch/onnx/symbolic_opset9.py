@@ -198,6 +198,7 @@ def _slice(g, input, axes, starts, ends):
         return input
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
+
 def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
     def symbolic(g, self, dim=None, keepdim=None):
         if dim is None:
@@ -942,7 +943,21 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
 
 @parse_args('v', 'i', 'i', 'i')
 def unfold(g, input, dimension, size, step):
-    return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+    if input.isCompleteTensor():
+        sizedim = input.type().sizes()[dimension]
+        low_indices = range(0, sizedim, step)
+        hi_indices = range(size, sizedim + 1, step)
+        stack = [sym_help._slice_helper(g, input, axes=[dimension], starts=[low], ends=[hi])
+                 for low, hi in zip(low_indices, hi_indices)]
+        ndim = input.type().dim()
+        perm = list(range(0, ndim))
+        perm.append(perm.pop(dimension))
+        unsqueeze = [g.op("Unsqueeze", g.op("Transpose", t, perm_i=perm), axes_i=[dimension]) for t in stack]
+        return g.op("Concat", *unsqueeze, axis_i=dimension)
+    else:
+        return _unimplemented("Unfold", "input size not accessible")
 
 
 @parse_args('v', 'v', 'i')
@@ -977,7 +992,7 @@ def index_select(g, self, dim, index):
         index = g.op("Constant", value_t=torch.LongTensor([index_const]))
     elif index_dim is not None:
         if index_dim == 0:
-            # Index is a scalar. Reshape it to a size 1 tensor. 
+            # Index is a scalar. Reshape it to a size 1 tensor.
             index = g.op("Reshape", index, g.op("Constant", value_t=torch.LongTensor([1])))
     return g.op("Gather", self, index, axis_i=dim)
 
@@ -986,6 +1001,47 @@ def index_put(g, self, indices_list_value, values, accumulate):
     indices_list = sym_help._unpack_list(indices_list_value)
     args = [self] + indices_list + [values, accumulate]
     return g.op("ATen", *args, operator_s='index_put')
+
+
+def index_fill(g, self, dim, index, value):
+    dim_value = sym_help._parse_arg(dim, 'i')
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, value, dim_i=dim_value, operator_s="index_fill")
+    # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
+    # 2. expand index => [..., dim, ...], same shape as self except for dim.
+    # 3. expand value as well.
+    # 4. apply onnx::scatter.
+
+    if self.type().dim() is None:
+        return _unimplemented("index_fill", "input rank not accesible")
+    self_dim = self.type().dim()
+    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
+                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
+    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
+
+    value = sym_help._maybe_get_scalar(value)
+    value = sym_help._if_scalar_type_as(g, value, self)
+    expanded_value = expand(g, value, expanded_index_shape, None)
+
+    return scatter(g, self, dim, expanded_index, expanded_value)
+
+
+def index_copy(g, self, dim, index, source):
+    dim_value = sym_help._parse_arg(dim, 'i')
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
+    # Similar to index_fill, apply reshape + expand to index.
+
+    if self.type().dim() is None:
+        return _unimplemented("index_copy", "input rank not accesible")
+    self_dim = self.type().dim()
+    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
+                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
+    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
+
+    return scatter(g, self, dim, expanded_index, source)
 
 
 def type_as(g, self, other):
@@ -1006,7 +1062,7 @@ def cosine_similarity(g, x1, x2, dim, eps):
 
 
 # ignore clone operators that are inserted by PyTorch autograd
-def clone(g, input):
+def clone(g, input, unused_memory_format):
     return input
 
 
@@ -1913,6 +1969,20 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
     return g.op("Multinomial", log_input,
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
+
+def baddbmm(g, self, batch1, batch2, beta, alpha):
+    dtype = self.type().scalarType()
+    batch_mul = matmul(g, batch1, batch2)
+    mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
+    mul_b = mul(g, self, g.op("Cast", beta, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
+    return add(g, mul_a, mul_b)
+
+def remainder(g, input, other):
+    div = g.op("Div", input, other)
+    if sym_help._is_fp(input):
+        div = g.op("Floor", div)
+    quo = g.op("Mul", div, other)
+    return g.op("Sub", input, quo)
 
 
 def gelu(g, self):
