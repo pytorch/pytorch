@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
@@ -18,8 +19,6 @@
 
 namespace torch {
 namespace jit {
-
-void printQuotedString(std::ostream& stmt, const std::string& str);
 
 // Constants relating to maintaining the topological index of nodes.
 //
@@ -116,7 +115,7 @@ static void printStrList(
   for (auto& item : items) {
     if (i++ > 0)
       out << ", ";
-    printQuotedString(out, item);
+    c10::printQuotedString(out, item);
   }
   out << "]";
 }
@@ -149,7 +148,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      printQuotedString(out, s(name));
+      c10::printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
       printStrList(out, ss(name));
@@ -273,7 +272,13 @@ std::ostream &Node::print(std::ostream &out, size_t level,
 
   // In debug print, append file:line:col as a comment after each node
   if (print_source_locations) {
-    if (auto file_line_col = sourceRange().file_line_col()) {
+    SourceRange r = sourceRange();
+    if (sourceRange().source()) {
+      if (auto orig = sourceRange().source()->findSourceRangeThatGenerated(r)) {
+        r = *orig;
+      }
+    }
+    if (auto file_line_col = r.file_line_col()) {
       std::string filename;
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
@@ -929,6 +934,7 @@ bool Node::hasSideEffects() const {
     case prim::CallFunction:
     case prim::CallMethod:
     case prim::BailoutTemplate:
+    case prim::profile:
       return true;
   }
 
@@ -1709,6 +1715,14 @@ void ProfileOp::cloneFrom(Node* other_) {
 }
 Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
+}
+
+TypePtr NamedValue::type() const {
+  if (value_) {
+    return value_->type();
+  } else {
+    return ivalue_.type();
+  }
 }
 
 constexpr Symbol ProfileOp::Kind;

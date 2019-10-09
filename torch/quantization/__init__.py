@@ -4,6 +4,7 @@ from .observer import *
 from .QConfig import *
 from .fake_quantize import *
 from .fuse_modules import fuse_modules
+from .stubs import *
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -14,7 +15,7 @@ def default_eval_fn(model, calib_data):
         model(data)
 
 _all__ = [
-    'QuantWrapper', 'QuantStub', 'DeQuantStub', 'DEFAULT_MODULE_MAPPING',
+    'QuantWrapper', 'QuantStub', 'DeQuantStub',
     # Top level API for eager mode quantization
     'quantize',
     # Sub functions used by eager mode quantization
