@@ -49,5 +49,18 @@ Tensor CosineEmbeddingLossImpl::forward(
   return F::cosine_embedding_loss(input1, input2, target, options);
 }
 
+// ============================================================================
+
+SoftMarginLossImpl::SoftMarginLossImpl(
+    const torch::nn::SoftMarginLossOptions& options_) : options(options_) {}
+
+void SoftMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::SoftMarginLoss(reduction=" << options.reduction() << ")";
+}
+
+Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
+  return torch::soft_margin_loss(input, target, options.reduction());
+}
+
 } // namespace nn
 } // namespace torch
