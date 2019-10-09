@@ -9,10 +9,10 @@ class ConvReLU2d(nnq.Conv2d):
     r"""
     A ConvReLU2d module is a fused module of Conv2d and ReLU
 
-    We adopt the same interface as :class:`torch.nn.quantized.Conv2d`.
+    We adopt the same interface as :class:`~torch.nn.quantized.Conv2d`.
 
-    Attributes:
-        Same as torch.nn.quantized.Conv2d
+    .. note::
+    Attributes: Same as torch.nn.quantized.Conv2d
 
     """
     _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d
