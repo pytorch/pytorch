@@ -596,3 +596,28 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         out = out.view(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
+
+"""Model to make sure that the observers are not inserted into custom modules.
+"""
+class ModelWithNoQconfigPropagation(nn.Module):
+    class ListOutModule(nn.Module):
+        def __init__(self):
+            super(ModelWithNoQconfigPropagation.ListOutModule, self).__init__()
+
+        def forward(self, x):
+            # returns a list of tensors, not supported by observers
+            return [x]
+
+    def __init__(self):
+        super(ModelWithNoQconfigPropagation, self).__init__()
+        self.fc1 = nn.Linear(5, 5).to(dtype=torch.float)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.no_quant_module = self.ListOutModule()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.dequant(x)
+        x = self.no_quant_module(x)
+        return x
