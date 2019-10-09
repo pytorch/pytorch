@@ -363,7 +363,7 @@ TEST_F(FunctionalTest, LogSigmoid) {
 
 TEST_F(FunctionalTest, Softmax) {
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
-  auto output = F::softmax(input, SoftmaxOptions(1));
+  auto output = F::softmax(input, /*dim=*/1);
   auto sum = torch::sum(torch::exp(input), 1);
 
   for (int i = 0; i < 2; i++) {

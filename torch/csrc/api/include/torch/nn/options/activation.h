@@ -61,10 +61,10 @@ struct LeakyReLUOptions {
 
 /// Options for the Softmax functional and module.
 struct TORCH_API SoftmaxOptions {
-  SoftmaxOptions(int dim);
+  SoftmaxOptions(int64_t dim);
 
   // Dimension along which Softmax will be computed.
-  TORCH_ARG(int, dim);
+  TORCH_ARG(int64_t, dim);
 };
 
 } // namespace nn

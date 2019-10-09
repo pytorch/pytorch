@@ -42,10 +42,10 @@ inline Tensor logsigmoid(const Tensor& input) {
 
 inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
                       c10::optional<torch::Dtype> dtype = c10::nullopt) {
-  int dim = options.dim();
+  int64_t dim = options.dim();
   Tensor ret;
 
-  if (dtype == torch::Dtype::Undefined) {
+  if (dtype == c10::nullopt) {
     ret = input.softmax(dim);
   } else {
     ret = input.softmax(dim, dtype);

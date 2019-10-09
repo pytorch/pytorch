@@ -1117,7 +1117,7 @@ TEST_F(ModulesTest, LogSigmoid) {
 }
 
 TEST_F(ModulesTest, Softmax) {
-  Softmax m(SoftmaxOptions(1));
+  Softmax m(/*dim=*/1);
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
   auto output = m(input);
   auto sum = torch::sum(torch::exp(input), 1);

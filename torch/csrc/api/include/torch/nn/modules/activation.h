@@ -128,6 +128,7 @@ TORCH_MODULE(LogSigmoid);
 /// about the exact behavior of this module.
 class TORCH_API SoftmaxImpl : public torch::nn::Cloneable<SoftmaxImpl> {
  public:
+  explicit SoftmaxImpl(int64_t dim) : SoftmaxImpl(SoftmaxOptions(dim)) {}
   explicit SoftmaxImpl(const SoftmaxOptions& options_);
 
   Tensor forward(const Tensor& input);
