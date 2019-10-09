@@ -1516,13 +1516,12 @@ TEST_F(ModulesTest, PrettyPrintSoftmax) {
   ASSERT_EQ(c10::str(Softmax(SoftmaxOptions(1))), "torch::nn::Softmax(dim=1)");
 }
 
-<<<<<<< HEAD
 TEST_F(ModulesTest, PrettyPrintSoftmin) {
   ASSERT_EQ(c10::str(Softmin(SoftminOptions(1))), "torch::nn::Softmin(dim=1)");
-=======
+}
+
 TEST_F(ModulesTest, PrettyPrintPReLU) {
   ASSERT_EQ(c10::str(PReLU()), "torch::nn::PReLU(num_parameters=1)");
   ASSERT_EQ(c10::str(PReLU(PReLUOptions().num_parameters(42))),
             "torch::nn::PReLU(num_parameters=42)");
->>>>>>> 0eccd05ab4355c110b73b1a9c4642d0dd6e2d7cc
 }
