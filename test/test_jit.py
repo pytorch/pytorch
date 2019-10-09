@@ -6793,7 +6793,7 @@ a")
         self.assertEqual(foo(4), 7)
         self.assertEqual(foo(None), 4)
         @torch.jit.script
-        def foo2(a : Optional[int], b : Optional[int]):
+        def foo2(a, b):
             # type: (Optional[int], Optional[int]) -> int
             if not isinstance(a, int) or not isinstance(b, int):
                 return 0
