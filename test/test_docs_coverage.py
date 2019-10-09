@@ -75,8 +75,13 @@ class TestDocCoverage(unittest.TestCase):
 
     def test_tensor(self):
         in_rst = self.parse_rst('tensors.rst', r2)
+        whitelist = {
+            'names', 'unflatten', 'align_as', 'rename_', 'refine_names', 'align_to',
+            'has_names', 'rename',
+        }
         classes = [torch.FloatTensor, torch.LongTensor, torch.ByteTensor]
         has_docstring = set(x for c in classes for x in dir(c) if not x.startswith('_') and getattr(c, x).__doc__)
+        has_docstring -= whitelist
         self.assertEqual(
             has_docstring, in_rst,
             textwrap.dedent('''

@@ -239,17 +239,10 @@ static inline ${return_type} ${api_name}(${formals}) {
 
 # In order to rely on the linker to strip unused ops, it requires us to dispatch statically
 # in Functions.h and TensorMethods.h.
-#
-# NB: The default body also needs to apply a variable guard, as in some
-# situations what we think is a default body actually does have an
-# explicit derivative, and thereby would have gotten unwrapped by
-# the time you get to the implementation.
 STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
-at::AutoNonVariableTypeMode _var_guard(true);
 ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
-at::AutoNonVariableTypeMode _var_guard(true);
 switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:
@@ -1286,9 +1279,7 @@ def create_generic(top_env, declarations):
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
         # Emit #ifdef BUILD_NAMEDTENSOR macros for any code generated here
-        # that is sent to top_env. This is because some of this code (Type.h,
-        # TensorBody.h, TensorMethods.h) is checked into the repo and must be
-        # the same regardless of BUILD_NAMEDTENSOR status.
+        # that is sent to top_env.
         is_named_tensor_only = (has_named_tensor_formals(formals) or
                                 option['api_name'] == 'align_tensors' or
                                 option['api_name'] == 'align_as')

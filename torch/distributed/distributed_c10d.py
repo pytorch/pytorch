@@ -129,7 +129,8 @@ _default_pg = None
 _default_pg_init_method = None
 
 # Default process group wide timeout, if applicable.
-# This currently only applies to the gloo backend. To make an attempt at
+# This only applies to the gloo and nccl backends
+# (only if NCCL_BLOCKING_WAIT is set to 1). To make an attempt at
 # backwards compatibility with THD, we use an extraordinarily high default
 # timeout, given that THD did not have timeouts.
 _default_pg_timeout = timedelta(minutes=30)
@@ -346,7 +347,9 @@ def init_process_group(backend,
                                 Mutually exclusive with ``init_method``.
         timeout (timedelta, optional): Timeout for operations executed against
             the process group. Default value equals 30 minutes.
-            This is only applicable for the ``gloo`` backend.
+            This is applicable for the ``gloo`` backend. For ``nccl``, this is
+            applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
+            is set to 1.
         group_name (str, optional, deprecated): Group name.
 
     To enable ``backend == Backend.MPI``, PyTorch needs to built from source
@@ -485,7 +488,8 @@ def _new_process_group_helper(world_size,
             pg = ProcessGroupNCCL(
                 prefix_store,
                 rank,
-                world_size)
+                world_size,
+                timeout)
             _pg_map[pg] = (Backend.NCCL, store)
             _pg_names[pg] = group_name
         else:
