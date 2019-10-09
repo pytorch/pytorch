@@ -81,7 +81,7 @@ dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& o
 }
 
 template <typename func_t,
-    typename std::enable_if<not std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+    typename std::enable_if<!std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
 static inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t op) {
   using traits = function_traits<func_t>;

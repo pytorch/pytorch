@@ -711,6 +711,14 @@ Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   return native::zeros(self.sizes(), options);
 }
 
+Tensor new_zeros(
+    const Tensor& self,
+    IntArrayRef size,
+    const TensorOptions& options
+    ) {
+  return at::zeros(size, self.options().merge_in(options));
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor bartlett_window(int64_t window_length, const TensorOptions& options) {

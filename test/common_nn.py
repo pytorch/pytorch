@@ -57,6 +57,18 @@ module_tests = [
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t())
     ),
     dict(
+        module_name='Linear',
+        constructor_args=(10, 8),
+        input_size=(0, 10),
+        desc='zero_batch',
+    ),
+    dict(
+        module_name='Linear',
+        constructor_args=(10, 8, False),
+        input_size=(0, 10),
+        desc='zero_batch_no_bias',
+    ),
+    dict(
         module_name='Threshold',
         constructor_args=(2., 1.),
         input_size=(2, 3, 4, 5),
@@ -295,8 +307,8 @@ def bceloss_no_reduce_test():
             lambda i: F.binary_cross_entropy(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()),
-        check_gradgrad=False,
-        pickle=False)
+        pickle=False,
+        precision=7e-4)
 
 
 def bceloss_no_reduce_scalar_test():
@@ -307,7 +319,6 @@ def bceloss_no_reduce_scalar_test():
             lambda i: F.binary_cross_entropy(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()),
-        check_gradgrad=False,
         pickle=False)
 
 
@@ -321,8 +332,8 @@ def bceloss_weights_no_reduce_test():
                                              weight=weights.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, p, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
-        check_gradgrad=False,
-        pickle=False
+        pickle=False,
+        precision=3e-4
     )
 
 
@@ -336,7 +347,6 @@ def bceloss_weights_no_reduce_scalar_test():
                                              weight=weights.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
-        check_gradgrad=False,
         pickle=False
     )
 
