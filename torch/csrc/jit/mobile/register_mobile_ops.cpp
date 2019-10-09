@@ -201,12 +201,13 @@ static auto registry0 = torch::RegisterOperators().op(
   #ifdef USE_STATIC_DISPATCH
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   #endif
+  constexpr size_t nvar = 5;
   auto result_ = at::addmm(
-  (std::move(peek(*stack, 0, 5))).toTensor(),
-  (std::move(peek(*stack, 1, 5))).toTensor(),
-  (std::move(peek(*stack, 2, 5))).toTensor(),
-  (std::move(peek(*stack, 3, 5))).toScalar(),
-  (std::move(peek(*stack, 4, 5))).toScalar()
+  (std::move(peek(*stack, 0, nvar))).toTensor(),
+  (std::move(peek(*stack, 1, nvar))).toTensor(),
+  (std::move(peek(*stack, 2, nvar))).toTensor(),
+  (std::move(peek(*stack, 3, nvar))).toScalar(),
+  (std::move(peek(*stack, 4, nvar))).toScalar()
   );
   drop(*stack, 5);
   pack(*stack, std::move(result_));
