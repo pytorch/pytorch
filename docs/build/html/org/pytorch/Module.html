@@ -9,7 +9,7 @@
   
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <title>org.pytorch.Module (Module) &mdash; PyTorch master documentation</title>
+  <title>Module &mdash; PyTorch master documentation</title>
   
 
   
@@ -34,7 +34,8 @@
   <link rel="stylesheet" href="../../_static/katex-math.css" type="text/css" />
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="prev" title="org.pytorch.IValue (IValue)" href="IValue.html" /> 
+    <link rel="next" title="Tensor" href="Tensor.html" />
+    <link rel="prev" title="IValue" href="IValue.html" /> 
 
   
   <script src="../../_static/js/modernizr.min.js"></script>
@@ -129,7 +130,7 @@
               
               
                 <div class="version">
-                  master (1.2.0 )
+                  master (1.3.0.dev20190917 )
                 </div>
               
             
@@ -200,7 +201,6 @@
 <li class="toctree-l1"><a class="reference internal" href="../../nn.init.html">torch.nn.init</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../onnx.html">torch.onnx</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../optim.html">torch.optim</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../quantization.html">Quantization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../random.html">torch.random</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../sparse.html">torch.sparse</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../storage.html">torch.Storage</a></li>
@@ -225,7 +225,7 @@
 <p class="caption"><span class="caption-text">Other Languages</span></p>
 <ul class="current">
 <li class="toctree-l1"><a class="reference external" href="`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_">`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_</a></li>
-<li class="toctree-l1 current"><a class="reference internal" href="../../packages.html">Java API</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../../packages.html">Javadoc</a></li>
 </ul>
 
             
@@ -267,9 +267,11 @@
       </li>
 
         
-          <li><a href="../../packages.html">Java API</a> &gt;</li>
+          <li><a href="../../packages.html">Javadoc</a> &gt;</li>
         
-      <li>org.pytorch.Module (Module)</li>
+          <li><a href="package-index.html">org.pytorch</a> &gt;</li>
+        
+      <li>Module</li>
     
     
       <li class="pytorch-breadcrumbs-aside">
@@ -301,107 +303,82 @@
             <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
              <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
               
-  <div class="section" id="org-pytorch-module-module">
-<h1>org.pytorch.Module (Module)<a class="headerlink" href="#org-pytorch-module-module" title="Permalink to this headline">¶</a></h1>
-<div class="section" id="source-code">
-<h2>Source Code<a class="headerlink" href="#source-code" title="Permalink to this headline">¶</a></h2>
-<p>Full code can be found in <a class="reference external" href="https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/java/org/pytorch/Module.java">Github</a>.</p>
-</div>
-<div class="section" id="overview">
-<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
-<p>Module is a wrapper of torch.jit.ScriptModule (<cite>torch::jit::script::Module</cite> in PyTorch C++ API)
-which can be constructed with factory method load providing absolute path to the file with serialized TorchScript.</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">IValue</span> <span class="n">IValue</span><span class="o">.</span><span class="n">runMethod</span><span class="p">(</span><span class="n">String</span> <span class="n">methodName</span><span class="p">,</span> <span class="n">IValue</span><span class="o">...</span> <span class="n">inputs</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>for running a particular method of the script module.</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">IValue</span> <span class="n">IValue</span><span class="o">.</span><span class="n">forward</span><span class="p">(</span><span class="n">IValue</span><span class="o">...</span> <span class="n">inputs</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>Shortcut to run ‘forward’ method.</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">IValue</span> <span class="n">IValue</span><span class="o">.</span><span class="n">destroy</span><span class="p">()</span>
-</pre></div>
-</div>
-<p>Explicitly destructs native (C++) part of the Module, <cite>torch::jit::script::Module</cite>.
-As fbjni library destructs native part automatically when current <cite>org.pytorch.Module</cite> instance will be collected by Java GC, the instance will not leak if this method is not called, but timing of deletion and the thread will be at the whim of the Java GC. If you want to control the thread and timing of the destructor, you should call this method explicitly.</p>
-</div>
-<div class="section" id="module-api-details">
-<h2>Module API Details<a class="headerlink" href="#module-api-details" title="Permalink to this headline">¶</a></h2>
+  <div class="section" id="module">
+<h1>Module<a class="headerlink" href="#module" title="Permalink to this headline">¶</a></h1>
 <dl class="type">
 <dt id="org.pytorch.Module">
 public class <code class="sig-name descname">Module</code><a class="headerlink" href="#org.pytorch.Module" title="Permalink to this definition">¶</a></dt>
-<dd><p>Java holder for torch::jit::script::Module which owns it on jni side.</p>
+<dd><p>Java wrapper for torch::jit::script::Module.</p>
 </dd></dl>
 
 <div class="section" id="methods">
-<h3>Methods<a class="headerlink" href="#methods" title="Permalink to this headline">¶</a></h3>
+<h2>Methods<a class="headerlink" href="#methods" title="Permalink to this headline">¶</a></h2>
 <div class="section" id="destroy">
-<h4>destroy<a class="headerlink" href="#destroy" title="Permalink to this headline">¶</a></h4>
+<h3>destroy<a class="headerlink" href="#destroy" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.Module.destroy()">
 public void <code class="sig-name descname">destroy</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Module.destroy()" title="Permalink to this definition">¶</a></dt>
-<dd><p>Explicitly destructs native part. Current instance can not be used after this call. This method may be called multiple times safely. As fbjni library destructs native part automatically when current instance will be collected by Java GC, the instance will not leak if this method is not called, but timing of deletion and the thread will be at the whim of the Java GC. If you want to control the thread and timing of the destructor, you should call this method explicitly. <code class="xref java java-ref docutils literal notranslate"><span class="pre">com.facebook.jni.HybridData.resetNative</span></code></p>
+<dd><p>Explicitly destroys the native torch::jit::script::Module. Calling this method is not required, as the native object will be destroyed when this object is garbage-collected. However, the timing of garbage collection is not guaranteed, so proactively calling <code class="docutils literal notranslate"><span class="pre">destroy</span></code> can free memory more quickly. See <code class="xref java java-ref docutils literal notranslate"><span class="pre">com.facebook.jni.HybridData.resetNative</span></code>.</p>
 </dd></dl>
 
 </div>
 <div class="section" id="forward">
-<h4>forward<a class="headerlink" href="#forward" title="Permalink to this headline">¶</a></h4>
+<h3>forward<a class="headerlink" href="#forward" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.Module.forward(IValue)">
 public <a class="reference internal" href="IValue.html#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">forward</code><span class="sig-paren">(</span><a class="reference internal" href="IValue.html#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>...<em> inputs</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Module.forward(IValue)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Runs ‘forward’ method of loaded torchscript module with specified arguments.</p>
+<dd><p>Runs the ‘forward’ method of this module with the specified arguments.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>inputs</strong> – arguments for torchscript module ‘forward’ method.</p></li>
+<li><p><strong>inputs</strong> – arguments for the TorchScript module’s ‘forward’ method.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns</dt>
-<dd class="field-even"><p>result of torchscript module ‘forward’ method evaluation</p>
+<dd class="field-even"><p>return value from the ‘forward’ method.</p>
 </dd>
 </dl>
 </dd></dl>
 
 </div>
 <div class="section" id="load">
-<h4>load<a class="headerlink" href="#load" title="Permalink to this headline">¶</a></h4>
+<h3>load<a class="headerlink" href="#load" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.Module.load(String)">
-public static <a class="reference internal" href="#org.pytorch.Module" title="org.pytorch.Module">Module</a> <code class="sig-name descname">load</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a><em> modelAbsolutePath</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Module.load(String)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Loads serialized torchscript module from the specified absolute path on the disk.</p>
+public static <a class="reference internal" href="#org.pytorch.Module" title="org.pytorch.Module">Module</a> <code class="sig-name descname">load</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a><em> modelPath</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Module.load(String)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Loads a serialized TorchScript module from the specified path on the disk.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>modelAbsolutePath</strong> – absolute path to file that contains the serialized torchscript module.</p></li>
+<li><p><strong>modelPath</strong> – path to file that contains the serialized TorchScript module.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns</dt>
-<dd class="field-even"><p>new <a class="reference internal" href="#org.pytorch.Module" title="org.pytorch.Module"><code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Module</span></code></a> object which owns torch::jit::script::Module on jni side.</p>
+<dd class="field-even"><p>new <a class="reference internal" href="#org.pytorch.Module" title="org.pytorch.Module"><code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Module</span></code></a> object which owns torch::jit::script::Module.</p>
 </dd>
 </dl>
 </dd></dl>
 
 </div>
 <div class="section" id="runmethod">
-<h4>runMethod<a class="headerlink" href="#runmethod" title="Permalink to this headline">¶</a></h4>
+<h3>runMethod<a class="headerlink" href="#runmethod" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.Module.runMethod(String, IValue)">
 public <a class="reference internal" href="IValue.html#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">runMethod</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a><em> methodName</em>, <a class="reference internal" href="IValue.html#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>...<em> inputs</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Module.runMethod(String, IValue)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Runs specified method of loaded torchscript module with specified arguments.</p>
+<dd><p>Runs the specified method of this module with the specified arguments.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>methodName</strong> – torchscript module method to run</p></li>
-<li><p><strong>inputs</strong> – arguments that will be specified to torchscript module method call</p></li>
+<li><p><strong>methodName</strong> – name of the TorchScript method to run.</p></li>
+<li><p><strong>inputs</strong> – arguments that will be passed to TorchScript method.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns</dt>
-<dd class="field-even"><p>result of torchscript module specified method evaluation</p>
+<dd class="field-even"><p>return value from the method.</p>
 </dd>
 </dl>
 </dd></dl>
 
-</div>
 </div>
 </div>
 </div>
@@ -414,8 +391,10 @@ public <a class="reference internal" href="IValue.html#org.pytorch.IValue" title
   
     <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
       
+        <a href="Tensor.html" class="btn btn-neutral float-right" title="Tensor" accesskey="n" rel="next">Next <img src="../../_static/images/chevron-right-orange.svg" class="next-page"></a>
       
-        <a href="IValue.html" class="btn btn-neutral" title="org.pytorch.IValue (IValue)" accesskey="p" rel="prev"><img src="../../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+      
+        <a href="IValue.html" class="btn btn-neutral" title="IValue" accesskey="p" rel="prev"><img src="../../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
       
     </div>
   
@@ -447,17 +426,12 @@ public <a class="reference internal" href="IValue.html#org.pytorch.IValue" title
           <div class="pytorch-right-menu" id="pytorch-right-menu">
             <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
               <ul>
-<li><a class="reference internal" href="#">org.pytorch.Module (Module)</a><ul>
-<li><a class="reference internal" href="#source-code">Source Code</a></li>
-<li><a class="reference internal" href="#overview">Overview</a></li>
-<li><a class="reference internal" href="#module-api-details">Module API Details</a><ul>
+<li><a class="reference internal" href="#">Module</a><ul>
 <li><a class="reference internal" href="#methods">Methods</a><ul>
 <li><a class="reference internal" href="#destroy">destroy</a></li>
 <li><a class="reference internal" href="#forward">forward</a></li>
 <li><a class="reference internal" href="#load">load</a></li>
 <li><a class="reference internal" href="#runmethod">runMethod</a></li>
-</ul>
-</li>
 </ul>
 </li>
 </ul>

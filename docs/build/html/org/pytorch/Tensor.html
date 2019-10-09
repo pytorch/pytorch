@@ -9,7 +9,7 @@
   
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <title>org.pytorch.Tensor (Tensor) &mdash; PyTorch master documentation</title>
+  <title>Tensor &mdash; PyTorch master documentation</title>
   
 
   
@@ -34,8 +34,8 @@
   <link rel="stylesheet" href="../../_static/katex-math.css" type="text/css" />
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="org.pytorch.IValue (IValue)" href="IValue.html" />
-    <link rel="prev" title="Java API" href="../../packages.html" /> 
+    <link rel="next" title="Tensor.Tensor_float32" href="Tensor-Tensor_float32.html" />
+    <link rel="prev" title="Module" href="Module.html" /> 
 
   
   <script src="../../_static/js/modernizr.min.js"></script>
@@ -130,7 +130,7 @@
               
               
                 <div class="version">
-                  master (1.2.0 )
+                  master (1.3.0.dev20190917 )
                 </div>
               
             
@@ -201,7 +201,6 @@
 <li class="toctree-l1"><a class="reference internal" href="../../nn.init.html">torch.nn.init</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../onnx.html">torch.onnx</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../optim.html">torch.optim</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../quantization.html">Quantization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../random.html">torch.random</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../sparse.html">torch.sparse</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../storage.html">torch.Storage</a></li>
@@ -226,7 +225,7 @@
 <p class="caption"><span class="caption-text">Other Languages</span></p>
 <ul class="current">
 <li class="toctree-l1"><a class="reference external" href="`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_">`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_</a></li>
-<li class="toctree-l1 current"><a class="reference internal" href="../../packages.html">Java API</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../../packages.html">Javadoc</a></li>
 </ul>
 
             
@@ -268,9 +267,11 @@
       </li>
 
         
-          <li><a href="../../packages.html">Java API</a> &gt;</li>
+          <li><a href="../../packages.html">Javadoc</a> &gt;</li>
         
-      <li>org.pytorch.Tensor (Tensor)</li>
+          <li><a href="package-index.html">org.pytorch</a> &gt;</li>
+        
+      <li>Tensor</li>
     
     
       <li class="pytorch-breadcrumbs-aside">
@@ -302,153 +303,25 @@
             <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
              <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
               
-  <div class="section" id="org-pytorch-tensor-tensor">
-<h1>org.pytorch.Tensor (Tensor)<a class="headerlink" href="#org-pytorch-tensor-tensor" title="Permalink to this headline">¶</a></h1>
-<div class="section" id="source-code">
-<h2>Source Code<a class="headerlink" href="#source-code" title="Permalink to this headline">¶</a></h2>
-<p>Full code can be found in <a class="reference external" href="https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/java/org/pytorch/Tensor.java">Github</a>.</p>
-</div>
-<div class="section" id="overview">
-<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
-<p>Tensor supports dtypes <code class="docutils literal notranslate"><span class="pre">uint8,</span> <span class="pre">int8,</span> <span class="pre">float32,</span> <span class="pre">int32,</span> <span class="pre">float64,</span> <span class="pre">int64</span></code>.
-Tensor holds data in DirectByteBuffer of proper type with native bit order.</p>
-<p>To create a Tensor user can use one of the factory methods:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Tensor</span> <span class="n">newUInt8Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="n">ByteBuffer</span> <span class="n">data</span><span class="p">)</span>
-<span class="n">Tensor</span> <span class="n">newUInt8Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="n">byte</span><span class="p">[]</span> <span class="n">data</span><span class="p">)</span>
-
-<span class="n">Tensor</span> <span class="n">newInt8Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="n">ByteBuffer</span> <span class="n">data</span><span class="p">)</span>
-<span class="n">Tensor</span> <span class="n">newInt8Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="n">byte</span><span class="p">[]</span> <span class="n">data</span><span class="p">)</span>
-
-<span class="n">Tensor</span> <span class="n">newFloat32Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="n">FloatBuffer</span> <span class="n">data</span><span class="p">)</span>
-<span class="n">Tensor</span> <span class="n">newFloat32Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="nb">float</span><span class="p">[]</span> <span class="n">data</span><span class="p">)</span>
-
-<span class="n">Tensor</span> <span class="n">newInt32Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="n">IntBuffer</span> <span class="n">data</span><span class="p">)</span>
-<span class="n">Tensor</span> <span class="n">newInt32Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="nb">int</span><span class="p">[]</span> <span class="n">data</span><span class="p">)</span>
-
-<span class="n">Tensor</span> <span class="n">newFloat64Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="n">DoubleBuffer</span> <span class="n">data</span><span class="p">)</span>
-<span class="n">Tensor</span> <span class="n">newFloat64Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="n">double</span><span class="p">[]</span> <span class="n">data</span><span class="p">)</span>
-
-<span class="n">Tensor</span> <span class="n">newInt64Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="n">LongBuffer</span> <span class="n">data</span><span class="p">)</span>
-<span class="n">Tensor</span> <span class="n">newInt64Tensor</span><span class="p">(</span><span class="n">long</span><span class="p">[]</span> <span class="n">shape</span><span class="p">,</span> <span class="n">long</span><span class="p">[]</span> <span class="n">data</span><span class="p">)</span>
-</pre></div>
-</div>
-<p>Where the first parameter <code class="docutils literal notranslate"><span class="pre">long[]</span> <span class="pre">shape</span></code> is shape of the Tensor as array of longs.</p>
-<p>Content of the Tensor can be provided either as (a) java array  or (b) as java.nio.DirectByteBuffer of proper type with native bit order.</p>
-<p>In case of (a) proper DirectByteBuffer will be created internally. (b) case has an advantage that user can keep the reference to DirectByteBuffer and change its content in future for the next run, avoiding allocation of DirectByteBuffer for repeated runs.</p>
-<p>Java’s primitive type byte is signed and java does not have unsigned 8 bit type. For dtype=uint8 api uses byte that will be re-interpreted as uint8 on native side. On java side unsigned value of byte can be read as (byte &amp; 0xFF).</p>
-<div class="section" id="tensor-content-layout">
-<h3>Tensor content layout<a class="headerlink" href="#tensor-content-layout" title="Permalink to this headline">¶</a></h3>
-<p>Tensor content is represented as a one dimensional array (buffer),
-where the first element has all zero indexes T[0, … 0].</p>
-<p>Lets assume tensor shape is {d<sub>0</sub>, … d<sub>n-1</sub>} and d<sub>n-1</sub>&gt; 0.</p>
-<p>The second element will be T[0, … 1] and the last one T[d<sub>0</sub>-1, … d<sub>n-1</sub>- 1]</p>
-<p>Tensor has methods to check its dtype:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="nb">int</span> <span class="n">dtype</span><span class="p">()</span>
-</pre></div>
-</div>
-<p>That returns one of the dtype codes:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Tensor</span><span class="o">.</span><span class="n">DTYPE_UINT8</span>
-<span class="n">Tensor</span><span class="o">.</span><span class="n">DTYPE_INT8</span>
-<span class="n">Tensor</span><span class="o">.</span><span class="n">DTYPE_INT32</span>
-<span class="n">Tensor</span><span class="o">.</span><span class="n">DTYPE_FLOAT32</span>
-<span class="n">Tensor</span><span class="o">.</span><span class="n">DTYPE_INT64</span>
-<span class="n">Tensor</span><span class="o">.</span><span class="n">DTYPE_FLOAT64</span>
-</pre></div>
-</div>
-<p>The data of Tensor can be read as java array:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">byte</span><span class="p">[]</span> <span class="n">getDataAsUnsignedByteArray</span><span class="p">()</span>
-<span class="n">byte</span><span class="p">[]</span> <span class="n">getDataAsByteArray</span><span class="p">()</span>
-<span class="nb">int</span><span class="p">[]</span> <span class="n">getDataAsIntArray</span><span class="p">()</span>
-<span class="n">long</span><span class="p">[]</span> <span class="n">getDataAsLongArray</span><span class="p">()</span>
-<span class="nb">float</span><span class="p">[]</span> <span class="n">getDataAsFloatArray</span><span class="p">()</span>
-<span class="n">double</span><span class="p">[]</span> <span class="n">getDataAsDoubleArray</span><span class="p">()</span>
-</pre></div>
-</div>
-<p>These methods throw IllegalStateException if called for inappropriate dtype.</p>
-</div>
-</div>
-<div class="section" id="tensor-api-details">
-<h2>Tensor API Details<a class="headerlink" href="#tensor-api-details" title="Permalink to this headline">¶</a></h2>
+  <div class="section" id="tensor">
+<h1>Tensor<a class="headerlink" href="#tensor" title="Permalink to this headline">¶</a></h1>
 <dl class="type">
 <dt id="org.pytorch.Tensor">
 public abstract class <code class="sig-name descname">Tensor</code><a class="headerlink" href="#org.pytorch.Tensor" title="Permalink to this definition">¶</a></dt>
-<dd><p>Representation of Tensor. Tensor shape is stored in <a class="reference internal" href="#org.pytorch.Tensor.shape" title="org.pytorch.Tensor.shape"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.shape</span></code></a>, elements are stored as <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/DirectByteBuffer.html" title="java.nio.DirectByteBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.DirectByteBuffer</span></code></a> of one of the supported types.</p>
+<dd><p>Representation of a Tensor. Behavior is similar to PyTorch’s tensor objects.</p>
+<p>Most tensors will be constructed as <code class="docutils literal notranslate"><span class="pre">Tensor.fromBlob(data,</span> <span class="pre">shape)</span></code>, where <code class="docutils literal notranslate"><span class="pre">data</span></code> can be an array or a direct <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/Buffer.html" title="java.nio.Buffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Buffer</span></code></a> (of the proper subclass). Helper methods are provided to allocate buffers properly.</p>
+<p>To access Tensor data, see <a class="reference internal" href="#org.pytorch.Tensor.dtype()" title="org.pytorch.Tensor.dtype()"><code class="xref java java-ref docutils literal notranslate"><span class="pre">dtype()</span></code></a>, <a class="reference internal" href="#org.pytorch.Tensor.shape()" title="org.pytorch.Tensor.shape()"><code class="xref java java-ref docutils literal notranslate"><span class="pre">shape()</span></code></a>, and various <code class="docutils literal notranslate"><span class="pre">getDataAs*</span></code> methods.</p>
+<p>When constructing <code class="docutils literal notranslate"><span class="pre">Tensor</span></code> objects with <code class="docutils literal notranslate"><span class="pre">data</span></code> as an array, it is not specified whether this data is is copied or retained as a reference so it is recommended not to modify it after constructing. <code class="docutils literal notranslate"><span class="pre">data</span></code> passed as a <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/Buffer.html" title="java.nio.Buffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Buffer</span></code></a> is not copied, so it can be modified between <a class="reference internal" href="Module.html#org.pytorch.Module" title="org.pytorch.Module"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Module</span></code></a> calls to avoid reallocation. Data retrieved from <code class="docutils literal notranslate"><span class="pre">Tensor</span></code> objects may be copied or may be a reference to the <code class="docutils literal notranslate"><span class="pre">Tensor</span></code>’s internal data buffer. <code class="docutils literal notranslate"><span class="pre">shape</span></code> is always copied.</p>
 </dd></dl>
 
-<div class="section" id="fields">
-<h3>Fields<a class="headerlink" href="#fields" title="Permalink to this headline">¶</a></h3>
-<div class="section" id="dtype-float32">
-<h4>DTYPE_FLOAT32<a class="headerlink" href="#dtype-float32" title="Permalink to this headline">¶</a></h4>
-<dl class="field">
-<dt id="org.pytorch.Tensor.DTYPE_FLOAT32">
-public static final int <code class="sig-name descname">DTYPE_FLOAT32</code><a class="headerlink" href="#org.pytorch.Tensor.DTYPE_FLOAT32" title="Permalink to this definition">¶</a></dt>
-<dd><p>Code for dtype torch.float32. <a class="reference internal" href="#org.pytorch.Tensor.dtype()" title="org.pytorch.Tensor.dtype()"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.dtype()</span></code></a></p>
-</dd></dl>
-
-</div>
-<div class="section" id="dtype-float64">
-<h4>DTYPE_FLOAT64<a class="headerlink" href="#dtype-float64" title="Permalink to this headline">¶</a></h4>
-<dl class="field">
-<dt id="org.pytorch.Tensor.DTYPE_FLOAT64">
-public static final int <code class="sig-name descname">DTYPE_FLOAT64</code><a class="headerlink" href="#org.pytorch.Tensor.DTYPE_FLOAT64" title="Permalink to this definition">¶</a></dt>
-<dd><p>Code for dtype torch.float64. <a class="reference internal" href="#org.pytorch.Tensor.dtype()" title="org.pytorch.Tensor.dtype()"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.dtype()</span></code></a></p>
-</dd></dl>
-
-</div>
-<div class="section" id="dtype-int32">
-<h4>DTYPE_INT32<a class="headerlink" href="#dtype-int32" title="Permalink to this headline">¶</a></h4>
-<dl class="field">
-<dt id="org.pytorch.Tensor.DTYPE_INT32">
-public static final int <code class="sig-name descname">DTYPE_INT32</code><a class="headerlink" href="#org.pytorch.Tensor.DTYPE_INT32" title="Permalink to this definition">¶</a></dt>
-<dd><p>Code for dtype torch.int32. <a class="reference internal" href="#org.pytorch.Tensor.dtype()" title="org.pytorch.Tensor.dtype()"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.dtype()</span></code></a></p>
-</dd></dl>
-
-</div>
-<div class="section" id="dtype-int64">
-<h4>DTYPE_INT64<a class="headerlink" href="#dtype-int64" title="Permalink to this headline">¶</a></h4>
-<dl class="field">
-<dt id="org.pytorch.Tensor.DTYPE_INT64">
-public static final int <code class="sig-name descname">DTYPE_INT64</code><a class="headerlink" href="#org.pytorch.Tensor.DTYPE_INT64" title="Permalink to this definition">¶</a></dt>
-<dd><p>Code for dtype torch.int64. <a class="reference internal" href="#org.pytorch.Tensor.dtype()" title="org.pytorch.Tensor.dtype()"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.dtype()</span></code></a></p>
-</dd></dl>
-
-</div>
-<div class="section" id="dtype-int8">
-<h4>DTYPE_INT8<a class="headerlink" href="#dtype-int8" title="Permalink to this headline">¶</a></h4>
-<dl class="field">
-<dt id="org.pytorch.Tensor.DTYPE_INT8">
-public static final int <code class="sig-name descname">DTYPE_INT8</code><a class="headerlink" href="#org.pytorch.Tensor.DTYPE_INT8" title="Permalink to this definition">¶</a></dt>
-<dd><p>Code for dtype torch.int8. <a class="reference internal" href="#org.pytorch.Tensor.dtype()" title="org.pytorch.Tensor.dtype()"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.dtype()</span></code></a></p>
-</dd></dl>
-
-</div>
-<div class="section" id="dtype-uint8">
-<h4>DTYPE_UINT8<a class="headerlink" href="#dtype-uint8" title="Permalink to this headline">¶</a></h4>
-<dl class="field">
-<dt id="org.pytorch.Tensor.DTYPE_UINT8">
-public static final int <code class="sig-name descname">DTYPE_UINT8</code><a class="headerlink" href="#org.pytorch.Tensor.DTYPE_UINT8" title="Permalink to this definition">¶</a></dt>
-<dd><p>Code for dtype torch.uint8. <a class="reference internal" href="#org.pytorch.Tensor.dtype()" title="org.pytorch.Tensor.dtype()"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.dtype()</span></code></a></p>
-</dd></dl>
-
-</div>
-<div class="section" id="shape">
-<h4>shape<a class="headerlink" href="#shape" title="Permalink to this headline">¶</a></h4>
-<dl class="field">
-<dt id="org.pytorch.Tensor.shape">
-public final long[] <code class="sig-name descname">shape</code><a class="headerlink" href="#org.pytorch.Tensor.shape" title="Permalink to this definition">¶</a></dt>
-<dd><p>Shape of current tensor.</p>
-</dd></dl>
-
-</div>
-</div>
 <div class="section" id="methods">
-<h3>Methods<a class="headerlink" href="#methods" title="Permalink to this headline">¶</a></h3>
+<h2>Methods<a class="headerlink" href="#methods" title="Permalink to this headline">¶</a></h2>
 <div class="section" id="allocatebytebuffer">
-<h4>allocateByteBuffer<a class="headerlink" href="#allocatebytebuffer" title="Permalink to this headline">¶</a></h4>
+<h3>allocateByteBuffer<a class="headerlink" href="#allocatebytebuffer" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.Tensor.allocateByteBuffer(int)">
 public static <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html" title="java.nio.ByteBuffer">ByteBuffer</a> <code class="sig-name descname">allocateByteBuffer</code><span class="sig-paren">(</span>int<em> numElements</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.allocateByteBuffer(int)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Allocates a new direct <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html" title="java.nio.ByteBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.ByteBuffer</span></code></a> with native byte order with specified capacity that can be used in <a class="reference internal" href="#org.pytorch.Tensor.newInt8Tensor(long[], ByteBuffer)" title="org.pytorch.Tensor.newInt8Tensor(long[], ByteBuffer)"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.newInt8Tensor(long[],ByteBuffer)</span></code></a>, <a class="reference internal" href="#org.pytorch.Tensor.newUInt8Tensor(long[], ByteBuffer)" title="org.pytorch.Tensor.newUInt8Tensor(long[], ByteBuffer)"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.newUInt8Tensor(long[],ByteBuffer)</span></code></a>.</p>
+<dd><p>Allocates a new direct <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html" title="java.nio.ByteBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.ByteBuffer</span></code></a> with native byte order with specified capacity that can be used in <a class="reference internal" href="#org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])" title="org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.fromBlob(ByteBuffer,long[])</span></code></a>, <a class="reference internal" href="#org.pytorch.Tensor.fromBlobUnsigned(ByteBuffer, long[])" title="org.pytorch.Tensor.fromBlobUnsigned(ByteBuffer, long[])"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.fromBlobUnsigned(ByteBuffer,long[])</span></code></a>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
@@ -460,11 +333,11 @@ public static <a class="reference external" href="http://docs.oracle.com/javase/
 
 </div>
 <div class="section" id="allocatedoublebuffer">
-<h4>allocateDoubleBuffer<a class="headerlink" href="#allocatedoublebuffer" title="Permalink to this headline">¶</a></h4>
+<h3>allocateDoubleBuffer<a class="headerlink" href="#allocatedoublebuffer" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.Tensor.allocateDoubleBuffer(int)">
 public static <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/DoubleBuffer.html" title="java.nio.DoubleBuffer">DoubleBuffer</a> <code class="sig-name descname">allocateDoubleBuffer</code><span class="sig-paren">(</span>int<em> numElements</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.allocateDoubleBuffer(int)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Allocates a new direct <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/DoubleBuffer.html" title="java.nio.DoubleBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.DoubleBuffer</span></code></a> with native byte order with specified capacity that can be used in <a class="reference internal" href="#org.pytorch.Tensor.newFloat64Tensor(long[], DoubleBuffer)" title="org.pytorch.Tensor.newFloat64Tensor(long[], DoubleBuffer)"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.newFloat64Tensor(long[],DoubleBuffer)</span></code></a>.</p>
+<dd><p>Allocates a new direct <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/DoubleBuffer.html" title="java.nio.DoubleBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.DoubleBuffer</span></code></a> with native byte order with specified capacity that can be used in <a class="reference internal" href="#org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])" title="org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.fromBlob(DoubleBuffer,long[])</span></code></a>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
@@ -476,11 +349,11 @@ public static <a class="reference external" href="http://docs.oracle.com/javase/
 
 </div>
 <div class="section" id="allocatefloatbuffer">
-<h4>allocateFloatBuffer<a class="headerlink" href="#allocatefloatbuffer" title="Permalink to this headline">¶</a></h4>
+<h3>allocateFloatBuffer<a class="headerlink" href="#allocatefloatbuffer" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.Tensor.allocateFloatBuffer(int)">
 public static <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/FloatBuffer.html" title="java.nio.FloatBuffer">FloatBuffer</a> <code class="sig-name descname">allocateFloatBuffer</code><span class="sig-paren">(</span>int<em> numElements</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.allocateFloatBuffer(int)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Allocates a new direct <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/FloatBuffer.html" title="java.nio.FloatBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.FloatBuffer</span></code></a> with native byte order with specified capacity that can be used in <a class="reference internal" href="#org.pytorch.Tensor.newFloat32Tensor(long[], FloatBuffer)" title="org.pytorch.Tensor.newFloat32Tensor(long[], FloatBuffer)"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.newFloat32Tensor(long[],FloatBuffer)</span></code></a>.</p>
+<dd><p>Allocates a new direct <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/FloatBuffer.html" title="java.nio.FloatBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.FloatBuffer</span></code></a> with native byte order with specified capacity that can be used in <a class="reference internal" href="#org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])" title="org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.fromBlob(FloatBuffer,long[])</span></code></a>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
@@ -492,19 +365,27 @@ public static <a class="reference external" href="http://docs.oracle.com/javase/
 
 </div>
 <div class="section" id="allocateintbuffer">
-<h4>allocateIntBuffer<a class="headerlink" href="#allocateintbuffer" title="Permalink to this headline">¶</a></h4>
+<h3>allocateIntBuffer<a class="headerlink" href="#allocateintbuffer" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.Tensor.allocateIntBuffer(int)">
 public static <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/IntBuffer.html" title="java.nio.IntBuffer">IntBuffer</a> <code class="sig-name descname">allocateIntBuffer</code><span class="sig-paren">(</span>int<em> numElements</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.allocateIntBuffer(int)" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
+<dd><p>Allocates a new direct <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/IntBuffer.html" title="java.nio.IntBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.IntBuffer</span></code></a> with native byte order with specified capacity that can be used in <a class="reference internal" href="#org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])" title="org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.fromBlob(IntBuffer,long[])</span></code></a>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>numElements</strong> – capacity (number of elements) of result buffer.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
 
 </div>
 <div class="section" id="allocatelongbuffer">
-<h4>allocateLongBuffer<a class="headerlink" href="#allocatelongbuffer" title="Permalink to this headline">¶</a></h4>
+<h3>allocateLongBuffer<a class="headerlink" href="#allocatelongbuffer" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.Tensor.allocateLongBuffer(int)">
 public static <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/LongBuffer.html" title="java.nio.LongBuffer">LongBuffer</a> <code class="sig-name descname">allocateLongBuffer</code><span class="sig-paren">(</span>int<em> numElements</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.allocateLongBuffer(int)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Allocates a new direct <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/LongBuffer.html" title="java.nio.LongBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.LongBuffer</span></code></a> with native byte order with specified capacity that can be used in <a class="reference internal" href="#org.pytorch.Tensor.newInt64Tensor(long[], LongBuffer)" title="org.pytorch.Tensor.newInt64Tensor(long[], LongBuffer)"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.newInt64Tensor(long[],LongBuffer)</span></code></a>.</p>
+<dd><p>Allocates a new direct <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/LongBuffer.html" title="java.nio.LongBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.LongBuffer</span></code></a> with native byte order with specified capacity that can be used in <a class="reference internal" href="#org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])" title="org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.fromBlob(LongBuffer,long[])</span></code></a>.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
@@ -516,129 +397,37 @@ public static <a class="reference external" href="http://docs.oracle.com/javase/
 
 </div>
 <div class="section" id="dtype">
-<h4>dtype<a class="headerlink" href="#dtype" title="Permalink to this headline">¶</a></h4>
+<h3>dtype<a class="headerlink" href="#dtype" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.Tensor.dtype()">
-public abstract int <code class="sig-name descname">dtype</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.dtype()" title="Permalink to this definition">¶</a></dt>
-<dd><p>Returns dtype of current tensor. Can be one of <a class="reference internal" href="#org.pytorch.Tensor.DTYPE_UINT8" title="org.pytorch.Tensor.DTYPE_UINT8"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.DTYPE_UINT8</span></code></a>, <a class="reference internal" href="#org.pytorch.Tensor.DTYPE_INT8" title="org.pytorch.Tensor.DTYPE_INT8"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.DTYPE_INT8</span></code></a>, <a class="reference internal" href="#org.pytorch.Tensor.DTYPE_INT32" title="org.pytorch.Tensor.DTYPE_INT32"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.DTYPE_INT32</span></code></a>,<a class="reference internal" href="#org.pytorch.Tensor.DTYPE_FLOAT32" title="org.pytorch.Tensor.DTYPE_FLOAT32"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.DTYPE_FLOAT32</span></code></a>, <a class="reference internal" href="#org.pytorch.Tensor.DTYPE_INT64" title="org.pytorch.Tensor.DTYPE_INT64"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.DTYPE_INT64</span></code></a>, <a class="reference internal" href="#org.pytorch.Tensor.DTYPE_FLOAT64" title="org.pytorch.Tensor.DTYPE_FLOAT64"><code class="xref java java-ref docutils literal notranslate"><span class="pre">Tensor.DTYPE_FLOAT64</span></code></a>.</p>
-</dd></dl>
-
-</div>
-<div class="section" id="getdataasbytearray">
-<h4>getDataAsByteArray<a class="headerlink" href="#getdataasbytearray" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.getDataAsByteArray()">
-public byte[] <code class="sig-name descname">getDataAsByteArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsByteArray()" title="Permalink to this definition">¶</a></dt>
-<dd><p>Returns newly allocated java byte array that contains a copy of tensor data.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Throws</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-int8 tensor.</p></li>
-</ul>
+public abstract <a class="reference internal" href="DType.html#org.pytorch.DType" title="org.pytorch.DType">DType</a> <code class="sig-name descname">dtype</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.dtype()" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p>data type of this tensor.</p>
 </dd>
 </dl>
 </dd></dl>
 
 </div>
-<div class="section" id="getdataasdoublearray">
-<h4>getDataAsDoubleArray<a class="headerlink" href="#getdataasdoublearray" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="dtypejnicode">
+<h3>dtypeJniCode<a class="headerlink" href="#dtypejnicode" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.Tensor.getDataAsDoubleArray()">
-public double[] <code class="sig-name descname">getDataAsDoubleArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsDoubleArray()" title="Permalink to this definition">¶</a></dt>
-<dd><p>Returns newly allocated java byte array that contains a copy of tensor data.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Throws</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-float64 tensor.</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="getdataasfloatarray">
-<h4>getDataAsFloatArray<a class="headerlink" href="#getdataasfloatarray" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.getDataAsFloatArray()">
-public float[] <code class="sig-name descname">getDataAsFloatArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsFloatArray()" title="Permalink to this definition">¶</a></dt>
-<dd><p>Returns newly allocated java byte array that contains a copy of tensor data.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Throws</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-float32 tensor.</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="getdataasintarray">
-<h4>getDataAsIntArray<a class="headerlink" href="#getdataasintarray" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.getDataAsIntArray()">
-public int[] <code class="sig-name descname">getDataAsIntArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsIntArray()" title="Permalink to this definition">¶</a></dt>
-<dd><p>Returns newly allocated java byte array that contains a copy of tensor data.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Throws</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-int32 tensor.</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="getdataaslongarray">
-<h4>getDataAsLongArray<a class="headerlink" href="#getdataaslongarray" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.getDataAsLongArray()">
-public long[] <code class="sig-name descname">getDataAsLongArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsLongArray()" title="Permalink to this definition">¶</a></dt>
-<dd><p>Returns newly allocated java byte array that contains a copy of tensor data.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Throws</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-int64 tensor.</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="getdataasunsignedbytearray">
-<h4>getDataAsUnsignedByteArray<a class="headerlink" href="#getdataasunsignedbytearray" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.getDataAsUnsignedByteArray()">
-public byte[] <code class="sig-name descname">getDataAsUnsignedByteArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsUnsignedByteArray()" title="Permalink to this definition">¶</a></dt>
-<dd><p>Returns newly allocated java byte array that contains a copy of tensor data.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Throws</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-uint8 tensor.</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="getrawdatabuffer">
-<h4>getRawDataBuffer<a class="headerlink" href="#getrawdatabuffer" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.getRawDataBuffer()">
- <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/Buffer.html" title="java.nio.Buffer">Buffer</a> <code class="sig-name descname">getRawDataBuffer</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getRawDataBuffer()" title="Permalink to this definition">¶</a></dt>
+<dt id="org.pytorch.Tensor.dtypeJniCode()">
+ int <code class="sig-name descname">dtypeJniCode</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.dtypeJniCode()" title="Permalink to this definition">¶</a></dt>
 <dd></dd></dl>
 
 </div>
-<div class="section" id="newfloat32tensor">
-<h4>newFloat32Tensor<a class="headerlink" href="#newfloat32tensor" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="fromblob">
+<h3>fromBlob<a class="headerlink" href="#fromblob" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.Tensor.newFloat32Tensor(long[], float[])">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newFloat32Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, float[]<em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newFloat32Tensor(long[], float[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new Tensor instance with dtype torch.float32 with specified shape and data as array of floats.</p>
+<dt id="org.pytorch.Tensor.fromBlob(byte[], long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlob</code><span class="sig-paren">(</span>byte[]<em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlob(byte[], long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new Tensor instance with dtype torch.int8 with specified shape and data as array of bytes.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>shape</strong> – Tensor shape</p></li>
 <li><p><strong>data</strong> – Tensor elements</p></li>
+<li><p><strong>shape</strong> – Tensor shape</p></li>
 </ul>
 </dd>
 </dl>
@@ -646,27 +435,61 @@ public static <a class="reference internal" href="#org.pytorch.Tensor" title="or
 
 </div>
 <div class="section" id="id1">
-<h4>newFloat32Tensor<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h4>
+<h3>fromBlob<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.Tensor.newFloat32Tensor(long[], FloatBuffer)">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newFloat32Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/FloatBuffer.html" title="java.nio.FloatBuffer">FloatBuffer</a><em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newFloat32Tensor(long[], FloatBuffer)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new Tensor instance with dtype torch.float32 with specified shape and data.</p>
+<dt id="org.pytorch.Tensor.fromBlob(int[], long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlob</code><span class="sig-paren">(</span>int[]<em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlob(int[], long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new Tensor instance with dtype torch.int32 with specified shape and data as array of ints.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> – Tensor elements</p></li>
 <li><p><strong>shape</strong> – Tensor shape</p></li>
-<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor#numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
 </ul>
 </dd>
 </dl>
 </dd></dl>
 
 </div>
-<div class="section" id="newfloat64tensor">
-<h4>newFloat64Tensor<a class="headerlink" href="#newfloat64tensor" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="id2">
+<h3>fromBlob<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.Tensor.newFloat64Tensor(long[], double[])">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newFloat64Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, double[]<em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newFloat64Tensor(long[], double[])" title="Permalink to this definition">¶</a></dt>
+<dt id="org.pytorch.Tensor.fromBlob(float[], long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlob</code><span class="sig-paren">(</span>float[]<em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlob(float[], long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new Tensor instance with dtype torch.float32 with specified shape and data as array of floats.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> – Tensor elements</p></li>
+<li><p><strong>shape</strong> – Tensor shape</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="id3">
+<h3>fromBlob<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.fromBlob(long[], long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlob</code><span class="sig-paren">(</span>long[]<em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlob(long[], long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new Tensor instance with dtype torch.int64 with specified shape and data as array of longs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> – Tensor elements</p></li>
+<li><p><strong>shape</strong> – Tensor shape</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="id4">
+<h3>fromBlob<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.fromBlob(long[], double[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlob</code><span class="sig-paren">(</span>long[]<em> shape</em>, double[]<em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlob(long[], double[])" title="Permalink to this definition">¶</a></dt>
 <dd><p>Creates a new Tensor instance with dtype torch.float64 with specified shape and data as array of doubles.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
@@ -679,136 +502,17 @@ public static <a class="reference internal" href="#org.pytorch.Tensor" title="or
 </dd></dl>
 
 </div>
-<div class="section" id="id2">
-<h4>newFloat64Tensor<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.newFloat64Tensor(long[], DoubleBuffer)">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newFloat64Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/DoubleBuffer.html" title="java.nio.DoubleBuffer">DoubleBuffer</a><em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newFloat64Tensor(long[], DoubleBuffer)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new Tensor instance with dtype torch.float64 with specified shape and data.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>shape</strong> – Tensor shape</p></li>
-<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor#numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="newint32tensor">
-<h4>newInt32Tensor<a class="headerlink" href="#newint32tensor" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.newInt32Tensor(long[], int[])">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newInt32Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, int[]<em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newInt32Tensor(long[], int[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new Tensor instance with dtype torch.int32 with specified shape and data as array of ints.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>shape</strong> – Tensor shape</p></li>
-<li><p><strong>data</strong> – Tensor elements</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="id3">
-<h4>newInt32Tensor<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.newInt32Tensor(long[], IntBuffer)">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newInt32Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/IntBuffer.html" title="java.nio.IntBuffer">IntBuffer</a><em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newInt32Tensor(long[], IntBuffer)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new Tensor instance with dtype torch.int32 with specified shape and data.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>shape</strong> – Tensor shape</p></li>
-<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor#numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="newint64tensor">
-<h4>newInt64Tensor<a class="headerlink" href="#newint64tensor" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.newInt64Tensor(long[], long[])">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newInt64Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, long[]<em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newInt64Tensor(long[], long[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new Tensor instance with dtype torch.int64 with specified shape and data as array of longs.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>shape</strong> – Tensor shape</p></li>
-<li><p><strong>data</strong> – Tensor elements</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="id4">
-<h4>newInt64Tensor<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.newInt64Tensor(long[], LongBuffer)">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newInt64Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/LongBuffer.html" title="java.nio.LongBuffer">LongBuffer</a><em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newInt64Tensor(long[], LongBuffer)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new Tensor instance with dtype torch.int64 with specified shape and data.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>shape</strong> – Tensor shape</p></li>
-<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor#numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="newint8tensor">
-<h4>newInt8Tensor<a class="headerlink" href="#newint8tensor" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.newInt8Tensor(long[], byte[])">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newInt8Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, byte[]<em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newInt8Tensor(long[], byte[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new Tensor instance with dtype torch.int8 with specified shape and data as array of bytes.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>shape</strong> – Tensor shape</p></li>
-<li><p><strong>data</strong> – Tensor elements</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
 <div class="section" id="id5">
-<h4>newInt8Tensor<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h4>
+<h3>fromBlob<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.Tensor.newInt8Tensor(long[], ByteBuffer)">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newInt8Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html" title="java.nio.ByteBuffer">ByteBuffer</a><em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newInt8Tensor(long[], ByteBuffer)" title="Permalink to this definition">¶</a></dt>
+<dt id="org.pytorch.Tensor.fromBlob(ByteBuffer, long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlob</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html" title="java.nio.ByteBuffer">ByteBuffer</a><em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlob(ByteBuffer, long[])" title="Permalink to this definition">¶</a></dt>
 <dd><p>Creates a new Tensor instance with dtype torch.int8 with specified shape and data.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor.numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
 <li><p><strong>shape</strong> – Tensor shape</p></li>
-<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor#numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
-</ul>
-</dd>
-</dl>
-</dd></dl>
-
-</div>
-<div class="section" id="newuint8tensor">
-<h4>newUInt8Tensor<a class="headerlink" href="#newuint8tensor" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.newUInt8Tensor(long[], byte[])">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newUInt8Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, byte[]<em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newUInt8Tensor(long[], byte[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new Tensor instance with dtype torch.uint8 with specified shape and data as array of bytes.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>shape</strong> – Tensor shape</p></li>
-<li><p><strong>data</strong> – Tensor elements</p></li>
 </ul>
 </dd>
 </dl>
@@ -816,134 +520,249 @@ public static <a class="reference internal" href="#org.pytorch.Tensor" title="or
 
 </div>
 <div class="section" id="id6">
-<h4>newUInt8Tensor<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h4>
+<h3>fromBlob<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.Tensor.newUInt8Tensor(long[], ByteBuffer)">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">newUInt8Tensor</code><span class="sig-paren">(</span>long[]<em> shape</em>, <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html" title="java.nio.ByteBuffer">ByteBuffer</a><em> data</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.newUInt8Tensor(long[], ByteBuffer)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new Tensor instance with dtype torch.uint8 with specified shape and data.</p>
+<dt id="org.pytorch.Tensor.fromBlob(IntBuffer, long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlob</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/IntBuffer.html" title="java.nio.IntBuffer">IntBuffer</a><em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlob(IntBuffer, long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new Tensor instance with dtype torch.int32 with specified shape and data.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor.numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
 <li><p><strong>shape</strong> – Tensor shape</p></li>
-<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor#numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
 </ul>
 </dd>
 </dl>
-</dd></dl>
-
-</div>
-<div class="section" id="numel">
-<h4>numel<a class="headerlink" href="#numel" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.Tensor.numel()">
-public long <code class="sig-name descname">numel</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.numel()" title="Permalink to this definition">¶</a></dt>
-<dd><p>Calculates number of elements in current tensor instance.</p>
 </dd></dl>
 
 </div>
 <div class="section" id="id7">
-<h4>numel<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h4>
+<h3>fromBlob<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.Tensor.numel(long[])">
-public static long <code class="sig-name descname">numel</code><span class="sig-paren">(</span>long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.numel(long[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Calculates number of elements in tensor with specified shape.</p>
+<dt id="org.pytorch.Tensor.fromBlob(FloatBuffer, long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlob</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/FloatBuffer.html" title="java.nio.FloatBuffer">FloatBuffer</a><em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlob(FloatBuffer, long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new Tensor instance with dtype torch.float32 with specified shape and data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor.numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
+<li><p><strong>shape</strong> – Tensor shape</p></li>
+</ul>
+</dd>
+</dl>
 </dd></dl>
 
 </div>
-</div>
-</div>
-<div class="section" id="tensorimageutils">
-<h2>TensorImageUtils<a class="headerlink" href="#tensorimageutils" title="Permalink to this headline">¶</a></h2>
 <div class="section" id="id8">
-<h3>Overview<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h3>
-<dl class="type">
-<dt id="org.pytorch.torchvision.TensorImageUtils">
-public final class <code class="sig-name descname">TensorImageUtils</code><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils" title="Permalink to this definition">¶</a></dt>
-<dd><p>Contains utility functions for <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor"><code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code></a> creation from <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code> or <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.media.Image</span></code> source.</p>
+<h3>fromBlob<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.fromBlob(LongBuffer, long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlob</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/LongBuffer.html" title="java.nio.LongBuffer">LongBuffer</a><em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlob(LongBuffer, long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new Tensor instance with dtype torch.int64 with specified shape and data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor.numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
+<li><p><strong>shape</strong> – Tensor shape</p></li>
+</ul>
+</dd>
+</dl>
 </dd></dl>
 
 </div>
 <div class="section" id="id9">
-<h3>Fields<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h3>
-<div class="section" id="torchvision-norm-mean-rgb">
-<h4>TORCHVISION_NORM_MEAN_RGB<a class="headerlink" href="#torchvision-norm-mean-rgb" title="Permalink to this headline">¶</a></h4>
-<dl class="field">
-<dt id="org.pytorch.torchvision.TensorImageUtils.TORCHVISION_NORM_MEAN_RGB">
-public static float[] <code class="sig-name descname">TORCHVISION_NORM_MEAN_RGB</code><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.TORCHVISION_NORM_MEAN_RGB" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="torchvision-norm-std-rgb">
-<h4>TORCHVISION_NORM_STD_RGB<a class="headerlink" href="#torchvision-norm-std-rgb" title="Permalink to this headline">¶</a></h4>
-<dl class="field">
-<dt id="org.pytorch.torchvision.TensorImageUtils.TORCHVISION_NORM_STD_RGB">
-public static float[] <code class="sig-name descname">TORCHVISION_NORM_STD_RGB</code><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.TORCHVISION_NORM_STD_RGB" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-</div>
-<div class="section" id="id10">
-<h3>Methods<a class="headerlink" href="#id10" title="Permalink to this headline">¶</a></h3>
-<div class="section" id="bitmaptofloat32tensor">
-<h4>bitmapToFloat32Tensor<a class="headerlink" href="#bitmaptofloat32tensor" title="Permalink to this headline">¶</a></h4>
+<h3>fromBlob<a class="headerlink" href="#id9" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.torchvision.TensorImageUtils.bitmapToFloat32Tensor(Bitmap, float[], float[])">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">bitmapToFloat32Tensor</code><span class="sig-paren">(</span>Bitmap<em> bitmap</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.bitmapToFloat32Tensor(Bitmap, float[], float[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates new <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor"><code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code></a> from full <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code>, normalized with specified in parameters mean and std.</p>
+<dt id="org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlob</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/DoubleBuffer.html" title="java.nio.DoubleBuffer">DoubleBuffer</a><em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlob(DoubleBuffer, long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new Tensor instance with dtype torch.float64 with specified shape and data.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>normMeanRGB</strong> – means for RGB channels normalization, length must equal 3, RGB order</p></li>
-<li><p><strong>normStdRGB</strong> – standard deviation for RGB channels normalization, length must equal 3, RGB order</p></li>
+<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor.numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
+<li><p><strong>shape</strong> – Tensor shape</p></li>
 </ul>
 </dd>
 </dl>
+</dd></dl>
+
+</div>
+<div class="section" id="fromblobunsigned">
+<h3>fromBlobUnsigned<a class="headerlink" href="#fromblobunsigned" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.fromBlobUnsigned(byte[], long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlobUnsigned</code><span class="sig-paren">(</span>byte[]<em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlobUnsigned(byte[], long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new Tensor instance with dtype torch.uint8 with specified shape and data as array of bytes.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> – Tensor elements</p></li>
+<li><p><strong>shape</strong> – Tensor shape</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="id10">
+<h3>fromBlobUnsigned<a class="headerlink" href="#id10" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.fromBlobUnsigned(ByteBuffer, long[])">
+public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">fromBlobUnsigned</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/ByteBuffer.html" title="java.nio.ByteBuffer">ByteBuffer</a><em> data</em>, long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.fromBlobUnsigned(ByteBuffer, long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new Tensor instance with dtype torch.uint8 with specified shape and data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>data</strong> – Direct buffer with native byte order that contains <code class="docutils literal notranslate"><span class="pre">Tensor.numel(shape)</span></code> elements. The buffer is used directly without copying, and changes to its content will change the tensor.</p></li>
+<li><p><strong>shape</strong> – Tensor shape</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="getdataasbytearray">
+<h3>getDataAsByteArray<a class="headerlink" href="#getdataasbytearray" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.getDataAsByteArray()">
+public byte[] <code class="sig-name descname">getDataAsByteArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsByteArray()" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Throws</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-int8 tensor.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a Java byte array that contains the tensor data. This may be a copy or reference.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="getdataasdoublearray">
+<h3>getDataAsDoubleArray<a class="headerlink" href="#getdataasdoublearray" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.getDataAsDoubleArray()">
+public double[] <code class="sig-name descname">getDataAsDoubleArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsDoubleArray()" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Throws</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-float64 tensor.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a Java double array that contains the tensor data. This may be a copy or reference.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="getdataasfloatarray">
+<h3>getDataAsFloatArray<a class="headerlink" href="#getdataasfloatarray" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.getDataAsFloatArray()">
+public float[] <code class="sig-name descname">getDataAsFloatArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsFloatArray()" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Throws</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-float32 tensor.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a Java float array that contains the tensor data. This may be a copy or reference.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="getdataasintarray">
+<h3>getDataAsIntArray<a class="headerlink" href="#getdataasintarray" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.getDataAsIntArray()">
+public int[] <code class="sig-name descname">getDataAsIntArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsIntArray()" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Throws</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-int32 tensor.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a Java int array that contains the tensor data. This may be a copy or reference.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="getdataaslongarray">
+<h3>getDataAsLongArray<a class="headerlink" href="#getdataaslongarray" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.getDataAsLongArray()">
+public long[] <code class="sig-name descname">getDataAsLongArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsLongArray()" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Throws</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-int64 tensor.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a Java long array that contains the tensor data. This may be a copy or reference.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="getdataasunsignedbytearray">
+<h3>getDataAsUnsignedByteArray<a class="headerlink" href="#getdataasunsignedbytearray" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.getDataAsUnsignedByteArray()">
+public byte[] <code class="sig-name descname">getDataAsUnsignedByteArray</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getDataAsUnsignedByteArray()" title="Permalink to this definition">¶</a></dt>
+<dd><dl class="field-list simple">
+<dt class="field-odd">Throws</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><strong>IllegalStateException</strong></a> – if it is called for a non-uint8 tensor.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>a Java byte array that contains the tensor data. This may be a copy or reference.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="getrawdatabuffer">
+<h3>getRawDataBuffer<a class="headerlink" href="#getrawdatabuffer" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.getRawDataBuffer()">
+ <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/Buffer.html" title="java.nio.Buffer">Buffer</a> <code class="sig-name descname">getRawDataBuffer</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.getRawDataBuffer()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="numel">
+<h3>numel<a class="headerlink" href="#numel" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.Tensor.numel()">
+public long <code class="sig-name descname">numel</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.numel()" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the number of elements in this tensor.</p>
 </dd></dl>
 
 </div>
 <div class="section" id="id11">
-<h4>bitmapToFloat32Tensor<a class="headerlink" href="#id11" title="Permalink to this headline">¶</a></h4>
+<h3>numel<a class="headerlink" href="#id11" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.torchvision.TensorImageUtils.bitmapToFloat32Tensor(Bitmap, int, int, int, int, float[], float[])">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">bitmapToFloat32Tensor</code><span class="sig-paren">(</span>Bitmap<em> bitmap</em>, int<em> x</em>, int<em> y</em>, int<em> width</em>, int<em> height</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.bitmapToFloat32Tensor(Bitmap, int, int, int, int, float[], float[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates new <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor"><code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code></a> from specified area of <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code>, normalized with specified in parameters mean and std.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>bitmap</strong> – <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code> as a source for Tensor data</p></li>
-<li><p><strong>x</strong> – x coordinate of top left corner of bitmap’s area</p></li>
-<li><p><strong>y</strong> – y coordinate of top left corner of bitmap’s area</p></li>
-<li><p><strong>width</strong> – width of bitmap’s area</p></li>
-<li><p><strong>height</strong> – height of bitmap’s area</p></li>
-<li><p><strong>normMeanRGB</strong> – means for RGB channels normalization, length must equal 3, RGB order</p></li>
-<li><p><strong>normStdRGB</strong> – standard deviation for RGB channels normalization, length must equal 3, RGB order</p></li>
-</ul>
-</dd>
-</dl>
+<dt id="org.pytorch.Tensor.numel(long[])">
+public static long <code class="sig-name descname">numel</code><span class="sig-paren">(</span>long[]<em> shape</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.numel(long[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Calculates the number of elements in a tensor with the specified shape.</p>
 </dd></dl>
 
 </div>
-<div class="section" id="imageyuv420centercroptofloat32tensor">
-<h4>imageYUV420CenterCropToFloat32Tensor<a class="headerlink" href="#imageyuv420centercroptofloat32tensor" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="shape">
+<h3>shape<a class="headerlink" href="#shape" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.torchvision.TensorImageUtils.imageYUV420CenterCropToFloat32Tensor(Image, int, int, int, float[], float[])">
-public static <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">imageYUV420CenterCropToFloat32Tensor</code><span class="sig-paren">(</span>Image<em> image</em>, int<em> rotateCWDegrees</em>, int<em> tensorWidth</em>, int<em> tensorHeight</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.imageYUV420CenterCropToFloat32Tensor(Image, int, int, int, float[], float[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates new <a class="reference internal" href="#org.pytorch.Tensor" title="org.pytorch.Tensor"><code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code></a> from specified area of <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.media.Image</span></code>, doing optional rotation, scaling (nearest) and center cropping.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters</dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>image</strong> – <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.media.Image</span></code> as a source for Tensor data</p></li>
-<li><p><strong>rotateCWDegrees</strong> – Clockwise angle through which the input image needs to be rotated to be upright. Range of valid values: 0, 90, 180, 270</p></li>
-<li><p><strong>tensorWidth</strong> – return tensor width, must be positive</p></li>
-<li><p><strong>tensorHeight</strong> – return tensor height, must be positive</p></li>
-<li><p><strong>normMeanRGB</strong> – means for RGB channels normalization, length must equal 3, RGB order</p></li>
-<li><p><strong>normStdRGB</strong> – standard deviation for RGB channels normalization, length must equal 3, RGB order</p></li>
-</ul>
-</dd>
-</dl>
+<dt id="org.pytorch.Tensor.shape()">
+public long[] <code class="sig-name descname">shape</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.Tensor.shape()" title="Permalink to this definition">¶</a></dt>
+<dd><p>Returns the shape of this tensor. (The array is a fresh copy.)</p>
 </dd></dl>
 
-</div>
 </div>
 </div>
 </div>
@@ -956,10 +775,10 @@ public static <a class="reference internal" href="#org.pytorch.Tensor" title="or
   
     <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
       
-        <a href="IValue.html" class="btn btn-neutral float-right" title="org.pytorch.IValue (IValue)" accesskey="n" rel="next">Next <img src="../../_static/images/chevron-right-orange.svg" class="next-page"></a>
+        <a href="Tensor-Tensor_float32.html" class="btn btn-neutral float-right" title="Tensor.Tensor_float32" accesskey="n" rel="next">Next <img src="../../_static/images/chevron-right-orange.svg" class="next-page"></a>
       
       
-        <a href="../../packages.html" class="btn btn-neutral" title="Java API" accesskey="p" rel="prev"><img src="../../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+        <a href="Module.html" class="btn btn-neutral" title="Module" accesskey="p" rel="prev"><img src="../../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
       
     </div>
   
@@ -991,23 +810,7 @@ public static <a class="reference internal" href="#org.pytorch.Tensor" title="or
           <div class="pytorch-right-menu" id="pytorch-right-menu">
             <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
               <ul>
-<li><a class="reference internal" href="#">org.pytorch.Tensor (Tensor)</a><ul>
-<li><a class="reference internal" href="#source-code">Source Code</a></li>
-<li><a class="reference internal" href="#overview">Overview</a><ul>
-<li><a class="reference internal" href="#tensor-content-layout">Tensor content layout</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#tensor-api-details">Tensor API Details</a><ul>
-<li><a class="reference internal" href="#fields">Fields</a><ul>
-<li><a class="reference internal" href="#dtype-float32">DTYPE_FLOAT32</a></li>
-<li><a class="reference internal" href="#dtype-float64">DTYPE_FLOAT64</a></li>
-<li><a class="reference internal" href="#dtype-int32">DTYPE_INT32</a></li>
-<li><a class="reference internal" href="#dtype-int64">DTYPE_INT64</a></li>
-<li><a class="reference internal" href="#dtype-int8">DTYPE_INT8</a></li>
-<li><a class="reference internal" href="#dtype-uint8">DTYPE_UINT8</a></li>
-<li><a class="reference internal" href="#shape">shape</a></li>
-</ul>
-</li>
+<li><a class="reference internal" href="#">Tensor</a><ul>
 <li><a class="reference internal" href="#methods">Methods</a><ul>
 <li><a class="reference internal" href="#allocatebytebuffer">allocateByteBuffer</a></li>
 <li><a class="reference internal" href="#allocatedoublebuffer">allocateDoubleBuffer</a></li>
@@ -1015,6 +818,19 @@ public static <a class="reference internal" href="#org.pytorch.Tensor" title="or
 <li><a class="reference internal" href="#allocateintbuffer">allocateIntBuffer</a></li>
 <li><a class="reference internal" href="#allocatelongbuffer">allocateLongBuffer</a></li>
 <li><a class="reference internal" href="#dtype">dtype</a></li>
+<li><a class="reference internal" href="#dtypejnicode">dtypeJniCode</a></li>
+<li><a class="reference internal" href="#fromblob">fromBlob</a></li>
+<li><a class="reference internal" href="#id1">fromBlob</a></li>
+<li><a class="reference internal" href="#id2">fromBlob</a></li>
+<li><a class="reference internal" href="#id3">fromBlob</a></li>
+<li><a class="reference internal" href="#id4">fromBlob</a></li>
+<li><a class="reference internal" href="#id5">fromBlob</a></li>
+<li><a class="reference internal" href="#id6">fromBlob</a></li>
+<li><a class="reference internal" href="#id7">fromBlob</a></li>
+<li><a class="reference internal" href="#id8">fromBlob</a></li>
+<li><a class="reference internal" href="#id9">fromBlob</a></li>
+<li><a class="reference internal" href="#fromblobunsigned">fromBlobUnsigned</a></li>
+<li><a class="reference internal" href="#id10">fromBlobUnsigned</a></li>
 <li><a class="reference internal" href="#getdataasbytearray">getDataAsByteArray</a></li>
 <li><a class="reference internal" href="#getdataasdoublearray">getDataAsDoubleArray</a></li>
 <li><a class="reference internal" href="#getdataasfloatarray">getDataAsFloatArray</a></li>
@@ -1022,37 +838,9 @@ public static <a class="reference internal" href="#org.pytorch.Tensor" title="or
 <li><a class="reference internal" href="#getdataaslongarray">getDataAsLongArray</a></li>
 <li><a class="reference internal" href="#getdataasunsignedbytearray">getDataAsUnsignedByteArray</a></li>
 <li><a class="reference internal" href="#getrawdatabuffer">getRawDataBuffer</a></li>
-<li><a class="reference internal" href="#newfloat32tensor">newFloat32Tensor</a></li>
-<li><a class="reference internal" href="#id1">newFloat32Tensor</a></li>
-<li><a class="reference internal" href="#newfloat64tensor">newFloat64Tensor</a></li>
-<li><a class="reference internal" href="#id2">newFloat64Tensor</a></li>
-<li><a class="reference internal" href="#newint32tensor">newInt32Tensor</a></li>
-<li><a class="reference internal" href="#id3">newInt32Tensor</a></li>
-<li><a class="reference internal" href="#newint64tensor">newInt64Tensor</a></li>
-<li><a class="reference internal" href="#id4">newInt64Tensor</a></li>
-<li><a class="reference internal" href="#newint8tensor">newInt8Tensor</a></li>
-<li><a class="reference internal" href="#id5">newInt8Tensor</a></li>
-<li><a class="reference internal" href="#newuint8tensor">newUInt8Tensor</a></li>
-<li><a class="reference internal" href="#id6">newUInt8Tensor</a></li>
 <li><a class="reference internal" href="#numel">numel</a></li>
-<li><a class="reference internal" href="#id7">numel</a></li>
-</ul>
-</li>
-</ul>
-</li>
-<li><a class="reference internal" href="#tensorimageutils">TensorImageUtils</a><ul>
-<li><a class="reference internal" href="#id8">Overview</a></li>
-<li><a class="reference internal" href="#id9">Fields</a><ul>
-<li><a class="reference internal" href="#torchvision-norm-mean-rgb">TORCHVISION_NORM_MEAN_RGB</a></li>
-<li><a class="reference internal" href="#torchvision-norm-std-rgb">TORCHVISION_NORM_STD_RGB</a></li>
-</ul>
-</li>
-<li><a class="reference internal" href="#id10">Methods</a><ul>
-<li><a class="reference internal" href="#bitmaptofloat32tensor">bitmapToFloat32Tensor</a></li>
-<li><a class="reference internal" href="#id11">bitmapToFloat32Tensor</a></li>
-<li><a class="reference internal" href="#imageyuv420centercroptofloat32tensor">imageYUV420CenterCropToFloat32Tensor</a></li>
-</ul>
-</li>
+<li><a class="reference internal" href="#id11">numel</a></li>
+<li><a class="reference internal" href="#shape">shape</a></li>
 </ul>
 </li>
 </ul>

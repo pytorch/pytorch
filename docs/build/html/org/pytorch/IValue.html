@@ -9,7 +9,7 @@
   
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <title>org.pytorch.IValue (IValue) &mdash; PyTorch master documentation</title>
+  <title>IValue &mdash; PyTorch master documentation</title>
   
 
   
@@ -34,8 +34,8 @@
   <link rel="stylesheet" href="../../_static/katex-math.css" type="text/css" />
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="org.pytorch.Module (Module)" href="Module.html" />
-    <link rel="prev" title="org.pytorch.Tensor (Tensor)" href="Tensor.html" /> 
+    <link rel="next" title="Module" href="Module.html" />
+    <link rel="prev" title="DType" href="DType.html" /> 
 
   
   <script src="../../_static/js/modernizr.min.js"></script>
@@ -130,7 +130,7 @@
               
               
                 <div class="version">
-                  master (1.2.0 )
+                  master (1.3.0.dev20190917 )
                 </div>
               
             
@@ -201,7 +201,6 @@
 <li class="toctree-l1"><a class="reference internal" href="../../nn.init.html">torch.nn.init</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../onnx.html">torch.onnx</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../optim.html">torch.optim</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../quantization.html">Quantization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../random.html">torch.random</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../sparse.html">torch.sparse</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../storage.html">torch.Storage</a></li>
@@ -226,7 +225,7 @@
 <p class="caption"><span class="caption-text">Other Languages</span></p>
 <ul class="current">
 <li class="toctree-l1"><a class="reference external" href="`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_">`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_</a></li>
-<li class="toctree-l1 current"><a class="reference internal" href="../../packages.html">Java API</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../../packages.html">Javadoc</a></li>
 </ul>
 
             
@@ -268,9 +267,11 @@
       </li>
 
         
-          <li><a href="../../packages.html">Java API</a> &gt;</li>
+          <li><a href="../../packages.html">Javadoc</a> &gt;</li>
         
-      <li>org.pytorch.IValue (IValue)</li>
+          <li><a href="package-index.html">org.pytorch</a> &gt;</li>
+        
+      <li>IValue</li>
     
     
       <li class="pytorch-breadcrumbs-aside">
@@ -302,191 +303,85 @@
             <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
              <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
               
-  <div class="section" id="org-pytorch-ivalue-ivalue">
-<h1>org.pytorch.IValue (IValue)<a class="headerlink" href="#org-pytorch-ivalue-ivalue" title="Permalink to this headline">¶</a></h1>
-<div class="section" id="source-code">
-<h2>Source Code<a class="headerlink" href="#source-code" title="Permalink to this headline">¶</a></h2>
-<p>Full code can be found in <a class="reference external" href="https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/src/main/java/org/pytorch/IValue.java">Github</a>.</p>
-</div>
-<div class="section" id="overview">
-<h2>Overview<a class="headerlink" href="#overview" title="Permalink to this headline">¶</a></h2>
-<p>IValue represents a TorchScript variable that can be one of the supported
-(by torchscript) <a class="reference external" href="https://pytorch.org/docs/stable/jit.html#types">types</a>.
-IValue is a tagged union. For every supported type it has a factory method, method
-to check the type and a getter method to retrieve a value. Getters throw
-IllegalStateException if called for inappropriate type.</p>
-</div>
-<div class="section" id="ivaue-api-details">
-<h2>IVaue API Details<a class="headerlink" href="#ivaue-api-details" title="Permalink to this headline">¶</a></h2>
+  <div class="section" id="ivalue">
+<h1>IValue<a class="headerlink" href="#ivalue" title="Permalink to this headline">¶</a></h1>
 <dl class="type">
 <dt id="org.pytorch.IValue">
 public class <code class="sig-name descname">IValue</code><a class="headerlink" href="#org.pytorch.IValue" title="Permalink to this definition">¶</a></dt>
-<dd><p>Java representation of a torchscript variable, which is implemented as tagged union that can be one of the supported types: <a class="reference external" href="https://pytorch.org/docs/stable/jit.html#types">https://pytorch.org/docs/stable/jit.html#types</a>.</p>
-<p>Calling getters for inappropriate types will throw IllegalStateException.</p>
+<dd><p>Java representation of a TorchScript value, which is implemented as tagged union that can be one of the supported types: <a class="reference external" href="https://pytorch.org/docs/stable/jit.html#types">https://pytorch.org/docs/stable/jit.html#types</a> .</p>
+<p>Calling <code class="docutils literal notranslate"><span class="pre">toX</span></code> methods for inappropriate types will throw <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/IllegalStateException.html" title="java.lang.IllegalStateException"><code class="xref java java-ref docutils literal notranslate"><span class="pre">IllegalStateException</span></code></a>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">IValue</span></code> objects are constructed with <code class="docutils literal notranslate"><span class="pre">IValue.from(value)</span></code>, <code class="docutils literal notranslate"><span class="pre">IValue.tupleFrom(value1,</span> <span class="pre">value2,</span> <span class="pre">...)</span></code>, <code class="docutils literal notranslate"><span class="pre">IValue.listFrom(value1,</span> <span class="pre">value2,</span> <span class="pre">...)</span></code>, or one of the <code class="docutils literal notranslate"><span class="pre">dict</span></code> methods, depending on the key type.</p>
+<p>Data is retrieved from <code class="docutils literal notranslate"><span class="pre">IValue</span></code> objects with the <code class="docutils literal notranslate"><span class="pre">toX()</span></code> methods. Note that <code class="docutils literal notranslate"><span class="pre">str</span></code>-type IValues must be extracted with <a class="reference internal" href="#org.pytorch.IValue.toStr()" title="org.pytorch.IValue.toStr()"><code class="xref java java-ref docutils literal notranslate"><span class="pre">toStr()</span></code></a>, rather than <a class="reference internal" href="Tensor-Tensor_float32.html#org.pytorch.Tensor.Tensor_float32.toString()" title="org.pytorch.Tensor.Tensor_float32.toString()"><code class="xref java java-ref docutils literal notranslate"><span class="pre">toString()</span></code></a>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">IValue</span></code> objects may retain references to objects passed into their constructors, and may return references to their internal state from <code class="docutils literal notranslate"><span class="pre">toX()</span></code>.</p>
 </dd></dl>
 
 <div class="section" id="methods">
-<h3>Methods<a class="headerlink" href="#methods" title="Permalink to this headline">¶</a></h3>
-<div class="section" id="bool">
-<h4>bool<a class="headerlink" href="#bool" title="Permalink to this headline">¶</a></h4>
+<h2>Methods<a class="headerlink" href="#methods" title="Permalink to this headline">¶</a></h2>
+<div class="section" id="dictlongkeyfrom">
+<h3>dictLongKeyFrom<a class="headerlink" href="#dictlongkeyfrom" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.bool(boolean)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">bool</code><span class="sig-paren">(</span>boolean<em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.bool(boolean)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript bool type.</p>
+<dt id="org.pytorch.IValue.dictLongKeyFrom(Map)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">dictLongKeyFrom</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/Long.html" title="java.lang.Long">Long</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt;<em> map</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.dictLongKeyFrom(Map)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">Dict[int,</span> <span class="pre">V]</span></code>.</p>
 </dd></dl>
 
 </div>
-<div class="section" id="boollist">
-<h4>boolList<a class="headerlink" href="#boollist" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="dictstringkeyfrom">
+<h3>dictStringKeyFrom<a class="headerlink" href="#dictstringkeyfrom" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.boolList(boolean)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">boolList</code><span class="sig-paren">(</span>boolean...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.boolList(boolean)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript List[bool] type.</p>
+<dt id="org.pytorch.IValue.dictStringKeyFrom(Map)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">dictStringKeyFrom</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt;<em> map</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.dictStringKeyFrom(Map)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">Dict[str,</span> <span class="pre">V]</span></code>.</p>
 </dd></dl>
 
 </div>
-<div class="section" id="dictlongkey">
-<h4>dictLongKey<a class="headerlink" href="#dictlongkey" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="from">
+<h3>from<a class="headerlink" href="#from" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.dictLongKey(Map)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">dictLongKey</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/Long.html" title="java.lang.Long">Long</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt;<em> map</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.dictLongKey(Map)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript Dict[int, V] type.</p>
+<dt id="org.pytorch.IValue.from(Tensor)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">from</code><span class="sig-paren">(</span><a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a><em> tensor</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.from(Tensor)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">Tensor</span></code>.</p>
 </dd></dl>
 
 </div>
-<div class="section" id="dictstringkey">
-<h4>dictStringKey<a class="headerlink" href="#dictstringkey" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="id1">
+<h3>from<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.dictStringKey(Map)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">dictStringKey</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt;<em> map</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.dictStringKey(Map)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance oftorchscript Dict[Str, V] type.</p>
+<dt id="org.pytorch.IValue.from(boolean)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">from</code><span class="sig-paren">(</span>boolean<em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.from(boolean)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">bool</span></code>.</p>
 </dd></dl>
 
 </div>
-<div class="section" id="double64">
-<h4>double64<a class="headerlink" href="#double64" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="id2">
+<h3>from<a class="headerlink" href="#id2" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.double64(double)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">double64</code><span class="sig-paren">(</span>double<em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.double64(double)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript float type.</p>
+<dt id="org.pytorch.IValue.from(long)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">from</code><span class="sig-paren">(</span>long<em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.from(long)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">int</span></code>.</p>
 </dd></dl>
 
 </div>
-<div class="section" id="doublelist">
-<h4>doubleList<a class="headerlink" href="#doublelist" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="id3">
+<h3>from<a class="headerlink" href="#id3" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.doubleList(double)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">doubleList</code><span class="sig-paren">(</span>double...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.doubleList(double)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript List[float] type.</p>
+<dt id="org.pytorch.IValue.from(double)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">from</code><span class="sig-paren">(</span>double<em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.from(double)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">float</span></code>.</p>
 </dd></dl>
 
 </div>
-<div class="section" id="getbool">
-<h4>getBool<a class="headerlink" href="#getbool" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="id4">
+<h3>from<a class="headerlink" href="#id4" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.getBool()">
-public boolean <code class="sig-name descname">getBool</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getBool()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="getboollist">
-<h4>getBoolList<a class="headerlink" href="#getboollist" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getBoolList()">
-public boolean[] <code class="sig-name descname">getBoolList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getBoolList()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="getdictlongkey">
-<h4>getDictLongKey<a class="headerlink" href="#getdictlongkey" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getDictLongKey()">
-public <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/Long.html" title="java.lang.Long">Long</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt; <code class="sig-name descname">getDictLongKey</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getDictLongKey()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="getdictstringkey">
-<h4>getDictStringKey<a class="headerlink" href="#getdictstringkey" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getDictStringKey()">
-public <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt; <code class="sig-name descname">getDictStringKey</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getDictStringKey()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="getdouble">
-<h4>getDouble<a class="headerlink" href="#getdouble" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getDouble()">
-public double <code class="sig-name descname">getDouble</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getDouble()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="getdoublelist">
-<h4>getDoubleList<a class="headerlink" href="#getdoublelist" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getDoubleList()">
-public double[] <code class="sig-name descname">getDoubleList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getDoubleList()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="getlist">
-<h4>getList<a class="headerlink" href="#getlist" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getList()">
-public <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>[] <code class="sig-name descname">getList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getList()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="getlong">
-<h4>getLong<a class="headerlink" href="#getlong" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getLong()">
-public long <code class="sig-name descname">getLong</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getLong()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="getlonglist">
-<h4>getLongList<a class="headerlink" href="#getlonglist" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getLongList()">
-public long[] <code class="sig-name descname">getLongList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getLongList()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="getstring">
-<h4>getString<a class="headerlink" href="#getstring" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getString()">
-public <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a> <code class="sig-name descname">getString</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getString()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="gettensor">
-<h4>getTensor<a class="headerlink" href="#gettensor" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getTensor()">
-public <a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">getTensor</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getTensor()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="gettensorlist">
-<h4>getTensorList<a class="headerlink" href="#gettensorlist" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getTensorList()">
-public <a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a>[] <code class="sig-name descname">getTensorList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getTensorList()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
-
-</div>
-<div class="section" id="gettuple">
-<h4>getTuple<a class="headerlink" href="#gettuple" title="Permalink to this headline">¶</a></h4>
-<dl class="method">
-<dt id="org.pytorch.IValue.getTuple()">
-public <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>[] <code class="sig-name descname">getTuple</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.getTuple()" title="Permalink to this definition">¶</a></dt>
-<dd></dd></dl>
+<dt id="org.pytorch.IValue.from(String)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">from</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a><em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.from(String)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">str</span></code>.</p>
+</dd></dl>
 
 </div>
 <div class="section" id="isbool">
-<h4>isBool<a class="headerlink" href="#isbool" title="Permalink to this headline">¶</a></h4>
+<h3>isBool<a class="headerlink" href="#isbool" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isBool()">
 public boolean <code class="sig-name descname">isBool</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isBool()" title="Permalink to this definition">¶</a></dt>
@@ -494,7 +389,7 @@ public boolean <code class="sig-name descname">isBool</code><span class="sig-par
 
 </div>
 <div class="section" id="isboollist">
-<h4>isBoolList<a class="headerlink" href="#isboollist" title="Permalink to this headline">¶</a></h4>
+<h3>isBoolList<a class="headerlink" href="#isboollist" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isBoolList()">
 public boolean <code class="sig-name descname">isBoolList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isBoolList()" title="Permalink to this definition">¶</a></dt>
@@ -502,7 +397,7 @@ public boolean <code class="sig-name descname">isBoolList</code><span class="sig
 
 </div>
 <div class="section" id="isdictlongkey">
-<h4>isDictLongKey<a class="headerlink" href="#isdictlongkey" title="Permalink to this headline">¶</a></h4>
+<h3>isDictLongKey<a class="headerlink" href="#isdictlongkey" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isDictLongKey()">
 public boolean <code class="sig-name descname">isDictLongKey</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isDictLongKey()" title="Permalink to this definition">¶</a></dt>
@@ -510,7 +405,7 @@ public boolean <code class="sig-name descname">isDictLongKey</code><span class="
 
 </div>
 <div class="section" id="isdictstringkey">
-<h4>isDictStringKey<a class="headerlink" href="#isdictstringkey" title="Permalink to this headline">¶</a></h4>
+<h3>isDictStringKey<a class="headerlink" href="#isdictstringkey" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isDictStringKey()">
 public boolean <code class="sig-name descname">isDictStringKey</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isDictStringKey()" title="Permalink to this definition">¶</a></dt>
@@ -518,7 +413,7 @@ public boolean <code class="sig-name descname">isDictStringKey</code><span class
 
 </div>
 <div class="section" id="isdouble">
-<h4>isDouble<a class="headerlink" href="#isdouble" title="Permalink to this headline">¶</a></h4>
+<h3>isDouble<a class="headerlink" href="#isdouble" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isDouble()">
 public boolean <code class="sig-name descname">isDouble</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isDouble()" title="Permalink to this definition">¶</a></dt>
@@ -526,7 +421,7 @@ public boolean <code class="sig-name descname">isDouble</code><span class="sig-p
 
 </div>
 <div class="section" id="isdoublelist">
-<h4>isDoubleList<a class="headerlink" href="#isdoublelist" title="Permalink to this headline">¶</a></h4>
+<h3>isDoubleList<a class="headerlink" href="#isdoublelist" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isDoubleList()">
 public boolean <code class="sig-name descname">isDoubleList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isDoubleList()" title="Permalink to this definition">¶</a></dt>
@@ -534,7 +429,7 @@ public boolean <code class="sig-name descname">isDoubleList</code><span class="s
 
 </div>
 <div class="section" id="islist">
-<h4>isList<a class="headerlink" href="#islist" title="Permalink to this headline">¶</a></h4>
+<h3>isList<a class="headerlink" href="#islist" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isList()">
 public boolean <code class="sig-name descname">isList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isList()" title="Permalink to this definition">¶</a></dt>
@@ -542,7 +437,7 @@ public boolean <code class="sig-name descname">isList</code><span class="sig-par
 
 </div>
 <div class="section" id="islong">
-<h4>isLong<a class="headerlink" href="#islong" title="Permalink to this headline">¶</a></h4>
+<h3>isLong<a class="headerlink" href="#islong" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isLong()">
 public boolean <code class="sig-name descname">isLong</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isLong()" title="Permalink to this definition">¶</a></dt>
@@ -550,7 +445,7 @@ public boolean <code class="sig-name descname">isLong</code><span class="sig-par
 
 </div>
 <div class="section" id="islonglist">
-<h4>isLongList<a class="headerlink" href="#islonglist" title="Permalink to this headline">¶</a></h4>
+<h3>isLongList<a class="headerlink" href="#islonglist" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isLongList()">
 public boolean <code class="sig-name descname">isLongList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isLongList()" title="Permalink to this definition">¶</a></dt>
@@ -558,7 +453,7 @@ public boolean <code class="sig-name descname">isLongList</code><span class="sig
 
 </div>
 <div class="section" id="isnull">
-<h4>isNull<a class="headerlink" href="#isnull" title="Permalink to this headline">¶</a></h4>
+<h3>isNull<a class="headerlink" href="#isnull" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isNull()">
 public boolean <code class="sig-name descname">isNull</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isNull()" title="Permalink to this definition">¶</a></dt>
@@ -566,7 +461,7 @@ public boolean <code class="sig-name descname">isNull</code><span class="sig-par
 
 </div>
 <div class="section" id="isstring">
-<h4>isString<a class="headerlink" href="#isstring" title="Permalink to this headline">¶</a></h4>
+<h3>isString<a class="headerlink" href="#isstring" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isString()">
 public boolean <code class="sig-name descname">isString</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isString()" title="Permalink to this definition">¶</a></dt>
@@ -574,7 +469,7 @@ public boolean <code class="sig-name descname">isString</code><span class="sig-p
 
 </div>
 <div class="section" id="istensor">
-<h4>isTensor<a class="headerlink" href="#istensor" title="Permalink to this headline">¶</a></h4>
+<h3>isTensor<a class="headerlink" href="#istensor" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isTensor()">
 public boolean <code class="sig-name descname">isTensor</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isTensor()" title="Permalink to this definition">¶</a></dt>
@@ -582,7 +477,7 @@ public boolean <code class="sig-name descname">isTensor</code><span class="sig-p
 
 </div>
 <div class="section" id="istensorlist">
-<h4>isTensorList<a class="headerlink" href="#istensorlist" title="Permalink to this headline">¶</a></h4>
+<h3>isTensorList<a class="headerlink" href="#istensorlist" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isTensorList()">
 public boolean <code class="sig-name descname">isTensorList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isTensorList()" title="Permalink to this definition">¶</a></dt>
@@ -590,84 +485,179 @@ public boolean <code class="sig-name descname">isTensorList</code><span class="s
 
 </div>
 <div class="section" id="istuple">
-<h4>isTuple<a class="headerlink" href="#istuple" title="Permalink to this headline">¶</a></h4>
+<h3>isTuple<a class="headerlink" href="#istuple" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.isTuple()">
 public boolean <code class="sig-name descname">isTuple</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.isTuple()" title="Permalink to this definition">¶</a></dt>
 <dd></dd></dl>
 
 </div>
-<div class="section" id="list">
-<h4>list<a class="headerlink" href="#list" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="listfrom">
+<h3>listFrom<a class="headerlink" href="#listfrom" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.list(IValue)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">list</code><span class="sig-paren">(</span><a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>...<em> array</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.list(IValue)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript List[T] type. All elements must have the same type.</p>
+<dt id="org.pytorch.IValue.listFrom(boolean)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">listFrom</code><span class="sig-paren">(</span>boolean...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.listFrom(boolean)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">List[bool]</span></code>.</p>
 </dd></dl>
 
 </div>
-<div class="section" id="long64">
-<h4>long64<a class="headerlink" href="#long64" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="id5">
+<h3>listFrom<a class="headerlink" href="#id5" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.long64(long)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">long64</code><span class="sig-paren">(</span>long<em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.long64(long)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript int type.</p>
+<dt id="org.pytorch.IValue.listFrom(long)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">listFrom</code><span class="sig-paren">(</span>long...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.listFrom(long)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">List[int]</span></code>.</p>
 </dd></dl>
 
 </div>
-<div class="section" id="longlist">
-<h4>longList<a class="headerlink" href="#longlist" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="id6">
+<h3>listFrom<a class="headerlink" href="#id6" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.longList(long)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">longList</code><span class="sig-paren">(</span>long...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.longList(long)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript List[int] type.</p>
+<dt id="org.pytorch.IValue.listFrom(double)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">listFrom</code><span class="sig-paren">(</span>double...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.listFrom(double)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">List[float]</span></code>.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="id7">
+<h3>listFrom<a class="headerlink" href="#id7" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.listFrom(Tensor)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">listFrom</code><span class="sig-paren">(</span><a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a>...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.listFrom(Tensor)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">List[Tensor]</span></code>.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="id8">
+<h3>listFrom<a class="headerlink" href="#id8" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.listFrom(IValue)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">listFrom</code><span class="sig-paren">(</span><a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>...<em> array</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.listFrom(IValue)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">List[T]</span></code>. All elements must have the same type.</p>
 </dd></dl>
 
 </div>
 <div class="section" id="optionalnull">
-<h4>optionalNull<a class="headerlink" href="#optionalnull" title="Permalink to this headline">¶</a></h4>
+<h3>optionalNull<a class="headerlink" href="#optionalnull" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.IValue.optionalNull()">
 public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">optionalNull</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.optionalNull()" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">Optional</span></code> that contains no value.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="tobool">
+<h3>toBool<a class="headerlink" href="#tobool" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.toBool()">
+public boolean <code class="sig-name descname">toBool</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toBool()" title="Permalink to this definition">¶</a></dt>
 <dd></dd></dl>
 
 </div>
-<div class="section" id="string">
-<h4>string<a class="headerlink" href="#string" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="toboollist">
+<h3>toBoolList<a class="headerlink" href="#toboollist" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.string(String)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">string</code><span class="sig-paren">(</span><a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a><em> value</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.string(String)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates new IValue instance of torchscript str type.</p>
-</dd></dl>
+<dt id="org.pytorch.IValue.toBoolList()">
+public boolean[] <code class="sig-name descname">toBoolList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toBoolList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
 
 </div>
-<div class="section" id="tensor">
-<h4>tensor<a class="headerlink" href="#tensor" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="todictlongkey">
+<h3>toDictLongKey<a class="headerlink" href="#todictlongkey" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.tensor(Tensor)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">tensor</code><span class="sig-paren">(</span><a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a><em> tensor</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.tensor(Tensor)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript Tensor type.</p>
-</dd></dl>
+<dt id="org.pytorch.IValue.toDictLongKey()">
+public <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/Long.html" title="java.lang.Long">Long</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt; <code class="sig-name descname">toDictLongKey</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toDictLongKey()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
 
 </div>
-<div class="section" id="tensorlist">
-<h4>tensorList<a class="headerlink" href="#tensorlist" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="todictstringkey">
+<h3>toDictStringKey<a class="headerlink" href="#todictstringkey" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.tensorList(Tensor)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">tensorList</code><span class="sig-paren">(</span><a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a>...<em> list</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.tensorList(Tensor)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript List[Tensor] type.</p>
-</dd></dl>
+<dt id="org.pytorch.IValue.toDictStringKey()">
+public <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/util/Map.html" title="java.util.Map">Map</a>&lt;<a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a>, <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>&gt; <code class="sig-name descname">toDictStringKey</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toDictStringKey()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
 
 </div>
-<div class="section" id="tuple">
-<h4>tuple<a class="headerlink" href="#tuple" title="Permalink to this headline">¶</a></h4>
+<div class="section" id="todouble">
+<h3>toDouble<a class="headerlink" href="#todouble" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
-<dt id="org.pytorch.IValue.tuple(IValue)">
-public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">tuple</code><span class="sig-paren">(</span><a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>...<em> array</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.tuple(IValue)" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates a new IValue instance of torchscript Tuple[T0, T1, …] type.</p>
-</dd></dl>
+<dt id="org.pytorch.IValue.toDouble()">
+public double <code class="sig-name descname">toDouble</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toDouble()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
 
 </div>
+<div class="section" id="todoublelist">
+<h3>toDoubleList<a class="headerlink" href="#todoublelist" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.toDoubleList()">
+public double[] <code class="sig-name descname">toDoubleList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toDoubleList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="tolist">
+<h3>toList<a class="headerlink" href="#tolist" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.toList()">
+public <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>[] <code class="sig-name descname">toList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="tolong">
+<h3>toLong<a class="headerlink" href="#tolong" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.toLong()">
+public long <code class="sig-name descname">toLong</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toLong()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="tolonglist">
+<h3>toLongList<a class="headerlink" href="#tolonglist" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.toLongList()">
+public long[] <code class="sig-name descname">toLongList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toLongList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="tostr">
+<h3>toStr<a class="headerlink" href="#tostr" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.toStr()">
+public <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/lang/String.html" title="java.lang.String">String</a> <code class="sig-name descname">toStr</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toStr()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="totensor">
+<h3>toTensor<a class="headerlink" href="#totensor" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.toTensor()">
+public <a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">toTensor</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toTensor()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="totensorlist">
+<h3>toTensorList<a class="headerlink" href="#totensorlist" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.toTensorList()">
+public <a class="reference internal" href="Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a>[] <code class="sig-name descname">toTensorList</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toTensorList()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="totuple">
+<h3>toTuple<a class="headerlink" href="#totuple" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.toTuple()">
+public <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>[] <code class="sig-name descname">toTuple</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.toTuple()" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+<div class="section" id="tuplefrom">
+<h3>tupleFrom<a class="headerlink" href="#tuplefrom" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.IValue.tupleFrom(IValue)">
+public static <a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a> <code class="sig-name descname">tupleFrom</code><span class="sig-paren">(</span><a class="reference internal" href="#org.pytorch.IValue" title="org.pytorch.IValue">IValue</a>...<em> array</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.IValue.tupleFrom(IValue)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates a new <code class="docutils literal notranslate"><span class="pre">IValue</span></code> of type <code class="docutils literal notranslate"><span class="pre">Tuple[T0,</span> <span class="pre">T1,</span> <span class="pre">...]</span></code>.</p>
+</dd></dl>
+
 </div>
 </div>
 </div>
@@ -680,10 +670,10 @@ public static <a class="reference internal" href="#org.pytorch.IValue" title="or
   
     <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
       
-        <a href="Module.html" class="btn btn-neutral float-right" title="org.pytorch.Module (Module)" accesskey="n" rel="next">Next <img src="../../_static/images/chevron-right-orange.svg" class="next-page"></a>
+        <a href="Module.html" class="btn btn-neutral float-right" title="Module" accesskey="n" rel="next">Next <img src="../../_static/images/chevron-right-orange.svg" class="next-page"></a>
       
       
-        <a href="Tensor.html" class="btn btn-neutral" title="org.pytorch.Tensor (Tensor)" accesskey="p" rel="prev"><img src="../../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+        <a href="DType.html" class="btn btn-neutral" title="DType" accesskey="p" rel="prev"><img src="../../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
       
     </div>
   
@@ -715,30 +705,15 @@ public static <a class="reference internal" href="#org.pytorch.IValue" title="or
           <div class="pytorch-right-menu" id="pytorch-right-menu">
             <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
               <ul>
-<li><a class="reference internal" href="#">org.pytorch.IValue (IValue)</a><ul>
-<li><a class="reference internal" href="#source-code">Source Code</a></li>
-<li><a class="reference internal" href="#overview">Overview</a></li>
-<li><a class="reference internal" href="#ivaue-api-details">IVaue API Details</a><ul>
+<li><a class="reference internal" href="#">IValue</a><ul>
 <li><a class="reference internal" href="#methods">Methods</a><ul>
-<li><a class="reference internal" href="#bool">bool</a></li>
-<li><a class="reference internal" href="#boollist">boolList</a></li>
-<li><a class="reference internal" href="#dictlongkey">dictLongKey</a></li>
-<li><a class="reference internal" href="#dictstringkey">dictStringKey</a></li>
-<li><a class="reference internal" href="#double64">double64</a></li>
-<li><a class="reference internal" href="#doublelist">doubleList</a></li>
-<li><a class="reference internal" href="#getbool">getBool</a></li>
-<li><a class="reference internal" href="#getboollist">getBoolList</a></li>
-<li><a class="reference internal" href="#getdictlongkey">getDictLongKey</a></li>
-<li><a class="reference internal" href="#getdictstringkey">getDictStringKey</a></li>
-<li><a class="reference internal" href="#getdouble">getDouble</a></li>
-<li><a class="reference internal" href="#getdoublelist">getDoubleList</a></li>
-<li><a class="reference internal" href="#getlist">getList</a></li>
-<li><a class="reference internal" href="#getlong">getLong</a></li>
-<li><a class="reference internal" href="#getlonglist">getLongList</a></li>
-<li><a class="reference internal" href="#getstring">getString</a></li>
-<li><a class="reference internal" href="#gettensor">getTensor</a></li>
-<li><a class="reference internal" href="#gettensorlist">getTensorList</a></li>
-<li><a class="reference internal" href="#gettuple">getTuple</a></li>
+<li><a class="reference internal" href="#dictlongkeyfrom">dictLongKeyFrom</a></li>
+<li><a class="reference internal" href="#dictstringkeyfrom">dictStringKeyFrom</a></li>
+<li><a class="reference internal" href="#from">from</a></li>
+<li><a class="reference internal" href="#id1">from</a></li>
+<li><a class="reference internal" href="#id2">from</a></li>
+<li><a class="reference internal" href="#id3">from</a></li>
+<li><a class="reference internal" href="#id4">from</a></li>
 <li><a class="reference internal" href="#isbool">isBool</a></li>
 <li><a class="reference internal" href="#isboollist">isBoolList</a></li>
 <li><a class="reference internal" href="#isdictlongkey">isDictLongKey</a></li>
@@ -753,16 +728,26 @@ public static <a class="reference internal" href="#org.pytorch.IValue" title="or
 <li><a class="reference internal" href="#istensor">isTensor</a></li>
 <li><a class="reference internal" href="#istensorlist">isTensorList</a></li>
 <li><a class="reference internal" href="#istuple">isTuple</a></li>
-<li><a class="reference internal" href="#list">list</a></li>
-<li><a class="reference internal" href="#long64">long64</a></li>
-<li><a class="reference internal" href="#longlist">longList</a></li>
+<li><a class="reference internal" href="#listfrom">listFrom</a></li>
+<li><a class="reference internal" href="#id5">listFrom</a></li>
+<li><a class="reference internal" href="#id6">listFrom</a></li>
+<li><a class="reference internal" href="#id7">listFrom</a></li>
+<li><a class="reference internal" href="#id8">listFrom</a></li>
 <li><a class="reference internal" href="#optionalnull">optionalNull</a></li>
-<li><a class="reference internal" href="#string">string</a></li>
-<li><a class="reference internal" href="#tensor">tensor</a></li>
-<li><a class="reference internal" href="#tensorlist">tensorList</a></li>
-<li><a class="reference internal" href="#tuple">tuple</a></li>
-</ul>
-</li>
+<li><a class="reference internal" href="#tobool">toBool</a></li>
+<li><a class="reference internal" href="#toboollist">toBoolList</a></li>
+<li><a class="reference internal" href="#todictlongkey">toDictLongKey</a></li>
+<li><a class="reference internal" href="#todictstringkey">toDictStringKey</a></li>
+<li><a class="reference internal" href="#todouble">toDouble</a></li>
+<li><a class="reference internal" href="#todoublelist">toDoubleList</a></li>
+<li><a class="reference internal" href="#tolist">toList</a></li>
+<li><a class="reference internal" href="#tolong">toLong</a></li>
+<li><a class="reference internal" href="#tolonglist">toLongList</a></li>
+<li><a class="reference internal" href="#tostr">toStr</a></li>
+<li><a class="reference internal" href="#totensor">toTensor</a></li>
+<li><a class="reference internal" href="#totensorlist">toTensorList</a></li>
+<li><a class="reference internal" href="#totuple">toTuple</a></li>
+<li><a class="reference internal" href="#tuplefrom">tupleFrom</a></li>
 </ul>
 </li>
 </ul>

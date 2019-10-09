@@ -33,9 +33,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.2/dist/katex.min.css" type="text/css" />
   <link rel="stylesheet" href="../../../_static/katex-math.css" type="text/css" />
     <link rel="index" title="Index" href="../../../genindex.html" />
-    <link rel="search" title="Search" href="../../../search.html" />
-    <link rel="next" title="torch" href="../../../torch.html" />
-    <link rel="prev" title="org.pytorch.torchvision" href="package-index.html" /> 
+    <link rel="search" title="Search" href="../../../search.html" /> 
 
   
   <script src="../../../_static/js/modernizr.min.js"></script>
@@ -130,7 +128,7 @@
               
               
                 <div class="version">
-                  master (1.2.0 )
+                  master (1.3.0.dev20190917 )
                 </div>
               
             
@@ -185,9 +183,8 @@
 <li class="toctree-l1"><a class="reference internal" href="../../../community/governance.html">PyTorch Governance</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../community/persons_of_interest.html">PyTorch Governance | Persons of Interest</a></li>
 </ul>
-<p class="caption"><span class="caption-text">Package Reference</span></p>
-<ul class="current">
-<li class="toctree-l1 current"><a class="reference internal" href="../../../packages.html">Javadoc</a></li>
+<p class="caption"><span class="caption-text">Python API</span></p>
+<ul>
 <li class="toctree-l1"><a class="reference internal" href="../../../torch.html">torch</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../nn.html">torch.nn</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../nn.functional.html">torch.nn.functional</a></li>
@@ -214,6 +211,19 @@
 <li class="toctree-l1"><a class="reference internal" href="../../../tensorboard.html">torch.utils.tensorboard</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../type_info.html">Type Info</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../__config__.html">torch.__config__</a></li>
+</ul>
+<p class="caption"><span class="caption-text">torchaudio Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="`torchaudio &lt;https://pytorch.org/audio&gt;`_">`torchaudio &lt;https://pytorch.org/audio&gt;`_</a></li>
+</ul>
+<p class="caption"><span class="caption-text">torchtext Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="`torchtext &lt;https://pytorch.org/text&gt;`_">`torchtext &lt;https://pytorch.org/text&gt;`_</a></li>
+</ul>
+<p class="caption"><span class="caption-text">Other Languages</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_">`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../packages.html">Javadoc</a></li>
 </ul>
 
             
@@ -255,10 +265,6 @@
       </li>
 
         
-          <li><a href="../../../packages.html">Javadoc</a> &gt;</li>
-        
-          <li><a href="package-index.html">org.pytorch.torchvision</a> &gt;</li>
-        
       <li>TensorImageUtils</li>
     
     
@@ -296,7 +302,7 @@
 <dl class="type">
 <dt id="org.pytorch.torchvision.TensorImageUtils">
 public final class <code class="sig-name descname">TensorImageUtils</code><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils" title="Permalink to this definition">¶</a></dt>
-<dd><p>Contains utility functions for <code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code> creation from <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code> or <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.media.Image</span></code> source.</p>
+<dd><p>Contains utility functions for <a class="reference internal" href="../Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor"><code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code></a> creation from <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code> or <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.media.Image</span></code> source.</p>
 </dd></dl>
 
 <div class="section" id="fields">
@@ -324,8 +330,8 @@ public static float[] <code class="sig-name descname">TORCHVISION_NORM_STD_RGB</
 <h3>bitmapToFloat32Tensor<a class="headerlink" href="#bitmaptofloat32tensor" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.torchvision.TensorImageUtils.bitmapToFloat32Tensor(Bitmap, float[], float[])">
-public static Tensor <code class="sig-name descname">bitmapToFloat32Tensor</code><span class="sig-paren">(</span>Bitmap<em> bitmap</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.bitmapToFloat32Tensor(Bitmap, float[], float[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates new <code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code> from full <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code>, normalized with specified in parameters mean and std.</p>
+public static <a class="reference internal" href="../Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">bitmapToFloat32Tensor</code><span class="sig-paren">(</span>Bitmap<em> bitmap</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.bitmapToFloat32Tensor(Bitmap, float[], float[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates new <a class="reference internal" href="../Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor"><code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code></a> from full <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code>, normalized with specified in parameters mean and std.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
@@ -341,8 +347,42 @@ public static Tensor <code class="sig-name descname">bitmapToFloat32Tensor</code
 <h3>bitmapToFloat32Tensor<a class="headerlink" href="#id1" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.torchvision.TensorImageUtils.bitmapToFloat32Tensor(Bitmap, int, int, int, int, float[], float[])">
-public static Tensor <code class="sig-name descname">bitmapToFloat32Tensor</code><span class="sig-paren">(</span>Bitmap<em> bitmap</em>, int<em> x</em>, int<em> y</em>, int<em> width</em>, int<em> height</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.bitmapToFloat32Tensor(Bitmap, int, int, int, int, float[], float[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates new <code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code> from specified area of <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code>, normalized with specified in parameters mean and std.</p>
+public static <a class="reference internal" href="../Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">bitmapToFloat32Tensor</code><span class="sig-paren">(</span>Bitmap<em> bitmap</em>, int<em> x</em>, int<em> y</em>, int<em> width</em>, int<em> height</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.bitmapToFloat32Tensor(Bitmap, int, int, int, int, float[], float[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates new <a class="reference internal" href="../Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor"><code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code></a> from specified area of <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code>, normalized with specified in parameters mean and std.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>bitmap</strong> – <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code> as a source for Tensor data</p></li>
+<li><p><strong>x</strong> – <ul>
+<li><p>x coordinate of top left corner of bitmap’s area</p></li>
+</ul>
+</p></li>
+<li><p><strong>y</strong> – <ul>
+<li><p>y coordinate of top left corner of bitmap’s area</p></li>
+</ul>
+</p></li>
+<li><p><strong>width</strong> – <ul>
+<li><p>width of bitmap’s area</p></li>
+</ul>
+</p></li>
+<li><p><strong>height</strong> – <ul>
+<li><p>height of bitmap’s area</p></li>
+</ul>
+</p></li>
+<li><p><strong>normMeanRGB</strong> – means for RGB channels normalization, length must equal 3, RGB order</p></li>
+<li><p><strong>normStdRGB</strong> – standard deviation for RGB channels normalization, length must equal 3, RGB order</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
+<div class="section" id="bitmaptofloatbuffer">
+<h3>bitmapToFloatBuffer<a class="headerlink" href="#bitmaptofloatbuffer" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.torchvision.TensorImageUtils.bitmapToFloatBuffer(Bitmap, int, int, int, int, float[], float[], FloatBuffer, int)">
+public static void <code class="sig-name descname">bitmapToFloatBuffer</code><span class="sig-paren">(</span>Bitmap<em> bitmap</em>, int<em> x</em>, int<em> y</em>, int<em> width</em>, int<em> height</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em>, <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/FloatBuffer.html" title="java.nio.FloatBuffer">FloatBuffer</a><em> outBuffer</em>, int<em> outBufferOffset</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.bitmapToFloatBuffer(Bitmap, int, int, int, int, float[], float[], FloatBuffer, int)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Writes tensor content from specified <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.graphics.Bitmap</span></code>, normalized with specified in parameters mean and std to specified <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/FloatBuffer.html" title="java.nio.FloatBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.FloatBuffer</span></code></a> with specified offset.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
@@ -375,8 +415,8 @@ public static Tensor <code class="sig-name descname">bitmapToFloat32Tensor</code
 <h3>imageYUV420CenterCropToFloat32Tensor<a class="headerlink" href="#imageyuv420centercroptofloat32tensor" title="Permalink to this headline">¶</a></h3>
 <dl class="method">
 <dt id="org.pytorch.torchvision.TensorImageUtils.imageYUV420CenterCropToFloat32Tensor(Image, int, int, int, float[], float[])">
-public static Tensor <code class="sig-name descname">imageYUV420CenterCropToFloat32Tensor</code><span class="sig-paren">(</span>Image<em> image</em>, int<em> rotateCWDegrees</em>, int<em> tensorWidth</em>, int<em> tensorHeight</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.imageYUV420CenterCropToFloat32Tensor(Image, int, int, int, float[], float[])" title="Permalink to this definition">¶</a></dt>
-<dd><p>Creates new <code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code> from specified area of <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.media.Image</span></code>, doing optional rotation, scaling (nearest) and center cropping.</p>
+public static <a class="reference internal" href="../Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor">Tensor</a> <code class="sig-name descname">imageYUV420CenterCropToFloat32Tensor</code><span class="sig-paren">(</span>Image<em> image</em>, int<em> rotateCWDegrees</em>, int<em> tensorWidth</em>, int<em> tensorHeight</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.imageYUV420CenterCropToFloat32Tensor(Image, int, int, int, float[], float[])" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates new <a class="reference internal" href="../Tensor.html#org.pytorch.Tensor" title="org.pytorch.Tensor"><code class="xref java java-ref docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code></a> from specified area of <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.media.Image</span></code>, doing optional rotation, scaling (nearest) and center cropping.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters</dt>
 <dd class="field-odd"><ul class="simple">
@@ -392,6 +432,29 @@ public static Tensor <code class="sig-name descname">imageYUV420CenterCropToFloa
 </dd></dl>
 
 </div>
+<div class="section" id="imageyuv420centercroptofloatbuffer">
+<h3>imageYUV420CenterCropToFloatBuffer<a class="headerlink" href="#imageyuv420centercroptofloatbuffer" title="Permalink to this headline">¶</a></h3>
+<dl class="method">
+<dt id="org.pytorch.torchvision.TensorImageUtils.imageYUV420CenterCropToFloatBuffer(Image, int, int, int, float[], float[], FloatBuffer, int)">
+public static void <code class="sig-name descname">imageYUV420CenterCropToFloatBuffer</code><span class="sig-paren">(</span>Image<em> image</em>, int<em> rotateCWDegrees</em>, int<em> tensorWidth</em>, int<em> tensorHeight</em>, float[]<em> normMeanRGB</em>, float[]<em> normStdRGB</em>, <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/FloatBuffer.html" title="java.nio.FloatBuffer">FloatBuffer</a><em> outBuffer</em>, int<em> outBufferOffset</em><span class="sig-paren">)</span><a class="headerlink" href="#org.pytorch.torchvision.TensorImageUtils.imageYUV420CenterCropToFloatBuffer(Image, int, int, int, float[], float[], FloatBuffer, int)" title="Permalink to this definition">¶</a></dt>
+<dd><p>Writes tensor content from specified <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.media.Image</span></code>, doing optional rotation, scaling (nearest) and center cropping to specified <a class="reference external" href="http://docs.oracle.com/javase/8/docs/api/java/nio/FloatBuffer.html" title="java.nio.FloatBuffer"><code class="xref java java-ref docutils literal notranslate"><span class="pre">java.nio.FloatBuffer</span></code></a> with specified offset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>image</strong> – <code class="xref java java-ref docutils literal notranslate"><span class="pre">android.media.Image</span></code> as a source for Tensor data</p></li>
+<li><p><strong>rotateCWDegrees</strong> – Clockwise angle through which the input image needs to be rotated to be upright. Range of valid values: 0, 90, 180, 270</p></li>
+<li><p><strong>tensorWidth</strong> – return tensor width, must be positive</p></li>
+<li><p><strong>tensorHeight</strong> – return tensor height, must be positive</p></li>
+<li><p><strong>normMeanRGB</strong> – means for RGB channels normalization, length must equal 3, RGB order</p></li>
+<li><p><strong>normStdRGB</strong> – standard deviation for RGB channels normalization, length must equal 3, RGB order</p></li>
+<li><p><strong>outBuffer</strong> – Output buffer, where tensor content will be written</p></li>
+<li><p><strong>outBufferOffset</strong> – Output buffer offset with which tensor content will be written</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</div>
 </div>
 </div>
 
@@ -400,15 +463,6 @@ public static Tensor <code class="sig-name descname">imageYUV420CenterCropToFloa
              
             </div>
             <footer>
-  
-    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
-      
-        <a href="../../../torch.html" class="btn btn-neutral float-right" title="torch" accesskey="n" rel="next">Next <img src="../../../_static/images/chevron-right-orange.svg" class="next-page"></a>
-      
-      
-        <a href="package-index.html" class="btn btn-neutral" title="org.pytorch.torchvision" accesskey="p" rel="prev"><img src="../../../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
-      
-    </div>
   
 
   
@@ -447,7 +501,9 @@ public static Tensor <code class="sig-name descname">imageYUV420CenterCropToFloa
 <li><a class="reference internal" href="#methods">Methods</a><ul>
 <li><a class="reference internal" href="#bitmaptofloat32tensor">bitmapToFloat32Tensor</a></li>
 <li><a class="reference internal" href="#id1">bitmapToFloat32Tensor</a></li>
+<li><a class="reference internal" href="#bitmaptofloatbuffer">bitmapToFloatBuffer</a></li>
 <li><a class="reference internal" href="#imageyuv420centercroptofloat32tensor">imageYUV420CenterCropToFloat32Tensor</a></li>
+<li><a class="reference internal" href="#imageyuv420centercroptofloatbuffer">imageYUV420CenterCropToFloatBuffer</a></li>
 </ul>
 </li>
 </ul>

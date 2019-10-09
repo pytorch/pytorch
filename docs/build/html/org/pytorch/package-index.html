@@ -9,7 +9,7 @@
   
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <title>Java API Details &mdash; PyTorch master documentation</title>
+  <title>org.pytorch &mdash; PyTorch master documentation</title>
   
 
   
@@ -33,7 +33,9 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.2/dist/katex.min.css" type="text/css" />
   <link rel="stylesheet" href="../../_static/katex-math.css" type="text/css" />
     <link rel="index" title="Index" href="../../genindex.html" />
-    <link rel="search" title="Search" href="../../search.html" /> 
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="DType" href="DType.html" />
+    <link rel="prev" title="Javadoc" href="../../packages.html" /> 
 
   
   <script src="../../_static/js/modernizr.min.js"></script>
@@ -128,7 +130,7 @@
               
               
                 <div class="version">
-                  master (1.2.0 )
+                  master (1.3.0.dev20190917 )
                 </div>
               
             
@@ -199,7 +201,6 @@
 <li class="toctree-l1"><a class="reference internal" href="../../nn.init.html">torch.nn.init</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../onnx.html">torch.onnx</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../optim.html">torch.optim</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../quantization.html">Quantization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../random.html">torch.random</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../sparse.html">torch.sparse</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../storage.html">torch.Storage</a></li>
@@ -222,9 +223,9 @@
 <li class="toctree-l1"><a class="reference external" href="`torchtext &lt;https://pytorch.org/text&gt;`_">`torchtext &lt;https://pytorch.org/text&gt;`_</a></li>
 </ul>
 <p class="caption"><span class="caption-text">Other Languages</span></p>
-<ul>
+<ul class="current">
 <li class="toctree-l1"><a class="reference external" href="`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_">`C++ API &lt;https://pytorch.org/cppdocs/&gt;`_</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../packages.html">Java API</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../../packages.html">Javadoc</a></li>
 </ul>
 
             
@@ -266,7 +267,9 @@
       </li>
 
         
-      <li>Java API Details</li>
+          <li><a href="../../packages.html">Javadoc</a> &gt;</li>
+        
+      <li>org.pytorch</li>
     
     
       <li class="pytorch-breadcrumbs-aside">
@@ -298,24 +301,20 @@
             <div role="main" class="main-content" itemscope="itemscope" itemtype="http://schema.org/Article">
              <article itemprop="articleBody" id="pytorch-article" class="pytorch-article">
               
-  <div class="section" id="java-api-details">
-<h1>Java API Details<a class="headerlink" href="#java-api-details" title="Permalink to this headline">¶</a></h1>
-<p>Main part of the java api includes 3 classes:</p>
-<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">org</span><span class="o">.</span><span class="n">pytorch</span><span class="o">.</span><span class="n">Module</span>
-<span class="n">org</span><span class="o">.</span><span class="n">pytorch</span><span class="o">.</span><span class="n">IValue</span>
-<span class="n">org</span><span class="o">.</span><span class="n">pytorch</span><span class="o">.</span><span class="n">Tensor</span>
-</pre></div>
-</div>
-<p>If the reader is familiar with pytorch python api, we can think that
-<code class="docutils literal notranslate"><span class="pre">org.pytorch.Tensor</span></code> represents <code class="docutils literal notranslate"><span class="pre">torch.tensor</span></code>, <code class="docutils literal notranslate"><span class="pre">org.pytorch.Module</span></code> represents <code class="docutils literal notranslate"><span class="pre">torch.Module</span></code>,
-while <code class="docutils literal notranslate"><span class="pre">org.pytorch.IValue</span></code> represents value of TorchScript variable, supporting all
-its <a class="reference external" href="https://pytorch.org/docs/stable/jit.html#types">types</a>.</p>
-<p>You can find details to each of these classes linked below:</p>
+  <div class="section" id="package-org.pytorch">
+<span id="org-pytorch"></span><h1>org.pytorch<a class="headerlink" href="#package-org.pytorch" title="Permalink to this headline">¶</a></h1>
 <div class="toctree-wrapper compound">
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="IValue.html">org.pytorch.IValue (IValue)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="Module.html">org.pytorch.Module (Module)</a></li>
-<li class="toctree-l1"><a class="reference internal" href="Tensor.html">org.pytorch.Tensor (Tensor)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="DType.html">DType</a></li>
+<li class="toctree-l1"><a class="reference internal" href="IValue.html">IValue</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Module.html">Module</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Tensor.html">Tensor</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Tensor-Tensor_float32.html">Tensor.Tensor_float32</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Tensor-Tensor_float64.html">Tensor.Tensor_float64</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Tensor-Tensor_int32.html">Tensor.Tensor_int32</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Tensor-Tensor_int64.html">Tensor.Tensor_int64</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Tensor-Tensor_int8.html">Tensor.Tensor_int8</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Tensor-Tensor_uint8.html">Tensor.Tensor_uint8</a></li>
 </ul>
 </div>
 </div>
@@ -325,6 +324,15 @@ its <a class="reference external" href="https://pytorch.org/docs/stable/jit.html
              
             </div>
             <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+        <a href="DType.html" class="btn btn-neutral float-right" title="DType" accesskey="n" rel="next">Next <img src="../../_static/images/chevron-right-orange.svg" class="next-page"></a>
+      
+      
+        <a href="../../packages.html" class="btn btn-neutral" title="Javadoc" accesskey="p" rel="prev"><img src="../../_static/images/chevron-right-orange.svg" class="previous-page"> Previous</a>
+      
+    </div>
   
 
   
@@ -354,7 +362,7 @@ its <a class="reference external" href="https://pytorch.org/docs/stable/jit.html
           <div class="pytorch-right-menu" id="pytorch-right-menu">
             <div class="pytorch-side-scroll" id="pytorch-side-scroll-right">
               <ul>
-<li><a class="reference internal" href="#">Java API Details</a></li>
+<li><a class="reference internal" href="#">org.pytorch</a></li>
 </ul>
 
             </div>
