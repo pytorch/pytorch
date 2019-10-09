@@ -371,3 +371,14 @@ TEST_F(FunctionalTest, LogSigmoid) {
   auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
+
+TEST_F(FunctionalTest, Softmax) {
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = F::softmax(input, /*dim=*/1);
+  auto sum = torch::sum(torch::exp(input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::exp(input[i]) / sum[i];
+    ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}

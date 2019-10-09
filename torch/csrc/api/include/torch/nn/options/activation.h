@@ -2,6 +2,7 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/types.h>
 
 namespace torch {
 namespace nn {
@@ -48,6 +49,16 @@ struct TORCH_API LeakyReLUOptions {
 
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace) = false;
+};
+
+// ============================================================================
+
+/// Options for the Softmax functional and module.
+struct TORCH_API SoftmaxOptions {
+  SoftmaxOptions(int64_t dim);
+
+  // Dimension along which Softmax will be computed.
+  TORCH_ARG(int64_t, dim);
 };
 
 } // namespace nn
