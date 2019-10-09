@@ -12,6 +12,7 @@
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
+#include <ATen/native/cpu/zmath.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -169,12 +170,19 @@ public:
     }
     return ret;
   }
-  template <typename non_float_t = T,
-            typename std::enable_if<!std::is_floating_point<non_float_t>::value, int>::type = 0>
+  Vec256<T> map(T (*f)(const T &)) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i != size(); i++) {
+      ret[i] = f(values[i]);
+    }
+    return ret;
+  }
+  template <typename other_t = T,
+            typename std::enable_if<!std::is_floating_point<other_t>::value && !std::is_complex_t<other_t>::value, int>::type = 0>
   Vec256<T> abs() const {
-    // non_float_t is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<non_float_t, T>::value, "non_float_t must be T");
-    return map([](T x) -> T { return x < static_cast<non_float_t>(0) ? -x : x; });
+    // other_t is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<other_t, T>::value, "other_t must be T");
+    return map([](T x) -> T { return x < static_cast<other_t>(0) ? -x : x; });
   }
   template <typename float_t = T,
             typename std::enable_if<std::is_floating_point<float_t>::value, int>::type = 0>
@@ -184,6 +192,26 @@ public:
     // Specifically deal with floating-point because the generic code above won't handle -0.0 (which should result in
     // 0.0) properly.
     return map(std::abs);
+  }
+  template <typename complex_t = T,
+            typename std::enable_if<std::is_complex_t<complex_t>::value, int>::type = 0>
+  Vec256<T> abs() const {
+    // complex_t is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<complex_t, T>::value, "complex_t must be T");
+    // Specifically map() does not perform the type conversion needed by abs.
+    return map([](T x) { return (T)std::abs(x); });
+  }
+  Vec256<T> angle() const {
+    return *this;
+  }
+  Vec256<T> real() const {
+    return *this;
+  }
+  Vec256<T> imag() const {
+    return *this;
+  }
+  Vec256<T> conj() const {
+    return *this;
   }
   Vec256<T> acos() const {
     return map(std::acos);
@@ -232,7 +260,7 @@ public:
     return map(std::log2);
   }
   Vec256<T> ceil() const {
-    return map(std::ceil);
+    return map(at::native::ceil_impl);
   }
   Vec256<T> cos() const {
     return map(std::cos);
@@ -241,7 +269,7 @@ public:
     return map(std::cosh);
   }
   Vec256<T> floor() const {
-    return map(std::floor);
+    return map(at::native::floor_impl);
   }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
@@ -251,7 +279,7 @@ public:
   }
   Vec256<T> round() const {
     // We do not use std::round because we would like to round midway numbers to the nearest even integer.
-    return map(std::nearbyint);
+    return map(at::native::round_impl);
   }
   Vec256<T> sin() const {
     return map(std::sin);
@@ -266,7 +294,7 @@ public:
     return map(std::tanh);
   }
   Vec256<T> trunc() const {
-    return map(std::trunc);
+    return map(at::native::trunc_impl);
   }
   Vec256<T> lgamma() const {
     return map(std::lgamma);
@@ -278,7 +306,7 @@ public:
     return map([](T x) { return (T)(1) / x; });
   }
   Vec256<T> rsqrt() const {
-    return map([](T x) { return 1 / std::sqrt(x); });
+    return map([](T x) { return (T)1 / std::sqrt(x); });
   }
   Vec256<T> pow(const Vec256<T> &exp) const {
     Vec256<T> ret;
@@ -352,10 +380,28 @@ template <class T> Vec256<T> inline operator||(
 
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
-template <class T> Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
+template <class T,
+          typename std::enable_if<!std::is_complex_t<T>::value, int>::type = 0>
+Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = (a[i] > b[i]) ? a[i] : b[i];
+    if (_isnan(a[i])) {
+      // If either input is NaN, propagate a NaN.
+      // NOTE: The case where b[i] was NaN is handled correctly by the naive
+      // ternary operator above.
+      c[i] = a[i];
+    }
+  }
+  return c;
+}
+
+template <class T,
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
+Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = (std::abs(a[i]) > std::abs(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
       // NOTE: The case where b[i] was NaN is handled correctly by the naive
@@ -377,10 +423,28 @@ inline T maximum(const T& a, const T& b) {
 
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
-template <class T> Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
+template <class T,
+          typename std::enable_if<!std::is_complex_t<T>::value, int>::type = 0>
+Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = (a[i] < b[i]) ? a[i] : b[i];
+    if (_isnan(a[i])) {
+      // If either input is NaN, propagate a NaN.
+      // NOTE: The case where b[i] was NaN is handled correctly by the naive
+      // ternary operator above.
+      c[i] = a[i];
+    }
+  }
+  return c;
+}
+
+template <class T,
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
+Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = (std::abs(a[i]) < std::abs(b[i])) ? a[i] : b[i];
     if (_isnan(a[i])) {
       // If either input is NaN, propagate a NaN.
       // NOTE: The case where b[i] was NaN is handled correctly by the naive
@@ -401,7 +465,9 @@ inline T minimum(const T& a, const T& b) {
 }
 
 // To save BC, it will not propagate NaN based on IEEE 754 201X
-template <class T> Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
+template <class T,
+          typename std::enable_if<!std::is_complex_t<T>::value, int>::type = 0>
+Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] < min_vec[i] ? min_vec[i] : (a[i] > max_vec[i] ? max_vec[i] : a[i]);
@@ -409,7 +475,19 @@ template <class T> Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &m
   return c;
 }
 
-template <class T> Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
+template <class T,
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
+Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = std::abs(a[i]) < std::abs(min_vec[i]) ? min_vec[i] : (std::abs(a[i]) > std::abs(max_vec[i]) ? max_vec[i] : a[i]);
+  }
+  return c;
+}
+
+template <class T,
+          typename std::enable_if<!std::is_complex_t<T>::value, int>::type = 0>
+Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] > max_vec[i] ? max_vec[i] : a[i];
@@ -417,10 +495,32 @@ template <class T> Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T
   return c;
 }
 
-template <class T> Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
+template <class T,
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
+Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = std::abs(a[i]) > std::abs(max_vec[i]) ? max_vec[i] : a[i];
+  }
+  return c;
+}
+
+template <class T,
+          typename std::enable_if<!std::is_complex_t<T>::value, int>::type = 0>
+Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
     c[i] = a[i] < min_vec[i] ? min_vec[i] : a[i];
+  }
+  return c;
+}
+
+template <class T,
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
+Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size(); i++) {
+    c[i] = std::abs(a[i]) < std::abs(min_vec[i]) ? min_vec[i] : a[i];
   }
   return c;
 }
