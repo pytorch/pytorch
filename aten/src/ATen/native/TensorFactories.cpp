@@ -50,6 +50,15 @@ void window_function_checks(
       window_length);
 }
 
+static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
+  for (Scalar& s : l) {
+    if (!s.isIntegral(true)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -67,7 +76,10 @@ Tensor arange(
     Scalar end,
     Scalar step,
     const TensorOptions& options) {
-  Tensor result = at::empty({0}, options);  // to be filled by arange_out
+  bool set_to_integral_dtype = !options.has_dtype() && allIntegral({start, end, step});
+  TensorOptions updated_options =
+      set_to_integral_dtype ? options.dtype(at::ScalarType::Long) : options;
+  Tensor result = at::empty({0}, updated_options);  // to be filled by arange_out
   return at::arange_out(result, start, end, step);
 }
 

@@ -11490,6 +11490,27 @@ a")
         FileCheck().check_not("value=<Tensor>").check_count("aten::mm", 2).check("aten::add") \
             .run(str(tm.graph))
 
+    def test_op_dtype(self):
+
+        def check_equal_and_dtype(a, b):
+            self.assertEqual(a, b)
+            self.assertEqual(a.dtype, b.dtype)
+
+        def fn():
+            a = torch.arange(10)
+            b = torch.arange(10, dtype=torch.float)
+            c = torch.arange(1, 10, 2)
+            d = torch.arange(1, 10, 2, dtype=torch.float)
+            e = torch.arange(1, 10., 2)
+            f = torch.arange(1, 10., 2, dtype=torch.float)
+            return a, b, c, d, e, f
+
+        scripted_fn = torch.jit.script(fn)
+        eager_out = fn()
+        script_out = scripted_fn()
+        for a, b in zip(eager_out, script_out):
+            check_equal_and_dtype(a, b)
+
     @_tmp_donotuse_dont_inline_everything
     def test_call_traced_fn_from_traced_module(self):
         @_trace(torch.rand(3, 4))
