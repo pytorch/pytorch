@@ -27,8 +27,8 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
     if (conv_algorithm == CONV_ALGORITHM_WINOGRAD) {
       algo_ = ialgo::convolution_winograd;
     }
-#ifdef USE_EULER
     need_euler_ = OperatorBase::GetSingleArgument<int>("need_euler", 0);
+#ifdef USE_EULER
     if (need_euler_) {
       eparam.nthreads = OperatorBase::GetSingleArgument<int>("nthreads", 0);
       eparam.tile_size = OperatorBase::GetSingleArgument<int>("tile_size", 5);
