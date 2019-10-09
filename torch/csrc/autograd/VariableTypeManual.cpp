@@ -164,7 +164,6 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
       jit::tracer::addInputs(node, "src", src);
       jit::tracer::addInputs(node, "self", self);
       graph->insertNode(node);
-      jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
       output = node->output();
     } else {
       output = graph->insert(
@@ -172,6 +171,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
           {jit::tracer::getValueTrace(self), jit::tracer::getValueTrace(src)});
       jit::tracer::recordSourceLocation(output->node());
     }
+    jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
   }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
