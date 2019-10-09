@@ -24,6 +24,24 @@ void ELUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+SELUImpl::SELUImpl(const SELUOptions& options_) : options(options_) {}
+
+Tensor SELUImpl::forward(Tensor& input) {
+  return F::selu(input, options);
+}
+
+void SELUImpl::reset() {}
+
+void SELUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::SELU(";
+  if (options.inplace()) {
+    stream << std::boolalpha << "inplace=" << options.inplace();
+  }
+  stream << ")";
+}
+
+// ============================================================================
+
 HardshrinkImpl::HardshrinkImpl(const HardshrinkOptions& options_)
     : options(options_) {}
 
@@ -94,6 +112,21 @@ void LogSigmoidImpl::reset() {}
 
 void LogSigmoidImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::LogSigmoid()";
+}
+
+// ============================================================================
+
+SoftmaxImpl::SoftmaxImpl(const SoftmaxOptions& options_)
+    : options(options_) {}
+
+void SoftmaxImpl::reset() {}
+
+void SoftmaxImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softmax(dim=" << options.dim() << ")";
+}
+
+Tensor SoftmaxImpl::forward(const Tensor& input) {
+  return F::softmax(input, options);
 }
 
 } // namespace nn

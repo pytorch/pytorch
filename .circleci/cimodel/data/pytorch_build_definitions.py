@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from collections import OrderedDict
 
 from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
