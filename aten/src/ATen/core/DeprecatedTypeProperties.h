@@ -3,7 +3,7 @@
 #include <c10/core/Backend.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Layout.h>
-#include <c10/core/TensorAxes.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/Generator.h>
@@ -97,18 +97,17 @@ class CAFFE2_API DeprecatedTypeProperties {
     return toBackend(Backend::HIP);
   }
 
-  /// Constructs the `TensorAxes` from a type and a `device_index`.
-  TensorAxes options(int16_t device_index = -1) const {
-    return TensorAxes(
-        typeMeta(),
-        Device(device_type(), device_index),
-        layout(),
-        is_variable());
+  /// Constructs the `TensorOptions` from a type and a `device_index`.
+  TensorOptions options(int16_t device_index = -1) const {
+    return TensorOptions().dtype(typeMeta())
+                          .device(device_type(), device_index)
+                          .layout(layout())
+                          .is_variable(is_variable());
   }
 
   /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
   /// the device type matches the device type of the type.
-  TensorAxes options(c10::optional<Device> device_opt) const {
+  TensorOptions options(c10::optional<Device> device_opt) const {
     if (!device_opt.has_value()) {
       return options(-1);
     } else {
@@ -118,7 +117,7 @@ class CAFFE2_API DeprecatedTypeProperties {
     }
   }
 
-  operator TensorAxes() const {
+  operator TensorOptions() const {
     return options();
   }
 

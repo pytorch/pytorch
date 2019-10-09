@@ -25,8 +25,11 @@ namespace {
     return tl[0].scalar_type();
   }
 
-  TensorAxes options(ScalarType s) {
-    return TensorAxes(s, Device(DeviceType::${DeviceType}));
+  TensorOptions options(ScalarType s) {
+    return TensorOptions().dtype(s)
+                          .device(DeviceType::${DeviceType})
+                          .layout(kStrided)
+                          .is_variable(false);
   }
 
   Allocator* allocator() {
