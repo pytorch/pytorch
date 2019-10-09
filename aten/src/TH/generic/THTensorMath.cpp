@@ -298,29 +298,20 @@ static void THTensor_(addmmImpl)(THTensor *r_, THTensor *t, THTensor *m1, THTens
   int64_t ldm1_ = (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1)));
   int64_t ldm2_ = (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1)));
 
-  // Don't go through GEMM if result is empty matrix, since this is not
-  // supported by BLAS.
-  if (m != 0 && n != 0) {
-    if (k == 0) {
-      THTensor_(mul)(r__, r__, beta);
-    } else {
-      /* do the operation */
-      THBlas_(gemm)(transpose_m1,
-                    transpose_m2,
-                    m,
-                    n,
-                    k,
-                    alpha,
-                    m1_->data<scalar_t>(),
-                    ldm1_,
-                    m2_->data<scalar_t>(),
-                    ldm2_,
-                    beta,
-                    r__->data<scalar_t>(),
-                    ldr__);
-    }
-  }
-
+  /* do the operation */
+  THBlas_(gemm)(transpose_m1,
+                transpose_m2,
+                m,
+                n,
+                k,
+                alpha,
+                m1_->data<scalar_t>(),
+                ldm1_,
+                m2_->data<scalar_t>(),
+                ldm2_,
+                beta,
+                r__->data<scalar_t>(),
+                ldr__);
 
   /* free intermediate variables */
   if(free_m1)
