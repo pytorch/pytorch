@@ -141,7 +141,7 @@ def arange(g, *args):
     if len(args) == 5:
         # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[1])
-        start_default = g.op("Constant", value_t=torch.tensor(0))
+        start_default = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
         delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
         arange_tensor = g.op("Range", start_default, args[0], delta_default)
     elif len(args) == 6:
@@ -156,7 +156,7 @@ def arange(g, *args):
         arange_tensor = g.op("Range", args[0], args[1], step)
     else:
         raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
-    return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
+    return arange_tensor
 
 
 @parse_args('v', 'i')
