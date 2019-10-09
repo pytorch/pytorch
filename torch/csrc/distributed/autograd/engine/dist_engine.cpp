@@ -220,7 +220,7 @@ void DistEngine::executeSendFunction(
     runEngineAndAccumulateGradients(autogradContext, dummyRoot, outputEdges);
 
     // Wait for all of the outstanding rpcs to complete.
-    autogradContext.clearAndWaitForOutStandingRpcs();
+    autogradContext.clearAndWaitForOutstandingRpcs();
   } else {
     lock.unlock();
     auto& graphTask = autogradContext.retrieveGraphTask();
@@ -262,7 +262,7 @@ void DistEngine::execute(const variable_list& roots) {
   runEngineAndAccumulateGradients(autogradContext, graphRoot, outputEdges);
 
   // Wait for all of the outstanding rpcs to complete.
-  autogradContext.clearAndWaitForOutStandingRpcs();
+  autogradContext.clearAndWaitForOutstandingRpcs();
 }
 
 } // namespace autograd

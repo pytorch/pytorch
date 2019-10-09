@@ -40,7 +40,7 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
       rpc::WorkerInfo("foo", fromWorkerId_), std::move(gradCall).toMessage());
 
   // Record the future in the context.
-  autogradContext_.addOutStandingRpc(futureMessage);
+  autogradContext_.addOutstandingRpc(futureMessage);
 
   // 'recv' function sends the gradients over the wire using RPC, it doesn't
   // need to return anything for any downstream autograd function.

@@ -38,11 +38,11 @@ class TORCH_API DistAutogradContext {
   std::shared_ptr<SendRpcBackward> retrieveSendFunction(
       int64_t autograd_message_id);
 
-  // Receive all send functions for this context.
+  // Return all send functions for this context.
   std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>> sendFunctions()
       const;
 
-  // Receive all recvfunctions for this context.
+  // Return all recv functions for this context.
   std::unordered_map<int64_t, std::shared_ptr<RecvRpcBackward>> recvFunctions()
       const;
 
@@ -60,12 +60,12 @@ class TORCH_API DistAutogradContext {
   void setGraphTask(std::unique_ptr<torch::autograd::GraphTask> graphTask);
 
   // Adds a future message recording an outstanding RPC.
-  void addOutStandingRpc(
+  void addOutstandingRpc(
       const std::shared_ptr<rpc::FutureMessage>& futureMessage);
 
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
-  void clearAndWaitForOutStandingRpcs();
+  void clearAndWaitForOutstandingRpcs();
 
   // Returns all gradients.
   const c10::Dict<torch::Tensor, torch::Tensor> getGradients() const;

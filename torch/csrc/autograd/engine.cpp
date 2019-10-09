@@ -83,11 +83,11 @@ struct ReadyQueue {
   // To protect read and writes to heap_
   std::mutex mutex_;
 
-  // incrementOutStandingTasks indicates whether or not we should increment
+  // incrementOutstandingTasks indicates whether or not we should increment
   // 'outstanding_tasks_' for the associated GraphTask. This should mostly
   // always be true, see the doc for 'enqueue_blocked_task_on_cpu' for when we
   // might set this to false.
-  void push(NodeTask item, bool incrementOutStandingTasks = true);
+  void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
   NodeTask pop();
 };
@@ -155,11 +155,11 @@ int NodeTask::getReentrantDepth() const {
   return base_->reentrant_depth_;
 }
 
-auto ReadyQueue::push(NodeTask item, bool incrementOutStandingTasks) -> void {
+auto ReadyQueue::push(NodeTask item, bool incrementOutstandingTasks) -> void {
   {
     // Lock mutex for writing to heap_
     std::lock_guard<std::mutex> lock(mutex_);
-    if (incrementOutStandingTasks) {
+    if (incrementOutstandingTasks) {
       ++item.base_->outstanding_tasks_;
     }
     heap_.push(std::move(item));
@@ -661,7 +661,7 @@ auto Engine::execute(const edge_list& roots,
 void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
   std::call_once(start_threads_flag_, &Engine::start_threads, this);
   ready_queue(at::kCPU).push(
-      std::move(task), /* incrementOutStandingTasks */ false);
+      std::move(task), /* incrementOutstandingTasks */ false);
 }
 
 variable_list Engine::execute_with_graph_task(

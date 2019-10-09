@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 from __future__ import absolute_import, division, print_function, unicode_literals
-from typing import List
 import torch
 
 class context(object):
@@ -33,7 +32,7 @@ class context(object):
         _release_context(self.autograd_context._context_id())
 
 
-def backward(roots: List[torch.Tensor]):
+def backward(roots):
     '''
     Kicks off the distributed backward pass using the provided roots. This
     currently implements the "FAST" mode

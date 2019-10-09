@@ -80,13 +80,13 @@ void DistAutogradContext::setGraphTask(
   graphTask_ = std::move(graphTask);
 }
 
-void DistAutogradContext::addOutStandingRpc(
+void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
   std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
 }
 
-void DistAutogradContext::clearAndWaitForOutStandingRpcs() {
+void DistAutogradContext::clearAndWaitForOutstandingRpcs() {
   // Copy futures under lock, but wait for them outside the lock.
   std::unique_lock<std::mutex> lock(lock_);
   auto outStandingRpcs = outStandingRpcs_;
