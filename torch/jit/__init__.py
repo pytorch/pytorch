@@ -6,7 +6,7 @@ import torch.testing
 import torch.jit._recursive
 
 
-from torch._jit_internal import _qualified_name
+from torch._jit_internal import Future, _qualified_name
 from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module, ModuleList, Sequential, ModuleDict
@@ -65,7 +65,8 @@ _jit_script_class_compile = torch._C._jit_script_class_compile
 # destruction order issues.
 _python_cu = torch._C.CompilationUnit()
 
-Future = torch._C.Future
+# Future = torch._C.Future
+Future = Future
 set_module(Future, "torch.jit")
 _fork = torch._C.fork
 _wait = torch._C.wait

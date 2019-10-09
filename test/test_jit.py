@@ -17577,6 +17577,19 @@ class TestAsync(JitTestCase):
         y = torch.jit._wait(fut)
         # assert nothing; only to make sure the fake python path works
 
+    def test_async_future_type_python(self):
+        def foo(inp):
+            futures = torch.jit.annotate(List[torch.jit.Future[torch.Tensor]], [])
+            for i in range(5):
+                futures.append(torch.jit._fork(lambda x: x, inp))
+            all_outputs = []
+            for future in futures:
+                all_outputs.append(torch.jit._wait(future))
+            return all_outputs
+
+        foo(torch.randn(3, 4))
+
+
     def test_async_parsing(self):
         @torch.jit.script
         def foo(x):

@@ -10,7 +10,7 @@ import warnings
 import torch._C
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
-from typing import Tuple, List, Dict, Optional, Union
+from typing import Tuple, List, Dict, Optional, Union, TypeVar, Generic
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -592,6 +592,26 @@ except ImportError:
     def is_final(ann):
         return isinstance(ann, FinalInstance)
 
+T = TypeVar('T')
+class Future(Generic[T]):
+    __slots__ = ['__args__']
+
+    def __init__(self, types):
+        self.__args__ = types
+# class FutureInstance(object):
+#     __slots__ = ['__args__']
+
+#     def __init__(self, types):
+#         self.__args__ = types
+
+# class FutureCls(object):
+#     def __getitem__(self, types):
+#         return FutureInstance(types)
+
+# Future = FutureCls()  # noqa: T484
+
+def is_future(ann):
+    return isinstance(ann, FutureInstance)
 
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
