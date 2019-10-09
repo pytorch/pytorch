@@ -49,5 +49,19 @@ Tensor CosineEmbeddingLossImpl::forward(
   return F::cosine_embedding_loss(input1, input2, target, options);
 }
 
+// ============================================================================
+
+MultiLabelMarginLossImpl::MultiLabelMarginLossImpl(
+    const torch::nn::MultiLabelMarginLossOptions& options_)
+    : options(options_) {}
+
+void MultiLabelMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::MultiLabelMarginLoss(reduction=" << options.reduction() << ")";
+}
+
+Tensor MultiLabelMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
+  return torch::multilabel_margin_loss(input, target, options.reduction());
+}
+
 } // namespace nn
 } // namespace torch

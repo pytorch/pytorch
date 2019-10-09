@@ -90,5 +90,29 @@ struct TORCH_API CosineEmbeddingLossImpl : Module {
 /// PyTorch's module storage semantics.
 TORCH_MODULE(CosineEmbeddingLoss);
 
+// ============================================================================
+
+/// Creates a criterion that optimizes a multi-class multi-classification
+/// hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
+/// and output :math:`y` (which is a 2D `Tensor` of target class indices).
+struct TORCH_API MultiLabelMarginLossImpl : Module {
+  explicit MultiLabelMarginLossImpl(
+    const MultiLabelMarginLossOptions& options_ = {});
+
+  /// Pretty prints the `L1Loss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  MultiLabelMarginLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `MultiLabelMarginLossImpl`.
+/// See the documentation for `MultiLabelMarginLossImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(MultiLabelMarginLoss);
+
 } // namespace nn
 } // namespace torch

@@ -172,6 +172,19 @@ TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-4));
 }
 
+TEST_F(FunctionalTest, MultiLabelMarginLoss) {
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = F::multilabel_margin_loss(
+    input, target, MultiLabelMarginLossOptions());
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
