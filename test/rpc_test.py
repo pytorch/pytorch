@@ -831,7 +831,8 @@ class RpcTest(object):
 
     @requires_process_group_agent
     def test_sender_exceptions(self):
-        dist.init_process_group(backend="gloo", init_method=self.init_method, timeout=timedelta(seconds=2))
+        import time
+        dist.init_process_group(backend="gloo", init_method=self.init_method, timeout=timedelta(seconds=5))
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
             backend=TEST_CONFIG.backend,
@@ -840,7 +841,7 @@ class RpcTest(object):
         )
 
         if rank == 0:
+            time.sleep(0.5)  # to allow worker 1 to exit without joining
             fut = dist.rpc_async("worker1", torch.add, args=(torch.ones(1), 3))
             with self.assertRaises(Exception):
                 fut.wait()
-        # allow rank 1 to exit
