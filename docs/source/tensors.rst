@@ -170,6 +170,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addr
    .. automethod:: addr_
    .. automethod:: allclose
+   .. automethod:: angle
    .. automethod:: apply_
    .. automethod:: argmax
    .. automethod:: argmin
@@ -206,6 +207,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: clone
    .. automethod:: contiguous
    .. automethod:: copy_
+   .. automethod:: conj
    .. automethod:: cos
    .. automethod:: cos_
    .. automethod:: cosh
@@ -276,6 +278,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hardshrink
    .. automethod:: histc
    .. automethod:: ifft
+   .. automethod:: imag
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -381,6 +384,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: register_hook
    .. automethod:: remainder
    .. automethod:: remainder_
+   .. automethod:: real
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
