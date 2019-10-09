@@ -58,7 +58,7 @@ Operation coverage
 ~~~~~~~~~~~~~~~~~~
 
 Quantized tensors support a limited subset of data manipulation methods of the regular
-full-precision tensor. <Link to quantized tensor documentation here>
+full-precision tensor. (see list below)
 
 For NN operators included in PyTorch, we restrict support to:
 
@@ -72,7 +72,7 @@ mapped linearly to the minimum and the maximum of the quantized data
 type such that zero is represented with no quantization error.
 
 Additional data types and quantization schemes can be implemented through
-the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`.
+the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_.
 
 Many operations for quantized tensors are available under the same API as full
 float version in ``torch`` or ``torch.nn``. Quantized version of NN modules that
@@ -238,7 +238,7 @@ PyTorch provides three approaches to quantize models.
    This is true for for LSTM and Transformer type models with small
    batch size. Applying dynamic quantization to a whole model can be
    done with a single call to torch.quantization.quantize\\_dynamic().
-   See the `<https://pytorch.org/tutorials/#Quantization_Experimental>` **NOTE NEEDS REVISION**
+   See the `quantization tutorials <https://pytorch.org/tutorials/#Quantization_Experimental>`_ **NOTE NEEDS REVISION**
 2. Post Training Static Quantization: This is the most commonly used form of
    quantization where the weights are quantized ahead of time and the
    scale factor and bias for the activation tensors is pre-computed
@@ -267,7 +267,7 @@ PyTorch provides three approaches to quantize models.
       quantizes the weights, computes and stores the scale and bias
       value to be used each activation tensor, and replaces key
       operators quantized implementations.
-   See the `<https://pytorch.org/tutorials/#Quantization_Experimental>` **NOTE NEEDS REVISION**
+   See the `quantization tutorials <https://pytorch.org/tutorials/#Quantization_Experimental>`_ **NOTE NEEDS REVISION**
 
 3. Quantization Aware Training: In the rare cases where post training
    quantization does not provide adequate accuracy training can be done
@@ -287,7 +287,7 @@ PyTorch provides three approaches to quantize models.
    5. Train or fine tune the model.
    6. Identical to step (6) for post training quantization
 
-   See the `<https://pytorch.org/tutorials/#Quantization_Experimental>` **NOTE NEEDS REVISION**
+   See the `quantization tutorials <https://pytorch.org/tutorials/#Quantization_Experimental>`_ **NOTE NEEDS REVISION**
 
 While default implementations of observers to select the scale factor and bias
 based on observed tensor data are provided, developers can provide their own
