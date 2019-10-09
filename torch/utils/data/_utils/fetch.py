@@ -1,4 +1,4 @@
-r""""Contains definitions of the methods used by the _DataLoaderIter to fetch
+r""""Contains definitions of the methods used by the _BaseDataLoaderIter to fetch
 data from an iterable-style or map-style dataset. This logic is shared in both
 single- and multi-processing data loading.
 """
