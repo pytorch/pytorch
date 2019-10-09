@@ -440,6 +440,38 @@ ccache -F 0
 # deploy (and add to ~/.bashrc for later)
 export PATH="/usr/lib/ccache:$PATH"
 ```
+
+It is also possible to install `ccache` via `conda` by installing it from the
+community-maintained `conda-forge` channel. Here is how to set up `ccache` this
+way:
+
+```bash
+# install ccache
+conda install -c conda-forge ccache
+
+# set up ccache compiler symlinks
+mkdir ~/ccache
+mkdir ~/ccache/lib
+mkdir ~/ccache/cuda
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/cc
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/c++
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/gcc
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/g++
+ln -s $CONDA_PREFIX/bin/ccache ~/ccache/cuda/nvcc
+
+# update PATH to reflect symlink locations, consider
+# adding this to your .bashrc
+export PATH=~/ccache/lib:$PATH
+export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
+
+# increase ccache cache size to 25 GiB
+ccache -M 25Gi
+```
+
+To check this is working, do two clean builds of pytorch in a row. The second
+build should be substantially and noticeably faster than the first build.
+
+
 #### Use a faster linker
 If you are editing a single file and rebuilding in a tight loop, the time spent
 linking will dominate. The system linker available in most Linux distributions
