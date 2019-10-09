@@ -12,6 +12,10 @@ namespace at { namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
+bool _use_cudnn_ctc_loss(const Tensor& log_probs, const Tensor& targets, int64_t BLANK) {
+  return false;
+}
+
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, bool deterministic, bool zero_infinity) {
   AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
 }
@@ -28,9 +32,28 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor
 
 namespace at { namespace native {
 
-namespace {
+bool _use_cudnn_ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK) {
+  auto& ctx = at::globalContext();
 
-}  // namespace
+  bool use_cudnn = ctx.userEnabledCuDNN() &&
+    (BLANK == 0) && (targets.dim()==1) &&
+    (log_probs.scalar_type() == at::kFloat) &&
+    (targets.scalar_type() == at::kInt) &&
+    (log_probs.type().backend() == Backend::CUDA);
+
+  if (use_cudnn) {
+    // we don't know that input_lengths and target_lengths have the same size (they should, but we didn't check yet)
+    int64_t max_input_length = log_probs.size(0);
+    for (size_t b = 0; b < input_lengths.size(); b++) {
+      use_cudnn &= (input_lengths[b] == max_input_length);
+    }
+    for (size_t b = 0; b < target_lengths.size(); b++) {
+      // target length < 256 is documented, but we see illegal memory accesses when target lengths > input lengths for CuDNN
+      use_cudnn &= (target_lengths[b] <= 256) & (target_lengths[b] <= input_lengths[b]);
+    }
+  }
+  return use_cudnn;
+}
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tensor& targets_t, IntArrayRef input_lengths_, IntArrayRef target_lengths_, int64_t BLANK, bool deterministic, bool zero_infinity) {
   (void)zero_infinity; // only used for backward

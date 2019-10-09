@@ -339,32 +339,7 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
-  auto& ctx = at::globalContext();
-
-#if CUDNN_VERSION >= 7600
-  // see cudnn/LossCTC.cpp for commentary why we only have this in >= 7.6
-  bool use_cudnn =
-    detail::getCUDAHooks().compiledWithCuDNN() &&
-    ctx.userEnabledCuDNN() &&
-    (BLANK == 0) && (targets.dim()==1) &&
-    (log_probs.scalar_type() == at::kFloat) &&
-    (targets.scalar_type() == at::kInt) &&
-    (log_probs.type().backend() == Backend::CUDA);
-#else
-  bool use_cudnn = false;
-#endif
-
-  if (use_cudnn) {
-    // we don't know that input_lengths and target_lengths have the same size (they should, but we didn't check yet)
-    int64_t max_input_length = log_probs.size(0);
-    for (size_t b = 0; b < input_lengths.size(); b++) {
-      use_cudnn &= (input_lengths[b] == max_input_length);
-    }
-    for (size_t b = 0; b < target_lengths.size(); b++) {
-      // target length < 256 is documented, but we see illegal memory accesses when target lengths > input lengths for CuDNN
-      use_cudnn &= (target_lengths[b] <= 256) & (target_lengths[b] <= input_lengths[b]);
-    }
-  }
+  bool use_cudnn = at::_use_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK);
 
   Tensor res;
   if (use_cudnn) {
