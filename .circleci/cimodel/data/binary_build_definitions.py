@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from collections import OrderedDict
 
 import cimodel.data.binary_build_data as binary_build_data

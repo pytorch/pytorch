@@ -7,35 +7,35 @@ circular dependency problems
 import inspect
 import weakref
 import warnings
-import typing
 import torch._C
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
+from typing import Tuple, List, Dict, Optional, Union
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
 boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
 
-def createResolutionCallback(frames_up=0):
+def createResolutionCallbackFromFrame(frames_up=0):
     """
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
-    the function which called createResolutionCallback (by default).
+    the function which called createResolutionCallbackFromFrame (by default).
 
     This is used to enable access in-scope Python variables inside
     TorchScript fragments.
 
     frames_up is number of additional frames to go up on the stack.
     The default value is 0, which correspond to the frame of the caller
-    of createResolutionCallback. Also for example, if frames_up is set
-    to 1, then the frame of the caller's caller of createResolutionCallback
+    of createResolutionCallbackFromFrame. Also for example, if frames_up is set
+    to 1, then the frame of the caller's caller of createResolutionCallbackFromFrame
     will be taken.
 
     For example, the following program prints 2::
 
         def bar():
-            cb = createResolutionCallback(1)
+            cb = createResolutionCallbackFromFrame(1)
             print(cb("foo"))
 
         def baz():
@@ -75,6 +75,48 @@ def get_closure(fn):
         captures[captured_name] = fn.__closure__[index].cell_contents
 
     return captures
+
+# [local resolution in python]
+# Depending on where a variable is defined, and where it is used, we may
+# or may not be able to recover its value when recursively compiling a
+# script function. Remember in the general case, a module or function is
+# first defined and then later scripted. This means we do not have a
+# chance to capture the active frames when the function is defined. Hence any
+# name resolution has to happen later on the created closure. The way
+# python captures type annotations restricts what we can recover. The
+# follow example illustrates the different cases:
+#
+#         class MyGlobalClass:
+#         ...
+#         def my_local_scope():
+#             @torch.jit.script
+#             class MyClass:
+#                 ...
+#             @torch.jit.script
+#             class MyClassUsedAsVar:
+#                 ...
+#             def eg(x: MyClass, y: MyGlobalClass):
+#                 a_local_capture : Foo
+#                 return MyClassUsedAsVar(x)
+#
+# MyGlobalClass is defined in the __globals__ dictionary of function
+# 'eg', so it is always recoverable. my_local_scope introduces a new local
+# variable scope in the function. Classes defined here are only visible as
+# local variables. For the case of MyClassUsedAsVar, it is captured
+# because it is used as a variable inside the body of the function, and we
+# can resolve it using the captures returned from `get_closure`. However,
+# the type annotations are not captured by the closure. In Python
+# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be availiable as
+# annotations on `eg``, but starting in Python 4.0, they will represented as
+# strings and no longer present. Furthermore, since the body of `eg` does
+# not reference those names, they do not appear in the list of closed over
+# variables. In Python 2.x, type annotations are in comments, leading to a
+# similar situation where their definitions are not available. We anticipate
+# that most users will not run into this issue because their modules and
+# functions will be defined at a global scope like MyGlobalClass. In cases
+# where they are not, it is possible to work around issues by declaring the
+# values global in the function.
+
 
 
 def createResolutionCallbackFromClosure(fn):
@@ -179,11 +221,12 @@ class FunctionModifiers(object):
 
 def export(fn):
     """
-    This decorator indicates that a method is used as an entry point into a
-    ``ScriptModule`` and should be compiled. ``forward`` implicitly is assumbed to be an
-    entry point, so it does not need this decorator. Functions and methods
-    called from ``forward`` are compiled as they are seen, so they do not need
-    this decorator either.
+    This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
+    :class:`ScriptModule` and should be compiled.
+
+    ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
+    Functions and methods called from ``forward`` are compiled as they are seen
+    by the compiler, so they do not need this decorator either.
 
     Example (using ``@torch.jit.export`` on a method):
 
@@ -490,17 +533,17 @@ def _get_overloaded_methods(method, mod_class):
 def is_tuple(ann):
     # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
     return ann.__module__ == 'typing' and \
-        (getattr(ann, '__origin__', None) is typing.Tuple or
+        (getattr(ann, '__origin__', None) is Tuple or
             getattr(ann, '__origin__', None) is tuple)
 
 def is_list(ann):
     return ann.__module__ == 'typing' and \
-        (getattr(ann, '__origin__', None) is typing.List or
+        (getattr(ann, '__origin__', None) is List or
             getattr(ann, '__origin__', None) is list)
 
 def is_dict(ann):
     return ann.__module__ == 'typing' and \
-        (getattr(ann, '__origin__', None) is typing.Dict or
+        (getattr(ann, '__origin__', None) is Dict or
             getattr(ann, '__origin__', None) is dict)
 
 def is_optional(ann):
@@ -513,14 +556,14 @@ def is_optional(ann):
         return issubclass(the_type, super_type)
 
     union_optional = False
-    if ann.__module__ == 'typing' and (getattr(ann, '__origin__', None) is typing.Union):
+    if ann.__module__ == 'typing' and (getattr(ann, '__origin__', None) is Union):
         args = getattr(ann, '__args__', ())
         if len(args) == 2:
             union_optional = (safe_is_subclass(args[1], type(None)) and not safe_is_subclass(args[0], type(None))) \
                 or (safe_is_subclass(args[0], type(None)) and not safe_is_subclass(args[1], type(None)))
 
     optional = ann.__module__ == 'typing' and \
-        (getattr(ann, '__origin__', None) is typing.Optional)
+        (getattr(ann, '__origin__', None) is Optional)
 
     return optional or union_optional
 
