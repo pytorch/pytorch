@@ -17,6 +17,15 @@ inline Tensor hinge_embedding_loss(
       options.reduction());
 }
 
+inline Tensor cosine_embedding_loss(
+    const Tensor& input1,
+    const Tensor& input2,
+    const Tensor& target,
+    const CosineEmbeddingLossOptions& options) {
+  return torch::cosine_embedding_loss(
+      input1, input2, target, options.margin(), options.reduction());
+}
+  
 inline Tensor triplet_margin_loss(
     const Tensor& anchor,
     const Tensor& positive,

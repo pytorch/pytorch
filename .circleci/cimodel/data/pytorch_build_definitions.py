@@ -34,6 +34,7 @@ class Conf:
     dependent_tests: List = field(default_factory=list)
     parent_build: Optional['Conf'] = None
     is_namedtensor: bool = False
+    is_libtorch: bool = False
     is_important: bool = False
 
     # TODO: Eliminate the special casing for docker paths
@@ -49,6 +50,8 @@ class Conf:
             leading.append("xla")
         if self.is_namedtensor and not for_docker:
             leading.append("namedtensor")
+        if self.is_libtorch and not for_docker:
+            leading.append("libtorch")
 
         cuda_parms = []
         if self.cuda_version:
@@ -225,6 +228,7 @@ def instantiate_configs():
             parms_list.append("gcc7")
 
         is_namedtensor = fc.find_prop("is_namedtensor") or False
+        is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
 
         gpu_resource = None
@@ -241,21 +245,24 @@ def instantiate_configs():
             restrict_phases,
             gpu_resource,
             is_namedtensor=is_namedtensor,
+            is_libtorch=is_libtorch,
             is_important=is_important,
         )
 
-        if cuda_version == "9" and python_version == "3.6":
+        if cuda_version == "9" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
 
         if (compiler_name == "gcc"
                 and compiler_version == "5.4"
-                and not is_namedtensor):
+                and not is_namedtensor
+                and not is_libtorch):
             bc_breaking_check = Conf(
                 "backward-compatibility-check",
                 [],
                 is_xla=False,
                 restrict_phases=["test"],
                 is_namedtensor=False,
+                is_libtorch=False,
                 is_important=True,
                 parent_build=c,
             )

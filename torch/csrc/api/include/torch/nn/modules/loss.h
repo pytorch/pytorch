@@ -63,6 +63,35 @@ TORCH_MODULE(HingeEmbeddingLoss);
 
 // ============================================================================
 
+/// Creates a criterion that measures the loss given input tensors
+/// `input1`, `input2`, and a `Tensor` label `target` with values 1 or
+/// -1. This is used for measuring whether two inputs are similar or
+/// dissimilar, using the cosine distance, and is typically used for learning
+/// nonlinear embeddings or semi-supervised learning.
+struct TORCH_API CosineEmbeddingLossImpl : Module {
+  explicit CosineEmbeddingLossImpl(
+      const CosineEmbeddingLossOptions& options_ = {});
+
+  /// Pretty prints the `CosineEmbeddingLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(
+      const Tensor& input1,
+      const Tensor& input2,
+      const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  CosineEmbeddingLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `CosineEmbeddingLossImpl`.
+/// See the documentation for `CosineEmbeddingLossImpl` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(CosineEmbeddingLoss);
+
+// ============================================================================
+
 /// Creates a criterion that measures the triplet loss given an input
 /// tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater 
 /// than :math:`0`. This is used for measuring a relative similarity between
