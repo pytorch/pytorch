@@ -5,6 +5,8 @@ namespace nn {
 
 HardshrinkOptions::HardshrinkOptions(double lambda) : lambda_(lambda) {}
 
+SoftmaxOptions::SoftmaxOptions(int64_t dim) : dim_(dim) {}
+
 ReLUOptions::ReLUOptions(bool inplace) : inplace_(inplace) {}
 
 } // namespace nn
