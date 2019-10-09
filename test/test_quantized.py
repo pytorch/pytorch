@@ -503,57 +503,50 @@ class TestQuantizedOps(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
-           kernel=st.sampled_from((2, 3, 5)),
+           kernel=st.sampled_from((3, 5)),
            stride=st.sampled_from((None, 1, 2)),
            padding=st.integers(0, 2),
            ceil_mode=st.sampled_from((True, False)),
            count_include_pad=st.sampled_from((True, False)),
-           divisor_override=st.sampled_from((None, None)),
-           qengine=st.sampled_from(("qnnpack", "none")))
-    def test_avg_pool2d(self, X, kernel, stride, padding, ceil_mode, count_include_pad, divisor_override, qengine):
+           divisor_override=st.sampled_from((None, None)))
+    def test_avg_pool2d(self, X, kernel, stride, padding, ceil_mode, count_include_pad, divisor_override):
         """
         Note: we currently cannot test the divisor_override, because quantized op will clamp the result
         within range. However, the float op will not.
         """
-        with override_quantized_engine(qengine):
-            X, (scale, zero_point, torch_type) = X
+        X, (scale, zero_point, torch_type) = X
 
-            if (qengine == 'qnnpack'):
-                ceil_mode = False
-                count_include_pad = True
-                divisor_override = None
-                assume(len(X.shape) == 4)
-            assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
-            iH, iW = X.shape[-2:]
-            oH = pool_output_shape(iH, kernel, padding, stride, 0)
-            assume(oH > 0)
-            oW = pool_output_shape(iW, kernel, padding, stride, 0)
-            assume(oW > 0)
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = pool_output_shape(iH, kernel, padding, stride, 0)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, 0)
+        assume(oW > 0)
 
-            X = torch.from_numpy(X)
-            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
-                                           dtype=torch_type)
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
 
-            # Run reference on int_repr + round to avoid double rounding error.
-            X_ref = torch.nn.functional.avg_pool2d(
-                qX.int_repr().to(torch.float), kernel_size=kernel, stride=stride, padding=padding,
-                ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
+        # Run reference on int_repr + round to avoid double rounding error.
+        X_ref = torch.nn.functional.avg_pool2d(
+            qX.int_repr().to(torch.float), kernel_size=kernel, stride=stride, padding=padding,
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
 
-            ops_under_test = {
-                "nn.functional": torch.nn.functional.avg_pool2d,
-                "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d
-            }
-            error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
-            for name, op in ops_under_test.items():
-                qX_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
-                            count_include_pad=count_include_pad, divisor_override=divisor_override)
-                self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
-                                 message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
-                self.assertEqual(scale, qX_hat.q_scale(),
-                                 message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
-                self.assertEqual(zero_point, qX_hat.q_zero_point(),
-                                 message=error_message.format(name + '.zero_point', scale,
-                                                              qX_hat.q_zero_point()))
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.avg_pool2d,
+            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d
+        }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
+                        count_include_pad=count_include_pad, divisor_override=divisor_override)
+            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
@@ -1635,6 +1628,61 @@ class TestQNNPackOps(TestCase):
             oW = pool_output_shape(4, kernel, padding, stride, dilation)
             np.testing.assert_equal(qc.size(), (0, 2, oH, oW),
                                     "Quantized maxpool2d with batch size 0 failed.")
+
+    @given(batch_size=st.integers(1, 5),
+           channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           height=st.integers(4, 10),
+           width=st.integers(4, 10),
+           kernel=st.integers(2, 4),
+           stride=st.integers(1, 2),
+           padding=st.integers(1, 2),
+           scale=st.floats(0.2, 1.6),
+           zero_point=st.integers(0, 25)
+           )
+    def test_avg_pool2d(
+            self,
+            batch_size,
+            channels,
+            height,
+            width,
+            kernel,
+            stride,
+            padding,
+            scale,
+            zero_point
+
+    ):
+        with override_quantized_engine('qnnpack'):
+            import torch.nn.functional as F
+            X_init = torch.from_numpy(np.random.randint(
+                0, 50, (batch_size, channels, height, width)))
+            zero_point = 0
+            X = scale * (X_init - zero_point).to(dtype=torch.float)
+
+            # Check constraints
+            assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+
+            iH, iW = X.shape[-2:]
+
+            oH = pool_output_shape(iH, kernel, padding, stride, 1)
+            assume(oH > 0)
+            oW = pool_output_shape(iW, kernel, padding, stride, 1)
+            assume(oW > 0)
+
+            k = (kernel, kernel)
+            s = (stride, stride)
+            p = (padding, padding)
+
+            q_avg_pool = torch.nn.quantized.functional.avg_pool2d
+
+            x_q = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                            dtype=torch.quint8)
+
+            a_pool = F.avg_pool2d(x_q.int_repr().to(torch.float), kernel_size=k, stride=s, padding=p)
+            qa_pool = q_avg_pool(x_q, k, s, p)
+
+            np.testing.assert_array_almost_equal(a_pool.numpy(),
+                                                 qa_pool.int_repr().numpy(), decimal=0)
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
