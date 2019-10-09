@@ -2,7 +2,7 @@ import sys
 import torch
 import torch._C as _C
 from torch._namedtensor_internals import update_names, check_serializing_named_tensor, resolve_ellipsis
-from torch._namedtensor_internals import unzip_namedshape
+from torch._namedtensor_internals import unzip_namedshape, single_ellipsis_index, is_ellipsis
 from collections import OrderedDict
 import torch.utils.hooks as hooks
 import warnings
@@ -599,8 +599,12 @@ class Tensor(torch._C._TensorBase):
             The named tensor API is experimental and subject to change.
 
         """
+        ellipsis_idx = single_ellipsis_index(names, 'align_to')
+        if ellipsis_idx is None:
+            return super(Tensor, self).align_to(names)
         return super(Tensor, self).align_to(
-            resolve_ellipsis(names, self.names, 'align_to', is_positional=False))
+            [name for name in names if not is_ellipsis(name)],
+            ellipsis_idx)
 
     def unflatten(self, dim, namedshape):
         r"""Unflattens the named dimension :attr:`dim`, viewing it in the shape
