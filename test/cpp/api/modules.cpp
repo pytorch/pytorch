@@ -1055,6 +1055,23 @@ TEST_F(ModulesTest, ELU) {
   }
 }
 
+TEST_F(ModulesTest, SELU) {
+  SELU model;
+  auto input = torch::randn({5, 5}, torch::requires_grad());
+  auto output = model->forward(input);
+  const double scale = 1.0507009873554804934193349852946;
+  const double alpha = 1.6732632423543772848170429916717;
+  auto zero = torch::zeros_like(input);
+  auto expected = scale *
+      (torch::max(zero, input) +
+       torch::min(zero, alpha * (torch::exp(input) - 1)));
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
 TEST_F(ModulesTest, Hardshrink) {
   const auto size = 3;
   for (const auto lambda : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
@@ -1412,6 +1429,12 @@ TEST_F(ModulesTest, PrettyPrintELU) {
   ASSERT_EQ(c10::str(ELU()), "torch::nn::ELU(alpha=1)");
   ASSERT_EQ(c10::str(ELU(ELUOptions().alpha(42.42).inplace(true))),
             "torch::nn::ELU(alpha=42.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSELU) {
+  ASSERT_EQ(c10::str(SELU()), "torch::nn::SELU()");
+  ASSERT_EQ(c10::str(SELU(SELUOptions().inplace(true))),
+            "torch::nn::SELU(inplace=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintHardshrink) {
