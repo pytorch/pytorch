@@ -6784,7 +6784,8 @@ a")
 
     def test_isinstance_refinement(self):
         @torch.jit.script
-        def foo(a : Optional[int]):
+        def foo(a):
+            # type: (Optional[int]) -> int
             if isinstance(a, int):
                 return a + 3
             else:
@@ -6793,6 +6794,7 @@ a")
         self.assertEqual(foo(None), 4)
         @torch.jit.script
         def foo2(a : Optional[int], b : Optional[int]):
+            # type: (Optional[int], Optional[int]) -> int
             if not isinstance(a, int) or not isinstance(b, int):
                 return 0
             else:
