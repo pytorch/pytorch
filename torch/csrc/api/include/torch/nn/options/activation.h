@@ -53,6 +53,16 @@ struct TORCH_API LeakyReLUOptions {
 
 // ============================================================================
 
+/// Options for the Softmax functional and module.
+struct TORCH_API SoftmaxOptions {
+  SoftmaxOptions(int64_t dim);
+
+  // Dimension along which Softmax will be computed.
+  TORCH_ARG(int64_t, dim);
+};
+
+// ============================================================================
+
 /// Options for PReLU functional and module.
 struct TORCH_API PReLUOptions {
   /// number of `a` to learn. Although it takes an int as input, there is only
