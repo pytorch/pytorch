@@ -5,6 +5,7 @@ import sys
 import unittest
 from collections import namedtuple
 from unittest import mock
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -830,8 +831,14 @@ class RpcTest(object):
 
     @requires_process_group_agent
     def test_sender_exceptions(self):
-        rank = self.rank
-        rpc.init_model_parallel("worker{}".format(rank))
+        dist.init_process_group(backend="gloo", init_method=self.init_method, timeout=timedelta(seconds=2))
+        rpc.init_model_parallel(
+            self_name="worker%d" % self.rank,
+            backend=TEST_CONFIG.backend,
+            self_rank=self.rank,
+            init_method=self.init_method,
+        )
+
         if rank == 0:
             fut = dist.rpc_async("worker1", torch.add, args=(torch.ones(1), 3))
             with self.assertRaises(Exception):
