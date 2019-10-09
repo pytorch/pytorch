@@ -78,5 +78,47 @@ class TORCH_API HardtanhImpl : public torch::nn::Cloneable<HardtanhImpl> {
 
 TORCH_MODULE(Hardtanh);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LeakyReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the LeakyReLU function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LeakyReLU to learn
+/// about the exact behavior of this module.
+class TORCH_API LeakyReLUImpl : public torch::nn::Cloneable<LeakyReLUImpl> {
+ public:
+  LeakyReLUImpl() : LeakyReLUImpl(LeakyReLUOptions()) {}
+  explicit LeakyReLUImpl(const LeakyReLUOptions& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `LeakyReLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  LeakyReLUOptions options;
+};
+
+TORCH_MODULE(LeakyReLU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LogSigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the LogSigmoid function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LogSigmoid to learn
+/// about the exact behavior of this module.
+class TORCH_API LogSigmoidImpl : public torch::nn::Cloneable<LogSigmoidImpl> {
+ public:
+  LogSigmoidImpl() {}
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `LogSigmoid` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(LogSigmoid);
+
 } // namespace nn
 } // namespace torch
