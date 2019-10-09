@@ -7,6 +7,7 @@ import numpy as np
 import itertools
 import random
 import os
+import bisect
 
 
 """Performance microbenchmarks's utils.
@@ -14,6 +15,8 @@ import os
 This module contains utilities for writing microbenchmark tests.
 """
 
+# Here are the reserved keywords in the benchmark suite
+_reserved_keywords = {"probs", "total_samples", "tags"}
 
 def shape_to_string(shape):
     return ', '.join([str(x) for x in shape])
@@ -159,6 +162,107 @@ def config_list(**configs):
             generated_configs.append(tmp_result)
 
     return generated_configs
+
+
+def attr_probs(**probs):
+    """ return the inputs in a dictionary  
+    """
+    return probs
+
+
+class RandomSample(object):
+
+    def __init__(self, configs):
+        self.saved_cum_distribution = {}
+        self.configs = configs
+
+    def _distribution_func(self, key, weights):
+        """ this is a cumulative distribution function used for random sampling inputs 
+        """
+        if key in self.saved_cum_distribution:
+            return self.saved_cum_distribution[key]
+
+        total = sum(weights)
+        result = []
+        cumsum = 0
+        for w in weights:
+            cumsum += w
+            result.append(cumsum / total)
+        self.saved_cum_distribution[key] = result
+        return result
+
+    def _random_sample(self, key, values, weights):
+        """ given values and weights, this function randomly sample values based their weights 
+        """
+        # TODO(mingzhe09088): cache the results to avoid recalculation overhead 
+        assert len(values) == len(weights)
+        _distribution_func_vals = self._distribution_func(key, weights)
+        x = random.random()
+        idx = bisect.bisect(_distribution_func_vals, x)
+
+        assert idx <= len(values), "Wrong index value is returned"
+        # Due to numerical property, the last value in cumsum could be slightly 
+        # smaller than 1, and lead to the (index == len(values)).
+        if idx == len(values):
+            idx -= 1
+        return values[idx]
+
+    def get_one_set_of_inputs(self): 
+        tmp_attr_list = []
+        for key, values in self.configs.items():
+            if key in _reserved_keywords:
+                continue
+            value = self._random_sample(key, values, self.configs["probs"][str(key)])
+            tmp_results = {key : value}
+            tmp_attr_list.append(tmp_results)
+        return (tmp_attr_list)
+
+
+def random_sample_configs(**configs): 
+    """
+    This function randomly sample <total_samples> values from the given inputs based on 
+    their weights. 
+    Here is an example showing what are the expected inputs and outpus from this function: 
+    M = [1, 2],
+    N = [4, 5],
+    K = [7, 8],
+    probs = attr_probs( 
+        M = [0.7, 0.2],
+        N = [0.5, 0.2],
+        K = [0.6, 0.2],
+    ),
+    total_samples=10, 
+    this function will generate 
+    [
+        [{'K': 7}, {'M': 1}, {'N': 4}], 
+        [{'K': 7}, {'M': 2}, {'N': 5}], 
+        [{'K': 8}, {'M': 2}, {'N': 4}],
+        ...
+    ]
+    Note: 
+    The probs is optional. Without them, it implies everything is 1. The probs doesn't 
+    have to reflect the actual normalized probability, the implementation will 
+    normalize it.
+    TODO (mingzhe09088):  
+    (1):  a lambda that accepts or rejects a config as a sample. For example: for matmul
+    with M, N, and K, this function could get rid of (M * N * K > 1e8) to filter out 
+    very slow benchmarks.
+    (2): Make sure each sample is unique. If the number of samples are larger than the 
+    total combinations, just return the cross product. Otherwise, if the number of samples 
+    is close to the number of cross-products, it is numerical safer to generate the list 
+    that you don't want, and remove them. 
+    """
+    if "probs" not in configs: 
+        raise ValueError("probs is missing. Consider adding probs or"
+                         "using other config functions")
+
+    configs_attrs_list = []
+    randomsample = RandomSample(configs)
+    for i in range(configs["total_samples"]):  
+        tmp_attr_list = randomsample.get_one_set_of_inputs()
+        tmp_attr_list.append({"tags" : '_'.join(configs["tags"])})
+        configs_attrs_list.append(tmp_attr_list)
+    return configs_attrs_list
 
 
 def op_list(**configs):
