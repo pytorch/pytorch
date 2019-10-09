@@ -339,7 +339,10 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
-  bool use_cudnn = at::_use_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK);
+  bool use_cudnn =
+      (log_probs.device().type() == at::kCUDA) &&
+      at::_use_cudnn_ctc_loss(
+          log_probs, targets, input_lengths, target_lengths, BLANK);
 
   Tensor res;
   if (use_cudnn) {
