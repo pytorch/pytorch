@@ -417,11 +417,11 @@ void Module::apply(const std::function<void(Module&)>& fn) {
   fn(*this);
 }
 
-std::string Module::dump_to_str(
+std::string Module::_dump_to_string(
     bool print_method_bodies,
     bool print_attr_values,
     bool print_param_values,
-    int level = 0) const {
+    int level) const {
   std::stringstream ss;
   std::stringstream parameters_ss;
   std::stringstream attributes_ss;
@@ -470,7 +470,7 @@ std::string Module::dump_to_str(
   for (const Module& submodule : get_modules()) {
     // We do level + 2, because one level of indentation comes from 'submodules'
     // scope and the other one goes from a specific submodule we're printing.
-    ss << submodule.dump_to_str(
+    ss << submodule._dump_to_string(
         print_method_bodies, print_attr_values, print_param_values, level + 2);
   }
   ss << "  }" << std::endl;
@@ -484,10 +484,11 @@ void Module::dump(
     bool print_method_bodies = true,
     bool print_attr_values = true,
     bool print_param_values = true) const {
-  std::cout << dump_to_str(
+  std::cout << _dump_to_string(
                    print_method_bodies,
                    print_attr_values,
-                   print_param_values)
+                   print_param_values,
+                   0)
             << std::endl;
 }
 

@@ -196,10 +196,11 @@ class CUDATestBase(DeviceTypeTestBase):
         primary_device_idx = int(cls.get_primary_device().split(':')[1])
         num_devices = torch.cuda.device_count()
 
-        prim_device = cls.get_primary_device()
+        devices = [cls.get_primary_device()]
         cuda_str = 'cuda:{0}'
         non_primary_devices = [cuda_str.format(idx) for idx in range(num_devices) if idx != primary_device_idx]
-        return [prim_device] + non_primary_devices
+        devices.extend(non_primary_devices)
+        return devices
 
     @classmethod
     def setUpClass(cls):

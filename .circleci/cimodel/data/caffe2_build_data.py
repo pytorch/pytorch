@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 from cimodel.lib.conf_tree import Ver
 

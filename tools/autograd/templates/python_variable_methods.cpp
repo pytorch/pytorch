@@ -475,7 +475,7 @@ static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
   if (!THCPStream_Check(arg)) {
     return PyErr_Format(PyExc_TypeError, "expected Stream object");
   }
-  void* data = self_.storage().data_ptr().get();
+  void* data = self_.data_ptr();
   c10::cuda::CUDACachingAllocator::recordStream(data, at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
   Py_RETURN_NONE;
 #else

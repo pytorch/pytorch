@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from collections import OrderedDict
 
 import cimodel.data.dimensions as dimensions
