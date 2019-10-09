@@ -827,3 +827,13 @@ class RpcTest(object):
             "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
+
+    @requires_process_group_agent
+    def test_sender_exceptions(self):
+        rank = self.rank
+        rpc.init_model_parallel("worker{}".format(rank))
+        if rank == 0:
+            fut = dist.rpc_async("worker1", torch.add, args=(torch.ones(1), 3))
+            with self.assertRaises(Exception):
+                fut.wait()
+        # allow rank 1 to exit

@@ -342,11 +342,13 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
           }
         } catch (std::exception& e) {
           if (work.message_.isRequest()) {
+            std::cout << "caught an exception\n";
             auto exceptionMsg = rpc::createException(work.message_, e);
             markFutureWithException(work.message_.id(), exceptionMsg);
           }
         } catch (...) {
           if (work.message_.isRequest()) {
+            std::cout << "caught an UNKNOWN exception\n";
             auto exceptionMsg = rpc::createException(
                 work.message_, "Unknown exception occured.");
             markFutureWithException(work.message_.id(), exceptionMsg);
@@ -425,15 +427,10 @@ void ProcessGroupAgent::markFutureWithException(
   std::shared_ptr<FutureMessage> fut = nullptr;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
-    auto fut = futures_[futureId];
+    fut = futures_[futureId];
   }
   // Don't hold lock on markCompleted, as it could invoke callbacks
   fut->markCompleted(exceptionMsg);
-  {
-    std::lock_guard<std::mutex> lock{futureMutex_};
-    futures_.erase(futureId);
-  }
-  futureCV_.notify_all();
 }
 
 } // namespace rpc
