@@ -1,6 +1,6 @@
 #include "interpreter.h"
 #include <torch/csrc/jit/mobile/function.h>
-#include <ATen/core/operator_name.h>
+#include <aten/src/ATen/core/operator_name.h>
 
 namespace torch{
 namespace jit{

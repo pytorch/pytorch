@@ -13,8 +13,7 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    skipIfRocm
+from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -28,7 +27,7 @@ def rosenbrock(tensor):
 
 def drosenbrock(tensor):
     x, y = tensor
-    return torch.Tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
+    return torch.DoubleTensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
 
 class TestOptim(TestCase):
@@ -62,12 +61,12 @@ class TestOptim(TestCase):
             if w:
                 i = torch.LongTensor([[0, 0]])
                 x = grad[0]
-                v = torch.Tensor([x / 4., x - x / 4.])
+                v = torch.DoubleTensor([x / 4., x - x / 4.])
             else:
                 i = torch.LongTensor([[1, 1]])
                 y = grad[1]
-                v = torch.Tensor([y - y / 4., y / 4.])
-            x = sparse.DoubleTensor(i, v, torch.Size([2])).to(dtype=v.dtype)
+                v = torch.DoubleTensor([y - y / 4., y / 4.])
+            x = sparse.DoubleTensor(i, v, torch.Size([2]))
             with torch.no_grad():
                 if sparse_grad:
                     params.grad = x
@@ -343,8 +342,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
-    # ROCm precision is too low to pass this test
-    @skipIfRocm
     def test_adadelta(self):
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta([weight, bias])

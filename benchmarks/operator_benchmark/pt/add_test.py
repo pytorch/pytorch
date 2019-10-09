@@ -19,8 +19,8 @@ add_long_configs = op_bench.cross_product_configs(
 
 add_short_configs = op_bench.config_list(
     attrs=[
+        [32, 64, 64],
         [64, 64, 64],
-        [64, 64, 128],
     ],
     attr_names=["M", "N", "K"],
     tags=["short"],

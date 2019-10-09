@@ -1,5 +1,5 @@
 import unittest
-from common_utils import TestCase, run_tests, TEST_NUMPY, default_floating_dtype
+from common_utils import TestCase, run_tests, TEST_NUMPY
 from common_cuda import TEST_CUDA
 from collections import namedtuple, OrderedDict
 import itertools
@@ -275,7 +275,6 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NYI"):
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
-    @default_floating_dtype(torch.double)
     def test_big_tensor_repr(self):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)

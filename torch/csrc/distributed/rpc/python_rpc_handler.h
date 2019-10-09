@@ -17,25 +17,20 @@ namespace rpc {
 class PYBIND11_EXPORT PythonRpcHandler {
  public:
   static PythonRpcHandler& getInstance();
-
-  // Deserialize Python function, run it, and serialize its return value.
+  // Execute python UDF, result is pickled to binary string
   std::vector<char> generatePythonUDFResult(
       const std::vector<char>& pickledPayload,
       const std::vector<torch::Tensor>& requestTensorTable,
       std::vector<torch::Tensor>& responseTensorTable);
-
   // Returned python UDF result is pickled binary string, so run python
   // function to unpickle the python UDF result and return py::object to user
   py::object loadPythonUDFResult(
       const std::vector<char>& pickledPayload,
       const std::vector<torch::Tensor>& tensorTable);
-
   // Run a pickled Python UDF and return the result py::object
   py::object runPythonUDF(const SerializedPyObj& serializedObj);
-
   // Serialized a py::object into a string
   SerializedPyObj serialize(const py::object& obj);
-
   // Deserialize a string into a py::object
   py::object deserialize(const SerializedPyObj& serializedObj);
 
@@ -48,14 +43,9 @@ class PYBIND11_EXPORT PythonRpcHandler {
   PythonRpcHandler(PythonRpcHandler&&) = delete;
   PythonRpcHandler& operator=(PythonRpcHandler&&) = delete;
 
-  // Ref to `torch.distributed.rpc.internal._run_function`.
-  py::object pyRunFunction_;
-
-  // Ref to `torch.distributed.rpc.internal._load_return_value`.
-  py::object pyLoadReturnValue_;
-
-  // Ref to `torch.distributed.rpc.internal.serialize`.
-  py::object pySerialize_;
+  py::object runUDFFunction_;
+  py::object loadResultFunction_;
+  py::object serializeFunction_;
 };
 
 } // namespace rpc

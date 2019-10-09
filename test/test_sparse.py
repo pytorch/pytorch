@@ -5,8 +5,7 @@ import functools
 import random
 import sys
 import unittest
-from common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, default_floating_dtype
+from common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, do_test_empty_full, load_tests
 from common_cuda import TEST_CUDA
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
@@ -95,7 +94,6 @@ class TestSparse(TestCase):
         # TODO: Put this in torch.cuda.randn
         return self.value_empty(*args, **kwargs).normal_()
 
-    @default_floating_dtype(torch.double)
     def test_print(self):
         shape_sparse_dim_nnz = [
             ((), 0, 2),
@@ -927,7 +925,6 @@ class TestSparse(TestCase):
         test_shape(1000, 0, 100, 0)
         test_shape(1000, 100, 0, 0)
 
-    @default_floating_dtype(torch.double)
     def test_sparse_addmm(self):
         def test_shape(m, n, p, nnz, broadcast):
             if broadcast:
@@ -947,7 +944,6 @@ class TestSparse(TestCase):
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
 
-    @default_floating_dtype(torch.double)
     def test_sparse_mm(self):
         def test_shape(d1, d2, d3, nnz, transposed):
             if transposed:
@@ -967,7 +963,6 @@ class TestSparse(TestCase):
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
 
-    @default_floating_dtype(torch.double)
     def test_dsmm(self):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj])[0]
@@ -986,7 +981,6 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 0, 20)
 
     @skipIfRocm
-    @default_floating_dtype(torch.double)
     def test_hsmm(self):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj])[0]
@@ -1049,7 +1043,6 @@ class TestSparse(TestCase):
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
-    @default_floating_dtype(torch.double)
     def test_spadd(self):
         self._test_spadd_shape(10, [5, 6])
         self._test_spadd_shape(10, [10, 10, 10])
@@ -1059,7 +1052,6 @@ class TestSparse(TestCase):
         self._test_spadd_shape(0, [50, 0, 20])
         self._test_spadd_shape(0, [50, 30, 0])
 
-    @default_floating_dtype(torch.double)
     def test_spadd_hybrid(self):
         self._test_spadd_shape(10, [5, 6], [2, 3])
         self._test_spadd_shape(10, [10, 10, 10], [3])
@@ -1081,7 +1073,6 @@ class TestSparse(TestCase):
         test_shape(4, 0, [0, 0, 100, 5, 5, 5, 0])
 
     @skipIfRocm
-    @default_floating_dtype(torch.double)
     def test_sparse_sum(self):
 
         def run_tests(S, td=None):
@@ -1222,7 +1213,6 @@ class TestSparse(TestCase):
             # coalesced.
             self.assertEqual(z._values(), y._values())
 
-    @default_floating_dtype(torch.double)
     def test_basic_ops(self):
         self._test_basic_ops_shape(9, 12, [5, 6])
         self._test_basic_ops_shape(9, 12, [10, 10, 10])
@@ -1233,7 +1223,6 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape(0, 0, [10, 10, 10])
         self._test_basic_ops_shape(0, 0, [10, 10, 0])
 
-    @default_floating_dtype(torch.double)
     def test_basic_ops_hybrid(self):
         self._test_basic_ops_shape(9, 12, [5, 6], [2, 3])
         self._test_basic_ops_shape(9, 12, [10, 10, 10], [3])
