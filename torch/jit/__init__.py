@@ -14,6 +14,7 @@ from torch.serialization import validate_cuda_device
 from torch._six import PY2, PY37, with_metaclass, string_classes
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
+from torch.utils import set_module
 
 import collections
 import contextlib
@@ -65,6 +66,7 @@ _jit_script_class_compile = torch._C._jit_script_class_compile
 _python_cu = torch._C.CompilationUnit()
 
 Future = torch._C.Future
+set_module(Future, "torch.jit")
 _fork = torch._C.fork
 _wait = torch._C.wait
 
@@ -724,14 +726,14 @@ def trace(func,
           _module_class=None,
           _compilation_unit=_python_cu):
     """
-    Trace a function and return an executable ``ScriptModule`` or ``torch._C.Function``
+    Trace a function and return an executable ``ScriptModule`` or ``torch.jit.ScriptFunction``
     that will be optimized using just-in-time compilation.
 
     Using ``torch.jit.trace`` and :func:`torch.jit.trace_module<torch.jit.trace_module>`, you can turn an existing module or Python
-    function into a TorchScript ``torch._C.Function`` or ``ScriptModule``. You must provide example inputs,
+    function into a TorchScript ``torch.jit.ScriptFunction`` or ``ScriptModule``. You must provide example inputs,
     and we run the function, recording the operations performed on all the tensors.
 
-    * The resulting recording of a standalone function produces ``torch._C.Function``.
+    * The resulting recording of a standalone function produces ``torch.jit.ScriptFunction``.
     * The resulting recording of ``forward`` function of ``nn.Module`` or ``nn.Module`` produces ``ScriptModule``.
 
     This module also contains any parameters that the original
@@ -799,7 +801,7 @@ def trace(func,
         a ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
         The returned ``ScriptModule`` will have the same set of sub-modules and parameters as the
         original ``nn.Module``.
-        If ``callable`` is a standalone function, ``trace`` returns ``torch._C.Function``
+        If ``callable`` is a standalone function, ``trace`` returns ``torch.jit.ScriptFunction``
 
     Example (tracing a function):
 
@@ -1080,7 +1082,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a ``ScriptModule`` or
-    ``torch._C.Function``. TorchScript itself is a subset of the Python language, so not all
+    ``torch.jit.ScriptFunction``. TorchScript itself is a subset of the Python language, so not all
     features in Python work, but we provide enough functionality to compute on
     tensors and do control-dependent operations. For a complete guide, see the
     `TorchScript Language Reference`_.
@@ -1089,7 +1091,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     ``@torch.jit.script`` for `TorchScript Classes <TorchScript Class_>`_ and functions.
 
     **Scripting a function**
-        The ``@torch.jit.script`` decorator will construct a ``torch._C.Function``
+        The ``@torch.jit.script`` decorator will construct a ``torch.jit.ScriptFunction``
         by compiling the body of the function.
 
         Example (scripting a function):
@@ -1255,6 +1257,7 @@ def interface(obj):
     ast = get_jit_class_def(obj, obj.__name__)
     rcb = _jit_internal.createResolutionCallback(1)
     torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
+    obj.__torch_script_interface__ = True
     return obj
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
@@ -1512,8 +1515,15 @@ if _enabled:
             else:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
-            Module._Module__construct(self)
-            Module.__setattr__(self, "training", True)
+            training = None
+            if self._c._has_attribute('training'):
+                training = self._c._get_attribute('training')
+            super(ScriptModule, self).__init__()
+            if training is not None:
+                self.training = training
+                self._c._register_attribute('training', torch._C.BoolType.get(), training)
+            elif not self._c._has_attribute('training'):
+                self._c._register_attribute('training', torch._C.BoolType.get(), self.training)
 
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
@@ -1579,11 +1589,6 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
-                if attr == 'training':
-                    if self._c._has_attribute('training'):
-                        self.__dict__['training'] = value
-                        self._c._set_attribute('training', value)
-                        return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
                     try:
@@ -1592,6 +1597,8 @@ if _enabled:
                         raise RuntimeError("Could not register attribute '{}' of type '{}' for a value of type '{}'"
                                            .format(attr, value.type, type(value.value)))
                     return
+                if self._c._has_attribute(attr):
+                    self._c._set_attribute(attr, value)
                 return super(ScriptModule, self).__setattr__(attr, value)
 
             if hasattr(self, attr):
@@ -2058,6 +2065,10 @@ def _check_directly_compile_overloaded(obj):
 
 # torch.jit.Error
 Error = torch._C.JITException
+set_module(Error, "torch.jit")
+# This is not perfect but works in common cases
+Error.__name__ = "Error"
+Error.__qualname__ = "Error"
 
 def _get_named_tuple_properties(obj):
     assert issubclass(obj, tuple) and hasattr(obj, '_fields')
@@ -2105,8 +2116,9 @@ def _graph_for(self, *args, **kwargs):
     return last_executed_optimized_graph()
 
 torch._C.ScriptMethod.graph_for = _graph_for
-torch._C.Function.graph_for = _graph_for
-Function = torch._C.Function
+torch._C.ScriptFunction.graph_for = _graph_for
+ScriptFunction = torch._C.ScriptFunction
+set_module(ScriptFunction, "torch.jit")
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

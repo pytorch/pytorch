@@ -111,7 +111,7 @@ class CAFFE2_API PyTorchStreamReader final {
  private:
   void init();
   size_t read(uint64_t pos, char* buf, size_t n);
-  void valid(const char* what);
+  void valid(const char* what, const char* info = "");
   size_t getRecordID(const std::string& name);
 
   friend size_t
@@ -141,14 +141,18 @@ class CAFFE2_API PyTorchStreamWriter final {
   ~PyTorchStreamWriter();
 
  private:
-   void valid(const char* what);
-   size_t current_pos_ = 0;
-   std::unique_ptr<mz_zip_archive> ar_;
-   std::string archive_name_;
-   std::ostream* out_;
-   std::ofstream file_stream_;
-   bool finalized_ = false;
-   friend size_t ostream_write_func(void *pOpaque, uint64_t file_ofs, const void *pBuf, size_t n);
+  void valid(const char* what, const char* info = "");
+  size_t current_pos_ = 0;
+  std::unique_ptr<mz_zip_archive> ar_;
+  std::string archive_name_;
+  std::ostream* out_;
+  std::ofstream file_stream_;
+  bool finalized_ = false;
+  friend size_t ostream_write_func(
+      void* pOpaque,
+      uint64_t file_ofs,
+      const void* pBuf,
+      size_t n);
 };
 
 } // namespace serialize
