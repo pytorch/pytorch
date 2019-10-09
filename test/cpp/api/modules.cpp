@@ -994,6 +994,20 @@ TEST_F(ModulesTest, HingeEmbeddingLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, MultiMarginLoss) {
+  auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
+  MultiMarginLoss loss(MultiMarginLossOptions().margin(2).weight(weight));
+  auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::requires_grad());
+  auto target = torch::tensor({2, 1, 0}, torch::kLong);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({0.305556}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineEmbeddingLoss) {
   CosineEmbeddingLoss cos(CosineEmbeddingLossOptions().margin(0.5));
   auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}}, torch::requires_grad());
