@@ -41,6 +41,20 @@ inline Tensor logsigmoid(const Tensor& input) {
   return torch::log_sigmoid(input);
 }
 
+inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
+                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
+  int64_t dim = options.dim();
+  Tensor ret;
+
+  if (dtype == c10::nullopt) {
+    ret = input.softmax(dim);
+  } else {
+    ret = input.softmax(dim, dtype);
+  }
+
+  return ret;
+}
+
 inline Tensor prelu(const Tensor& input, const Tensor& weight) {
   return torch::prelu(input, weight);
 }
