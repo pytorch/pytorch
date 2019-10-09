@@ -463,6 +463,8 @@ std::pair<size_t, MatchedSchema> matchSchemas(
     const c10::optional<NamedValue>& self,
     bool render_errors) {
   TORCH_INTERNAL_ASSERT(schemas.size() > 0);
+  // if there is only one schema, we do not need to try without conversions
+  // first. this is faster and puts less dead code in the graph.
   if (schemas.size() == 1) {
     return std::make_pair(
         0, matchSchema(*schemas.at(0), loc, graph, args, kwargs, self));
@@ -589,6 +591,8 @@ Value* emitBuiltinCall(
     return emitBuiltinNode(matched.second, loc, graph, name);
   } else {
     Function* fn = builtin_functions[matched.first - variants.size()];
+    // we inline builtin calls because they are normally very small
+    // wrappers and are not useful for keeping around to debug
     return insertGraph(graph, *fn->graph(), matched.second.inputs).at(0);
   }
 }
