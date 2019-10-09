@@ -6,6 +6,8 @@
 #include <ATen/Config.h>
 
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
 #include <vector>
 
@@ -170,8 +172,9 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       scalar_t w = weight.defined() ? weight.data_ptr<scalar_t>()[f * weight.stride(0)] : 1;
       scalar_t b = bias.defined() ? bias.data_ptr<scalar_t>()[f * bias.stride(0)] : 0;
 
-      CPU_tensor_apply2<scalar_t,scalar_t>(out, in, [&](scalar_t& o, const scalar_t& i) {
-        o = ((i - mean) * invstd) * w + b;
+      auto iter = TensorIterator::unary_op(out, in);
+      cpu_serial_kernel(iter, [=](const scalar_t i) -> scalar_t {
+        return ((i - mean) * invstd) * w + b;
       });
     }
   });
@@ -199,18 +202,24 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
     for (int64_t f = b_begin; f < b_end; ++f) {
       Tensor in = input.select(1, f);
-
+      
       // compute mean per input
+      auto iter = TensorIterator();
+      iter.add_input(in);
+      iter.build();
       accscalar_t sum = 0;
-      CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
-          sum += i;
-        });
+      cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
+        sum += i;
+      });
       scalar_t mean = sum / n;
       save_mean_a[f] = mean;
 
       // compute variance per input
+      iter = TensorIterator();
+      iter.add_input(in);
+      iter.build();
       accscalar_t var_sum = 0;
-      CPU_tensor_apply1<scalar_t>(in, [&] (const scalar_t& i) {
+      cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
         var_sum += (i - mean) * (i - mean);
       });
       save_var_transform_a[f] = VarTransform<accscalar_t>{}(var_sum / n, eps);
@@ -281,15 +290,22 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
         // sum over all gradOutput in feature plane
         accscalar_t sum = 0;
-        CPU_tensor_apply1<scalar_t>(grad_out, [&](const scalar_t& g) {
-            sum += g;
-          });
+        auto iter = TensorIterator();
+        iter.add_input(grad_out);
+        iter.build();
+        cpu_serial_kernel(iter, [&](const scalar_t g) -> void {
+          sum += g;
+        });
 
         // dot product of the Q(X) and gradOuput
         accscalar_t dotp = 0;
-        CPU_tensor_apply2<scalar_t,scalar_t>(in, grad_out, [&](const scalar_t& i, const scalar_t& go) {
-            dotp += (i - mean) * go;
-          });
+        iter = TensorIterator();
+        iter.add_input(in);
+        iter.add_input(grad_out);
+        iter.build();
+        cpu_serial_kernel(iter, [&](const scalar_t i, const scalar_t go) -> void {
+          dotp += (i - mean) * go;
+        });
 
         if (grad_input_mask[0]) {
           Tensor grad_in = grad_input.select(1, f);
@@ -301,23 +317,25 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 
             // projection of gradOutput on to output scaled by std
             scalar_t k = (scalar_t) dotp * invstd * invstd / n;
-
-            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, in, [&](scalar_t& gi, const scalar_t& i) {
-                gi = (i - mean)* k;
-              });
+            iter = TensorIterator::unary_op(grad_in, in);
+            cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+              return (i - mean) * k;
+            });
 
             accscalar_t grad_mean = sum / n;
-            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
-            gi = (go - grad_mean - gi) * invstd * w;
-              });
+            iter = TensorIterator::binary_op(grad_in, grad_in, grad_out);
+            cpu_serial_kernel(iter, [&](scalar_t gi, scalar_t go) -> scalar_t {
+              return (go - grad_mean - gi) * invstd * w;
+            });
           } else {
             // when in evaluation mode
             // Q(X) = X - running_mean  ; i.e. input centered to zero mean
             // Y = Q(X) / running_std    ; i.e. BN output before weight and bias
             // dL/dX = w / running_std
-            CPU_tensor_apply2<scalar_t,scalar_t>(grad_in, grad_out, [&](scalar_t& gi, const scalar_t& go) {
-                gi = go * invstd * w;
-              });
+            iter = TensorIterator::unary_op(grad_in, grad_out);
+            cpu_serial_kernel(iter, [&](const scalar_t i) -> scalar_t {
+              return i * invstd * w;
+            });
           }
         }
         if (grad_input_mask[1]) {
