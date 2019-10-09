@@ -1,5 +1,4 @@
 #include <torch/nn/modules/loss.h>
-using namespace std
 namespace F = torch::nn::functional;
 
 namespace torch {
