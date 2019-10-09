@@ -327,7 +327,10 @@ struct TORCH_API Variable : public at::Tensor {
   PyObject* pyobj() const noexcept;
   void set_pyobj(PyObject* pyobj) noexcept;
 
+ private:
   struct AutogradMeta;
+
+ public:
   Variable::AutogradMeta* get_autograd_meta() const noexcept;
 
  private:
