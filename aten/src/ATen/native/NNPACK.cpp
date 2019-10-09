@@ -105,7 +105,7 @@ static pthreadpool_t nnpack_threadpool() {
 #endif
 
     nnpack_threadpool_ = pthreadpool_create(threads);
-    if ( !nnpack_threadpool_ ) {
+    if (!nnpack_threadpool_) {
       LOG(WARNING) << "Failed to initialize pthreadpool! Running NNPACK in single-threaded mode.";
     }
   }
