@@ -1,10 +1,7 @@
-#!/usr/bin/env python3
-
 import collections
 import copyreg
 import io
 import pickle
-import six
 import threading
 import traceback
 
@@ -26,10 +23,10 @@ class _InternalRPCPickler:
     e.g. attach tensor to distributed autograd graph in C++
     """
     def __init__(self):
-        # python2 does not have dispatch_table, add "if six.PY3" condition,
+        # python2 does not have dispatch_table, add "if torch._six.PY3" condition,
         # as _InternalRPCPickler still got build in python2 even
         # we skipped python 2 tests for rpc_test
-        if six.PY3:
+        if torch._six.PY3:
             self._dispatch_table = copyreg.dispatch_table.copy()
             self._dispatch_table[torch.Tensor] = self._tensor_reducer
 
@@ -101,28 +98,37 @@ class _InternalRPCPickler:
 _internal_rpc_pickler = _InternalRPCPickler()
 
 
-def run_python_udf_internal(pickled_python_udf, tensors):
+def serialize(obj):
+    return _internal_rpc_pickler.serialize(obj)
+
+
+def _run_function(binary_data, tensor_table):
     r"""
-    Internal python function will be imported and executed in C++ land
-    it unpickles pickled python udf strings and tensors and run the python
-    udf, return serialized result and tensor tables
+    This function is exclusively called from C++.
+    See ``torch/csrc/distributed/rpc/python_rpc_handler.cpp``.
+
+    Runs a Python UDF and returns its return value.
+    Wraps any exception in ``RemoteException`` if the function raises.
     """
-    python_udf = _internal_rpc_pickler.deserialize(pickled_python_udf, tensors)
+    python_udf = _internal_rpc_pickler.deserialize(binary_data, tensor_table)
     try:
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
     except Exception as e:
         # except str = exception info + traceback string
         except_str = "{}\n{}".format(repr(e), traceback.format_exc())
         result = RemoteException(except_str)
-    return _internal_rpc_pickler.serialize(result)
+    return result
 
 
-def load_python_udf_result_internal(pickled_python_result, tensors):
+def _load_return_value(binary_data, tensor_table):
     r"""
-    Internal python function will be imported and executed in C++ land
-    it unpickled pickled python udf result and tensor tables, return python object
+    This function is exclusively called from C++.
+    See ``torch/csrc/distributed/rpc/python_rpc_handler.cpp``.
+
+    Processes the return value of a Python function.
+    Raises exception if the return value is a wrapped exception.
     """
-    result = _internal_rpc_pickler.deserialize(pickled_python_result, tensors)
+    result = _internal_rpc_pickler.deserialize(binary_data, tensor_table)
     if isinstance(result, RemoteException):
         raise Exception(result.msg)
     return result

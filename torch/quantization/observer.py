@@ -174,7 +174,7 @@ class MinMaxObserver(_ObserverBase):
     r"""Default Observer Module
     A default implementation of the observer module, only works for
     `per_tensor_affine` quantization scheme.  The module will record the
-     running average of max and min value of the observed Tensor and
+    running average of max and min value of the observed Tensor and
     calculate_qparams will calculate scale and zero_point
     """
 
@@ -215,7 +215,7 @@ class MinMaxObserver(_ObserverBase):
             max_val = torch.max(torch.max(x), max_val)
         self.min_val = min_val
         self.max_val = max_val
-        return x
+        return x_orig
 
     @torch.jit.export
     def calculate_qparams(self):
@@ -237,6 +237,25 @@ class MinMaxObserver(_ObserverBase):
         self.max_val = state_dict.pop(prefix + 'max_val')
         super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                           missing_keys, unexpected_keys, error_msgs)
+
+class MovingAverageMinMaxObserver(MinMaxObserver):
+    def __init__(self, averaging_constant=0.01, **kwargs):
+        self.averaging_constant = averaging_constant
+        super(MovingAverageMinMaxObserver, self).__init__(**kwargs)
+
+    def forward(self, x_orig):
+        x = x_orig.detach()  # avoid keeping autograd tape
+        min_val = self.min_val
+        max_val = self.max_val
+        if min_val is None or max_val is None:
+            min_val = torch.min(x)
+            max_val = torch.max(x)
+        else:
+            min_val = min_val + self.averaging_constant * (torch.min(x) - min_val)
+            max_val = max_val + self.averaging_constant * (torch.max(x) - max_val)
+        self.min_val = min_val
+        self.max_val = max_val
+        return x_orig
 
 
 class PerChannelMinMaxObserver(_ObserverBase):
@@ -260,26 +279,26 @@ class PerChannelMinMaxObserver(_ObserverBase):
                 "Cannot reduce range for symmetric quantization for quint8"
             )
 
-    def forward(self, x):
-        with torch.no_grad():
-            min_vals = self.min_vals
-            max_vals = self.max_vals
-            x_dim = x.size()
+    def forward(self, x_orig):
+        x = x_orig.detach()  # avoid keeping autograd tape
+        min_vals = self.min_vals
+        max_vals = self.max_vals
+        x_dim = x.size()
 
-            new_axis_list = list(range(len(x_dim)))
-            new_axis_list[self.ch_axis] = 0
-            new_axis_list[0] = self.ch_axis
-            y = x.permute(tuple(new_axis_list))
-            y = torch.flatten(y, start_dim=1)
-            if min_vals is None or max_vals is None:
-                min_vals = torch.min(y, 1)[0]
-                max_vals = torch.max(y, 1)[0]
-            else:
-                min_vals = torch.min(torch.min(y, 1)[0], min_vals)
-                max_vals = torch.max(torch.max(y, 1)[0], max_vals)
-            self.min_vals = min_vals
-            self.max_vals = max_vals
-        return x
+        new_axis_list = list(range(len(x_dim)))
+        new_axis_list[self.ch_axis] = 0
+        new_axis_list[0] = self.ch_axis
+        y = x.permute(tuple(new_axis_list))
+        y = torch.flatten(y, start_dim=1)
+        if min_vals is None or max_vals is None:
+            min_vals = torch.min(y, 1)[0]
+            max_vals = torch.max(y, 1)[0]
+        else:
+            min_vals = torch.min(torch.min(y, 1)[0], min_vals)
+            max_vals = torch.max(torch.max(y, 1)[0], max_vals)
+        self.min_vals = min_vals
+        self.max_vals = max_vals
+        return x_orig
 
     def calculate_qparams(self):
         return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)
@@ -295,6 +314,38 @@ class PerChannelMinMaxObserver(_ObserverBase):
         self.max_vals = state_dict.pop(prefix + 'max_vals')
         super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                                     missing_keys, unexpected_keys, error_msgs)
+
+class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
+    r"""Per Channel Observer Module
+    The module will record the running average of max and min value for each
+    channel of the observed Tensor and calculate_qparams will calculate
+    scales and zero_points for each channel
+    """
+
+    def __init__(self, averaging_constant=0.01, **kwargs):
+        self.averaging_constant = averaging_constant
+        super(MovingAveragePerChannelMinMaxObserver, self).__init__(**kwargs)
+
+    def forward(self, x_orig):
+        x = x_orig.detach()  # avoid keeping autograd tape
+        min_vals = self.min_vals
+        max_vals = self.max_vals
+        x_dim = x.size()
+
+        new_axis_list = list(range(len(x_dim)))
+        new_axis_list[self.ch_axis] = 0
+        new_axis_list[0] = self.ch_axis
+        y = x.permute(tuple(new_axis_list))
+        y = torch.flatten(y, start_dim=1)
+        if min_vals is None or max_vals is None:
+            min_vals = torch.min(y, 1)[0]
+            max_vals = torch.max(y, 1)[0]
+        else:
+            min_vals = min_vals + self.averaging_constant * (torch.min(y, 1)[0] - min_vals)
+            max_vals = max_vals + self.averaging_constant * (torch.max(y, 1)[0] - max_vals)
+        self.min_vals = min_vals
+        self.max_vals = max_vals
+        return x_orig
 
 class HistogramObserver(_ObserverBase):
     r"""
