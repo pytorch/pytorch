@@ -39,7 +39,8 @@ to quantized values.
 
 The mapping is performed by converting the floating point tensors using
 
-**include image of the formula from the design doc here**
+.. image:: math-quantizer-equation.png
+   :width: 40%
 
 Note that, we ensure that zero in floating point is repsresented with no error after quantization,
 thereby ensuring that operations like padding do not cause additional quantization error.
