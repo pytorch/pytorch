@@ -26,7 +26,7 @@ perform all or part of the computation in lower precision. Higher-level APIs are
 provided that incorporate typical workflows of converting FP32 model to lower
 precision with minimal accuracy loss.
 
-Quantized representation and operations
+Quantized Representation and Operations
 ---------------------------------------
 
 PyTorch supports both per tensor and per channel asymmetric linear
@@ -49,16 +49,16 @@ Quantized Tensor
 ~~~~~~~~~~~~~~~~
 
 In order to do quantization in PyTorch, we need to be able to represent
-quantized data in Tensors. A quantized Tensor allows for storing
+quantized data in Tensors. A Quantized Tensor allows for storing
 quantized data (represented as int8/uint8/int32) along with quantization
-parameters like scale and zero\\_point. Quantized tensors allow for many
+parameters like scale and zero\\_point. Quantized Tensors allow for many
 useful operations making quantized arithmetic easy, in addition to
 allowing for serialization of data in a quantized format.
 
 Operation coverage
 ~~~~~~~~~~~~~~~~~~
 
-Quantized tensors support a limited subset of data manipulation methods of the regular
+Quantized Tensors support a limited subset of data manipulation methods of the regular
 full-precision tensor. (see list below)
 
 For NN operators included in PyTorch, we restrict support to:
@@ -305,7 +305,7 @@ means that the model stays a regular ``nn.Module``-based instance throughout the
 process and thus can work with the rest of PyTorch APIs.
 
 
-Model preparation for quantization
+Model Preparation for Quantization
 ---------------------------------
 It is necessary to currently make some modifications to the model definition
 prior to quantization. This is because currently quantization works on a module
