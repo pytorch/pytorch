@@ -7976,16 +7976,18 @@ class TestTorchDeviceType(TestCase):
         self.assertRaises(TypeError, delitem)
 
     @skipCUDANonDefaultStreamIf(True)
-    @dtypes(torch.double)
+    @dtypes(torch.half, torch.double)
     def test_advancedindex(self, device, dtype):
         # Tests for Integer Array Indexing, Part I - Purely integer array
         # indexing
 
         def consec(size, start=1):
+            # Creates the sequence in float since CPU half doesn't support the
+            # needed operations. Converts to dtype before returning.
             numel = reduce(lambda x, y: x * y, size, 1)
-            sequence = torch.ones(numel, dtype=dtype, device=device).cumsum(0)
+            sequence = torch.ones(numel, dtype=torch.float, device=device).cumsum(0)
             sequence.add_(start - 1)
-            return sequence.view(*size)
+            return sequence.view(*size).to(dtype=dtype)
 
         # pick a random valid indexer type
         def ri(indices):
@@ -8017,6 +8019,13 @@ class TestTorchDeviceType(TestCase):
             x[ri([0, 2, 4]), ] = torch.tensor([5, 4, 3], dtype=dtype, device=device)
             self.assertEqual(x[ri([0, 2, 4]), ], torch.tensor([5, 4, 3], dtype=dtype, device=device))
 
+        # Only validates indexing and setting for halfs
+        if dtype == torch.half:
+            reference = consec((10,))
+            validate_indexing(reference)
+            validate_setting(reference)
+            return
+
         # First, we will test indexing to generate return values
 
         # Case 1: Purely Integer Array Indexing
@@ -8026,8 +8035,9 @@ class TestTorchDeviceType(TestCase):
         # setting values
         validate_setting(reference)
 
-        # Tensor with stride != 1
 
+
+        # Tensor with stride != 1
         # strided is [1, 3, 5, 7]
         reference = consec((10,))
         strided = torch.tensor((), dtype=dtype, device=device)
