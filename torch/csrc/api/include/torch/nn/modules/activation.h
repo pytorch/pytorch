@@ -31,6 +31,28 @@ class TORCH_API ELUImpl : public torch::nn::Cloneable<ELUImpl> {
 
 TORCH_MODULE(ELU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the selu function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.SELU to learn
+/// about the exact behavior of this module.
+class TORCH_API SELUImpl : public torch::nn::Cloneable<SELUImpl> {
+ public:
+  explicit SELUImpl(const SELUOptions& options_ = {});
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `SELU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  SELUOptions options;
+};
+
+TORCH_MODULE(SELU);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Hardshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the hard shrinkage function element-wise.
@@ -113,6 +135,29 @@ class TORCH_API LogSigmoidImpl : public torch::nn::Cloneable<LogSigmoidImpl> {
 };
 
 TORCH_MODULE(LogSigmoid);
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softmax ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the Softmax function.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softmax to learn
+/// about the exact behavior of this module.
+class TORCH_API SoftmaxImpl : public torch::nn::Cloneable<SoftmaxImpl> {
+ public:
+  explicit SoftmaxImpl(int64_t dim) : SoftmaxImpl(SoftmaxOptions(dim)) {}
+  explicit SoftmaxImpl(const SoftmaxOptions& options_);
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Softmax` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  SoftmaxOptions options;
+};
+
+TORCH_MODULE(Softmax);
 
 } // namespace nn
 } // namespace torch

@@ -63,6 +63,33 @@ TORCH_MODULE(HingeEmbeddingLoss);
 
 // ============================================================================
 
+/// Creates a criterion that optimizes a multi-class classification hinge
+/// loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`) and
+/// output :math:`y` (which is a 1D tensor of target class indices,
+/// :math:`0 \leq y \leq \text{x.size}(1)-1`):
+struct TORCH_API MultiMarginLossImpl : Module {
+  explicit MultiMarginLossImpl(
+      const MultiMarginLossOptions& options_ = {});
+
+  void reset();
+
+  /// Pretty prints the `MultiMarginLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  MultiMarginLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `MultiMarginLossImpl`.
+/// See the documentation for `MultiMarginLossImpl` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(MultiMarginLoss);
+
+// ============================================================================
+
 /// Creates a criterion that measures the loss given input tensors
 /// `input1`, `input2`, and a `Tensor` label `target` with values 1 or
 /// -1. This is used for measuring whether two inputs are similar or
