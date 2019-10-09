@@ -7,10 +7,10 @@ class LinearReLU(nnq.Linear):
     r"""
     A LinearReLU module fused from Linear and ReLU modules
 
-    We adopt the same interface as :class:`torch.nn.quantized.Linear`.
+    We adopt the same interface as :class:`~torch.nn.quantized.Linear`.
 
-    Attributes:
-        Same as torch.nn.quantized.Linear
+    .. note::
+    Attributes: Same as torch.nn.quantized.Linear
 
     Examples::
 
