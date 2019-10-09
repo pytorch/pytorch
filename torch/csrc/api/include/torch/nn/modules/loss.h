@@ -90,5 +90,31 @@ struct TORCH_API CosineEmbeddingLossImpl : Module {
 /// PyTorch's module storage semantics.
 TORCH_MODULE(CosineEmbeddingLoss);
 
+// ============================================================================
+
+/// Creates a criterion that optimizes a multi-label one-versus-all
+/// loss based on max-entropy, between input :math:`x` and target :math:`y` of size
+/// :math:`(N, C)`.
+struct TORCH_API MultiLabelSoftMarginLossImpl : Module {
+  explicit MultiLabelSoftMarginLossImpl(
+    const MultiLabelSoftMarginLossOptions& options_ = {});
+
+  /// Pretty prints the `L1Loss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  void reset();
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  MultiLabelSoftMarginLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `MultiLabelSoftMarginLossImpl`.
+/// See the documentation for `MultiLabelSoftMarginLossImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(MultiLabelSoftMarginLoss);
+
 } // namespace nn
 } // namespace torch

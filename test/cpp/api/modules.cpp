@@ -1022,6 +1022,20 @@ TEST_F(ModulesTest, CosineSimilarity) {
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
 }
 
+TEST_F(ModulesTest, MultiLabelSoftMarginLoss) {
+  auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
+  MultiLabelSoftMarginLoss loss(MultiLabelSoftMarginLossOptions().weight(weight));
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({0.4099098}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, PairwiseDistance) {
   PairwiseDistance dist(PairwiseDistanceOptions(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
