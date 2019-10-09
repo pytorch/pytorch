@@ -254,6 +254,32 @@ TEST_F(FunctionalTest, ELU) {
   }
 }
 
+TEST_F(FunctionalTest, SELU) {
+  {
+    const double scale = 1.0507009873554804934193349852946;
+    const double alpha = 1.6732632423543772848170429916717;
+    for (const auto inplace : {false, true}) {
+      auto input = torch::randn({5, 5});
+      auto expected = scale *
+          (torch::max(torch::zeros_like(input), input) +
+           torch::min(
+               torch::zeros_like(input), alpha * (torch::exp(input) - 1)));
+      auto output = F::selu(input, inplace);
+
+      ASSERT_TRUE(output.allclose(expected));
+      if (inplace) {
+        ASSERT_TRUE(input.allclose(expected));
+      }
+    }
+  }
+  {
+    auto input = torch::arange(0, 9, torch::kDouble).view({3, 3});
+    auto output = F::selu(input);
+    auto expected = F::selu(input, false);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(FunctionalTest, Hardshrink) {
   const auto size = 3;
   for (const auto lambda : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
