@@ -3201,7 +3201,6 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
-    assert list(query.size()) == [tgt_len, bsz, embed_dim]
     assert key.size() == value.size()
 
     head_dim = embed_dim // num_heads

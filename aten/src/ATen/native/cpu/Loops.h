@@ -42,13 +42,13 @@ namespace at { namespace native { namespace {
 
 using namespace vec256;
 
-template <typename traits, std::size_t... I>
+template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
 dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
-                 c10::guts::index_sequence<I...>) {
+                 c10::guts::index_sequence<INDEX...>) {
   return std::make_tuple(
-      *(typename traits::template arg<I>::type*)
-        (data[I] + i * strides[I])...);
+      *(typename traits::template arg<INDEX>::type*)
+        (data[INDEX] + i * strides[INDEX])...);
 }
 
 template <typename traits>
@@ -58,19 +58,19 @@ dereference(char* C10_RESTRICT data[], const int64_t* strides, int64_t i) {
   return dereference_impl<traits>(data, strides, i, Indices{});
 }
 
-template <typename traits, std::size_t... I>
+template <typename traits, std::size_t... INDEX>
 typename traits::ArgsTuple
 dereference_vec_impl(char* C10_RESTRICT data[],
                      const typename traits::result_type& opt_scalar,
                      size_t S,
                      int64_t i,
-                     c10::guts::index_sequence<I...>) {
+                     c10::guts::index_sequence<INDEX...>) {
   using Vec = typename traits::result_type;
   using scalar_t = typename Vec::value_type;
   return std::make_tuple(
-      S == I + 1 ?
+      S == INDEX + 1 ?
       opt_scalar :
-      Vec::loadu(data[I] + i * sizeof(scalar_t))...);
+      Vec::loadu(data[INDEX] + i * sizeof(scalar_t))...);
 }
 
 template <typename traits>
@@ -171,15 +171,15 @@ static inline void unroll_contiguous_scalar_checks(
   cb(0);
 }
 
-template <typename traits, typename cb_t, size_t I0, size_t ...I>
+template <typename traits, typename cb_t, size_t INDEX0, size_t ...INDEX>
 static inline void unroll_contiguous_scalar_checks(
     const int64_t* strides,
-    c10::guts::index_sequence<I0, I...>,
+    c10::guts::index_sequence<INDEX0, INDEX...>,
     const cb_t& cb) {
-  if (is_contiguous_scalar<traits, I0 + 1>(strides)) {
-    cb(I0 + 1);
+  if (is_contiguous_scalar<traits, INDEX0 + 1>(strides)) {
+    cb(INDEX0 + 1);
   } else {
-    unroll_contiguous_scalar_checks<traits>(strides, c10::guts::index_sequence<I...>{}, cb);
+    unroll_contiguous_scalar_checks<traits>(strides, c10::guts::index_sequence<INDEX...>{}, cb);
   }
 }
 
