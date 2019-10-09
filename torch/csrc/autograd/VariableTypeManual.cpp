@@ -112,7 +112,7 @@ int64_t _version(const Tensor & self) {
   return as_variable_ref(self).current_version();
 }
 
-Tensor& VariableType::requires_grad_(Tensor& self, bool _requires_grad) {
+Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
   if (!self.is_leaf() && !_requires_grad) {
     throw std::runtime_error(
       autograd::utils::requires_grad_leaf_error(requires_grad)

@@ -266,27 +266,31 @@ class SummaryWriter(object):
 
     def add_hparams(self, hparam_dict=None, metric_dict=None):
         """Add a set of hyperparameters to be compared in TensorBoard.
+
         Args:
-            hparam_dict (dictionary): Each key-value pair in the dictionary is the
+            hparam_dict (dict): Each key-value pair in the dictionary is the
               name of the hyper parameter and it's corresponding value.
-            metric_dict (dictionary): Each key-value pair in the dictionary is the
+            metric_dict (dict): Each key-value pair in the dictionary is the
               name of the metric and it's corresponding value. Note that the key used
               here should be unique in the tensorboard record. Otherwise the value
-              you added by `add_scalar` will be displayed in hparam plugin. In most
+              you added by ``add_scalar`` will be displayed in hparam plugin. In most
               cases, this is unwanted.
 
-            p.s. The value in the dictionary can be `int`, `float`, `bool`, `str`, or
-            0-dim tensor
         Examples::
+
             from torch.utils.tensorboard import SummaryWriter
             with SummaryWriter() as w:
                 for i in range(5):
                     w.add_hparams({'lr': 0.1*i, 'bsize': i},
                                   {'hparam/accuracy': 10*i, 'hparam/loss': 10*i})
+
         Expected result:
+
         .. image:: _static/img/tensorboard/add_hparam.png
            :scale: 50 %
+
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_hparams")
         if type(hparam_dict) is not dict or type(metric_dict) is not dict:
             raise TypeError('hparam_dict and metric_dict should be dictionary.')
         exp, ssi, sei = hparams(hparam_dict, metric_dict)
@@ -323,6 +327,7 @@ class SummaryWriter(object):
            :scale: 50 %
 
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_scalar")
         if self._check_caffe2_blob(scalar_value):
             scalar_value = workspace.FetchBlob(scalar_value)
         self._get_file_writer().add_summary(
@@ -359,6 +364,7 @@ class SummaryWriter(object):
            :scale: 50 %
 
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_scalars")
         walltime = time.time() if walltime is None else walltime
         fw_logdir = self._get_file_writer().get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
@@ -402,6 +408,7 @@ class SummaryWriter(object):
            :scale: 50 %
 
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_histogram")
         if self._check_caffe2_blob(values):
             values = workspace.FetchBlob(values)
         if isinstance(bins, six.string_types) and bins == 'tensorflow':
@@ -461,6 +468,7 @@ class SummaryWriter(object):
            :scale: 50 %
 
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_histogram_raw")
         if len(bucket_limits) != len(bucket_counts):
             raise ValueError('len(bucket_limits) != len(bucket_counts), see the document.')
         self._get_file_writer().add_summary(
@@ -517,6 +525,7 @@ class SummaryWriter(object):
            :scale: 50 %
 
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_image")
         if self._check_caffe2_blob(img_tensor):
             img_tensor = workspace.FetchBlob(img_tensor)
         self._get_file_writer().add_summary(
@@ -559,6 +568,7 @@ class SummaryWriter(object):
            :scale: 30 %
 
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_images")
         if self._check_caffe2_blob(img_tensor):
             img_tensor = workspace.FetchBlob(img_tensor)
         self._get_file_writer().add_summary(
@@ -579,12 +589,13 @@ class SummaryWriter(object):
             dataformats (string): Image data format specification of the form
               NCHW, NHWC, CHW, HWC, HW, WH, etc.
         Shape:
-            img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformat`` agrument.
+            img_tensor: Default is :math:`(3, H, W)`. It can be specified with ``dataformats`` argument.
             e.g. CHW or HWC
 
             box_tensor: (torch.Tensor, numpy.array, or string/blobname): NX4,  where N is the number of
             boxes and each 4 elememts in a row represents (xmin, ymin, xmax, ymax).
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_image_with_boxes")
         if self._check_caffe2_blob(img_tensor):
             img_tensor = workspace.FetchBlob(img_tensor)
         if self._check_caffe2_blob(box_tensor):
@@ -605,6 +616,7 @@ class SummaryWriter(object):
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_figure")
         if isinstance(figure, list):
             self.add_image(tag, figure_to_image(figure, close), global_step, walltime, dataformats='NCHW')
         else:
@@ -625,6 +637,7 @@ class SummaryWriter(object):
         Shape:
             vid_tensor: :math:`(N, T, C, H, W)`. The values should lie in [0, 255] for type `uint8` or [0, 1] for type `float`.
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_video")
         self._get_file_writer().add_summary(
             video(tag, vid_tensor, fps), global_step, walltime)
 
@@ -641,6 +654,7 @@ class SummaryWriter(object):
         Shape:
             snd_tensor: :math:`(1, L)`. The values should lie between [-1, 1].
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_audio")
         if self._check_caffe2_blob(snd_tensor):
             snd_tensor = workspace.FetchBlob(snd_tensor)
         self._get_file_writer().add_summary(
@@ -660,15 +674,18 @@ class SummaryWriter(object):
             writer.add_text('lstm', 'This is an lstm', 0)
             writer.add_text('rnn', 'This is an rnn', 10)
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_text")
         self._get_file_writer().add_summary(
             text(tag, text_string), global_step, walltime)
 
     def add_onnx_graph(self, prototxt):
+        torch._C._log_api_usage_once("tensorboard.logging.add_onnx_graph")
         self._get_file_writer().add_onnx_graph(load_onnx_graph(prototxt))
 
     def add_graph(self, model, input_to_model=None, verbose=False):
         # prohibit second call?
         # no, let tensorboard handle it and show its warning message.
+        torch._C._log_api_usage_once("tensorboard.logging.add_graph")
         """Add graph data to summary.
 
         Args:
@@ -742,6 +759,7 @@ class SummaryWriter(object):
             writer.add_embedding(torch.randn(100, 5), label_img=label_img)
             writer.add_embedding(torch.randn(100, 5), metadata=meta)
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_embedding")
         mat = make_np(mat)
         if global_step is None:
             global_step = 0
@@ -800,6 +818,7 @@ class SummaryWriter(object):
             writer.close()
 
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_pr_curve")
         labels, predictions = make_np(labels), make_np(predictions)
         self._get_file_writer().add_summary(
             pr_curve(tag, labels, predictions, num_thresholds, weights),
@@ -831,6 +850,7 @@ class SummaryWriter(object):
               seconds after epoch of event
             see: https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/pr_curve/README.md
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_pr_curve_raw")
         self._get_file_writer().add_summary(
             pr_curve_raw(tag,
                          true_positive_counts,
@@ -855,6 +875,7 @@ class SummaryWriter(object):
 
             writer.add_custom_scalars_multilinechart(['twse/0050', 'twse/2330'])
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_custom_scalars_multilinechart")
         layout = {category: {title: ['Multiline', tags]}}
         self._get_file_writer().add_summary(custom_scalars(layout))
 
@@ -869,6 +890,7 @@ class SummaryWriter(object):
 
             writer.add_custom_scalars_marginchart(['twse/0050', 'twse/2330', 'twse/2006'])
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_custom_scalars_marginchart")
         assert len(tags) == 3
         layout = {category: {title: ['Margin', tags]}}
         self._get_file_writer().add_summary(custom_scalars(layout))
@@ -892,6 +914,7 @@ class SummaryWriter(object):
 
             writer.add_custom_scalars(layout)
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_custom_scalars")
         self._get_file_writer().add_summary(custom_scalars(layout))
 
     def add_mesh(self, tag, vertices, colors=None, faces=None, config_dict=None, global_step=None, walltime=None):
@@ -945,6 +968,7 @@ class SummaryWriter(object):
 
             writer.close()
         """
+        torch._C._log_api_usage_once("tensorboard.logging.add_mesh")
         self._get_file_writer().add_summary(mesh(tag, vertices, colors, faces, config_dict), global_step, walltime)
 
     def flush(self):
