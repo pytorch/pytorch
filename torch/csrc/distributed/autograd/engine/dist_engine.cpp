@@ -61,7 +61,7 @@ void DistEngine::computeDependencies(
     DistAutogradContext& autogradContext,
     const edge_list& rootEdges,
     const variable_list& grads,
-    std::shared_ptr<Node> graphRoot,
+    const std::shared_ptr<Node>& graphRoot,
     edge_list& outputEdges) {
   TORCH_INTERNAL_ASSERT(graphRoot, "graphRoot is null!");
 
@@ -170,7 +170,7 @@ void DistEngine::computeDependencies(
 
 void DistEngine::runEngineAndAccumulateGradients(
     DistAutogradContext& autogradContext,
-    std::shared_ptr<Node> graphRoot,
+    const std::shared_ptr<Node>& graphRoot,
     const edge_list& outputEdges) {
   // Kick off autograd computation with the root node and retrieve all the
   // gradients.
@@ -198,7 +198,7 @@ void DistEngine::runEngineAndAccumulateGradients(
 
 void DistEngine::executeSendFunction(
     DistAutogradContext& autogradContext,
-    std::shared_ptr<Node> sendFunction) {
+    const std::shared_ptr<Node>& sendFunction) {
   std::unique_lock<std::mutex> lock(initializedContextIdsLock_);
   if (initializedContextIds_.find(autogradContext.contextId()) ==
       initializedContextIds_.end()) {

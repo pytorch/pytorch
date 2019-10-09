@@ -40,7 +40,7 @@ class TORCH_API DistEngine {
   // The gradients are accumulated in the provided autograd context.
   void executeSendFunction(
       DistAutogradContext& autogradContext,
-      std::shared_ptr<torch::autograd::Node> sendFunction);
+      const std::shared_ptr<torch::autograd::Node>& sendFunction);
 
  private:
   // Make sure this is a singleton.
@@ -70,7 +70,7 @@ class TORCH_API DistEngine {
       DistAutogradContext& context,
       const torch::autograd::edge_list& rootEdges,
       const torch::autograd::variable_list& grads,
-      std::shared_ptr<torch::autograd::Node> graphRoot,
+      const std::shared_ptr<torch::autograd::Node>& graphRoot,
       torch::autograd::edge_list& outputEdges);
 
   // Run the local autograd engine using the provided graphTask and graphRoot
@@ -78,7 +78,7 @@ class TORCH_API DistEngine {
   // context.
   void runEngineAndAccumulateGradients(
       DistAutogradContext& autogradContext,
-      std::shared_ptr<torch::autograd::Node> graphRoot,
+      const std::shared_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges);
 
   // Set of autograd context_ids, which we have already initialized for

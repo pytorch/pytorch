@@ -11,8 +11,8 @@ using torch::autograd::Variable;
 
 PropagateGradientsReq::PropagateGradientsReq(
     const AutogradMetadata& autogradMetadata,
-    const std::vector<Variable>& grads)
-    : autogradMetadata_(autogradMetadata), grads_(grads) {}
+    std::vector<Variable> grads)
+    : autogradMetadata_(autogradMetadata), grads_(std::move(grads)) {}
 
 Message PropagateGradientsReq::toMessage() && {
   std::vector<at::IValue> ivalues;

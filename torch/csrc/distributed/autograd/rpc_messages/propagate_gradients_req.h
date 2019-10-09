@@ -16,7 +16,7 @@ class TORCH_API PropagateGradientsReq : public rpc::RpcCommandBase {
  public:
   PropagateGradientsReq(
       const AutogradMetadata& autogradMetadata,
-      const std::vector<torch::autograd::Variable>& grads);
+      std::vector<torch::autograd::Variable> grads);
 
   const AutogradMetadata& getAutogradMetadata();
 

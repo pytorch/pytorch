@@ -48,7 +48,9 @@ class TORCH_API DistAutogradContext {
 
   // Record that we would like to accumulate the provided gradient on the given
   // variable.
-  void accumulateGrad(torch::autograd::Variable variable, torch::Tensor grad);
+  void accumulateGrad(
+      const torch::autograd::Variable& variable,
+      const torch::Tensor& grad);
 
   // Retrieve the GraphTask.
   torch::autograd::GraphTask& retrieveGraphTask();
@@ -58,7 +60,8 @@ class TORCH_API DistAutogradContext {
   void setGraphTask(std::unique_ptr<torch::autograd::GraphTask> graphTask);
 
   // Adds a future message recording an outstanding RPC.
-  void addOutStandingRpc(std::shared_ptr<rpc::FutureMessage> futureMessage);
+  void addOutStandingRpc(
+      const std::shared_ptr<rpc::FutureMessage>& futureMessage);
 
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.

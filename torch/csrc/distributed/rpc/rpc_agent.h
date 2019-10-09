@@ -12,7 +12,7 @@ namespace distributed {
 namespace rpc {
 
 // A globally unique ID to identify an RpcAgent
-struct WorkerInfo {
+struct TORCH_API WorkerInfo {
   WorkerInfo(std::string name, int id)
       : WorkerInfo(std::move(name), (worker_id_t)id) {
     TORCH_CHECK(

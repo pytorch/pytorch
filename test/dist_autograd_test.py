@@ -4,8 +4,8 @@ import time
 import unittest
 
 import torch
-import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
+import torch.distributed.rpc as rpc
 from dist_utils import INIT_METHOD_TEMPLATE, dist_init
 
 import threading
@@ -51,8 +51,8 @@ class DistAutogradTest(object):
                 return method(*args[0])
             return method(*args)
         else:
-            return dist.rpc_sync('worker{}'.format(self._next_rank()), method,
-                                 args=(args))
+            return rpc.rpc_sync('worker{}'.format(self._next_rank()), method,
+                                args=(args))
 
     def _next_rank(self):
         if hasattr(self, 'dst_rank'):
@@ -113,8 +113,8 @@ class DistAutogradTest(object):
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = dist.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
-            dist.rpc_sync(
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+            rpc.rpc_sync(
                 "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
             )
 
@@ -188,7 +188,7 @@ class DistAutogradTest(object):
             tensors = []
             for i in range(num_tensors):
                 tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
-            ret = dist.rpc_sync(
+            ret = rpc.rpc_sync(
                 "worker{}".format(self._next_rank()), torch.stack, args=(tensors,)
             )
             self.assertEqual(torch.stack(tensors), ret)
@@ -216,8 +216,8 @@ class DistAutogradTest(object):
 
             with self.assertRaises(RuntimeError):
                 # This should throw an error since matrix sizes don't match.
-                dist.rpc_sync('worker{}'.format(self._next_rank()), torch.matmul,
-                              args=(t1, t2))
+                rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.matmul,
+                             args=(t1, t2))
 
     def _verify_backwards(self, exec_mode, tensors, context_id, local_grads, *args):
         if exec_mode == ExecMode.REMOTE:
@@ -332,8 +332,8 @@ class DistAutogradTest(object):
 
             # We don't use the result of an RPC function, as a result the
             # backward pass would hang in the "FAST" mode.
-            res = dist.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
-                                args=(t1, t2))
+            res = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
+                               args=(t1, t2))
 
             val = torch.mul(t1, t2)
 
@@ -361,14 +361,14 @@ class DistAutogradTest(object):
 
             # Run multiple round trips across different nodes and verify the
             # original node receives an error thrown on a node deep in the chain.
-            val = dist.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
-                                args=(t2, t3))
-            val = dist.rpc_sync('worker{}'.format(self._next_rank()), torch.mul,
-                                args=(val, t2))
-            val = dist.rpc_sync('worker{}'.format(self._next_rank()), torch.matmul,
-                                args=(val, t2))
-            val = dist.rpc_sync('worker{}'.format(self._next_rank()), torch.div,
-                                args=(val, t2))
+            val = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
+                               args=(t2, t3))
+            val = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.mul,
+                               args=(val, t2))
+            val = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.matmul,
+                               args=(val, t2))
+            val = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.div,
+                               args=(val, t2))
 
             with self.assertRaises(RuntimeError):
                 # Run backwards, and validate we receive an error.
@@ -381,8 +381,8 @@ class DistAutogradTest(object):
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
 
-            res = dist.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
-                                args=(t1, t2))
+            res = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
+                               args=(t1, t2))
 
             if self.rank == 0:
                 # Wait a bit for all other nodes to die.
@@ -401,8 +401,8 @@ class DistAutogradTest(object):
         t2 = torch.rand((3, 3), requires_grad=True)
 
         with self.assertRaisesRegex(RuntimeError, "Current thread doesn't have a valid autograd context"):
-            res = dist.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
-                                args=(t1, t2))
+            res = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
+                               args=(t1, t2))
             dist_autograd.backward([res.sum()])
 
     @dist_init

@@ -49,8 +49,8 @@ DistAutogradContext::recvFunctions() const {
 }
 
 void DistAutogradContext::accumulateGrad(
-    torch::autograd::Variable variable,
-    torch::Tensor grad) {
+    const torch::autograd::Variable& variable,
+    const torch::Tensor& grad) {
   TORCH_INTERNAL_ASSERT(grad.defined());
   TORCH_INTERNAL_ASSERT(variable.requires_grad());
 
@@ -81,7 +81,7 @@ void DistAutogradContext::setGraphTask(
 }
 
 void DistAutogradContext::addOutStandingRpc(
-    std::shared_ptr<rpc::FutureMessage> futureMessage) {
+    const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
   std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
 }

@@ -26,7 +26,7 @@ std::shared_ptr<RpcAgent> RpcAgent::getDefaultRpcAgent() {
 void RpcAgent::setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent) {
   TORCH_INTERNAL_ASSERT(
       !defaultRpcAgent_, "Default rpc agent is already initialized!");
-  defaultRpcAgent_ = defaultRpcAgent;
+  defaultRpcAgent_ = std::move(defaultRpcAgent);
 }
 
 } // namespace rpc

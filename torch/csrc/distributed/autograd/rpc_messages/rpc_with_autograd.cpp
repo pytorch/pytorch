@@ -147,7 +147,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
       autogradMetadata,
       std::move(wrappedRpc),
       wrappedMessageType,
-      std::move(tensors));
+      wrappedMessage.tensors());
 }
 
 std::vector<torch::Tensor>& RpcWithAutograd::tensors() {
