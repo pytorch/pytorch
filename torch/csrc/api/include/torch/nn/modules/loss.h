@@ -81,7 +81,6 @@ struct TORCH_API TripletMarginLossImpl : Module {
       const Tensor& positive,
       const Tensor& negative);
 
-
   /// The options with which this `Module` was constructed.
   TripletMarginLossOptions options;
 };

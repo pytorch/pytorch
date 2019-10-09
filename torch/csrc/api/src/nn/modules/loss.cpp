@@ -1,5 +1,5 @@
 #include <torch/nn/modules/loss.h>
-
+using namespace std
 namespace F = torch::nn::functional;
 
 namespace torch {
@@ -39,9 +39,10 @@ TripletMarginLossImpl::TripletMarginLossImpl(
     : options(options_) {}
 
 void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::TripletMarginLoss(p=" << options.p() << 
-            ", margin=" << options.margin() <<
-            ", weight=" << options.swap() <<
+  stream << "torch::nn::TripletMarginLoss(margin=" << options.margin() << 
+            ", p=" << options.p() <<
+            ", eps=" << options.eps() << std::boolalpha <<
+            ", swap=" <<options.swap() <<
             ", reduction=" << options.reduction() << ")";
 }
 

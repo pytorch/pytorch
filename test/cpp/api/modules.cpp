@@ -1308,6 +1308,12 @@ TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
       "torch::nn::CosineSimilarity(dim=0, eps=0.5)");
 }
 
+TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
+  ASSERT_EQ(
+      c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
+      "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
+}
+
 TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
   ASSERT_EQ(
       c10::str(PairwiseDistance()),
