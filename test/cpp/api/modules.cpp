@@ -1189,6 +1189,29 @@ TEST_F(ModulesTest, Softmax) {
   }
 }
 
+TEST_F(ModulesTest, PReLU) {
+  const auto num_parameters = 42;
+  const auto init = 0.42;
+
+  PReLU model {PReLUOptions().num_parameters(num_parameters).init(init)};
+
+  ASSERT_EQ(model->weight.sizes(), torch::IntArrayRef({num_parameters}));
+  ASSERT_TRUE(torch::allclose(model->weight,
+              torch::full(num_parameters, init)));
+
+  const auto x = torch::rand({100, num_parameters}) * 200 - 100;
+  const auto y = model(x);
+  const auto s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), x.ndimension());
+  ASSERT_EQ(y.sizes(), x.sizes());
+  const auto y_exp = (x < 0) * model->weight * x  + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1479,4 +1502,10 @@ TEST_F(ModulesTest, PrettyPrintLogSigmoid) {
 
 TEST_F(ModulesTest, PrettyPrintSoftmax) {
   ASSERT_EQ(c10::str(Softmax(SoftmaxOptions(1))), "torch::nn::Softmax(dim=1)");
+}
+
+TEST_F(ModulesTest, PrettyPrintPReLU) {
+  ASSERT_EQ(c10::str(PReLU()), "torch::nn::PReLU(num_parameters=1)");
+  ASSERT_EQ(c10::str(PReLU(PReLUOptions().num_parameters(42))),
+            "torch::nn::PReLU(num_parameters=42)");
 }
