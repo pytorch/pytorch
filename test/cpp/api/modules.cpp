@@ -1009,6 +1009,19 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
   ASSERT_EQ(input2.sizes(), input2.grad().sizes());
 }
 
+TEST_F(ModulesTest, SmoothL1Loss) {
+  SmoothL1Loss loss;
+  auto input = torch::tensor({{0.1}, {1.2}, {4.7}}, torch::requires_grad());
+  auto target = torch::tensor({{0.}, {1.}, {5.}}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor({0.0233335}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());

@@ -49,5 +49,18 @@ Tensor CosineEmbeddingLossImpl::forward(
   return F::cosine_embedding_loss(input1, input2, target, options);
 }
 
+// ============================================================================
+
+SmoothL1LossImpl::SmoothL1LossImpl(
+    const torch::nn::SmoothL1LossOptions& options_) : options(options_) {}
+
+void SmoothL1LossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::SmoothL1Loss(reduction=" << options.reduction() << ")";
+}
+
+Tensor SmoothL1LossImpl::forward(const Tensor& input, const Tensor& target) {
+  return torch::smooth_l1_loss(input, target, options.reduction());
+}
+
 } // namespace nn
 } // namespace torch

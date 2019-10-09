@@ -90,5 +90,30 @@ struct TORCH_API CosineEmbeddingLossImpl : Module {
 /// PyTorch's module storage semantics.
 TORCH_MODULE(CosineEmbeddingLoss);
 
+// ============================================================================
+
+/// Creates a criterion that uses a squared term if the absolute
+/// element-wise error falls below 1 and an L1 term otherwise.
+/// It is less sensitive to outliers than the `MSELoss` and in some cases
+/// prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
+/// Also known as the Huber loss.
+struct TORCH_API SmoothL1LossImpl : Module {
+  explicit SmoothL1LossImpl(const SmoothL1LossOptions& options_ = {});
+
+  /// Pretty prints the `L1Loss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  SmoothL1LossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `SmoothL1LossImpl`.
+/// See the documentation for `SmoothL1LossImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(SmoothL1Loss);
+
 } // namespace nn
 } // namespace torch
