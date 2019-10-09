@@ -161,6 +161,17 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, MultiMarginLoss) {
+  auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
+  auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::requires_grad());
+  auto target = torch::tensor({2, 1, 0}, torch::kLong);
+  auto output = F::multi_margin_loss(
+    input, target, MultiMarginLossOptions().margin(2).weight(weight));
+  auto expected = torch::tensor({0.305556}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+}
+
 TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}});
   auto input2 = torch::tensor({{2, 3, 5}, {9, 12, 0}});
