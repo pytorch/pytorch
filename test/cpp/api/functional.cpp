@@ -166,7 +166,7 @@ TEST_F(FunctionalTest, AffineGrid) {
     // 2D affine.
     auto theta = torch::arange(1, 13, torch::kDouble)
                      .view(torch::IntArrayRef({2, 2, 3}));
-    auto size = torch::IntArrayRef({2, 3, 2, 2});
+    auto size = torch::IntArrayRef({2, 3, 2, 2}).vec();
     auto align_corners = true;
     auto output = F::affine_grid(theta, size, !align_corners);
     auto expected = torch::tensor(
@@ -184,7 +184,7 @@ TEST_F(FunctionalTest, AffineGrid) {
     // 3D affine.
     auto theta = torch::arange(1, 13, torch::kDouble)
                      .view(torch::IntArrayRef({1, 3, 4}));
-    auto size = torch::IntArrayRef({1, 1, 3, 2, 2});
+    auto size = torch::IntArrayRef({1, 1, 3, 2, 2}).vec();
     auto align_corners = true;
     auto output = F::affine_grid(theta, size, !align_corners);
     auto expected = torch::tensor(
@@ -208,7 +208,7 @@ TEST_F(FunctionalTest, AffineGrid) {
   }
   {
     auto theta = torch::empty({1, 2, 3}, torch::kDouble);
-    auto size = torch::IntArrayRef({1, 1, 2, 2});
+    auto size = torch::IntArrayRef({1, 1, 2, 2}).vec();
     ASSERT_THROWS_WITH(
         F::affine_grid(torch::empty({2, 2, 3}), {-1, 1, 2, 2}),
         "Expected non-zero, positive output size. Got [-1, 1, 2, 2]");
@@ -234,7 +234,7 @@ TEST_F(FunctionalTest, AffineGrid) {
   }
   {
     auto theta = torch::empty({1, 3, 4}, torch::kDouble);
-    auto size = torch::IntArrayRef({1, 1, 2, 2, 3});
+    auto size = torch::IntArrayRef({1, 1, 2, 2, 3}).vec();
     ASSERT_THROWS_WITH(
         F::affine_grid(theta[0], size),
         "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
