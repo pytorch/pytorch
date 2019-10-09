@@ -35,7 +35,7 @@ Tensor HingeEmbeddingLossImpl::forward(
 // ============================================================================
 
 MultiMarginLossImpl::MultiMarginLossImpl(
-    const MultiMarginLossOptions& options_)
+    const MultiMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
       reset();
     }
