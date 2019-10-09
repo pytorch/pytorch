@@ -24,6 +24,24 @@ void ELUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+SELUImpl::SELUImpl(const SELUOptions& options_) : options(options_) {}
+
+Tensor SELUImpl::forward(Tensor& input) {
+  return F::selu(input, options);
+}
+
+void SELUImpl::reset() {}
+
+void SELUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::SELU(";
+  if (options.inplace()) {
+    stream << std::boolalpha << "inplace=" << options.inplace();
+  }
+  stream << ")";
+}
+
+// ============================================================================
+
 HardshrinkImpl::HardshrinkImpl(const HardshrinkOptions& options_)
     : options(options_) {}
 
