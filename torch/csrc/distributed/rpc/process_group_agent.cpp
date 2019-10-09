@@ -429,6 +429,11 @@ void ProcessGroupAgent::markFutureWithException(
   }
   // Don't hold lock on markCompleted, as it could invoke callbacks
   fut->markCompleted(exceptionMsg);
+  {
+    std::lock_guard<std::mutex> lock{futureMutex_};
+    futures_.erase(futureId);
+  }
+  futureCV_.notify_all();
 }
 
 } // namespace rpc
