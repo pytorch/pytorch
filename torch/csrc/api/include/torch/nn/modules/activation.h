@@ -31,6 +31,28 @@ class TORCH_API ELUImpl : public torch::nn::Cloneable<ELUImpl> {
 
 TORCH_MODULE(ELU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ SELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the selu function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.SELU to learn
+/// about the exact behavior of this module.
+class TORCH_API SELUImpl : public torch::nn::Cloneable<SELUImpl> {
+ public:
+  explicit SELUImpl(const SELUOptions& options_ = {});
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `SELU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  SELUOptions options;
+};
+
+TORCH_MODULE(SELU);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Hardshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the hard shrinkage function element-wise.
@@ -157,6 +179,31 @@ class TORCH_API SoftminImpl : public torch::nn::Cloneable<SoftminImpl> {
 };
 
 TORCH_MODULE(Softmin);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the PReLU function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.PReLU to learn
+/// about the exact behavior of this module.
+class TORCH_API PReLUImpl : public torch::nn::Cloneable<PReLUImpl> {
+ public:
+  explicit PReLUImpl(const PReLUOptions& options_ = {});
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `PReLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  PReLUOptions options;
+
+  /// The learned weight.
+  Tensor weight;
+};
+
+TORCH_MODULE(PReLU);
 
 } // namespace nn
 } // namespace torch

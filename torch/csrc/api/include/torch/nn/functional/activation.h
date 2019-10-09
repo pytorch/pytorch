@@ -15,6 +15,14 @@ inline Tensor elu(Tensor& input, const ELUOptions& options = {}) {
   }
 }
 
+inline Tensor selu(Tensor& input, const SELUOptions& options = {}) {
+  if (options.inplace()) {
+    return torch::selu_(input);
+  } else {
+    return torch::selu(input);
+  }
+}
+
 inline Tensor hardshrink(const Tensor& input,
                          const HardshrinkOptions& options = {}) {
   return torch::hardshrink(input, options.lambda());
@@ -66,6 +74,10 @@ inline Tensor softmin(const Tensor& input, const SoftminOptions& options,
   }
 
   return ret;
+}
+
+inline Tensor prelu(const Tensor& input, const Tensor& weight) {
+  return torch::prelu(input, weight);
 }
 
 } // namespace functional

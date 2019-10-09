@@ -24,6 +24,24 @@ void ELUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+SELUImpl::SELUImpl(const SELUOptions& options_) : options(options_) {}
+
+Tensor SELUImpl::forward(Tensor& input) {
+  return F::selu(input, options);
+}
+
+void SELUImpl::reset() {}
+
+void SELUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::SELU(";
+  if (options.inplace()) {
+    stream << std::boolalpha << "inplace=" << options.inplace();
+  }
+  stream << ")";
+}
+
+// ============================================================================
+
 HardshrinkImpl::HardshrinkImpl(const HardshrinkOptions& options_)
     : options(options_) {}
 
@@ -124,6 +142,26 @@ void SoftminImpl::pretty_print(std::ostream& stream) const {
 
 Tensor SoftminImpl::forward(const Tensor& input) {
   return F::softmin(input, options);
+}
+
+// ============================================================================
+
+PReLUImpl::PReLUImpl(const PReLUOptions& options_) : options(options_) {
+  reset();
+}
+
+Tensor PReLUImpl::forward(const Tensor& input) {
+  return F::prelu(input, weight);
+}
+
+void PReLUImpl::reset() {
+  weight = register_parameter("weight",
+    torch::full(options.num_parameters(), options.init()));
+}
+
+void PReLUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::PReLU(num_parameters="
+         << options.num_parameters() << ")";
 }
 
 } // namespace nn
