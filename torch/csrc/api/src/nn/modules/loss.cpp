@@ -60,5 +60,22 @@ Tensor MultiMarginLossImpl::forward(
   return F::multi_margin_loss(input, target, options);
 }
 
+// ============================================================================
+  
+CosineEmbeddingLossImpl::CosineEmbeddingLossImpl(
+    const CosineEmbeddingLossOptions& options_)
+    : options(options_) {}
+
+void CosineEmbeddingLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::CosineEmbeddingLoss(margin=" << options.margin() << ")";
+}
+
+Tensor CosineEmbeddingLossImpl::forward(
+    const Tensor& input1,
+    const Tensor& input2,
+    const Tensor& target) {
+  return F::cosine_embedding_loss(input1, input2, target, options);
+}
+
 } // namespace nn
 } // namespace torch

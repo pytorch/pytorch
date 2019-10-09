@@ -47,5 +47,17 @@ struct TORCH_API MultiMarginLossOptions {
   TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
 };
 
+// ============================================================================
+
+/// Options for a Hinge Embedding loss functional and module.
+struct TORCH_API CosineEmbeddingLossOptions {
+  /// Specifies the threshold for which the distance of a negative sample must
+  /// reach in order to incur zero loss. Should be a number from -1 to 1, 0
+  /// to 0.5 is suggested. Default: 0.0
+  TORCH_ARG(double, margin) = 0.0;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+};
+
 } // namespace nn
 } // namespace torch
