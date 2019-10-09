@@ -157,7 +157,7 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
         cum_dist_low_ptr[j * cum_dist_stride_0] = sum_low;
       }
 
-      TORCH_CHECK(n_zeros > 0, "ERROR: invalid multinomial distribution n_sample = ", n_sample, " n_categories = ", n_categories, " last_zerp_j = ", last_index, " n_zeros = ", n_zeros);
+      TORCH_CHECK(n_zeros == 0, "ERROR: invalid multinomial distribution n_sample = ", n_sample, " n_categories = ", n_categories, " last_zerp_j = ", last_index, " n_zeros = ", n_zeros);
 
       TORCH_CHECK((sum_high + sum_low) > 0, "invalid multinomial distribution (sum of probabilities <= 0)");
       TORCH_CHECK(with_replacement || (n_categories - n_zeros >= n_sample),
