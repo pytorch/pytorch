@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/rpc/types.h>
 
 #include <algorithm>
+#include <cctype>
 
 namespace torch {
 namespace distributed {
