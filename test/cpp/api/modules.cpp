@@ -800,6 +800,21 @@ TEST_F(ModulesTest, EmbeddingList) {
   ASSERT_EQ(y.size(2), 4);
 }
 
+TEST_F(ModulesTest, EmbeddingFromPretrained) {
+  auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
+  Embedding embedding = torch::nn::Embedding::from_pretrained(weight);
+  auto input = torch::tensor({1}, torch::kLong);
+  ASSERT_TRUE(torch::allclose(embedding(input), torch::tensor({4.0000, 5.1000, 6.3000})));
+}
+
+TEST_F(ModulesTest, EmbeddingBagFromPretrained) {
+  auto weight = torch::tensor({{1., 2.3, 3.}, {4., 5.1, 6.3}});
+  EmbeddingBag embeddingbag = torch::nn::EmbeddingBag::from_pretrained(weight);
+  auto input = torch::zeros({{1, 2}}, torch::kLong);
+  input[0] = torch::tensor({1, 0});
+  ASSERT_TRUE(torch::allclose(embeddingbag(input), torch::tensor({2.5000, 3.7000, 4.6500})));
+}
+
 TEST_F(ModulesTest, Dropout) {
   Dropout dropout(0.5);
   torch::Tensor x = torch::ones(100, torch::requires_grad());
@@ -979,6 +994,35 @@ TEST_F(ModulesTest, HingeEmbeddingLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, MultiMarginLoss) {
+  auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
+  MultiMarginLoss loss(MultiMarginLossOptions().margin(2).weight(weight));
+  auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::requires_grad());
+  auto target = torch::tensor({2, 1, 0}, torch::kLong);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({0.305556}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, CosineEmbeddingLoss) {
+  CosineEmbeddingLoss cos(CosineEmbeddingLossOptions().margin(0.5));
+  auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}}, torch::requires_grad());
+  auto input2 = torch::tensor({{2, 3, 5}, {9, 12, 0}}, torch::requires_grad());
+  auto target = torch::tensor({1, -1});
+  auto output = cos(input1, input2, target);
+  auto expected = torch::tensor({0.1004}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-4));
+  ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+  ASSERT_EQ(input2.sizes(), input2.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
@@ -1025,6 +1069,23 @@ TEST_F(ModulesTest, ELU) {
   }
 }
 
+TEST_F(ModulesTest, SELU) {
+  SELU model;
+  auto input = torch::randn({5, 5}, torch::requires_grad());
+  auto output = model->forward(input);
+  const double scale = 1.0507009873554804934193349852946;
+  const double alpha = 1.6732632423543772848170429916717;
+  auto zero = torch::zeros_like(input);
+  auto expected = scale *
+      (torch::max(zero, input) +
+       torch::min(zero, alpha * (torch::exp(input) - 1)));
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
 TEST_F(ModulesTest, Hardshrink) {
   const auto size = 3;
   for (const auto lambda : {-4.2, -1.0, -0.42, 0.0, 0.42, 1.0, 4.2, 42.42}) {
@@ -1041,6 +1102,90 @@ TEST_F(ModulesTest, Hardshrink) {
     ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
     auto y_exp = (x.abs() > lambda) * x;
     ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
+TEST_F(ModulesTest, Hardtanh) {
+  const auto size = 3;
+  for (const auto min_val : {-4.2, -1.0, -0.42, 0.0}) {
+    for (const auto max_val : {0.42, 1.0, 4.2}) {
+      Hardtanh model {HardtanhOptions().min_val(min_val).max_val(max_val)};
+      auto x = torch::linspace(-10.0, 10.0, size * size * size);
+      x.resize_({size, size, size}).set_requires_grad(true);
+      auto y = model(x);
+      torch::Tensor s = y.sum();
+
+      s.backward();
+      ASSERT_EQ(s.ndimension(), 0);
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      auto y_exp = (x < min_val) * min_val +
+                   ((x >= min_val) * (x <= max_val)) * x +
+                   (x > max_val) * max_val;
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+    }
+  }
+}
+
+TEST_F(ModulesTest, HardtanhMinValGEMaxVal) {
+  ASSERT_THROWS_WITH(Hardtanh{HardtanhOptions().min_val(0.42).max_val(0.42)},
+                     "max_val must be greater than min_val");
+  ASSERT_THROWS_WITH(Hardtanh{HardtanhOptions().min_val(0.42).max_val(-0.42)},
+                     "max_val must be greater than min_val");
+
+  Hardtanh ht {HardtanhOptions().min_val(-0.42).max_val(0.42)};
+  ht->options.min_val(0.42);
+  ASSERT_THROWS_WITH(ht->reset(), "max_val must be greater than min_val");
+  ht->options.max_val(-0.42);
+  ASSERT_THROWS_WITH(ht->reset(), "max_val must be greater than min_val");
+}
+
+TEST_F(ModulesTest, LeakyReLU) {
+  const auto size = 3;
+  for (const auto negative_slope : {0.0, 0.42, 1.0}) {
+    LeakyReLU model {LeakyReLUOptions().negative_slope(negative_slope)};
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = (x < 0) * x * negative_slope + (x >= 0) * x;
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
+TEST_F(ModulesTest, LogSigmoid) {
+  const auto size = 3;
+  LogSigmoid model;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size}).set_requires_grad(true);
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+}
+
+TEST_F(ModulesTest, Softmax) {
+  Softmax m(/*dim=*/1);
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = m(input);
+  auto sum = torch::sum(torch::exp(input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::exp(input[i]) / sum[i];
+    ASSERT_TRUE(torch::allclose(output[i], expected));
   }
 }
 
@@ -1203,14 +1348,41 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm) {
 
 TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
-      c10::str(Embedding(10, 2)),
-      "torch::nn::Embedding(count=10, dimension=2)");
+      c10::str(Embedding(EmbeddingOptions(10, 2))),
+      "torch::nn::Embedding(num_embeddings=10, embedding_dim=2)");
+  ASSERT_EQ(
+      c10::str(Embedding(EmbeddingOptions(10, 2).padding_idx(3).max_norm(2))),
+      "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2)");
+  ASSERT_EQ(
+      c10::str(Embedding(EmbeddingOptions(10, 2).padding_idx(3).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true))),
+      "torch::nn::Embedding(num_embeddings=10, embedding_dim=2, padding_idx=3, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2))),
+      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2)");
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2))),
+      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2)");
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true))),
+      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
+  ASSERT_EQ(
+      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode("sum"))),
+      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=sum)");
 }
 
 TEST_F(ModulesTest, PrettyPrintHingeEmbeddingLoss) {
   ASSERT_EQ(
       c10::str(HingeEmbeddingLoss(HingeEmbeddingLossOptions().margin(4))),
       "torch::nn::HingeEmbeddingLoss(margin=4)");
+}
+
+TEST_F(ModulesTest, PrettyPrintCosineEmbeddingLoss) {
+  ASSERT_EQ(
+      c10::str(CosineEmbeddingLoss(CosineEmbeddingLossOptions().margin(0.25))),
+      "torch::nn::CosineEmbeddingLoss(margin=0.25)");
 }
 
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
@@ -1246,7 +1418,7 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
     TestModule()
         : torch::nn::Module("TestModule"),
           fc(register_module("fc", torch::nn::Linear(4, 5))),
-          table(register_module("table", torch::nn::Embedding(10, 2))),
+          table(register_module("table", torch::nn::Embedding(EmbeddingOptions(10, 2)))),
           inner(register_module("inner", std::make_shared<InnerTestModule>())) {
     }
 
@@ -1259,10 +1431,10 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
       c10::str(TestModule{}),
       "TestModule(\n"
       "  (fc): torch::nn::Linear(in=4, out=5, with_bias=true)\n"
-      "  (table): torch::nn::Embedding(count=10, dimension=2)\n"
+      "  (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2)\n"
       "  (inner): InnerTestModule(\n"
       "    (fc): torch::nn::Linear(in=3, out=4, with_bias=true)\n"
-      "    (table): torch::nn::Embedding(count=10, dimension=2)\n"
+      "    (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2)\n"
       "  )\n"
       ")");
 }
@@ -1273,8 +1445,38 @@ TEST_F(ModulesTest, PrettyPrintELU) {
             "torch::nn::ELU(alpha=42.42, inplace=true)");
 }
 
+TEST_F(ModulesTest, PrettyPrintSELU) {
+  ASSERT_EQ(c10::str(SELU()), "torch::nn::SELU()");
+  ASSERT_EQ(c10::str(SELU(SELUOptions().inplace(true))),
+            "torch::nn::SELU(inplace=true)");
+}
+
 TEST_F(ModulesTest, PrettyPrintHardshrink) {
   ASSERT_EQ(c10::str(Hardshrink()), "torch::nn::Hardshrink(0.5)");
   ASSERT_EQ(c10::str(Hardshrink(HardshrinkOptions().lambda(42.42))),
             "torch::nn::Hardshrink(42.42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintHardtanh) {
+  ASSERT_EQ(c10::str(Hardtanh()),
+    "torch::nn::Hardtanh(min_val=-1, max_val=1)");
+  ASSERT_EQ(c10::str(Hardtanh(
+      HardtanhOptions().min_val(-42.42).max_val(0.42).inplace(true))),
+    "torch::nn::Hardtanh(min_val=-42.42, max_val=0.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintLeakyReLU) {
+  ASSERT_EQ(c10::str(LeakyReLU()),
+    "torch::nn::LeakyReLU(negative_slope=0.01)");
+  ASSERT_EQ(c10::str(LeakyReLU(
+      LeakyReLUOptions().negative_slope(0.42).inplace(true))),
+    "torch::nn::LeakyReLU(negative_slope=0.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintLogSigmoid) {
+  ASSERT_EQ(c10::str(LogSigmoid()), "torch::nn::LogSigmoid()");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftmax) {
+  ASSERT_EQ(c10::str(Softmax(SoftmaxOptions(1))), "torch::nn::Softmax(dim=1)");
 }
