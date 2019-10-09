@@ -1,19 +1,30 @@
+.. _amp-examples:
+
 Automatic Mixed Precision Examples
 ==================================
 
 When following the examples below, you don't need to call ``.half()`` on your model(s) or data.
-In fact, you shouldn't:  model weights should remain FP32.                                                                                        
+In fact, you shouldn't.  Model weights should remain FP32.
+
 You also don't need to retune any hyperparameters.
 
 .. contents:: :local:
+
+.. _autocasting-examples:
 
 Autocasting Examples
 ^^^^^^^^^^^^^^^^^^^^
 
 Under construction...
 
+.. _gradient-scaling-examples:
+
 Gradient Scaling Examples
 ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The code snippets below demonstrate recommended use of :class:`torch.cuda.amp.AmpScaler`.
+
+.. currentmodule:: torch.cuda.amp
 
 Typical use (1 loss, 1 optimizer)
 ---------------------------------
@@ -29,6 +40,7 @@ Typical use (1 loss, 1 optimizer)
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
+
 
 Gradient clipping
 -----------------
@@ -50,11 +62,12 @@ One simple way to account for the scale factor is by clipping to ``max_norm*scal
         scaler.step(optimizer)
         scaler.update()
 
+Here the *scaled* gradients are clipped.  ``scaler.step(optimizer)`` is aware that gradients
+have not yet been unscaled, and unscales them under the hood before calling ``optimizer.step()``.
 
 Gradient clipping with separate unscaling
 -----------------------------------------
 
-In the above example, the *scaled* gradients were clipped.
 The specific case of clipping scaled gradients isn't so hard (all you have to do is clip to ``max_norm*scaler.get_scale()``).
 However, in general, between the backward pass and the optimizer step you may wish to manipulate gradients in some way that's not
 so easy to translate to scaled gradients.  In such cases, you can unscale and step separately.  Here's how that looks,
@@ -82,10 +95,10 @@ Gradient penalty
 A gradient penalty loss term also requires awareness of the scale factor.
 Gradient penalty demonstrates some subtle/nonstandard use cases:
 
-* Creating out-of-place gradients with ``torch.autograd.grad``
+* Creating out-of-place gradients with :func:`torch.autograd.grad`
 * Correct interaction of gradient scaling with double-backward
 
-Here's how that looks::
+Here's how that looks for a simple L2 penalty::
 
     scaler = AmpScaler()
     ...
@@ -98,7 +111,7 @@ Here's how that looks::
         grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
 
         # In general, the penalty term may depend nonlinearly on the out-of-place gradients, so to be safe,
-        # manually unscale them before computing the penalty term.  This unscale should be autograd-exposed.
+        # manually unscale them before computing the penalty.  This unscale should be autograd-exposed.
         grad_params = [p*(1./scaler.get_scale()) for p in grad_params]
 
         # Compute the penalty term and add it to the loss
@@ -118,7 +131,7 @@ Gradient accumulation
 ---------------------
 
 Gradient accumulation across iterations (between steps) is a common use case.
-:class:`torch.cuda.amp.AmpScaler` accommodates gradient accumulation without trouble::
+:class:`AmpScaler` accommodates gradient accumulation without trouble::
 
     scaler = AmpScaler()
     ...
@@ -135,7 +148,7 @@ Gradient accumulation across iterations (between steps) is a common use case.
 Switching gradient scaling on and off
 ------------------------------------
 
-The ``enabled`` kwarg to :class:`torch.cuda.amp.AmpScaler` allows gradient scaling to be globally enabled/disabled without script-side if statements::
+The ``enabled`` kwarg to :class:`AmpScaler` allows gradient scaling to be globally enabled/disabled without script-side if statements::
 
     scaler = AmpScaler(enabled=args.use_mixed_precision)
     ...
@@ -155,16 +168,8 @@ Multiple models/optimizers/losses
 ---------------------------------
 
 Make sure to call ``scaler.update()`` only at the end of the iteration, after ``scaler.step(optimizer)`` has
-been called for all optimizers used this iteration.
+been called for all optimizers used this iteration::
 
-The decision to invoke an explicit ``unscale`` can be made independently for each optimizer.
-
-.. warning::
-    If you (optionally) choose to unscale gradients prior to stepping, ``scaler.unscale(optimizer)``
-    should only be invoked once per optimizer per step, and only after all gradients for that optimizer's
-    owned parameters have been accumulated.
-
-::
     scaler = torch.cuda.amp.AmpScaler()
 
     for input, target in data:
@@ -178,9 +183,28 @@ The decision to invoke an explicit ``unscale`` can be made independently for eac
         scaler.scale(loss0).backward(retain_graph=True)
         scaler.scale(loss1).backward()
 
+        # You can choose which optimizers receive explicit unscaling
         scaler.unscale(optimizer0)
 
         scaler.step(optimizer0)
         scaler.step(optimizer1)
         scaler.update()
 
+Note that the decision to invoke an explicit ``unscale`` can be made independently for each optimizer.
+
+.. warning::
+    If you (optionally) choose to unscale gradients prior to stepping, ``scaler.unscale(optimizer)``
+    should only be invoked once per optimizer per step, and only after all gradients for that optimizer's
+    owned parameters have been accumulated.
+
+.. _custom-optimizer-guide:
+
+Custom Optimizer Guide
+^^^^^^^^^^^^^^^^^^^^^^
+
+I will write this once the gradient scaling API is approved.
+
+Additional References
+^^^^^^^^^^^^^^^^^^^^^
+
+Todo once API is approved.

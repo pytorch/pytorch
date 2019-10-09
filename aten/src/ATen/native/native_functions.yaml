@@ -5399,13 +5399,11 @@
   supports_named_tensor: True
 
 - func: _amp_unscale_inf_check_(Tensor(a!) self, Tensor current_scale, Tensor found_inf) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     CUDA: _amp_unscale_inf_check_cuda
 
 - func: _amp_update_scale(Tensor current_scale, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor) -> Tensor
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     CUDA: _amp_update_scale_cuda

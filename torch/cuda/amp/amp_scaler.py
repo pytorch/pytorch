@@ -10,47 +10,46 @@ class AmpScaler(object):
 
     Here's how that looks in a simple example::
 
-        amp_scaler = AmpScaler()
+        scaler = AmpScaler()
 
         for input, target in data:
             optimizer.zero_grad()
             output = model(input)
             loss = loss_fn(output, target)
-            amp_scaler.scale(loss).backward()
-            amp_scaler.step(optimizer)
-            amp_scaler.update()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
-    See :ref:`Gradient Scaling Examples` for usage in more complex cases.
+    See :ref:`Gradient Scaling Examples<gradient-scaling-examples>` for usage in more complex cases.
 
-    By default, ``amp_scaler.step`` internally unscales ``optimizer``'s gradients before applying them, so the
+    By default, ``scaler.step`` internally unscales ``optimizer``'s gradients before applying them, so the
     learning rate and other hyperparameters don't need to change.  If you wish to unscale gradients manually
     prior to :meth:`step`, use :meth:`unscale`.
 
-    ``amp_scaler`` maintains the scale factor internally.  To leverage the dtype's full dynamic range,
-    ``amp_scaler`` attempts to use the largest scale factor it can without incurring overflow.
+    ``scaler`` maintains the scale factor internally.  To leverage the dtype's full dynamic range,
+    ``scaler`` attempts to use the largest scale factor it can without incurring overflow.
     It does so by checking the gradients for infs and NaNs during every :meth:`step` or separate :meth:`unscale`.
     If no infs/NaNs are found, :meth:`step` runs the underlying ``optimizer.step()`` as usual and
     :meth:`update` increases the scale factor slightly.  If infs/NaNs are found, :meth:`step` skips the underlying
     ``optimizer.step()`` (so the params themselves remain unpolluted) and decreases the scale factor.
 
-    The first several ``optimizer.step()``\ s may be skipped as the scaler calibrates.  After that, step skipping
-    should occur rarely (once every few hundred iterations).
+    Often, ``scaler.step`` skips the underlying ``optimizer.step()`` for the first few iterations
+    as the scale value calibrates.  After that, step skipping should occur rarely (once every few hundred iterations).
+
+    Arguments:
+        init_scale (float, optional, default=2.**24):  Initial scale factor.
+        growth_factor (float, optional, default=1.001):  Factor by which the scale is multiplied during
+            :meth:`update` if no inf/NaN gradients were found this iteration.
+        backoff_factor (float, optional, default=0.5):  Factor by which the scale is multiplied during
+            :meth:`update` if inf/NaN gradients were found this iteration.
+        enabled (bool,optional, default=True):  If ``False``, disables gradient scaling. :meth:`step` simply
+            invokes the underlying ``optimizer.step()``, and other methods become no-ops.
     """
     def __init__(self,
                  init_scale=2.**24,
                  growth_factor=1.001,
                  backoff_factor=0.5,
                  enabled=True):
-        """
-        Arguments:
-            init_scale (float, optional, default=2.**24):  Initial scale factor.
-            growth_factor (float, optional, default=1.001):  Factor by which the scale is multiplied during
-                :meth:`update` if no inf/NaN gradients were found this iteration.
-            backoff_factor (float, optional, default=0.5):  Factor by which the scale is multiplied during
-                :meth:`update` if inf/NaN gradients were found this iteration.
-            enabled (bool,optional, default=True):  If ``False``, disables gradient scaling. :meth:`step` simply
-                invokes the underlying ``optimizer.step()``, and other methods become no-ops.
-        """
         self._enabled = enabled
         if enabled:
             self._scale = torch.full((1,), init_scale, dtype=torch.float32, device="cuda")
@@ -108,11 +107,11 @@ class AmpScaler(object):
         Simple example, using :meth:`unscale` to enable clipping of unscaled gradients::
 
             ...
-            amp_scaler.scale(loss).backward()
-            amp_scaler.unscale(optimizer)
+            scaler.scale(loss).backward()
+            scaler.unscale(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-            amp_scaler.step(optimizer)
-            amp_scaler.update()
+            scaler.step(optimizer)
+            scaler.update()
 
         If this instance of :class:`AmpScaler` is not enabled, :meth:`unscale` is a no-op.
 
@@ -146,12 +145,12 @@ class AmpScaler(object):
 
     def step(self, optimizer, *args, **kwargs):
         """
-        Carry out a scaling-safe step using ``optimizer``.  "Scaling-safe" means two things::
+        Carry out a scaling-safe step using ``optimizer``.  "Scaling-safe" means two things:
 
-            1.  If :meth:`unscale` has not yet been invoked, :meth:`step` will make sure to invoke :meth:`unscale`
-                internally.
-            2.  If inf/NaN gradients are found, :meth:`step` will skip ``optimizer.step()`` to avoid polluting the
-                params.
+        1.  If :meth:`unscale` has not yet been invoked, :meth:`step` will make sure to invoke :meth:`unscale`
+            internally.
+        2.  If inf/NaN gradients are found, :meth:`step` will skip ``optimizer.step()`` to avoid polluting the
+            params.
 
         ``*args`` and ``**kwargs`` will be forwarded to ``optimizer.step()``.
 
@@ -163,11 +162,12 @@ class AmpScaler(object):
         Returns:
             The return value of ``optimizer.step(*args, **kwargs)``.
 
-        note::
+        .. note::
             If you're writing a custom optimizer, and wish to define your own scaling-safe ``step`` method that
-            :meth:`AmpScaler.step` may call directly without any wrapping logic, see the :ref:`Custom Optimizer Guide`.
+            :meth:`AmpScaler.step` may call directly without any wrapping logic, see the
+            :ref:`Custom Optimizer Guide<custom-optimizer-guide>`.
 
-        warning::
+        .. warning::
             Closure use is not currently supported.
         """
         if (not self._enabled):
@@ -205,7 +205,7 @@ class AmpScaler(object):
             new_scale (float or torch.cuda.FloatTensor, optional, default=None):  New shared scale factor.
 
         .. warning::
-            ``update`` should only be called at the end of the iteration, after ``amp_scaler.step(optimizer)`` has
+            :meth:`update` should only be called at the end of the iteration, after ``scaler.step(optimizer)`` has
             been invoked for all optimizers used this iteration.
         """
         if not self._enabled:
