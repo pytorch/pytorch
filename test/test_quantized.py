@@ -571,7 +571,7 @@ class TestQuantizedOps(TestCase):
             X = np.repeat(X, 176 / X.shape[1], 1)
 
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
-        X = torch.from_numpy(X_nchw).permute([0, 3, 1, 2])
+
         qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
                                        zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
 
@@ -1628,6 +1628,61 @@ class TestQNNPackOps(TestCase):
             oW = pool_output_shape(4, kernel, padding, stride, dilation)
             np.testing.assert_equal(qc.size(), (0, 2, oH, oW),
                                     "Quantized maxpool2d with batch size 0 failed.")
+
+    @given(batch_size=st.integers(1, 5),
+           channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           height=st.integers(4, 10),
+           width=st.integers(4, 10),
+           kernel=st.integers(2, 4),
+           stride=st.integers(1, 2),
+           padding=st.integers(1, 2),
+           scale=st.floats(0.2, 1.6),
+           zero_point=st.integers(0, 25)
+           )
+    def test_avg_pool2d(
+            self,
+            batch_size,
+            channels,
+            height,
+            width,
+            kernel,
+            stride,
+            padding,
+            scale,
+            zero_point
+
+    ):
+        with override_quantized_engine('qnnpack'):
+            import torch.nn.functional as F
+            X_init = torch.from_numpy(np.random.randint(
+                0, 50, (batch_size, channels, height, width)))
+            zero_point = 0
+            X = scale * (X_init - zero_point).to(dtype=torch.float)
+
+            # Check constraints
+            assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+
+            iH, iW = X.shape[-2:]
+
+            oH = pool_output_shape(iH, kernel, padding, stride, 1)
+            assume(oH > 0)
+            oW = pool_output_shape(iW, kernel, padding, stride, 1)
+            assume(oW > 0)
+
+            k = (kernel, kernel)
+            s = (stride, stride)
+            p = (padding, padding)
+
+            q_avg_pool = torch.nn.quantized.functional.avg_pool2d
+
+            x_q = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                            dtype=torch.quint8)
+
+            a_pool = F.avg_pool2d(x_q.int_repr().to(torch.float), kernel_size=k, stride=s, padding=p)
+            qa_pool = q_avg_pool(x_q, k, s, p)
+
+            np.testing.assert_array_almost_equal(a_pool.numpy(),
+                                                 qa_pool.int_repr().numpy(), decimal=0)
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
