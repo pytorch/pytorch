@@ -40,7 +40,6 @@ def ort_test_with_input(ort_sess, input, output, rtol, atol):
     # compare onnxruntime and PyTorch results
     assert len(outputs) == len(ort_outs), "number of outputs differ"
 
-
     # compare onnxruntime and PyTorch results
     [np.testing.assert_allclose(out, ort_out, rtol=rtol, atol=atol) for out, ort_out in zip(outputs, ort_outs)]
 
@@ -422,7 +421,7 @@ class TestONNXRuntime(unittest.TestCase):
         class ArangeModel(torch.nn.Module):
             def forward(self, end):
                 return torch.arange(end), \
-                       torch.arange(0, end)
+                    torch.arange(0, end)
 
         x = torch.tensor(6.2, dtype=torch.float)
         self.run_test(ArangeModel(), x)
