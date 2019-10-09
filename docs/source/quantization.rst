@@ -239,7 +239,7 @@ PyTorch provides three approaches to quantize models.
    This is true for for LSTM and Transformer type models with small
    batch size. Applying dynamic quantization to a whole model can be
    done with a single call to torch.quantization.quantize\\_dynamic().
-   See the `quantization tutorials <https://pytorch.org/tutorials/#Quantization_Experimental>`_ **NOTE NEEDS REVISION**
+   See the `quantization tutorials <https://pytorch.org/tutorials/#quantization-experimental>`_
 2. Post Training Static Quantization: This is the most commonly used form of
    quantization where the weights are quantized ahead of time and the
    scale factor and bias for the activation tensors is pre-computed
@@ -268,7 +268,7 @@ PyTorch provides three approaches to quantize models.
       quantizes the weights, computes and stores the scale and bias
       value to be used each activation tensor, and replaces key
       operators quantized implementations.
-   See the `quantization tutorials <https://pytorch.org/tutorials/#Quantization_Experimental>`_ **NOTE NEEDS REVISION**
+   See the `quantization tutorials <https://pytorch.org/tutorials/#quantization_experimental>`_ 
 
 3. Quantization Aware Training: In the rare cases where post training
    quantization does not provide adequate accuracy training can be done
@@ -288,7 +288,7 @@ PyTorch provides three approaches to quantize models.
    5. Train or fine tune the model.
    6. Identical to step (6) for post training quantization
 
-   See the `quantization tutorials <https://pytorch.org/tutorials/#Quantization_Experimental>`_ **NOTE NEEDS REVISION**
+   See the `quantization tutorials <https://pytorch.org/tutorials/#quantization_experimental>`_ 
 
 While default implementations of observers to select the scale factor and bias
 based on observed tensor data are provided, developers can provide their own
@@ -326,7 +326,6 @@ Code Structure
 --------------
 
 The code is organized into the following modules
-[Note: Insert quantization code stack diagram here]
 
 -  ``torch.quantization`` : this module implements the functions you call
    directly to convert your model from FP32 to quantized form. For
