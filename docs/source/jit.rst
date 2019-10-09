@@ -183,7 +183,7 @@ The new usage looks like this:
 
 * The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``.
 * To compile a method other than ``forward`` that is not called from ``forward``, add ``@torch.jit.export``.
-* To stop the compiler from compiling a method, add ``@torch.jit.ignore`` or `@torch.jit.unused`. ``@ignore`` leaves the
+* To stop the compiler from compiling a method, add :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`@torch.jit.unused <torch.jit.unused>`. ``@ignore`` leaves the
 * method as a call to python, and ``@unused`` replaces it with an exception. ``@ignored`` cannot be exported; ``@unused`` can.
 * Most attribute types can be inferred, so ``torch.jit.Attribute`` is not necessary. For empty container types, annotate their types using `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
 * Constants can be marked with a ``Final`` class annotation instead of adding the name of the member to ``__constants__``.
@@ -217,7 +217,7 @@ lazily compiled in the order they are used in ``forward``, as well as any
 
 Functions
 ~~~~~~~~~
-Functions don't change much, they can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` or `torch.jit.unused <torch.jit.unused>` if needed.
+Functions don't change much, they can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`torch.jit.unused <torch.jit.unused>` if needed.
 
 .. testcode::
 
