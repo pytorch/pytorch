@@ -473,6 +473,25 @@ Example::
     True
 """)
 
+add_docstr(torch.angle,
+           r"""
+angle(input, out=None) -> Tensor
+
+Computes the element-wise angle (in radians) of the given :attr:`input` tensor.
+
+.. math::
+    \text{out}_{i} = angle(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
+    tensor([ 135.,  135,  325])
+""".format(**common_args))
+
 add_docstr(torch.as_strided,
            r"""
 as_strided(input, size, stride, storage_offset=0) -> Tensor
@@ -899,12 +918,12 @@ cdist(x1, x2, p=2) -> Tensor
 
 Computes the p-norm distance between each pair of the two collections of row vectors.
 
-If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the 
+If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the
 output will have shape :math:`P \times R`.
 
-This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)` 
-if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to 
-`scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest 
+This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)`
+if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to
+`scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest
 scipy function is `scipy.spatial.distance.cdist(xn, lambda x, y: np.abs(x - y).max())`.
 
 Args:
@@ -951,6 +970,25 @@ Example::
     tensor([-0.6341, -1.4208, -1.0900,  0.5826])
     >>> torch.ceil(a)
     tensor([-0., -1., -1.,  1.])
+""".format(**common_args))
+
+add_docstr(torch.real,
+           r"""
+real(input, out=None) -> Tensor
+
+Computes the element-wise real value of the given :attr:`input` tensor.
+
+.. math::
+    \text{out}_{i} = real(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.real(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    tensor([ -1,  -2,  3])
 """.format(**common_args))
 
 add_docstr(torch.reciprocal,
@@ -1054,11 +1092,6 @@ and `c` is returned such that:
 `torch.cholesky_solve(b, u)` can take in 2D inputs `b, u` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `c`
-
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `b, u` must be 2D matrices.
 
 Args:
     input (Tensor): input matrix :math:`b` of size :math:`(*, m, k)`,
@@ -1208,6 +1241,25 @@ Example::
     tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
     >>> torch.clamp(a, max=0.5)
     tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
+""".format(**common_args))
+
+add_docstr(torch.conj,
+           r"""
+conj(input, out=None) -> Tensor
+
+Computes the element-wise conjugate of the given :attr:`input` tensor.
+
+.. math::
+    \text{out}_{i} = conj(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.conj(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    tensor([-1 - 1j, -2 - 2j, 3 + 3j])
 """.format(**common_args))
 
 add_docstr(torch.cos,
@@ -2263,6 +2315,25 @@ Example::
 
     >>> torch.histc(torch.tensor([1., 2, 1]), bins=4, min=0, max=3)
     tensor([ 0.,  2.,  1.,  0.])
+""".format(**common_args))
+
+add_docstr(torch.imag,
+           r"""
+imag(input, out=None) -> Tensor
+
+Computes the element-wise imag value of the given :attr:`input` tensor.
+
+.. math::
+    \text{out}_{i} = imag(\text{input}_{i})
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.imag(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
+    tensor([ 1,  2,  -3])
 """.format(**common_args))
 
 add_docstr(torch.index_select,
@@ -4569,7 +4640,7 @@ add_docstr(torch.set_num_threads,
            r"""
 set_num_threads(int)
 
-Sets the number of threads used for parallelizing CPU operations.
+Sets the number of threads used for intraop parallelism on CPU.
 WARNING:
 To ensure that the correct number of threads is used, set_num_threads
 must be called before running eager, JIT or autograd code.
@@ -5485,11 +5556,6 @@ with the default keyword arguments.
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
 batched outputs `X`
-
-.. note::
-
-    The :attr:`out` keyword only supports 2D matrix inputs, that is,
-    `b, A` must be 2D matrices.
 
 Args:
     input (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where

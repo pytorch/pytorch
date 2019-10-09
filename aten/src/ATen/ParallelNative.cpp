@@ -179,8 +179,9 @@ void set_num_threads(int nthreads) {
   TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
   int no_value = NOT_SET;
   TORCH_CHECK(num_intraop_threads.compare_exchange_strong(no_value, nthreads),
-      "Error: cannot set number of interop threads "
-      "after parallel work has started or after set_num_threads call");
+      "Error: cannot set number of intraop threads "
+      "after parallel work has started or after set_num_threads call "
+      "when using native parallel backend");
 #else
   TORCH_CHECK(false, "set_num_threads is not supported for mobile.");
 #endif // C10_MOBILE
