@@ -89,7 +89,141 @@ torch.nn.qat and torch.nn.intrinsic.qat
 Current quantized operation list is sufficient to cover typical CNN and RNN
 models:
 
-**NOTE  explicit list here**
+
+**torch**
+
+Operations that are available from the ``torch`` namespace
+
+* *_adaptive_avg_pool2d* — 2d adaptive average pool (can be ignored)
+* *_empty_affine_quantized* — Creates an empty per-tensor quantized tensor
+* *_empty_per_channel_affine_quantized* — Creates an empty per channel quantized tensor
+* *as_strided* — Returns the view of a tensor of some size and stride
+* Comparators
+    * *ne* — Not equal
+    * *eq* — Equal
+    * *ge* — Greater or equal
+    * *le* — Less or equal
+    * *gt* — Greater
+    * *lt* — Less
+* *copy_* — copies the tensor
+* *clone* — tensor deep copy
+* *dequantize* — dequantization function
+* *equal* — compares two tensors, returns true if quantization parameters and elements are the same
+* *int_repr* — prints the underlying representation of the quantized tensor
+* *max* — maximum value (reduction only)
+* *mean* — Mean function. Supported variants: reduction, dim, out
+* *min* — minimum value (reduction only)
+* *q_scale* — gets the scale of the per tensor quantized tensor
+* *q_zero_point* — gets the zero_point of the per tensor quantized zero point
+* *q_per_channel_scales* — gets the scales of the per channel quantized tensor
+* *q_per_channel_zero_points* — gets the zero points of the per channel quantized tensor
+* *q_per_channel_axis* — gets the channel axis of the per channel quantized tensor
+* *quantized_max_pool2d* — Quantized 2D max pooling
+* *relu* — rectified linear unit (copy)
+* *relu_* — rectified linear unit (inplace)
+* *sort* — sorts the tensor
+* *topk* — returns k maximum values of a tensor
+
+**torch.nn.intrinsic**
+
+Fused modules
+
+* *torch.nn.intrinsic* — PQT module level layers. same as ``torch.nn.intrinsic.modules`` and ``torch.nn.intrinsic.module.fused``
+    * *ConvBn2d* —* *2D Convolution + BatchNorm
+    * *ConvBnReLU2d* — 2D Convolution + BatchNorm + ReLU
+    * *ConvReLU2d* — 2D Convolution + Relu
+    * *LinearReLU* — 2D Linear + ReLU
+* *torch.nn.intrinsic.qat* — QAT layers, same as ``torch.nn.intrinsic.qat.modules``
+    * *ConvBn2d*
+    * *ConvBnReLU2d*
+    * *ConvReLU2d*
+    * *LinearReLU*
+* *torch.nn.intrinsic.quantized* — Quantized representations of the fused layers
+    * *LinearReLU* — Linear + ReLU
+    * *ConvReLU2d* — 2D Convolution + ReLU
+
+**torch.nn.quantized**
+
+Layers under the ``torch.nn.quantized`` namespace.
+
+* *Conv2d* — 2D convolution
+* *DeQuantize* — Dequantization layer
+* *FloatFunctional* — Wrapper class to make stateless float operations stateful
+* *Linear* — Linear (fully-connected) layer
+* *MaxPool2d* — 2D max pooling 
+* *QFunctional* — Wrapper class to make stateless quantized operations stateful
+* *Quantize* — Quantization layer
+* *ReLU* — Rectified linear unit
+* *ReLU6* — Rectified linear unit with cut-off at quantized representation of 6
+
+**torch.nn.quantized.functional**
+
+Functional operations under ``torch.nn.quantized.functional``
+
+* *adaptive_avg_pool2d* — 2D adaptive average pooling
+* *avg_pool2d* — 2D average pooling
+* *conv2d* — 2D convolution
+* *interpolate* — Down-/up- sampler
+* *linear* — Linear (fully-connected) op
+* *max_pool2d* — 2D max pooling
+* *relu* — Rectified linear unit
+* *upsample* — Upsampler. Will be deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
+* *upsample_bilinear* — Bilenear upsampler. Will be deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
+* *upsample_nearest* — Nearest neighbor upsampler. Will be deprecated in favor of :func:`~torch.nn.quantized.functional.interpolate`
+
+**torch.ops.quantized**
+
+* TBD  
+
+**NOTE: still TBD here**
+
+**Quantized tensor methods**
+
+Member methods as part of quantized tensors
+
+* *as_strided* — Returns the view of a tensor of some size and stride
+* *clone* — deep copy of the tensor
+* *copy_* — copies the tensor (inplace)
+* Comparators:
+    * *ne* — Not equal
+    * *eq* — Equal
+    * *ge* — Greater or equal
+    * *le* — Less or equal
+    * *gt* — Greater
+    * *lt* — Less
+* *dequantize* — dequantization of the tensor
+* *equal* — compares two tensors, returns true if quantization parameters and elements are the same
+* *int_repr* — prints the underlying representation of the quantized tensor
+* *max* — maximum value (reduction only)
+* *mean* (reduction, dim, out) — Mean method. Supported variants: reduction, dim, out
+* *min* — minimum value (reduction only)
+* *q_scale* — scale of the per tensor quantized tensor
+* *q_zero_point* — zero point of the per tensor quantized tensor
+* *q_per_channel_scales* — scales of the per channel quantized tensor
+* *q_per_channel_zero_points* — zero points of the per channel quantized tensor
+* *q_per_channel_axis* — axis of quantization of the per channel quantized tensor
+* *qscheme* — type of the quantization scheme
+* *relu* — rectified linear unit (copy)
+* *relu_* — rectified linear unit (inline)
+* *resize_* — inplace resize
+* *set_* — sets the underlying storage, size, and strides
+* *sort* — sorts the tensor
+* *topk* — returns k* *maximum values of a tensor
+* *view* — returns the tensor with the same data but of different shape
+
+**Types in Quantization**
+
+* torch.*qscheme* — Type to describe the quantization scheme of a tensor. Supported types:
+    * torch.*per_tensor_affine* — per tensor, asymmetric
+    * torch.*per_channel_affine* — per channel, asymmetric
+    * torch.*per_tensor_symmetric* — per tensor, symmetric
+    * torch.*per_channel_symmetric* — per tensor, symmetric
+* torch.dtype — Type to describe the data. Supported types:
+    * torch.*quint8* — 8-bit unsigned integer
+    * torch.*qint8* — 8-bit signed integer
+    * torch.*qint32* — 32-bit signed integer
+
+
 
 Quantization Workflows
 ----------------------
