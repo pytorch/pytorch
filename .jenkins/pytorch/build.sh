@@ -159,47 +159,60 @@ echo "The next three invocations are expected to fail with invalid command error
 ( ! get_exit_code python setup.py clean] )
 ( ! get_exit_code python setup.py clean bad_argument )
 
-# ppc64le build fails when WERROR=1
-# set only when building other architectures
-# only use for "python setup.py install" line
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-  WERROR=1 python setup.py install
+if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+
+  # ppc64le build fails when WERROR=1
+  # set only when building other architectures
+  # only use for "python setup.py install" line
+  if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+    WERROR=1 python setup.py install
+  else
+    python setup.py install
+  fi
+
+  # TODO: I'm not sure why, but somehow we lose verbose commands
+  set -x
+
+  if which sccache > /dev/null; then
+    echo 'PyTorch Build Statistics'
+    sccache --show-stats
+  fi
+
+  assert_git_not_dirty
+
+  # Test documentation build
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+    pushd docs
+    # TODO: Don't run this here
+    pip_install -r requirements.txt || true
+    LC_ALL=C make html
+    popd
+    assert_git_not_dirty
+  fi
+
+  # Build custom operator tests.
+  CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+  CUSTOM_OP_TEST="$PWD/test/custom_operator"
+  python --version
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  mkdir "$CUSTOM_OP_BUILD"
+  pushd "$CUSTOM_OP_BUILD"
+  cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
 else
-  python setup.py install
-fi
+  # Test standalone c10 build
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+    mkdir -p c10/build
+    pushd c10/build
+    cmake ..
+    make -j
+    popd
+    assert_git_not_dirty
+  fi
 
-# TODO: I'm not sure why, but somehow we lose verbose commands
-set -x
-
-if which sccache > /dev/null; then
-  echo 'PyTorch Build Statistics'
-  sccache --show-stats
-fi
-
-assert_git_not_dirty
-
-# Test documentation build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-  pushd docs
-  # TODO: Don't run this here
-  pip_install -r requirements.txt || true
-  LC_ALL=C make html
-  popd
-  assert_git_not_dirty
-fi
-
-# Test standalone c10 build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-  mkdir -p c10/build
-  pushd c10/build
-  cmake ..
-  make -j
-  popd
-  assert_git_not_dirty
-fi
-
-# Test no-Python build
-if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
+  # Test no-Python build
   echo "Building libtorch"
   # NB: Install outside of source directory (at the same level as the root
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
@@ -209,18 +222,6 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   WERROR=1 VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
   popd
 fi
-
-# Build custom operator tests.
-CUSTOM_OP_BUILD="$PWD/../custom-op-build"
-CUSTOM_OP_TEST="$PWD/test/custom_operator"
-python --version
-SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-mkdir "$CUSTOM_OP_BUILD"
-pushd "$CUSTOM_OP_BUILD"
-cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
-make VERBOSE=1
-popd
-assert_git_not_dirty
 
 # Test XLA build
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then

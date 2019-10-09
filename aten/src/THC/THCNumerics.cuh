@@ -234,7 +234,6 @@ struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half mul(at::Half a, at::Half b) { return a * b; }
   static inline __host__ __device__ at::Half sub(at::Half a, at::Half b) { return a - b; }
   static inline __host__ __device__ at::Half pow(at::Half a, at::Half b) { return ::pow(a, b); }
-  static inline __host__ __device__ at::Half atan2(at::Half a, at::Half b) { return ::atan2(a, b); }
 
   static inline __host__ __device__ bool isnan(at::Half a) {
     #ifdef _MSC_VER
@@ -302,7 +301,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float mul  (float a, float b) { return a * b; }
   static inline __host__ __device__  float sub  (float a, float b) { return a - b; }
   static inline __host__ __device__  float pow  (float a, float b) { return powf(a, b); }
-  static inline __host__ __device__  float atan2(float a, float b) { return atan2f(a, b); }
   static inline __host__ __device__  bool isnan(float a) { return ::isnan(a); }
   static inline __host__ __device__  bool isinf(float a) { return ::isinf(a); }
 };
@@ -351,7 +349,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double mul  (double a, double b) { return a * b; }
   static inline __host__ __device__  double sub  (double a, double b) { return a - b; }
   static inline __host__ __device__  double pow  (double a, double b) { return ::pow(a, b); }
-  static inline __host__ __device__  double atan2(double a, double b) { return ::atan2(a, b); }
   static inline __host__ __device__  bool isnan(double a) { return ::isnan(a); }
   static inline __host__ __device__  bool isinf(double a) { return ::isinf(a); }
 };
