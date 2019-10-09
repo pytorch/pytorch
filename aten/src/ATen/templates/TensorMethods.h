@@ -5,6 +5,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/TensorAxes.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/ATenDispatch.h>
@@ -28,29 +29,34 @@ struct Quantizer;
 using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 inline Tensor Tensor::cpu() const {
-  return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
+  return to(axes().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
 }
 
 // TODO: The Python version also accepts arguments
 inline Tensor Tensor::cuda() const {
-  return to(options().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
+  return to(axes().device(DeviceType::CUDA), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::hip() const {
-  return to(options().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
+  return to(axes().device(DeviceType::HIP), /*non_blocking*/ false, /*copy*/ false);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
-  return to(options().dtype(t), /*non_blocking*/ false, /*copy*/ false);
+  return to(axes().dtype(t), /*non_blocking*/ false, /*copy*/ false);
 }
 
 // TODO: Deprecate me
 inline Tensor Tensor::toBackend(Backend b) const {
-  return to(options().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
+  return to(axes().device(backendToDeviceType(b)).layout(layout_from_backend(b)), /*non_blocking*/ false, /*copy*/ false);
 }
 
-inline TensorAxes Tensor::options() const {
+inline TensorAxes Tensor::axes() const {
   return TensorAxes(dtype(), device(), layout(), is_variable());
+}
+
+// Deprecated. Use Tensor::axes() instead.
+inline TensorOptions Tensor::options() const {
+  return axes();  // use implicit conversion via   TensorOptions ctor
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch

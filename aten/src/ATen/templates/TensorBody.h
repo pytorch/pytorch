@@ -24,6 +24,7 @@ class Tensor;
 }
 namespace c10{
 struct TensorAxes;
+struct TensorOptions;
 }
 namespace at {
 struct Generator;
@@ -292,8 +293,11 @@ class CAFFE2_API Tensor {
   NamedTensorMeta* get_named_tensor_meta();
 #endif
 
-  /// Returns the `TensorAxes` corresponding to this `Tensor`.
-  TensorAxes options() const;
+  /// Returns the `TensorAxes` specification of this `Tensor`.
+  TensorAxes axes() const;
+
+  /// Returns the `TensorOptions` of this `Tensor`.
+  TensorOptions options() const;
 
   void* data_ptr() const {
     return this->unsafeGetTensorImpl()->data();

@@ -45,7 +45,7 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
       (!dtype_opt  || self.dtype()  ==  dtype_opt.value()) && !copy) {
     return self;
   }
-  auto specified_options = self.options();
+  auto specified_options = self.axes();
   if (device_opt) {
     specified_options = specified_options.device(device_opt.value());
   }
@@ -60,25 +60,23 @@ Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking
   if (self.device() == device && self.dtype() == dtype && !copy) {
     return self;
   }
-  return to_impl(self, self.options().device(device).dtype(dtype), non_blocking);
+  return to_impl(self, self.axes().device(device).dtype(dtype), non_blocking);
 }
 
 Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy) {
   if (self.dtype() == dtype && !copy) {
     return self;
   }
-  return to_impl(self, self.options().dtype(dtype), non_blocking);
+  return to_impl(self, self.axes().dtype(dtype), non_blocking);
 }
 
 Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy) {
-  auto self_options = self.options();
-  auto options = other.options();
-  // Tensor.options() always have everything filled so we are happy and don't
-  // even need to fill in device index.
-  if (self_options == options && !copy) {
+  auto self_axes = self.axes();
+  auto axes = other.axes();
+  if (self_axes == axes && !copy) {
     return self;
   }
-  return to_impl(self, options, non_blocking);
+  return to_impl(self, axes, non_blocking);
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {

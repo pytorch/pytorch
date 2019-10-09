@@ -104,8 +104,8 @@ struct CAFFE2_API OperandInfo {
   ScalarType dtype = ScalarType::Undefined;
 
   bool is_type_defined() const { return dtype != ScalarType::Undefined; }
-  TensorAxes options() const {
-    return TensorAxes(scalarTypeToTypeMeta(dtype), device);
+  TensorOptions options() const {
+    return TensorOptions(dtype).device(device);
   }
 
   /// The data pointer. This may be different from tensor.data_ptr() if the

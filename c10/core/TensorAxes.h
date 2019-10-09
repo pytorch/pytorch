@@ -8,18 +8,19 @@
 
 namespace c10 {
 
-/// TensorAxes holds the effectively used data type, device and layout of a
-/// Tensor. Additionally it indicates whether a Tensor is a Variable.
+/// `TensorAxes` holds the effectively used data type, device and layout of a
+/// `Tensor`. Additionally it indicates whether a `Tensor` is an autograd
+/// variable.
 ///
 /// The class is in general immutable but allows to change the representation
 /// as a whole via the standard assignment operator.
 ///
-/// In contrast to TensorOptions which allows to specify (optional) construction
-/// arguments this class always holds a full axes specification of a Tensor,
-/// i.e. it has no optional fields.
+/// In contrast to `TensorOptions` which allows to specify (optional)
+/// construction arguments this class always holds a full axes specification of
+/// a `Tensor`, i.e. it has no optional fields.
 ///
-/// An (implicit) conversion from TensorAxes to TensorOptions via the
-/// TensorOptions(TensorAxes&) ctor exists but not vice versa.
+/// An (implicit) conversion from `TensorAxes` to `TensorOptions` via the
+/// `TensorOptions(TensorAxes&)` ctor exists but not vice versa.
 
 class C10_API TensorAxes final {
  public:
