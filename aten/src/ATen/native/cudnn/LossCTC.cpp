@@ -15,6 +15,8 @@ namespace at { namespace native {
 bool _use_cudnn_ctc_loss(
     const Tensor& log_probs,
     const Tensor& targets,
+    IntArrayRef input_lengths,
+    IntArrayRef target_lengths,
     int64_t BLANK) {
   return false;
 }
