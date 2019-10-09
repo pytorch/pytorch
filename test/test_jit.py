@@ -20222,9 +20222,48 @@ for test in criterion_tests:
     test['no_grad'] = True
     add_nn_module_test(**test)
 
-if __name__ == '__main__':
+import inspect
+import re
+import subprocess
+
+def convert(name):
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+
+OUT_DIR = 'test/jit'
+NUM_IMPORT_LINES = 261
+MAIN = """
+if __name__ == 'main':
     run_tests()
-    if not PY2:
-        import test_jit_py3
-        suite = unittest.findTestCases(test_jit_py3)
-        unittest.TextTestRunner().run(suite)
+"""
+
+if __name__ == '__main__':
+    content = open(__file__, 'r').readlines()
+    prelude = content[:NUM_IMPORT_LINES]
+    f = list(globals())
+    for g in f:
+        value = globals()[g]
+        if not inspect.isclass(value):
+            continue
+        if issubclass(value, unittest.TestCase):
+            name = value.__name__
+            if not name.startswith('Test'):
+                continue
+            name = convert(name)
+            source = inspect.getsource(value)
+
+            new_file = '{}/{}.py'.format(OUT_DIR, name)
+            f = open(new_file, 'w')
+            f.write(''.join(prelude))
+            f.write('\n')
+            f.write(source)
+            f.write('\n')
+            f.write(MAIN)
+
+            subprocess.run([
+                'autoflake',
+                '--in-place',
+                '--remove-all-unused-imports',
+                '--remove-unused-variables',
+                new_file
+            ])
