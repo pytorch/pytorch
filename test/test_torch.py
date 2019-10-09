@@ -245,14 +245,6 @@ class _TestTorchMixin(object):
                        'to_dense',
                        'sparse_resize_',
                        'sparse_resize_and_clear_',
-                       'align_to',  # BUILD_NAMEDTENSOR only
-                       'align_as',  # BUILD_NAMEDTENSOR only
-                       'rename',  # BUILD_NAMEDTENSOR only
-                       'rename_',  # BUILD_NAMEDTENSOR only
-                       'has_names',  # BUILD_NAMEDTENSOR only
-                       'rename',  # BUILD_NAMEDTENSOR only
-                       'refine_names',  # BUILD_NAMEDTENSOR only
-                       'unflatten',  # BUILD_NAMEDTENSOR only
                        )
         test_namespace(torch.nn)
         test_namespace(torch.nn.functional, 'assert_int_or_pair', 'feature_alpha_dropout')
