@@ -811,7 +811,7 @@ class RpcTest(object):
             ret_rref = ret_rref[0].to_here()
 
         ret = ret_rref
-        self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
+        self.assertNotEqual(ret, torch.add(torch.ones(n, n), 1))
 
     @dist_init
     @requires_process_group_agent
