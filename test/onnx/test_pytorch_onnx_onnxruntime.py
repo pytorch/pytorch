@@ -627,8 +627,6 @@ class TestONNXRuntime(unittest.TestCase):
     def test_tensor_index_advanced_indexing_consecutive(self):
         self._test_index_generic(lambda input: input[:, torch.tensor([0, 2]), torch.tensor([[1, 3], [4, 0]]), None])
 
-    # TODO: Enable the following tests after ScatterND is supported in ONNX Runtime.
-    @unittest.skip("Enable this once ScatterND is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put(self):
         class IndexPutModel(torch.nn.Module):
@@ -641,7 +639,6 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.ones(4)
         self.run_test(IndexPutModel(), (x, ind, update))
 
-    @unittest.skip("Enable this once ScatterND is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_accumulate(self):
         class IndexPutModel(torch.nn.Module):
@@ -653,7 +650,6 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.ones(4)
         self.run_test(IndexPutModel(), (x, ind, update))
 
-    @unittest.skip("Enable this once ScatterND is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_slice_index(self):
         class IndexPutModel(torch.nn.Module):
@@ -701,7 +697,6 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.tensor([10, 15]).view(2, 1)
         self.run_test(IndexPutModel5(), (x, update))
 
-    @unittest.skip("Enable this once ScatterND is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_ellipsis(self):
         class IndexPutModel(torch.nn.Module):
@@ -720,9 +715,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 4, 5, 6, 7)
         update = torch.randn(4, 1, 3, 2)
-        # self.run_test(IndexPutModel2(), (x, update))
+        self.run_test(IndexPutModel2(), (x, update))
 
-    @unittest.skip("Enable this once ScatterND is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_copy_(self):
         class CopyModel(torch.nn.Module):
@@ -768,7 +762,6 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.randn(1, 2)
         self.run_test(CopyModel3(), (x, update))
 
-    @unittest.skip("Enable this once ScatterND is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_copy_ellipsis(self):
         class CopyModel(torch.nn.Module):
