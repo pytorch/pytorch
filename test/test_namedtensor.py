@@ -1,5 +1,5 @@
 import unittest
-from common_utils import TestCase, run_tests, TEST_NUMPY, default_floating_dtype
+from common_utils import TestCase, run_tests, TEST_NUMPY
 from common_cuda import TEST_CUDA
 from collections import namedtuple, OrderedDict
 import itertools
@@ -275,14 +275,13 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NYI"):
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
-    @default_floating_dtype(torch.double)
-    def test_big_tensor_repr(self):
+    def test_big_tensor_repr(self, dtype=torch.double):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
             expected = "{}, names={})".format(repr(unnamed_tensor)[:-1], named_tensor.names)
             self.assertEqual(repr(named_tensor), expected)
 
-        check_repr(torch.randn(128, 3, 64, 64, names=('N', 'C', 'H', 'W')))
+        check_repr(torch.randn(128, 3, 64, 64, dtype=dtype, names=('N', 'C', 'H', 'W')))
 
     def test_noncontig_contiguous(self):
         # This type of contiguous is special-cased and therefore needs its own test
