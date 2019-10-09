@@ -61,5 +61,15 @@ struct TORCH_API SoftmaxOptions {
   TORCH_ARG(int64_t, dim);
 };
 
+// ============================================================================
+
+/// Options for the Softmin functional and module.
+struct TORCH_API SoftminOptions {
+  SoftminOptions(int64_t dim);
+
+  // Dimension along which Softmin will be computed.
+  TORCH_ARG(int64_t, dim);
+};
+
 } // namespace nn
 } // namespace torch

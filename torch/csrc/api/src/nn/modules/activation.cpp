@@ -111,5 +111,20 @@ Tensor SoftmaxImpl::forward(const Tensor& input) {
   return F::softmax(input, options);
 }
 
+// ============================================================================
+
+SoftminImpl::SoftminImpl(const SoftminOptions& options_)
+    : options(options_) {}
+
+void SoftminImpl::reset() {}
+
+void SoftminImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softmin(dim=" << options.dim() << ")";
+}
+
+Tensor SoftminImpl::forward(const Tensor& input) {
+  return F::softmin(input, options);
+}
+
 } // namespace nn
 } // namespace torch
