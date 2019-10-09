@@ -32,26 +32,9 @@ PicklerClass getClass(const std::string& str) {
   AT_ERROR("Unknown class name for unpickler: ", str);
 }
 
-static void postSetStateValidate(const IValue& v) {
-  auto obj = v.toObject();
-  const auto& objType = obj->type();
-  for (size_t i = 0; i < objType->numAttributes(); i++) {
-    const auto& attrType = objType->getAttribute(i);
-    const auto& attrName = objType->getAttributeName(i);
-    const auto& slot = obj->getSlot(i);
-    // const auto attrType = objType->getAttribute(i);
-    // Verify that all the non-optional attributes have been initialized
-    // TODO: Issue #20497
-    if (attrType->kind() != TypeKind::OptionalType) {
-      TORCH_CHECK(
-          !slot.isNone(),
-          "The field '",
-          attrName,
-          "' was left unitialized after __setstate__, but expected a ",
-          "value of type '",
-          attrType->python_str(),
-          "'");
-    }
+static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
+  if (root.isObject()) {
+    restoreAccurateTypeTags(root, root.type());
   }
 }
 
@@ -66,15 +49,12 @@ static void postSetStateValidate(const IValue& v) {
 // the top-level unpickled thing (which is guarenteed for Modules, but
 // not for torch.load/torch,save). Otherwise we do not know the types
 // of the contained objects and cannot restore the tags.
-static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
-  if (!root.isObject()) {
-    return;
-  }
+void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   struct Work {
     TypePtr static_type;
     IValue value;
   };
-  std::vector<Work> to_process = {{root.type(), root}};
+  std::vector<Work> to_process = {{type_tag, root}};
   std::unordered_set<const void*> scanned;
   while (!to_process.empty()) {
     Work w = std::move(to_process.back());
