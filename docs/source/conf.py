@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
 # PyTorch documentation build configuration file, created by
@@ -54,6 +53,7 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
+    'javasphinx',
 ]
 
 # katex options
