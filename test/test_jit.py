@@ -3547,7 +3547,7 @@ def foo(x):
     def test_static_methods(self):
         class M(nn.Module):
             def __init__(self):
-                super().__init__()
+                super(M, self).__init__()
 
             @staticmethod
             def my_method(x):
@@ -3558,7 +3558,7 @@ def foo(x):
 
         class N(nn.Module):
             def __init__(self):
-                super().__init__()
+                super(N, self).__init__()
 
             @staticmethod
             def my_method(x):
