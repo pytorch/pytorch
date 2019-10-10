@@ -306,10 +306,7 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
 }
 
 static bool isModuleType(const TypePtr& type) {
-  if (!type) {
-    return false;
-  }
-
+  TORCH_INTERNAL_ASSERT(type);
   if (auto classType = type->cast<ClassType>()) {
     return classType->is_module();
   }
@@ -327,6 +324,10 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
   const auto& selfType = concreteType_->getJitType();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
     const auto& attrType = selfType->getAttribute(i);
+    if (!attrType) {
+      continue;
+    }
+
     if (isModuleType(attrType)) {
       submoduleNames.push_back(selfType->getAttributeName(i));
     }
@@ -363,19 +364,18 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     const std::string& field) {
   // 1. Look inside script::Module object for the field.
   const auto& selfType = concreteType_->getJitType();
-  if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
-    if (isModuleType(selfType->getAttribute(field))) {
-      // ...if it's a submodule, return it as a new ModuleValue.
-      const auto submoduleConcreteType =
-          concreteType_->findSubmoduleConcreteType(field);
-      TORCH_INTERNAL_ASSERT(submoduleConcreteType);
-      return std::make_shared<ModuleValue>(
-          m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
-    } else {
+  if (selfType->hasAttribute(field) && isModuleType(selfType->getAttribute(field))) {
+    // ...if it's a submodule, return it as a new ModuleValue.
+    const auto submoduleConcreteType =
+        concreteType_->findSubmoduleConcreteType(field);
+    TORCH_INTERNAL_ASSERT(submoduleConcreteType);
+    return std::make_shared<ModuleValue>(
+        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+  } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
       // ...otherwise, methods, parameters, attributes, and buffers are all
       // first class so they get returned as SimpleValues
       return SimpleValue(self_).attr(loc, m, field);
-    }
+
   }
 
   // 2. Check if it's a user-provided constant property.
@@ -434,9 +434,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       auto boundMethod = py::module::import("torch.jit._recursive")
                              .attr("lazy_bind")(concreteType_, unboundMethod);
       TORCH_CHECK(py::isinstance<py::function>(boundMethod));
-      // TODO: Try to reduce our reliance on frame-based rcb
       auto rcb =
-          py::module::import("torch.jit").attr("_gen_rcb")(unboundMethod, 0);
+          py::module::import("torch._jit_internal")
+              .attr("createResolutionCallbackFromClosure")(unboundMethod);
       return std::make_shared<PythonValue>(boundMethod, rcb, self_);
     }
 
@@ -670,7 +670,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   // methods here have been explicitly annotated to not be compiled,
   // so they do not have the same overload and compile checks as for functions
   if (isFunction || isMethod) {
-    auto rcb = py::module::import("torch.jit").attr("_gen_rcb")(obj, 0);
+    auto rcb = py::module::import("torch._jit_internal")
+                   .attr("createResolutionCallbackFromClosure")(obj);
     return std::make_shared<PythonValue>(obj, rcb);
   }
 

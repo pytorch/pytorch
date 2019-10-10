@@ -102,49 +102,42 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   friend bool operator==(
       const ConcreteModuleType& lhs,
       const ConcreteModuleType& rhs) {
-    // This check is first sicne it's the most discriminating
-    if (!lhs.pyClass_.is(rhs.pyClass_)) {
-      return false;
-    }
-
-    if (lhs.iterableModuleKind_ != rhs.iterableModuleKind_) {
-      return false;
-    }
-
-    // We need to change the meaning of module equality depending on whether the
-    // module is iterable or not.
-    bool modulesEqual = false;
-    if (lhs.iterableModuleKind_ == IterableModuleKind::NONE) {
-      // ordering doesn't matter, so compare modules sorted by name
-      auto lhsSorted = lhs.modules_;
-      std::sort(
-          lhsSorted.begin(),
-          lhsSorted.end(),
-          [](const ModuleInfo& a, const ModuleInfo& b) {
-            return a.name < b.name;
-          });
-
-      auto rhsSorted = rhs.modules_;
-      std::sort(
-          rhsSorted.begin(),
-          rhsSorted.end(),
-          [](const ModuleInfo& a, const ModuleInfo& b) {
-            return a.name < b.name;
-          });
-
-      modulesEqual = lhsSorted == rhsSorted;
-    } else {
-      modulesEqual = lhs.modules_ == rhs.modules_;
-    }
 
     // clang-format off
-    return
-      modulesEqual &&
+    // These are vaguely ordered so that cheap, discriminating checks happen first.
+    bool equal =
+      lhs.pyClass_.is(rhs.pyClass_) &&
+      lhs.iterableModuleKind_ == rhs.iterableModuleKind_ &&
       lhs.constants_ == rhs.constants_ &&
       lhs.attributes_ == rhs.attributes_ &&
       lhs.overloads_ == rhs.overloads_ &&
       lhs.functionAttributes_ == rhs.functionAttributes_;
     // clang-format on
+    if (!equal) {
+      return false;
+    }
+
+    // We store modules in order of insertion (to make compilation
+    // deterministic). However, for the purposes of equality, insertion order
+    // should not matter, so sort them by name.
+    // We put this check last because it involves the most work.
+    auto lhsSorted = lhs.modules_;
+    std::sort(
+        lhsSorted.begin(),
+        lhsSorted.end(),
+        [](const ModuleInfo& a, const ModuleInfo& b) {
+          return a.name < b.name;
+        });
+
+    auto rhsSorted = rhs.modules_;
+    std::sort(
+        rhsSorted.begin(),
+        rhsSorted.end(),
+        [](const ModuleInfo& a, const ModuleInfo& b) {
+          return a.name < b.name;
+        });
+
+    return lhsSorted == rhsSorted;
   }
 
   void dump() const;
