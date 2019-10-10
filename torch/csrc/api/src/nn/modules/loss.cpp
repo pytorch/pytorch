@@ -41,7 +41,7 @@ void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::TripletMarginLoss(margin=" << options.margin() << 
             ", p=" << options.p() <<
             ", eps=" << options.eps() << std::boolalpha <<
-            ", swap=" <<options.swap() <<
+            ", swap=" << options.swap() <<
             ", reduction=" << options.reduction() << ")";
 }
 
