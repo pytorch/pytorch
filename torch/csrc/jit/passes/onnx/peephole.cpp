@@ -582,26 +582,14 @@ static void eraseListConstruct(Block* block) {
   }
 }
 
-static void fuseListUnpack(Block* b) {
+static void fuseSplitListUnpack(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
-
     for (auto* child_block : it->blocks()) {
-      fuseListUnpack(child_block);
+      fuseSplitListUnpack(child_block);
     }
     if (it->kind() == prim::ListUnpack) {
       Node* input_node = it->input()->node();
-      // This is a temporary fix. For ops such as meshgrid where input
-      // is a list, we need unpack the list to create the subgraph. 
-      // Elements are then packed to a new list with onnx::ListConstruct.
-      // Packing and unpacking is handled in the pass for now.
-      if (input_node->kind() == prim::ListConstruct) {
-        for (size_t i = 0; i < it->outputs().size(); i++) {
-          auto output = it->outputs().at(i);
-          output->replaceAllUsesWith(input_node->inputs().at(i));
-        }
-      }
-
-      else if (input_node->kind() == onnx::Split) {
+			if (input_node->kind() == onnx::Split) {
         auto origSplitNode = it->inputs().at(0)->node();
         Node* splitNode =
             b->owningGraph()->create(it->inputs().at(0)->node()->kind(), it->outputs().size());
@@ -664,6 +652,26 @@ static void fuseUnbindListUnpack(Block *b) {
   }
 }
 
+// For ops such as meshgrid where output is a list of Tensors
+// (returns prim::ListConstruct), we need to unpack the list
+// before the pass which deletes ListConstruct.
+static void fuseListConstructListUnpack(Block *b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseListConstructListUnpack(child_block);
+    }
+    if (it->kind() == prim::ListUnpack) {
+      Node* input_node = it->input()->node();
+	    if (input_node->kind() == prim::ListConstruct) {
+	      for (size_t i = 0; i < it->outputs().size(); i++) {
+	        auto output = it->outputs().at(i);
+	        output->replaceAllUsesWith(input_node->inputs().at(i));
+	      }
+	    }
+    }
+  }
+}
+
 void removeMaxPoolUnusedOutput(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     auto n = *it;
@@ -713,7 +721,8 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   eliminateNopTranspose(graph->block());
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
-  fuseListUnpack(graph->block());
+  fuseListConstructListUnpack(graph->block());
+  fuseSplitListUnpack(graph->block());
   fuseUnbindListUnpack(graph->block());
   eraseListConstruct(graph->block());
   removeMaxPoolUnusedOutput(graph->block());
