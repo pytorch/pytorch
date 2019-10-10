@@ -1365,6 +1365,11 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.names, ['H', 'C', 'W', 'N'])
         self.assertEqual(output.shape, [3, 2, 5, 7])
 
+        # ... = ['N', 'W']
+        output = tensor.align_to('H', 'C', '...')
+        self.assertEqual(output.names, ['H', 'C', 'N', 'W'])
+        self.assertEqual(output.shape, [3, 2, 7, 5])
+
         # ... = ['H', 'C']
         output = tensor.align_to('W', '...', 'N')
         self.assertEqual(output.names, ['W', 'H', 'C', 'N'])
@@ -1376,16 +1381,20 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.shape, [7, 2, 1, 3, 5])
 
         # Input tensor partially named
-        partiall_named = create('N:7,None:1')
-        with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):
-            partiall_named.align_to('...', 'N')
+        partially_named = create('None:2,None:3,None:5,C:7')
+        output = partially_named.align_to('C', '...')
+        self.assertEqual(output.names, ['C', None, None, None])
+        self.assertEqual(output.shape, [7, 2, 3, 5])
+
+        with self.assertRaisesRegex(RuntimeError, "order of dimensions cannot contain a None"):
+            partially_named.align_to('C', None, '...')
 
         # Input order partially named
-        with self.assertRaisesRegex(RuntimeError, "desired order must not contain None"):
+        with self.assertRaisesRegex(RuntimeError, "cannot contain a None name"):
             tensor.align_to('...', 'N', None)
 
         # Input order duplicate names
-        with self.assertRaisesRegex(RuntimeError, "Duplicate names"):
+        with self.assertRaisesRegex(RuntimeError, "duplicate names"):
             tensor.align_to('...', 'N', 'N')
 
     def test_align_as(self):

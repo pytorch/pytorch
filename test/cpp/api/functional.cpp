@@ -161,6 +161,17 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, MultiMarginLoss) {
+  auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
+  auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::requires_grad());
+  auto target = torch::tensor({2, 1, 0}, torch::kLong);
+  auto output = F::multi_margin_loss(
+    input, target, MultiMarginLossOptions().margin(2).weight(weight));
+  auto expected = torch::tensor({0.305556}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+}
+
 TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}});
   auto input2 = torch::tensor({{2, 3, 5}, {9, 12, 0}});
@@ -251,6 +262,32 @@ TEST_F(FunctionalTest, ELU) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
       }
     }
+  }
+}
+
+TEST_F(FunctionalTest, SELU) {
+  {
+    const double scale = 1.0507009873554804934193349852946;
+    const double alpha = 1.6732632423543772848170429916717;
+    for (const auto inplace : {false, true}) {
+      auto input = torch::randn({5, 5});
+      auto expected = scale *
+          (torch::max(torch::zeros_like(input), input) +
+           torch::min(
+               torch::zeros_like(input), alpha * (torch::exp(input) - 1)));
+      auto output = F::selu(input, inplace);
+
+      ASSERT_TRUE(output.allclose(expected));
+      if (inplace) {
+        ASSERT_TRUE(input.allclose(expected));
+      }
+    }
+  }
+  {
+    auto input = torch::arange(0, 9, torch::kDouble).view({3, 3});
+    auto output = F::selu(input);
+    auto expected = F::selu(input, false);
+    ASSERT_TRUE(output.allclose(expected));
   }
 }
 
@@ -370,4 +407,24 @@ TEST_F(FunctionalTest, LogSigmoid) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
   auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+}
+
+TEST_F(FunctionalTest, Softmax) {
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = F::softmax(input, /*dim=*/1);
+  auto sum = torch::sum(torch::exp(input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::exp(input[i]) / sum[i];
+    ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
+TEST_F(FunctionalTest, PReLU) {
+  const auto x = torch::rand({42, 24}) * 200 - 100;
+  const auto w = torch::rand(24) * 200 - 100;
+  const auto y = F::prelu(x, w);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({42, 24}));
+  const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
