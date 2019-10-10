@@ -10219,7 +10219,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_multinomial_unnormalized(self, device):
         for dtype in [torch.float, torch.double]:
-            part_size = 15
+            part_size = 10
             num_samples = 2 * part_size
             # ensure [0.01 - 1.01] range
             large_part = torch.rand(part_size, dtype=dtype, device=device) + 0.01
