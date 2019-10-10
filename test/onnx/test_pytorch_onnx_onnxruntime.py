@@ -175,6 +175,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = {"test_key_in": torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x,))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_cste_script(self):
+        class MyModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.zeros(x.size(0)), torch.ones((x.size(1), x.size(0)), dtype=torch.int64)
+
+        x = torch.randn(3, 4)
+        self.run_test(MyModel(), x)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
@@ -984,6 +994,22 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randint(10, (1, 2, 3, 4))
         self.run_test(FlattenModel(), x)
+
+    def test_unbind(self):
+        class UnbindModel(torch.nn.Module):
+            def forward(self, input):
+                return input.unbind()
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel(), x)
+
+        class UnbindModel2(torch.nn.Module):
+            def forward(self, input):
+                _, out, _, _ = input.unbind(1)
+                return out
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel2(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
