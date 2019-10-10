@@ -1284,6 +1284,8 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t 
     maxval = maxval + 1;
   }
 
+  TORCH_CHECK(!(std::isinf(minval) || std::isinf(maxval)), "range of [", minval, ", ", maxval, "] is not finite");
+
   h_data = hist->data<scalar_t>();
 
   TH_TENSOR_APPLY(scalar_t, tensor,
