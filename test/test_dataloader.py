@@ -1500,7 +1500,7 @@ class TestDataLoader(TestCase):
                 return 4
 
         dtypes = {
-            #np.float64: torch.DoubleTensor,
+            # np.float64: torch.DoubleTensor,
             np.float32: torch.FloatTensor,
             np.float16: torch.HalfTensor,
             np.int64: torch.LongTensor,
@@ -1509,7 +1509,6 @@ class TestDataLoader(TestCase):
             np.int8: torch.CharTensor,
             np.uint8: torch.ByteTensor,
         }
-        
         for dt, tt in dtypes.items():
             dset = ScalarDataset(dt)
             loader = DataLoader(dset, batch_size=2)
