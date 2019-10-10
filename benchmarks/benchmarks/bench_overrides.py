@@ -18,7 +18,7 @@ def implements(torch_function):
 
 class SubTensor(Tensor):
     def __torch_function__(self, func, args=None, kwargs=None):
-        if(kwargs == None):
+        if(kwargs is None):
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS:

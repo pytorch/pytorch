@@ -46,7 +46,7 @@ class DiagonalTensor:
         return self._i * torch.eye(self._N)
 
     def __torch_function__(self, func, args=None, kwargs=None):
-        if(kwargs == None):
+        if(kwargs is None):
             kwargs = {}
         if func not in HANDLED_FUNCTIONS:
             return NotImplemented
@@ -80,8 +80,8 @@ def mm(mat1, mat2):
     return 0
 
 class SubTensor(torch.Tensor):
-    def __torch_function__(self, func, args=None, kwargs={}):
-        if(kwargs == None):
+    def __torch_function__(self, func, args=None, kwargs=None):
+        if(kwargs is None):
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS_SUB:
@@ -113,7 +113,7 @@ class SubDiagonalTensor(DiagonalTensor):
         return self._i * torch.eye(self._N)
 
     def __torch_function__(self, func, args=None, kwargs=None):
-        if(kwargs == None):
+        if(kwargs is None):
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS_SUB_DIAGONAL:
