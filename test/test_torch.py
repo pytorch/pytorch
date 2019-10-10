@@ -10219,7 +10219,7 @@ class TestTorchDeviceType(TestCase):
 
     def test_multinomial_unnormalized(self, device):
         for dtype in [torch.float, torch.double]:
-            part_size = 10
+            part_size = 15
             num_samples = 2 * part_size
             # ensure [0.01 - 1.01] range
             large_part = torch.rand(part_size, dtype=dtype, device=device) + 0.01
@@ -10227,14 +10227,12 @@ class TestTorchDeviceType(TestCase):
             large_part = large_part * 1e15
             small_part = small_part * 1e-15
             dist = torch.cat((large_part, small_part), 0)
-            with warnings.catch_warnings(record=True) as w:
-                result = torch.multinomial(dist, num_samples, replacement=False)
-                self.assertEqual(len(w), 1)
-                actual = torch.unique(result, sorted=True)
-                expected = torch.from_numpy(np.arange(0, num_samples)).to(device)
-                if actual.size(0) != expected.size(0):
-                    raise RuntimeError("actual = " + str(actual) + " expected = " + str(expected) + " dist = " + str(dist))
-                self.assertEqual(actual, expected, "non-unique indicies")
+            result = torch.multinomial(dist, num_samples, replacement=False)
+            actual = torch.unique(result, sorted=True)
+            expected = torch.from_numpy(np.arange(0, num_samples)).to(device)
+            if actual.size(0) != expected.size(0):
+                raise RuntimeError("actual = " + str(actual) + " expected = " + str(expected) + " dist = " + str(dist))
+            self.assertEqual(actual, expected, "non-unique indicies")
 
     def test_cdist_large(self, device):
         x = torch.randn(1000, 10, device=device)
