@@ -1637,11 +1637,15 @@ TEST_F(ModulesTest, PrettyPrintReLU) {
   ASSERT_EQ(c10::str(ReLU()), "torch::nn::ReLU()");
   ASSERT_EQ(c10::str(ReLU(ReLUOptions().inplace(true))),
     "torch::nn::ReLU(inplace=true)");
+  ASSERT_EQ(c10::str(ReLU(/*inplace=*/true)),
+    "torch::nn::ReLU(inplace=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintReLU6) {
   ASSERT_EQ(c10::str(ReLU6()), "torch::nn::ReLU6()");
   ASSERT_EQ(c10::str(ReLU6(ReLU6Options().inplace(true))),
+    "torch::nn::ReLU6(inplace=true)");
+  ASSERT_EQ(c10::str(ReLU6(/*inplace=*/true)),
     "torch::nn::ReLU6(inplace=true)");
 }
 
