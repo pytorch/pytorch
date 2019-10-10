@@ -130,13 +130,14 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
         }
       }
     } else {
-      AT_WARN("To calculate cumulative distribution pytorch will need to use extra memory");
+      AT_WARN("Based on provided distribution pytorch will need to use a extra memory to calculate cumulative distribution and not to lose precision");
       // We will use two Tensors cum_dist_low, cum_dist_high to hold integer and fractional parts of the cum_dist
       Tensor cum_dist_high = at::empty({n_categories}, self.options().dtype<accscalar_t>());
       Tensor cum_dist_low = at::empty({n_categories}, self.options().dtype<accscalar_t>());
-      Tensor self_copy = at::empty({n_categories}, self.options().dtype<scalar_t>());
       accscalar_t * const cum_dist_high_ptr = cum_dist_high.data_ptr<accscalar_t>();
       accscalar_t * const cum_dist_low_ptr = cum_dist_low.data_ptr<accscalar_t>();
+      // will hold a copy of provided distribution to recalculate cumulative one
+      Tensor self_copy = at::empty({n_categories}, self.options().dtype<scalar_t>());
       scalar_t * const self_copy_ptr = self_copy.data_ptr<scalar_t>();
 
       accscalar_t sum_high = 0;
