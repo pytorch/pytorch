@@ -62,6 +62,10 @@ inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
   return ret;
 }
 
+inline Tensor prelu(const Tensor& input, const Tensor& weight) {
+  return torch::prelu(input, weight);
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
