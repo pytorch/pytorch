@@ -3103,6 +3103,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_for_rocm
     def test_nccl_timeout(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         os.environ["NCCL_BLOCKING_WAIT"] = "1"
