@@ -1747,12 +1747,14 @@ class _ConstModuleList(ScriptModule):
             for key, module in modules.items():
                 if isinstance(module, torch.nn.Module):
                     module = torch.jit._recursive.recursive_script(module)
+                # Make a valid Python name
+                key = key if not key.isdigit() else '_' + key
                 self.add_module(key, module)
         else:
             for i, module in enumerate(modules):
                 if isinstance(module, torch.nn.Module):
                     module = torch.jit._recursive.recursive_script(module)
-                self.add_module(str(i), module)
+                self.add_module("_" + str(i), module)
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
