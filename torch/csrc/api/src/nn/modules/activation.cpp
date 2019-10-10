@@ -225,7 +225,7 @@ void CELUImpl::pretty_print(std::ostream& stream) const {
 // ============================================================================
 
 Tensor SigmoidImpl::forward(const Tensor& input) {
-  return sigmoid(input);
+  return torch::sigmoid(input);
 }
 
 void SigmoidImpl::reset() {}
