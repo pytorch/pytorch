@@ -392,6 +392,13 @@ def split_with_sizes(g, self, split_sizes, dim):
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
 
 
+@parse_args('v', 'i')
+def unbind(g, self, dim=0):
+    # NOTE: This conversion of this node is handled in onnx peephole pass.
+    # Due to that an additional Squeeze node needs to be inserted for each output from unbind.
+    return g.op("aten::unbind", self, axis_i=dim)
+
+
 @parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
     if dim > 1:
