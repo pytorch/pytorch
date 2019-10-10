@@ -53,7 +53,6 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
-    'javasphinx',
 ]
 
 # katex options
