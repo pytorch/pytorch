@@ -1123,6 +1123,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             # Call the function using the TorchScript interpreter
             foo(torch.ones(2, 2), torch.ones(2, 2))
 
+        .. testoutput::
+            :hide:
+
+            ...
+
     **Scripting an nn.Module**
         Scripting an ``nn.Module`` by default will compile the ``forward`` method and recursively
         compile any methods, submodules, and functions called by ``forward``. If a ``nn.Module`` only uses
