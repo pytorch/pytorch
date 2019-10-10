@@ -1023,6 +1023,20 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
   ASSERT_EQ(input2.sizes(), input2.grad().sizes());
 }
 
+TEST_F(ModulesTest, TripletMarginLoss) {
+  TripletMarginLoss loss(TripletMarginLossOptions().margin(3));
+  auto anchor = torch::tensor({{3, 3}}, torch::requires_grad());
+  auto positive = torch::tensor({{2, 2}}, torch::kFloat);
+  auto negative = torch::tensor({{0, 0}}, torch::kFloat);
+  auto output = loss->forward(anchor, positive, negative);
+  auto expected = torch::tensor({0}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
@@ -1562,6 +1576,12 @@ TEST_F(ModulesTest, PrettyPrintCosineEmbeddingLoss) {
   ASSERT_EQ(
       c10::str(CosineEmbeddingLoss(CosineEmbeddingLossOptions().margin(0.25))),
       "torch::nn::CosineEmbeddingLoss(margin=0.25)");
+}
+
+TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
+  ASSERT_EQ(
+      c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
+      "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {

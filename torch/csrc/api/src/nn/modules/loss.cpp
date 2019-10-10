@@ -83,5 +83,18 @@ Tensor CosineEmbeddingLossImpl::forward(
   return F::cosine_embedding_loss(input1, input2, target, options);
 }
 
+/ ============================================================================
+
+TripletMarginLossImpl::TripletMarginLossImpl(
+    const TripletMarginLossOptions& options_)
+    : options(options_) {}
+
+void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::TripletMarginLoss(margin=" << options.margin() << 
+            ", p=" << options.p() <<
+            ", eps=" << options.eps() << std::boolalpha <<
+            ", swap=" << options.swap() << ")";
+}
+
 } // namespace nn
 } // namespace torch
