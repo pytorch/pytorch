@@ -131,6 +131,21 @@ Tensor SoftmaxImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
+LogSoftmaxImpl::LogSoftmaxImpl(const LogSoftmaxOptions& options_)
+    : options(options_) {}
+
+void LogSoftmaxImpl::reset() {}
+
+void LogSoftmaxImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::LogSoftmax(dim=" << options.dim() << ")";
+}
+
+Tensor LogSoftmaxImpl::forward(const Tensor& input) {
+  return F::log_softmax(input, options);
+}
+
+// ============================================================================
+
 PReLUImpl::PReLUImpl(const PReLUOptions& options_) : options(options_) {
   reset();
 }

@@ -420,6 +420,17 @@ TEST_F(FunctionalTest, Softmax) {
   }
 }
 
+TEST_F(FunctionalTest, LogSoftmax) {
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = F::log_softmax(input, /*dim=*/1);
+  auto sum = torch::sum(torch::exp(input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::log(torch::exp(input[i]) / sum[i]);
+    ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
 TEST_F(FunctionalTest, PReLU) {
   const auto x = torch::rand({42, 24}) * 200 - 100;
   const auto w = torch::rand(24) * 200 - 100;
