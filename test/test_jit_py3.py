@@ -110,6 +110,8 @@ class TestScriptPy3(JitTestCase):
         FileCheck().check_not('TupleConstruct').run(foo.graph)
 
     def test_named_tuple_type_annotation(self):
+        global MyCoolNamedTuple  # see [local resolution in python]
+
         class MyCoolNamedTuple(NamedTuple):
             a : int
             b : float

@@ -12,9 +12,9 @@ namespace distributed {
 namespace rpc {
 
 // A globally unique ID to identify an RpcAgent
-struct WorkerId {
-  WorkerId(std::string name, int id)
-      : WorkerId(std::move(name), (worker_id_t)id) {
+struct WorkerInfo {
+  WorkerInfo(std::string name, int id)
+      : WorkerInfo(std::move(name), (worker_id_t)id) {
     TORCH_CHECK(
         id <= std::numeric_limits<worker_id_t>::max(),
         "RPC worker id ",
@@ -22,7 +22,8 @@ struct WorkerId {
         " out of bound of int16_t.");
   }
 
-  WorkerId(std::string name, worker_id_t id) : name_(std::move(name)), id_(id) {
+  WorkerInfo(std::string name, worker_id_t id)
+      : name_(std::move(name)), id_(id) {
     bool validSize = name_.length() < MAX_NAME_LEN && name_.length() > 0;
     bool validChar =
         std::find_if(name_.begin(), name_.end(), [](char c) {
@@ -51,9 +52,9 @@ struct WorkerId {
 // construction.
 class RpcAgent {
  public:
-  // `WorkerId` is the globally unique identifier for this RpcAgent instance. It
-  // contains a ``name_`` field and an ``id_`` field. ``name_`` is the globally
-  // unique name for this ``RpcAgent``. It is up to the ``RpcAgent``
+  // `WorkerInfo` is the globally unique identifier for this RpcAgent instance.
+  // It contains a ``name_`` field and an ``id_`` field. ``name_`` is the
+  // globally unique name for this ``RpcAgent``. It is up to the ``RpcAgent``
   // implementation to determine how to resolve names. ``id_`` is the globally
   // unique ID for this ``RpcAgent``. This should be determined by the
   // ``RpcAgent`` implementation.
@@ -61,7 +62,7 @@ class RpcAgent {
   // ``RpcAgent`` base class makes no assumption on the thread-safeness of the
   // ``RequestCallback``. ``RpcAgent`` implementations need to make sure that
   // its threading model conform to ``RequestCallback``'s requirement.
-  RpcAgent(WorkerId id, std::unique_ptr<RequestCallback> cb);
+  RpcAgent(WorkerInfo id, std::unique_ptr<RequestCallback> cb);
 
   virtual ~RpcAgent();
 
@@ -73,19 +74,20 @@ class RpcAgent {
   // when the response arrives. For other message types, the Future should be
   // ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
-      const WorkerId& to,
+      const WorkerInfo& to,
       Message&& message) = 0;
 
-  // Return a reference to the ``WorkerId`` of this RpcAgent.
+  // Return a reference to the ``WorkerInfo`` of this RpcAgent.
   // NB: not using ``c10::optional<const std::string&>`` here because we might
   // need to create a separate RPC API lib and avoid forcing all ``RpcAgent``
   // implementations to depend on libtorch.
-  const WorkerId& getWorkerId() const;
+  const WorkerInfo& getWorkerInfo() const;
 
-  // Return a reference to the ``WorkerId`` of the given ``workerName``.
-  virtual const WorkerId& getWorkerId(const std::string& workerName) const = 0;
+  // Return a reference to the ``WorkerInfo`` of the given ``workerName``.
+  virtual const WorkerInfo& getWorkerInfo(
+      const std::string& workerName) const = 0;
 
-  virtual const WorkerId& getWorkerId(worker_id_t id) const = 0;
+  virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
 
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
@@ -96,7 +98,7 @@ class RpcAgent {
   virtual void sync() = 0;
 
  protected:
-  const WorkerId workerId_;
+  const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
 };

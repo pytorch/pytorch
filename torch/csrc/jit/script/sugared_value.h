@@ -168,6 +168,13 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
       at::ArrayRef<NamedValue> attributes,
       at::ArrayRef<NamedValue> inputs,
       size_t n_binders) override;
+
+  // try to create this builtin but if it doesn't exist or the self argument
+  // cannot possibly match, then return nullptr. Use in situations where it is
+  // not clear if it is a valid builtin
+  static std::shared_ptr<BuiltinFunction> tryCreate(
+      Symbol symbol,
+      c10::optional<NamedValue> self);
 };
 
 struct TORCH_API BuiltinModule : public SugaredValue {
@@ -242,9 +249,16 @@ struct TORCH_API NamedTupleConstructor : public SugaredValue {
 };
 
 struct FunctionValue : public SugaredValue {
-  FunctionValue(Function* callee) : callee_(std::move(callee)) {}
+  FunctionValue(Function* callee) : callees_({std::move(callee)}) {}
   FunctionValue(const StrongFunctionPtr& p)
-      : callee_(p.function_), cu_(p.cu_) {}
+      : callees_({p.function_}), cu_(p.cu_) {}
+  FunctionValue(const std::vector<StrongFunctionPtr>& callees) {
+    for (const StrongFunctionPtr& callee : callees) {
+      cu_ = cu_ ? cu_ : callee.cu_;
+      TORCH_INTERNAL_ASSERT(callee.cu_ == cu_);
+      callees_.push_back(callee.function_);
+    }
+  }
 
   std::string kind() const override {
     return "function";
@@ -256,16 +270,20 @@ struct FunctionValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    callee_->ensure_defined();
-    MatchedSchema match =
-        matchSchema(callee_->getSchema(), loc, *f.graph(), inputs, attributes);
-    Value* output = f.graph()->insertFunctionCall(callee_, match);
+    std::vector<const FunctionSchema*> schemas;
+    for (Function* callee : callees_) {
+      callee->ensure_defined();
+      schemas.push_back(&callee->getSchema());
+    }
+    auto match = matchSchemas(schemas, loc, *f.graph(), inputs, attributes);
+    Value* output =
+        f.graph()->insertFunctionCall(callees_[match.first], match.second);
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);
   }
 
  private:
-  Function* callee_;
+  std::vector<Function*> callees_;
   // TODO holding this thing is creepy
   std::shared_ptr<CompilationUnit> cu_;
 };
@@ -283,10 +301,12 @@ struct TORCH_API ClosureValue : public SugaredValue {
   Value* value_;
 };
 
-// defines how a method obtained from a module behaves in script
+// defines how a method obtained from a module/class/interface behaves in script
 struct MethodValue : public SugaredValue {
+  MethodValue(Value* self, std::vector<std::string> method_names)
+      : self_(std::move(self)), method_names_(std::move(method_names)) {}
   MethodValue(Value* self, std::string method_name)
-      : self_(std::move(self)), method_name_(std::move(method_name)) {}
+      : MethodValue(self, std::vector<std::string>({method_name})) {}
 
   std::string kind() const override {
     return "method";
@@ -300,28 +320,31 @@ struct MethodValue : public SugaredValue {
       size_t n_binders) override {
     std::vector<NamedValue> inputsWithSelf = {self_};
     inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
-    const FunctionSchema* schema = nullptr;
-    if (auto class_type = self_->type()->cast<ClassType>()) {
-      auto method = class_type->getMethod(method_name_);
-      TORCH_INTERNAL_ASSERT(method);
-      method->ensure_defined();
-      schema = &method->getSchema();
-    } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
-      schema = interface_type->getMethod(method_name_);
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          false, "method constructed that is not a class or interface");
+    std::vector<const FunctionSchema*> schemas;
+    for (const std::string& method_name : method_names_) {
+      if (auto class_type = self_->type()->cast<ClassType>()) {
+        auto method = class_type->getMethod(method_name);
+        TORCH_INTERNAL_ASSERT(method);
+        method->ensure_defined();
+        schemas.push_back(&method->getSchema());
+      } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
+        schemas.push_back(interface_type->getMethod(method_name));
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "method constructed that is not a class or interface");
+      }
     }
-    MatchedSchema match =
-        matchSchema(*schema, loc, *f.graph(), inputsWithSelf, attributes);
-    Value* output = f.graph()->insertMethodCall(method_name_, match);
+    auto match =
+        matchSchemas(schemas, loc, *f.graph(), inputsWithSelf, attributes);
+    Value* output =
+        f.graph()->insertMethodCall(method_names_[match.first], match.second);
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);
   }
 
  private:
   Value* self_;
-  std::string method_name_;
+  std::vector<std::string> method_names_;
 };
 
 struct TORCH_API PrintValue : public SugaredValue {
@@ -386,53 +409,27 @@ struct TORCH_API MagicMethod : public SugaredValue {
   std::string desugared_name_;
 };
 
-// These SugaredValues have special handling in the compiler because they
-// change the normal evalution order of the expression they participate in.
-// They are exposed here so that the python frontend can inject them
-// when it sees the equivalent thing in python
+// things that look like function applications, but
+// perform non-standard evaluation are represented
+// with SpecialFormValues, e.g.
+//   isinstance(x, int)
+//   fork(fn)
+//   annotate(int, 3)
+// The implementation of each value is handled by a case inside emitApplyExpr
+struct TORCH_API SpecialFormValue : public SugaredValue {
+  SpecialFormValue(Symbol form) : form_(form) {}
+  std::string kind() const override {
+    return form_.toUnqualString();
+  }
+  Symbol form() const {
+    return form_;
+  }
+  static std::shared_ptr<SpecialFormValue> create(Symbol form) {
+    return std::make_shared<SpecialFormValue>(form);
+  }
 
-struct TORCH_API ForkValue : public SugaredValue {
-  ForkValue() = default;
-  std::string kind() const override {
-    return "fork";
-  }
-};
-struct TORCH_API AnnotateValue : public SugaredValue {
-  AnnotateValue() = default;
-  std::string kind() const override {
-    return "annotate";
-  }
-};
-
-struct TORCH_API UninitializedValue : public SugaredValue {
-  UninitializedValue() = default;
-  std::string kind() const override {
-    return "uninitialized";
-  }
-};
-
-// matched against for special handling of getattr expressions
-struct TORCH_API GetAttrValue : SugaredValue {
-  GetAttrValue() = default;
-  std::string kind() const override {
-    return "getattr";
-  }
-};
-
-// matched against for special handling of isinstance expressions
-struct TORCH_API IsInstanceValue : SugaredValue {
-  IsInstanceValue() = default;
-  std::string kind() const override {
-    return "isinstance";
-  }
-};
-
-// matched against for special handling of tuple() call
-struct TORCH_API TupleCallValue : SugaredValue {
-  TupleCallValue() = default;
-  std::string kind() const override {
-    return "tuple";
-  }
+ private:
+  Symbol form_;
 };
 
 // matched against for special handling of range expressions
@@ -453,15 +450,6 @@ struct TORCH_API RangeValue : SugaredValue {
   // derivation nodes to simplify the graph and enable more possible
   // optimizations
   bool has_only_end_;
-};
-
-// matched against for special handling of iterables like zip(), enumerate()
-struct TORCH_API IterableValue : SugaredValue {
-  IterableValue(Symbol symbol) : symbol_(symbol) {}
-  std::string kind() const override {
-    return "iterable";
-  }
-  Symbol symbol_;
 };
 
 // Specialized Tree structure to matched against for special handling
@@ -499,28 +487,6 @@ struct TORCH_API IterableTree : SugaredValue {
 
  private:
   std::vector<SugaredValuePtr> children_;
-};
-
-// This represents the "__new__" method on classes, which can't be a MethodValue
-// because it takes a ClassValue as input.
-// So if we see:
-//   Foo.__new__(Foo)
-// Foo is a ClassValue, calling `attr("__new__")` will return a ClassNewMethod.
-struct TORCH_API ClassNewMethod : public SugaredValue {
-  ClassNewMethod(ClassTypePtr type) : type_(type) {}
-  std::string kind() const override {
-    return "class.__new__";
-  }
-
-  std::shared_ptr<SugaredValue> createObject(
-      const SourceRange& loc,
-      Function& m) {
-    auto& g = *m.graph();
-    auto createNode = g.insertNode(g.createObject(type_));
-    return std::make_shared<SimpleValue>(createNode->output());
-  }
-
-  ClassTypePtr type_;
 };
 
 static inline std::vector<Value*> toValues(
