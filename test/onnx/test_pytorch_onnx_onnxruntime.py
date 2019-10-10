@@ -303,22 +303,26 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.MaxPool1d(2, stride=1, dilation=2)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
-
+    
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool(self):
         model = torch.nn.AvgPool1d(2, stride=1)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_1d_ceil(self):
         model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_2d_ceil(self):
         model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
@@ -355,7 +359,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_slice_neg_large(self):
         class NegSlice(torch.nn.Module):
             def forward(self, x):
-                return x[:, :, :, :, -3]
+                return x[:, :, -3:-1, :, -1]
 
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)

@@ -394,17 +394,16 @@ def split_with_sizes(g, self, split_sizes, dim):
 
 @parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
-    if dim > 1:
-        # TODO: this is a temporary hack because of the implementation details
-        # of Gather in caffe2. We need to change this as soon as possible.
-        # TODO: this breaks if index == -1
-        index_val = _parse_arg(index, 'i')
-        slice_node = sym_help._slice_helper(g, self, axes=[dim],
-                                            starts=[index_val], ends=[index_val + 1])
+    index = sym_help._maybe_get_scalar(index)
+    if (not sym_help._is_value(index)) and (index < 0):
+        if index == -1:
+            end_index = 9223372036854775807
+        else:
+            end_index = index + 1
+        slice_node = sym_help._slice_helper(g, self, axes=[dim], starts=[index], ends=[end_index])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
-
 
 def squeeze(g, self, dim=None):
     if dim is None:
