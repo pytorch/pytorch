@@ -3400,6 +3400,7 @@ def foo(x):
                 cu.define(full)
 
     def test_namedtuple_python(self):
+        global MyTuple, MyMod  # see [local resolution in python]
         MyTuple = namedtuple('MyTuple', ['a'])
 
         @torch.jit.unused
@@ -3982,7 +3983,8 @@ def foo(x):
         bytesio = io.BytesIO(buffer)
         scripted = torch.jit.load(bytesio)
 
-        fc = FileCheck().check(':6:11')
+        _, lineno = inspect.getsourcelines(Scripted)
+        fc = FileCheck().check(':{}'.format(lineno + 3))
         fc.run(scripted.graph)
         fc.run(str(scripted.graph))
 
@@ -4020,6 +4022,20 @@ def foo(xyz):
 
         with self.assertRaisesRegex(RuntimeError, 'test_jit.py:{}'.format(lineno + 3)):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
+
+    def test_serialized_source_ranges_graph(self):
+
+        class FooTest3(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, w):
+                return torch.mm(x, w.t())
+
+        ft = FooTest3()
+        loaded = self.getExportImportCopy(ft)
+        _, lineno = inspect.getsourcelines(FooTest3)
+
+        fc = FileCheck().check('test_jit.py:{}'.format(lineno + 3))
+        fc.run(loaded.graph)
 
     def test_serialized_source_ranges2(self):
 
@@ -6820,6 +6836,9 @@ a")
                 def __init__(self, a):
                     # type: (Tuple[int,Any]) -> None
                     self.a = a
+
+                def hi(self):
+                    pass
 
     def test_isinstance(self):
         # test isinstance operator for static type checking
@@ -15024,6 +15043,7 @@ a")
         self.checkScript(fn, ())
 
     def test_named_tuple_redefine(self):
+        global _1, _2
         _1 = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
         _2 = namedtuple('GoogLeNetOutputs', ['different'])
 
@@ -15034,6 +15054,7 @@ a")
                 return x
 
     def test_named_tuple_py2(self):
+        global _GoogLeNetOutputs  # see [local resolution in python]
         _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
 
         @torch.jit.script
@@ -15048,6 +15069,7 @@ a")
         self.assertEqual(out.aux_logits1, vals[2])
 
     def test_named_tuple_good_error(self):
+        global _GoogLeNetOutputs  # see [local resolution in python]
         _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
 
         @torch.jit.script
@@ -15388,6 +15410,32 @@ class TestRecursiveScript(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "has not been initialized"):
             torch.jit.script(M())
+
+    def test_script_after_eval(self):
+        class M(nn.Module):
+            def forward(self):
+                if self.training:
+                    return 2
+                else:
+                    return 0
+
+        m = M()
+        sm1 = torch.jit.script(m)
+        m.eval()
+        sm2 = torch.jit.script(m)
+
+        # m is in eval mode, training should be False
+        self.assertFalse(m.training)
+
+        # sm1 was created while m had training = True
+        self.assertTrue(sm1.training)
+        self.assertEqual(sm1.training, sm1._c._get_attribute('training'))
+        self.assertEqual(sm1(), 2)
+
+        # sm2 was created after m was eval'ed
+        self.assertFalse(sm2.training)
+        self.assertEqual(sm2.training, sm2._c._get_attribute('training'))
+        self.assertEqual(sm2(), 0)
 
     def test_module_name(self):
         class MyModule(torch.nn.Module):
@@ -19368,6 +19416,7 @@ class TestClassType(JitTestCase):
                         self.attr = x
 
     def test_class_type_as_param(self):
+        global FooTest  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
         class FooTest(object):
             def __init__(self, x):
@@ -19510,6 +19559,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(2 * input, output)
 
     def test_python_interop(self):
+        global Foo   # see [local resolution in python]
         @torch.jit.script  # noqa: B903
         class Foo(object):
             def __init__(self, x, y):
@@ -19536,6 +19586,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(y, f2.y)
 
     def test_class_specialization(self):
+        global Foo  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
         class Foo(object):
             def __init__(self, x, y):
@@ -19560,6 +19611,7 @@ class TestClassType(JitTestCase):
         FileCheck().check_count("Double(*, *) = prim::GetAttr", 4).run(graphstr)
 
     def test_class_sorting(self):
+        global Foo  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
         class Foo(object):
             def __init__(self, x):
@@ -19673,6 +19725,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(3 * input, output)
 
     def test_interface(self):
+        global Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2
         @torch.jit.script
         class Foo(object):
             def __init__(self):
@@ -19834,6 +19887,7 @@ class TestClassType(JitTestCase):
         # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
+        global Foo, MyClass  # see [local resolution in python]
         @torch.jit.script
         class Foo(object):
             def __init__(self, x):
@@ -19989,6 +20043,7 @@ class TestClassType(JitTestCase):
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
 
     def test_cast_overloads(self):
+        global Foo  # see [local resolution in python]
         @torch.jit.script
         class Foo(object):
             def __init__(self, val):
