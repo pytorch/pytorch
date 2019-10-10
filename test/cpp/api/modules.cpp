@@ -994,6 +994,20 @@ TEST_F(ModulesTest, HingeEmbeddingLoss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, MultiMarginLoss) {
+  auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
+  MultiMarginLoss loss(MultiMarginLossOptions().margin(2).weight(weight));
+  auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::requires_grad());
+  auto target = torch::tensor({2, 1, 0}, torch::kLong);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({0.305556}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineEmbeddingLoss) {
   CosineEmbeddingLoss cos(CosineEmbeddingLossOptions().margin(0.5));
   auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}}, torch::requires_grad());
@@ -1173,6 +1187,46 @@ TEST_F(ModulesTest, Softmax) {
     auto expected = torch::exp(input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
+}
+
+TEST_F(ModulesTest, PReLU) {
+  const auto num_parameters = 42;
+  const auto init = 0.42;
+
+  PReLU model {PReLUOptions().num_parameters(num_parameters).init(init)};
+
+  ASSERT_EQ(model->weight.sizes(), torch::IntArrayRef({num_parameters}));
+  ASSERT_TRUE(torch::allclose(model->weight,
+              torch::full(num_parameters, init)));
+
+  const auto x = torch::rand({100, num_parameters}) * 200 - 100;
+  const auto y = model(x);
+  const auto s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), x.ndimension());
+  ASSERT_EQ(y.sizes(), x.sizes());
+  const auto y_exp = (x < 0) * model->weight * x  + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, ReLU) {
+  const auto size = 3;
+  ReLU model;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size}).set_requires_grad(true);
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  auto y_exp = (x < 0) * 0 + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {
@@ -1465,4 +1519,18 @@ TEST_F(ModulesTest, PrettyPrintLogSigmoid) {
 
 TEST_F(ModulesTest, PrettyPrintSoftmax) {
   ASSERT_EQ(c10::str(Softmax(SoftmaxOptions(1))), "torch::nn::Softmax(dim=1)");
+}
+
+TEST_F(ModulesTest, PrettyPrintPReLU) {
+  ASSERT_EQ(c10::str(PReLU()), "torch::nn::PReLU(num_parameters=1)");
+  ASSERT_EQ(c10::str(PReLU(PReLUOptions().num_parameters(42))),
+            "torch::nn::PReLU(num_parameters=42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintReLU) {
+  ASSERT_EQ(c10::str(ReLU()), "torch::nn::ReLU()");
+  ASSERT_EQ(c10::str(ReLU(ReLUOptions().inplace(true))),
+    "torch::nn::ReLU(inplace=true)");
+  ASSERT_EQ(c10::str(ReLU(/*inplace=*/true)),
+    "torch::nn::ReLU(inplace=true)");
 }
