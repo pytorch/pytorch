@@ -1472,7 +1472,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.randn(16, 3, 256, 256)
         self.run_model_test(ReduceSumMultipleAxes(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
- 
+
     # InstanceNorm model (used in the subgraph) includes unused weights, 
     # so skip this in TestCaffe2BackendEmbed
     @skipIfEmbed
