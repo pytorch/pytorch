@@ -849,7 +849,9 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_arange_end(self):
+    @skipIfUnsupportedOpsetVersion([11])
+    # Skip script model: arange uses scalar type casting pass (supported only for tracing)
+    def test_arange_end_script(self):
         class ArangeScript(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, a):
@@ -859,44 +861,55 @@ class TestONNXRuntime(unittest.TestCase):
         outputs = ArangeScript()(x)
         self.run_test(ArangeScript(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_end(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, a):
                 return torch.arange(a.size(0), dtype=torch.float).view(-1, 1) + a
 
+        x = torch.randn(3, 4, requires_grad=True)
         self.run_test(ArangeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedOpsetVersion([11])
+    # Skip script model: arange uses scalar type casting pass (supported only for tracing)
+    def test_arange_start_end_script(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        self.run_test(ArangeScript(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_start_end(self):
-        class ArangeScript(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, a):
-                return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
-
-        x = torch.randn(3, 4, requires_grad=True)
-        outputs = ArangeScript()(x)
-        self.run_test(ArangeScript(), x)
-
         class ArangeModel(torch.nn.Module):
             def forward(self, a):
                 return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
 
+        x = torch.randn(3, 4, requires_grad=True)
         self.run_test(ArangeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_arange_start_end_step(self):
+    @skipIfUnsupportedOpsetVersion([11])
+    # Skip script model: arange uses scalar type casting pass (supported only for tracing)
+    def test_arange_start_end_step_script(self):
         class ArangeScript(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, a):
                 return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
 
         x = torch.randn(3, 4, requires_grad=True)
-        outputs = ArangeScript()(x)
         self.run_test(ArangeScript(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_arange_start_end_step(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, a):
                 return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
 
+        x = torch.randn(3, 4, requires_grad=True)
         self.run_test(ArangeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
