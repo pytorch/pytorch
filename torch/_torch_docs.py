@@ -3899,14 +3899,14 @@ is called the order of the polygamma function.
 
 Args:
     n (int): the order of the polygamma function
-    {input}
-    {out}
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
 
 Example::
     >>> a = torch.tensor([1, 0.5])
     >>> torch.polygamma(1, a)
     tensor([1.64493, 4.9348])
-""".format(**common_args))
+""")
 
 add_docstr(torch.pow,
            r"""
