@@ -478,6 +478,7 @@
               echo 'Error: xcodebuild is not installed.'
               exit 1
             fi 
+            echo ${IOS_DEV_TEAM_ID}
             ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
             if ! [ "$?" -eq "0" ]; then
               echo 'xcodebuild failed!'
