@@ -565,6 +565,7 @@ TEST_F(FunctionalTest, ReLUDefaultOptions) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
 TEST_F(FunctionalTest, ReLU6) {
