@@ -522,7 +522,7 @@ std::string Module::dump_to_str(
   for (const auto& p : get_modules()) {
     // We do level + 2, because one level of indentation comes from 'submodules'
     // scope and the other one goes from a specific submodule we're printing.
-    ss << submodule.dump_to_str(
+    ss << p.second.dump_to_str(
         print_method_bodies, print_attr_values, print_param_values, level + 2);
   }
   ss << "  }" << std::endl;
