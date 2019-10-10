@@ -136,7 +136,6 @@ class TORCH_API LogSigmoidImpl : public torch::nn::Cloneable<LogSigmoidImpl> {
 
 TORCH_MODULE(LogSigmoid);
 
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softmax ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the Softmax function.
@@ -158,6 +157,31 @@ class TORCH_API SoftmaxImpl : public torch::nn::Cloneable<SoftmaxImpl> {
 };
 
 TORCH_MODULE(Softmax);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the PReLU function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.PReLU to learn
+/// about the exact behavior of this module.
+class TORCH_API PReLUImpl : public torch::nn::Cloneable<PReLUImpl> {
+ public:
+  explicit PReLUImpl(const PReLUOptions& options_ = {});
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `PReLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  PReLUOptions options;
+
+  /// The learned weight.
+  Tensor weight;
+};
+
+TORCH_MODULE(PReLU);
 
 } // namespace nn
 } // namespace torch

@@ -52,6 +52,7 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
     'sphinxcontrib.katex',
+    'sphinx.ext.autosectionlabel',
 ]
 
 # katex options
