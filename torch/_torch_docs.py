@@ -3884,6 +3884,30 @@ Args:
 
 """)
 
+add_docstr(torch.polygamma,
+           r"""
+polygamma(n, input, out=None) -> Tensor
+
+Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`, where :attr:`n \geq 0`
+is called the order of the polygamma function.
+
+.. math::
+    \psi^{(n)}(x) = \frac{d}{dx^{(n)}} \psi(x)
+
+.. note::
+    This function is not implemented for :math:`n \geq 2`.
+
+Args:
+    n (int): the order of the polygamma function
+    {input}
+    {out}
+
+Example::
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.polygamma(1, a)
+    tensor([1.64493, 4.9348])
+""".format(**common_args))
+
 add_docstr(torch.pow,
            r"""
 .. function:: pow(input, exponent, out=None) -> Tensor
