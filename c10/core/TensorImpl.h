@@ -815,7 +815,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
-  virtual void set_allow_tensor_metadata_change(bool value) {
+  void set_allow_tensor_metadata_change(bool value) {
     allow_tensor_metadata_change_ = value;
   }
 
@@ -823,7 +823,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
-  virtual bool allow_tensor_metadata_change() const {
+  bool allow_tensor_metadata_change() const {
     return allow_tensor_metadata_change_;
   }
 
