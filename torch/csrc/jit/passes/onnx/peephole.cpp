@@ -587,24 +587,23 @@ static void fuseSplitListUnpack(Block* b) {
     for (auto* child_block : it->blocks()) {
       fuseSplitListUnpack(child_block);
     }
-    if (it->kind() == prim::ListUnpack) {
-      Node* input_node = it->input()->node();
-			if (input_node->kind() == onnx::Split) {
-        auto origSplitNode = it->inputs().at(0)->node();
-        Node* splitNode =
-            b->owningGraph()->create(it->inputs().at(0)->node()->kind(), it->outputs().size());
-        for (size_t i = 0; i < splitNode->outputs().size(); ++i) {
-          splitNode->outputs()[i]->copyMetadata(it->outputs()[i]);
-        }
-        splitNode->copyAttributes(*origSplitNode);
-        splitNode->insertBefore(origSplitNode);
-        splitNode->addInput(origSplitNode->inputs().at(0));
-        it->replaceAllUsesWith(splitNode);
-        it->removeAllInputs();
-        origSplitNode->destroy();
-        it.destroyCurrent();
-        continue;
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == onnx::Split) {
+      auto origSplitNode = it->input()->node();
+
+      Node* splitNode =
+        b->owningGraph()->create(onnx::Split, it->outputs().size());
+      for (size_t i = 0; i < splitNode->outputs().size(); ++i) {
+        splitNode->outputs()[i]->copyMetadata(it->outputs()[i]);
       }
+      splitNode->copyAttributes(*origSplitNode);
+      splitNode->insertBefore(origSplitNode);
+      splitNode->addInput(origSplitNode->inputs().at(0));
+      it->replaceAllUsesWith(splitNode);
+      it->removeAllInputs();
+      origSplitNode->destroy();
+      it.destroyCurrent();
+      continue;
     }
   }
 }
@@ -660,14 +659,12 @@ static void fuseListConstructListUnpack(Block *b) {
     for (auto* child_block : it->blocks()) {
       fuseListConstructListUnpack(child_block);
     }
-    if (it->kind() == prim::ListUnpack) {
-      Node* input_node = it->input()->node();
-	    if (input_node->kind() == prim::ListConstruct) {
-	      for (size_t i = 0; i < it->outputs().size(); i++) {
-	        auto output = it->outputs().at(i);
-	        output->replaceAllUsesWith(input_node->inputs().at(i));
-	      }
-	    }
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == prim::ListConstruct) {
+      for (size_t i = 0; i < it->outputs().size(); i++) {
+        auto output = it->outputs().at(i);
+        output->replaceAllUsesWith(it->input()->node()->inputs().at(i));
+      }
     }
   }
 }
