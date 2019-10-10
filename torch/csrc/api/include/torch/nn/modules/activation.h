@@ -168,7 +168,6 @@ class TORCH_API LogSoftmaxImpl : public torch::nn::Cloneable<LogSoftmaxImpl> {
   explicit LogSoftmaxImpl(int64_t dim) : LogSoftmaxImpl(LogSoftmaxOptions(dim)) {}
   explicit LogSoftmaxImpl(const LogSoftmaxOptions& options_);
 
-
   Tensor forward(const Tensor& input);
 
   void reset() override;
