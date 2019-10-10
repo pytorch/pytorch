@@ -590,6 +590,10 @@ static void fuseListUnpack(Block* b) {
     }
     if (it->kind() == prim::ListUnpack) {
       Node* input_node = it->input()->node();
+      // This is a temporary fix. For ops such as meshgrid where input
+      // is a list, we need unpack the list to create the subgraph. 
+      // Elements are then packed to a new list with onnx::ListConstruct.
+      // Packing and unpacking is handled in the pass for now.
       if (input_node->kind() == prim::ListConstruct) {
         for (size_t i = 0; i < it->outputs().size(); i++) {
           auto output = it->outputs().at(i);
