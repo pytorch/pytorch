@@ -364,10 +364,9 @@ TEST_F(FunctionalTest, LogSigmoid) {
 TEST_F(FunctionalTest, Normalize) {
   const auto expected = torch::tensor(
     {{{0.0000, 0.1000, 0.2000, 0.3000, 0.4000},
-      {0.1429, 0.1714, 0.2000, 0.2286, 0.2571}}}, torch::requires_grad().dtype(torch::kFloat64));
+      {0.1429, 0.1714, 0.2000, 0.2286, 0.2571}}}, torch::requires_grad().dtype(torch::kFloat));
   { // Test #1 
-    auto input = torch::arange(10, torch::requires_grad().dtype(torch::kFloat64));
-    input.resize_({1, 2, 5});
+    auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat).requires_grad(true));
     auto norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
     
     // reduce to scalar to call .backward()
@@ -375,19 +374,19 @@ TEST_F(FunctionalTest, Normalize) {
     s.backward();
 
     ASSERT_EQ(s.ndimension(), 0);
-    ASSERT_EQ(input.grad().numel(), 10)
-    ASSERT_TRUE(torch::allclose(norm, expected))
+    ASSERT_EQ(input.grad().numel(), 10);
+    ASSERT_TRUE(torch::allclose(norm, expected));
   }
 
   { // Test #2 Check with non-null output parameter
-    auto input = torch::arange(10, torch::requires_grad().dtype(torch::kFloat64)).reshape({1,2,5});
-    auto output = torch::randn({1,2,5});
+    auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat));
+    auto output = torch::randn({1,2,5}, torch::dtype(torch::kFloat));
     F::normalize(input, NormalizeOptions().dim(-2), output);
     
-    ASSERT_TRUE(torch::allclose(output, expected))
+    ASSERT_TRUE(torch::allclose(output, expected));
   }
   
-  { // Test #3 Base of scalar tensor
+  { // Test #3 Base case of scalar tensor
     auto input = torch::randn({}, torch::requires_grad());
     torch::Tensor norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
     norm.backward();

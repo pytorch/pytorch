@@ -14,8 +14,7 @@ inline Tensor normalize(
     if (out == c10::nullopt) {
       auto denom = input.norm(options.p(), options.dim(), true).clamp_min(options.eps()).expand_as(input);
       return input / denom;
-    } 
-    else {
+    } else {
       auto denom = input.norm(options.p(), options.dim(), true).clamp_min(options.eps()).expand_as(input);
       return torch::div_out(*out, input, denom);
     }
