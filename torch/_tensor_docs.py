@@ -1821,6 +1821,20 @@ Example:
     torch.Size([5, 2, 3])
 """)
 
+add_docstr_all('polygamma',
+               r"""
+polygamma(n) -> Tensor
+
+See :func:`torch.polygamma`
+""")
+
+add_docstr_all('polygamma_',
+               r"""
+polygamma_(n) -> Tensor
+
+In-place version of :meth:`~Tensor.polygamma`
+""")
+
 add_docstr_all('pow',
                r"""
 pow(exponent) -> Tensor
