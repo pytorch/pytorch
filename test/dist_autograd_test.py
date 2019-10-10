@@ -77,9 +77,13 @@ class DistAutogradTest(object):
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
 
-            # no worker ids should be recorded yet.
+            # Ensure that the destination workerId is recorded on this context.
             worker_ids = ctx._known_worker_ids()
             self.assertEqual(len(worker_ids), 1)
+            self.assertEqual(dst_rank, worker_ids[0])
+            # TODO why not
+            # dest_worker = rpc.get_worker_info("worker{}".format(dst_rank))
+            # self.assertEqual(worker_ids[0], dest_worker.id_)
 
 
             # Retrieve the next functions in the graph.
@@ -131,6 +135,7 @@ class DistAutogradTest(object):
             )
             self.assertEqual(next_funcs[0][0], next_funcs[1][0])
 
+
         # autograd context should be cleaned up by now.
         with self.assertRaises(RuntimeError):
             ctx = dist_autograd._retrieve_context(context_id)
@@ -165,3 +170,26 @@ class DistAutogradTest(object):
                     self.assertEqual(tensors[i], next_funcs[i][0].variable)
                 else:
                     self.assertIsNone(next_funcs[i][0])
+
+            # Verify that the worker id has been recorded in the context
+            ctx = dist_autograd._current_context()
+            worker_ids = ctx._known_worker_ids()
+            self.assertEqual(len(worker_ids), 1)
+            self.assertEqual(worker_ids[0], dst_rank)
+
+    @dist_init
+    def test_worker_ids_recorded(self):
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=True)
+            t2 = torch.zeros(3, 3, requires_grad=True)
+            for dst_rank in dst_ranks:
+                ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+                rpc.rpc_sync(
+                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
+                )
+            # all worker_ids of dst_ranks should be recorded
+            ctx = dist_autograd._current_context()
+            worker_ids = ctx._known_worker_ids()
+            self.assertEqual(len(worker_ids), len(dst_ranks))
+            self.assertEqual(set(worker_ids), dst_ranks)
