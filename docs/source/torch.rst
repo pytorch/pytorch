@@ -52,6 +52,8 @@ Creation Ops
 .. autofunction:: empty_strided
 .. autofunction:: full
 .. autofunction:: full_like
+.. autofunction:: quantize_per_tensor
+.. autofunction:: quantize_per_channel
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -359,6 +361,3 @@ BLAS and LAPACK Operations
 Utilities
 ----------------------------------
 .. autofunction:: compiled_with_cxx11_abi
-.. autofunction:: result_type
-.. autofunction:: can_cast
-.. autofunction:: promote_types
