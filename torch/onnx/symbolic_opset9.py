@@ -1970,6 +1970,9 @@ def gelu(g, self):
 
 @parse_args('v', 'i', 'v', 'v', 'f', 'i')
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, weight, bias, num_groups_i=num_groups,	
+                eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
     input_sizes = input.type().sizes()
     shape = [0, num_groups, -1]
     input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(shape)))
