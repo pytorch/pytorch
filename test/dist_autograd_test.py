@@ -3,10 +3,9 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import time
 import unittest
 
-import six
 import torch
-import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
+import torch.distributed.rpc as rpc
 from dist_utils import INIT_METHOD_TEMPLATE, dist_init
 
 
@@ -22,7 +21,7 @@ def _set_rpc_done(context_id):
 
 
 @unittest.skipIf(
-    not six.PY3, "Pytorch distributed autograd package " "does not support python2"
+    not torch._six.PY3, "Pytorch distributed autograd package " "does not support python2"
 )
 class DistAutogradTest(object):
     @property
@@ -67,8 +66,8 @@ class DistAutogradTest(object):
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = dist.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
-            dist.rpc_sync(
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+            rpc.rpc_sync(
                 "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
             )
 
@@ -143,7 +142,7 @@ class DistAutogradTest(object):
             tensors = []
             for i in range(num_tensors):
                 tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
-            ret = dist.rpc_sync(
+            ret = rpc.rpc_sync(
                 "worker{}".format(dst_rank), torch.stack, args=(tensors,)
             )
             self.assertEqual(torch.stack(tensors), ret)

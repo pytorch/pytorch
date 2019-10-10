@@ -9,6 +9,7 @@ import subprocess
 import glob
 
 import common_utils as common
+from common_utils import default_floating_dtype
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
@@ -65,6 +66,7 @@ class TestCppExtension(common.TestCase):
         z = cpp_extension.sigmoid_add(x, y)
         self.assertEqual(z, x.sigmoid() + y.sigmoid())
 
+    @default_floating_dtype(torch.double)
     def test_extension_module(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
         weights = torch.rand(8, 4)
@@ -72,6 +74,7 @@ class TestCppExtension(common.TestCase):
         result = mm.forward(weights)
         self.assertEqual(expected, result)
 
+    @default_floating_dtype(torch.double)
     def test_backward(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
         weights = torch.rand(8, 4, requires_grad=True)
@@ -474,6 +477,7 @@ class TestCppExtension(common.TestCase):
 
     @dont_wipe_extensions_build_folder
     @common.skipIfRocm
+    @default_floating_dtype(torch.double)
     def test_cpp_frontend_module_has_same_output_as_python(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
