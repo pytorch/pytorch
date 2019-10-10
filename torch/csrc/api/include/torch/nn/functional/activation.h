@@ -81,7 +81,7 @@ inline Tensor relu6(Tensor& input, const ReLU6Options& options = {}) {
 }
 
 inline Tensor rrelu(Tensor& input, const RReLUOptions& options = {},
-                    bool training=false) {
+                    bool training = false) {
   if (options.inplace()) {
     return torch::rrelu_(input, options.lower(), options.upper(), training);
   } else {
