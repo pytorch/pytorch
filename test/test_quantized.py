@@ -402,6 +402,7 @@ class TestQuantizedOps(TestCase):
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
+        assume(iH > kernel and iW > kernel) # Reject examples where image is smaller than kernel
         oH = pool_output_shape(iH, kernel, padding, stride, dilation)
         assume(oH > 0)
         oW = pool_output_shape(iW, kernel, padding, stride, dilation)
@@ -456,6 +457,7 @@ class TestQuantizedOps(TestCase):
         # Check constraints
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
+        assume(iH > kernel and iW > kernel) # Reject examples where image is smaller than kernel
         oH = pool_output_shape(iH, kernel, padding, stride, dilation)
         assume(oH > 0)
         oW = pool_output_shape(iW, kernel, padding, stride, dilation)
