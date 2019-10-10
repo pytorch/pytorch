@@ -1,8 +1,5 @@
 #include <torch/nn/modules/loss.h>
-<<<<<<< HEAD
-=======
-using namespace std
->>>>>>> Add C++ Frontend - triplet-margin-loss
+
 namespace F = torch::nn::functional;
 
 namespace torch {
@@ -45,19 +42,52 @@ void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::TripletMarginLoss(margin=" << options.margin() << 
             ", p=" << options.p() <<
             ", eps=" << options.eps() << std::boolalpha <<
-<<<<<<< HEAD
-            ", swap=" << options.swap() <<
-=======
-            ", swap=" <<options.swap() <<
->>>>>>> Add C++ Frontend - triplet-margin-loss
+            ", swap=" << options.swap() <<  << ")";
+}
+
+// ============================================================================
+
+MultiMarginLossImpl::MultiMarginLossImpl(
+    const MultiMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
+    : options(options_) {
+      reset();
+    }
+
+void MultiMarginLossImpl::reset() {
+  TORCH_CHECK((options.p() == 1) || (options.p() == 2), "only p == 1 and p == 2 supported");
+  TORCH_CHECK(!options.weight().defined() || options.weight().dim() == 1);
+
+  register_buffer("weight", options.weight());
+}
+
+void MultiMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::MultiMarginLoss(p=" << options.p() << 
+            ", margin=" << options.margin() <<
+            ", weight=" << options.weight() <<
             ", reduction=" << options.reduction() << ")";
 }
 
-Tensor TripletMarginLossImpl::forward(
-    const Tensor& anchor,
-    const Tensor& positive,
-    const Tensor& negative) {
-  return F::triplet_margin_loss(anchor, positive, negative, options);
+Tensor MultiMarginLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+  return F::multi_margin_loss(input, target, options);
+}
+
+// ============================================================================
+  
+CosineEmbeddingLossImpl::CosineEmbeddingLossImpl(
+    const CosineEmbeddingLossOptions& options_)
+    : options(options_) {}
+
+void CosineEmbeddingLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::CosineEmbeddingLoss(margin=" << options.margin() << ")";
+}
+
+Tensor CosineEmbeddingLossImpl::forward(
+    const Tensor& input1,
+    const Tensor& input2,
+    const Tensor& target) {
+  return F::cosine_embedding_loss(input1, input2, target, options);
 }
 
 } // namespace nn
