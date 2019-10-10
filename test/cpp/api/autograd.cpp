@@ -1,8 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <torch/autograd.h>
+#include <torch/torch.h>
 
-#include <torch/utils.h>
 #include <test/cpp/api/support.h>
 
 using namespace torch::autograd;
