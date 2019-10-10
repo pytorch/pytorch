@@ -1386,8 +1386,6 @@ graph(%input, %weight):
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
         " with instruction set support avx2 or newer.",
     )
-    @unittest.skip("somehow it segfaults and I'm not able to repro locally, skip to"
-                   "unblock the PRs in the stack.")
     @_tmp_donotuse_dont_inline_everything
     def test_fold_prepack(self):
         class QLinear(torch.nn.Module):
