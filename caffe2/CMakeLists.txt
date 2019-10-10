@@ -21,6 +21,7 @@ if (INTERN_BUILD_ATEN_OPS)
     --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
   DEPENDS
   ATEN_CPU_FILES_GEN_TARGET
+  ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
 
@@ -44,14 +45,6 @@ if (INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
   list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
-else()
-  # Only add "ATen Core", a minimal, easy-to-compile fragment of ATen.
-  # This codepath should only be exercised by the Android build.
-  add_subdirectory(../aten/src/ATen/core ATen_core)
-  list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
-  list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
-  list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
-  # See cmake/Codegen.cmake for header installation
 endif()
 
 # ---[ Caffe2 build
@@ -478,6 +471,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
   endif()
 
+  if (USE_NCCL)
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
+  endif()
+
   if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
@@ -619,6 +617,11 @@ ELSEIF(USE_CUDA)
 ELSE()
   add_library(torch ${Caffe2_CPU_SRCS})
 ENDIF()
+
+if (USE_NCCL)
+  target_link_libraries(torch PRIVATE __caffe2_nccl)
+  target_compile_definitions(torch PRIVATE USE_NCCL)
+endif()
 
 
 # ==========================================================
