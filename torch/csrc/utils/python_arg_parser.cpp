@@ -135,7 +135,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 static PyObject* get_tensor_torch_function(void)
 {
   PyObject* method = PyObject_GetAttrString((PyObject*)THPVariableClass, "__torch_function__");
-  assert(method != NULL);
+  assert(method != nullptr);
   return method;
 }
 
@@ -143,7 +143,7 @@ static PyObject* get_tensor_torch_function(void)
 static bool check_has_torch_function(PyObject* obj)
 {
   PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
-  if(method != NULL){
+  if(method != nullptr){
     return true;
   }
   return false;
@@ -731,14 +731,14 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
-    PyObject* overloaded_args[32] = {nullptr};
+    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr};
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
     return PythonArgs(0, traceable, signature, parsed_args, overloaded_args);
   }
 
   int i = 0;
   for (auto& signature : signatures_) {
-    PyObject* overloaded_args[32] = {nullptr};
+    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr};
     if (signature.parse(args, kwargs, parsed_args, overloaded_args, false)) {
       return PythonArgs(i, traceable, signature, parsed_args, overloaded_args);
     }
@@ -760,7 +760,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
 
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
-    PyObject* overloaded_args[32] = {nullptr};
+    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr};
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
   }
 

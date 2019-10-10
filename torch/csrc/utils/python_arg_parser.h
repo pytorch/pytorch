@@ -74,6 +74,8 @@
 #include <string>
 #include <vector>
 
+#define TH_MAX_ARGS 32
+
 namespace torch {
 
 enum class ParameterType {
