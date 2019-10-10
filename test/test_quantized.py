@@ -6,6 +6,7 @@ import torch.jit
 import torch.nn.functional as F
 from torch.nn.modules.utils import _pair
 
+from hypothesis import settings, HealthCheck
 from hypothesis import assume, given
 from hypothesis import strategies as st
 import hypothesis_utils as hu
@@ -900,8 +901,6 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(Y, qY.dequantize())
 
     """Tests the correctness of the quantized equal op."""
-    @unittest.skip("temporarily disable until failures are fixed. " +
-                   "See https://github.com/pytorch/pytorch/issues/26279")
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()),
            X2=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -947,6 +946,8 @@ class TestQuantizedOps(TestCase):
             if qX.qscheme() != qX2.qscheme():
                 return False
             if qX.shape != qX2.shape:
+                return False
+            if qX.dtype != qX2.dtype:
                 return False
             if qX.qscheme() == torch.per_tensor_affine:
                 if qX.q_scale() != qX2.q_scale():
@@ -1520,6 +1521,7 @@ class TestQNNPackOps(TestCase):
             self.assertEqual(qY, qY_hat)
 
     """Tests the correctness of the quantized::add (qnnpack) op."""
+    @settings(suppress_health_check=(HealthCheck.filter_too_much,))
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            zero_point=st.sampled_from([0, 2, 5, 15, 127]),

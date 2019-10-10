@@ -124,7 +124,7 @@ You can write new neural network layers in Python using the torch API
 [or your favorite NumPy-based libraries such as SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
 If you want to write your layers in C/C++, we provide a convenient extension API that is efficient and with minimal boilerplate.
-There is no wrapper code that needs to be written. You can see [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
+No wrapper code needs to be written. You can see [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
 
 
 ## Installation
@@ -145,7 +145,7 @@ Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are av
   - Python 2.7: https://nvidia.box.com/v/torch-weekly-cp27-jetson-jp42
   - Python 3.6: https://nvidia.box.com/v/torch-weekly-cp36-jetson-jp42
 
-They requires JetPack 4.2 and above and are maintained by @dusty-nv
+They require JetPack 4.2 and above, and @dusty-nv maintains them
 
 
 ### From Source
@@ -175,7 +175,7 @@ conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
 On Linux
 ```bash
 # Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda90 # or [magma-cuda92 | magma-cuda100 ] depending on your cuda version
+conda install -c pytorch magma-cuda90 # or [magma-cuda92 | magma-cuda100 | magma-cuda101 ] depending on your cuda version
 ```
 
 #### Get the PyTorch Source
@@ -234,7 +234,7 @@ set FORCE_PY27_BUILD=1
 :: Note: This value is useless if Ninja is detected. However, you can force that by using `set USE_NINJA=OFF`.
 set CMAKE_GENERATOR=Visual Studio 15 2017
 
-:: Read the content in the previous section carefully before you preceed.
+:: Read the content in the previous section carefully before you proceed.
 :: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.
 :: "Visual Studio 2017 Developer Command Prompt" will be run automatically.
 :: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
