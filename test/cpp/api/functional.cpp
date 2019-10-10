@@ -529,3 +529,15 @@ TEST_F(FunctionalTest, PReLU) {
   const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
+
+TEST_F(FunctionalTest, Bilinear) {
+  auto input1 = torch::Tensor({{1, 2, 3}, {7, 6, 5}});
+  auto input2 = torch::Tensor({{7, 4}, {8 ,9}});
+  auto weight = torch::Tensor({{{2, 3}, {9, 7}, {8, 6}}});
+  auto bias = torch::Tensor({1});
+  auto y = F::bilinear(input1, input2, weight, bias);
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 1}));
+  auto y_exp = torch::Tensor({{449, 1702}});
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+}

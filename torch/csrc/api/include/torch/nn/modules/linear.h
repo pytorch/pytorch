@@ -4,6 +4,7 @@
 #include <torch/nn/module.h>
 #include <torch/nn/options/linear.h>
 #include <torch/nn/pimpl.h>
+#include <torch/nn/functional/linear.h>
 #include <torch/types.h>
 
 #include <cstddef>
@@ -63,24 +64,12 @@ class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
 /// module storage semantics.
 TORCH_MODULE(Linear);
 
-/// Options for the `Bilinear` module.
-struct TORCH_API BilinearOptions {
-  BilinearOptions(int64_t in1, int64_t in2, int64_t out);
-  /// The number of features in input 1 (columns of the input1 matrix).
-  TORCH_ARG(int64_t, in1);
-  /// The number of features in input 2 (columns of the input2 matrix).
-  TORCH_ARG(int64_t, in2);
-  /// The number of output features to produce (columns of the output matrix).
-  TORCH_ARG(int64_t, out);
-  /// Whether to learn and add a bias after the bilinear transformation.
-  TORCH_ARG(bool, with_bias) = true;
-};
 
 /// Applies a billinear transformation with optional bias.
 class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
  public:
-  BilinearImpl(int64_t in1, int64_t in2, int64_t out) : BilinearImpl(BilinearOptions(in1, in2, out)) {}
-  explicit BilinearImpl(BilinearOptions options);
+  BilinearImpl(int64_t in1_features, int64_t in2_features, int64_t out_features) : BilinearImpl(BilinearOptions(in1_features, in2_features, out_features)) {}
+  explicit BilinearImpl(const BilinearOptions& options_);
 
   void reset() override;
 

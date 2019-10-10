@@ -1239,7 +1239,9 @@ TEST_F(ModulesTest, PrettyPrintLinear) {
 
 TEST_F(ModulesTest, PrettyPrintBilinear) {
   ASSERT_EQ(
-      c10::str(Bilinear(3, 2, 4)), "torch::nn::Bilinear(in1=3, in2=2, out=4, with_bias=true)");
+      c10::str(Bilinear(3, 2, 4)), "torch::nn::Bilinear(in1_features=3, in2_features=2, out_features=4, bias=true)");
+  ASSERT_EQ(
+      c10::str(Bilinear(BilinearOptions(3, 2, 4).bias(false))), "torch::nn::Bilinear(in1_features=3, in2_features=2, out_features=4, bias=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintConv) {
