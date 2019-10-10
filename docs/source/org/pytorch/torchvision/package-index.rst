@@ -1,4 +1,4 @@
-rg.pytorch.torchvision
+org.pytorch.torchvision
 =======================
 
 .. java:package:: org.pytorch.torchvision
