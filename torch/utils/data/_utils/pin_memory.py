@@ -1,4 +1,4 @@
-r""""Contains definitions of the methods used by the _DataLoaderIter to put
+r""""Contains definitions of the methods used by the _BaseDataLoaderIter to put
 fetched tensors into pinned memory.
 
 These **needs** to be in global scope since Py2 doesn't support serializing
