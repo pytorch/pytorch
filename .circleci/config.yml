@@ -1321,16 +1321,12 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp
             # install fastlane
             sudo gem install bundler && bundle install
-            # install certificate
-            set +x
-            export CERT=${IOS_CERT_KEY}
-            set +x
-            echo $CERT >> cert.txt
-            # decode certificate
+            # install certificates
+            echo ${IOS_CERT_KEY} >> cert.txt
             base64 --decode cert.txt -o Certificates.p12
             rm cert.txt
             bundle exec fastlane install_cert
-            # decode provisioning profile
+            # install the provisioning profile
             PROFILE=TestApp_CI.mobileprovision
             PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
             mkdir -pv "${PROVISIONING_PROFILES}"
@@ -1377,13 +1373,12 @@ jobs:
             set -e
             PROJ_ROOT=/Users/distiller/project
             PROFILE=TestApp_CI
-            # run xcodebuild
+            # run the ruby build script
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
               exit 1
             fi 
-            # run build script
-            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE}
+            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
             if ! [ "$?" -eq "0" ]; then
               echo 'xcodebuild failed!'
               exit 1
