@@ -65,7 +65,6 @@ _jit_script_class_compile = torch._C._jit_script_class_compile
 # destruction order issues.
 _python_cu = torch._C.CompilationUnit()
 
-# Future = torch._C.Future
 Future = Future
 set_module(Future, "torch.jit")
 _fork = torch._C.fork

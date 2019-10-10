@@ -36,7 +36,7 @@ class EvalEnv(object):
         'List': List,
         'Dict': Dict,
         'Optional': Optional,
-        # 'Future': Future,
+        'Future': Future,
     }
 
     def __init__(self, rcb):
@@ -230,6 +230,8 @@ def ann_to_type(ann, resolver=None):
             return OptionalType(ann_to_type(ann.__args__[0]))
         else:
             return OptionalType(ann_to_type(ann.__args__[1]))
+    elif is_future(ann):
+        return FutureType(ann_to_type(ann.__args__[0]))
     elif ann is float:
         return FloatType.get()
     elif ann is int:

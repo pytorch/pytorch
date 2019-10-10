@@ -598,20 +598,9 @@ class Future(Generic[T]):
 
     def __init__(self, types):
         self.__args__ = types
-# class FutureInstance(object):
-#     __slots__ = ['__args__']
-
-#     def __init__(self, types):
-#         self.__args__ = types
-
-# class FutureCls(object):
-#     def __getitem__(self, types):
-#         return FutureInstance(types)
-
-# Future = FutureCls()  # noqa: T484
 
 def is_future(ann):
-    return isinstance(ann, FutureInstance)
+    return isinstance(ann, Future)
 
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
