@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/rpc_command_base.h>
 
 namespace torch {
 namespace distributed {

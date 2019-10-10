@@ -59,27 +59,30 @@ Message RpcWithAutograd::toMessage() && {
   auto payload = std::move(wrappedMessage_).movePayload();
   TORCH_INTERNAL_ASSERT(!payload.empty());
 
-  // We append the message type (1 byte), autograd context id(8 bytes) and
-  // autograd message id(8 bytes) to the original message in network byte order
-  // (big endian).
-  size_t writableIndex = payload.size();
+  std::vector<at::IValue> ivalues{messageType,
+                                  autogradMetadata_.autogradContextId,
+                                  autogradMetadata_.autogradMessageId,
+                                  fromWorkerId_};
 
-  // Need 17 additional bytes.
-  payload.resize(payload.size() + kAutogradMessageSize);
+  // Now pickle using JIT pickler.
+  std::vector<torch::Tensor> tensorTable;
+  std::vector<char> additionalPayload =
+      jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
 
-  // Add message type.
-  payload[writableIndex++] = messageType;
+  // We shouldn't have any tensors!
+  TORCH_INTERNAL_ASSERT(tensorTable.empty());
 
-  // Add autograd ids.
+  // Append the payload.
+  payload.insert(
+      payload.end(), additionalPayload.begin(), additionalPayload.end());
+
+  // Add size of the additional payload.
+  int64_t indexToWrite = payload.size();
+  payload.resize(payload.size() + sizeof(int64_t));
+  const int64_t additionalPayloadSize = additionalPayload.size();
   torch::utils::THP_encodeInt64Buffer(
-      reinterpret_cast<uint8_t*>(payload.data()) + writableIndex,
-      &autogradMetadata_.autogradContextId,
-      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
-      1);
-  writableIndex += sizeof(int64_t);
-  torch::utils::THP_encodeInt64Buffer(
-      reinterpret_cast<uint8_t*>(payload.data()) + writableIndex,
-      &autogradMetadata_.autogradMessageId,
+      reinterpret_cast<uint8_t*>(payload.data()) + indexToWrite,
+      &additionalPayloadSize,
       torch::utils::THPByteOrder::THP_BIG_ENDIAN,
       1);
 
