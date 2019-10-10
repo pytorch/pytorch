@@ -8,34 +8,55 @@ namespace impl {
 namespace {
 
 /// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
-/// thread_local is not supported. In that case, we don't provide
-/// `at::NonVariableTypeMode`.
+/// thread_local is not supported.
 #ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
 
-// NB: Zero initialized!
-thread_local uint64_t raw_excluded;
+// NB: POD, zero initialized!
+thread_local PODLocalTensorTypeSet raw_local_tensor_type_set;
 
 #else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
-uint64_t raw_excluded = 0;
+static PODLocalTensorTypeSet raw_local_tensor_type_set;
 
 #endif
 
+} // anonymous namespace
+
+LocalTensorTypeSet tls_local_tensor_type_set() {
+  return raw_local_tensor_type_set;
 }
 
-TensorTypeSet tls_excluded_tensor_type_set() {
-  return TensorTypeSet(TensorTypeSet::RAW, raw_excluded);
+// We could have also just snapshotted the entire state.  I'm not sure which is
+// better; but right now only the guard API is allowed so the two cases are
+// not distinguishable.
+
+IncludeTensorTypeIdGuard::IncludeTensorTypeIdGuard(TensorTypeId x)
+  : tls_(&raw_local_tensor_type_set)
+  , id_(x)
+  , prev_state_(tls_->included().has(x)) {
+  if (!prev_state_) {
+    tls_->set_included(tls_->included().add(x));
+  }
 }
 
-bool tls_variable_is_enabled() {
-  return !tls_excluded_tensor_type_set().has(TensorTypeId::VariableTensorId);
+IncludeTensorTypeIdGuard::~IncludeTensorTypeIdGuard() {
+  if (!prev_state_) {
+    tls_->set_included(tls_->included().remove(id_));
+  }
 }
 
-void tls_variable_set_enabled(bool enabled) {
-  if (enabled) {
-    raw_excluded = tls_excluded_tensor_type_set().remove(TensorTypeId::VariableTensorId).raw_repr();
-  } else {
-    raw_excluded = tls_excluded_tensor_type_set().add(TensorTypeId::VariableTensorId).raw_repr();
+ExcludeTensorTypeIdGuard::ExcludeTensorTypeIdGuard(TensorTypeId x)
+  : tls_(&raw_local_tensor_type_set)
+  , id_(x)
+  , prev_state_(tls_->excluded().has(x)) {
+  if (!prev_state_) {
+    tls_->set_excluded(tls_->excluded().add(x));
+  }
+}
+
+ExcludeTensorTypeIdGuard::~ExcludeTensorTypeIdGuard() {
+  if (!prev_state_) {
+    tls_->set_excluded(tls_->excluded().remove(id_));
   }
 }
 

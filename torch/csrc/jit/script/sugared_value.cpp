@@ -50,7 +50,7 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
   return std::make_shared<SimpleValue>(
-      emitBuiltinCall(loc, *m.graph(), symbol, self, inputs, attributes, true));
+      emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, self));
 }
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
