@@ -22,7 +22,8 @@ TestSkip = namedtuple('TestSkip', 'exit_code, message')
 TEST_SKIPS = {
     "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
-    "known_issues": TestSkip(77, "Test skipped due to known issues")
+    "known_issues": TestSkip(77, "Test skipped due to known issues"),
+    "skipIfRocm": TestSkip(78, "Test skipped for ROCm")
 }
 
 
@@ -90,6 +91,14 @@ def requires_mpi():
         "c10d was not compiled with the MPI backend",
     )
 
+
+def skip_for_rocm(func):
+    """Skips a test for ROCm"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        sys.exit(TEST_SKIPS['skipIfRocm'].exit_code)
+
+    return wrapper
 
 TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {}
