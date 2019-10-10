@@ -50,7 +50,7 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
   return std::make_shared<SimpleValue>(
-      emitBuiltinCall(loc, *m.graph(), symbol, self, inputs, attributes, true));
+      emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, self));
 }
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
@@ -79,6 +79,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
         "is_mkldnn",
         "is_quantized",
         "requires_grad",
+        "layout",
     };
     if (fields.count(field)) {
       auto r =
@@ -86,51 +87,53 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       return std::make_shared<SimpleValue>(r);
     }
   }
-  if (value_->type()->isSubtypeOf(NumberType::get())) {
-    throw ErrorReport(loc) << "Cannot call methods on numbers";
-  }
+
+  // accessing fields of named tuples
   if (auto tuple_type = value_->type()->cast<TupleType>()) {
-    if (!tuple_type->schema()) {
-      throw ErrorReport(loc) << "Getting attributes of tuples is not supported";
-    }
-    auto attrs = tuple_type->schema()->arguments();
-    for (size_t i = 0; i < attrs.size(); i++) {
-      if (attrs[i].name() == field) {
-        auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
-        auto out_type = tuple_type->elements().at(i);
-        auto r =
-            m.graph()
-                ->insertNode(m.graph()->createTupleIndex(value_, idx, out_type))
-                ->output();
-        return std::make_shared<SimpleValue>(r);
+    if (tuple_type->schema()) {
+      auto attrs = tuple_type->schema()->arguments();
+      for (size_t i = 0; i < attrs.size(); i++) {
+        if (attrs[i].name() == field) {
+          auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
+          auto out_type = tuple_type->elements().at(i);
+          auto r = m.graph()
+                       ->insertNode(
+                           m.graph()->createTupleIndex(value_, idx, out_type))
+                       ->output();
+          return std::make_shared<SimpleValue>(r);
+        }
       }
     }
-    throw ErrorReport(loc) << "Unknown attribute to named tuple";
-  }
-
-  if (auto classType = value_->type()->cast<ClassType>()) {
+  } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (auto method = classType->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
-    if (!classType->hasAttribute(field)) {
-      throw ErrorReport(loc)
-          << "Tried to access nonexistent attribute " << field
-          << ". Did you forget to initialize it in __init__()?";
+    if (classType->hasAttribute(field)) {
+      auto& g = *m.graph();
+      auto n = g.insertNode(g.createGetAttr(value_, field));
+      return std::make_shared<SimpleValue>(n->output());
     }
-    auto& g = *m.graph();
-    auto n = g.insertNode(g.createGetAttr(value_, field));
-    return std::make_shared<SimpleValue>(n->output());
-  }
-
-  if (auto iface = value_->type()->cast<InterfaceType>()) {
+  } else if (auto iface = value_->type()->cast<InterfaceType>()) {
+    // accessing methods of interfaces
     if (auto schema = iface->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
   }
 
-  return std::make_shared<BuiltinFunction>(
-      Symbol::aten(field), NamedValue(loc, "self", value_));
+  // none of the more-specific cases worked, so see if this is a builtin method
+  if (auto builtin = BuiltinFunction::tryCreate(
+          Symbol::aten(field), NamedValue(loc, "self", value_))) {
+    return builtin;
+  }
+
+  ErrorReport report(loc);
+  report << "Tried to access nonexistent attribute or method '" << field
+         << "' of type '" << value_->type()->python_str() << "'.";
+  if (value_->type()->kind() == ClassType::Kind) {
+    report << " Did you forget to initialize an attribute in __init__()?";
+  }
+  throw report;
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
@@ -272,6 +275,12 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
     ctx_inputs.insert(ctx_inputs.end(), inputs.begin(), inputs.end());
     return FunctionValue(ret).call(loc, m, ctx_inputs, attributes, n_binders);
   }
+
+  if (auto class_type = getValue()->type()->cast<ClassType>()) {
+    return attr(loc, m, "__call__")
+        ->call(loc, m, inputs, attributes, n_binders);
+  }
+
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
 
@@ -287,24 +296,6 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
     throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
                            << " object is not iterable";
   }
-}
-
-std::shared_ptr<SugaredValue> callClassMethod(
-    const ClassTypePtr& class_ptr,
-    const std::string& desugared_name,
-    const SourceRange& loc,
-    Function& m,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) {
-  if (!class_ptr->getMethod(desugared_name)) {
-    throw ErrorReport(loc) << class_ptr->python_str() << " does not define a "
-                           << desugared_name << " method";
-  }
-
-  Value* self = inputs.at(0).value(*m.graph());
-  return MethodValue(self, desugared_name)
-      .call(loc, m, inputs.slice(1), attributes, n_binders);
 }
 
 Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
@@ -327,7 +318,8 @@ Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
   } else if (val_type->isSubtypeOf(TensorType::get())) {
     return g.insert(aten::select, {val, 0, idx}, {}, loc);
   } else if (auto class_type = val_type->cast<ClassType>()) {
-    return callClassMethod(class_type, "__getitem__", loc, m, {val, idx}, {}, 1)
+    return attr(loc, m, "__getitem__")
+        ->call(loc, m, {idx}, {}, 1)
         ->asValue(loc, m);
   } else {
     throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
@@ -339,6 +331,15 @@ RangeValue::RangeValue(
     const SourceRange& loc,
     Function& m,
     std::vector<Value*> inputs) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    auto typ = inputs[i]->type();
+    if (!typ->cast<IntType>()) {
+      throw ErrorReport(loc)
+          << "all inputs of range must be ints, found " << typ->python_str()
+          << " in argument " << c10::guts::to_string(i);
+    }
+  }
+
   Graph& g = *m.graph();
   if (inputs.size() == 0) {
     throw ErrorReport(loc) << "range expected at least 1 arguments, got 0";
@@ -437,12 +438,14 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
   if (inputs.size() > 0) {
     Value* self = inputs[0].value(*m.graph());
     if (auto class_ptr = self->type()->cast<ClassType>()) {
-      return callClassMethod(
-          class_ptr, desugared_name_, loc, m, inputs, attributes, n_binders);
+      return SimpleValue(self)
+          .attr(loc, m, desugared_name_)
+          ->call(loc, m, inputs.slice(1), attributes, n_binders);
     }
   }
   return base_value_->call(loc, m, inputs, attributes, n_binders);
 }
+
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
     Function& m,
@@ -473,7 +476,7 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
   }
-  return std::make_shared<ClassNewMethod>(type_);
+  return SpecialFormValue::create(prim::CreateObject);
 }
 
 std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
@@ -498,6 +501,31 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
   self->setType(type_);
 
   return std::make_shared<SimpleValue>(self);
+}
+
+std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
+    Symbol symbol,
+    c10::optional<NamedValue> self) {
+  for (const std::shared_ptr<Operator>& op : getAllOperatorsFor(symbol)) {
+    if (!self) {
+      return std::make_shared<BuiltinFunction>(symbol, nullptr);
+    }
+    if (auto index = op->schema().argumentIndexWithName("self")) {
+      std::unordered_map<std::string, TypePtr> type_env;
+      TypePtr formal_type = op->schema().arguments().at(*index).type();
+      const MatchTypeReturn matched =
+          matchTypeVariables(formal_type, self->type(), type_env);
+      if (!matched.success()) {
+        continue;
+      }
+      const auto concrete_type = tryEvalTypeVariables(formal_type, type_env);
+      if (!concrete_type || !self->type()->isSubtypeOf(concrete_type)) {
+        continue;
+      }
+      return std::make_shared<BuiltinFunction>(symbol, self);
+    }
+  }
+  return nullptr;
 }
 
 } // namespace script

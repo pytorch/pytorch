@@ -76,7 +76,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDevice_type(THPDevice *self)
+PyObject *THPDevice_type(THPDevice *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   std::ostringstream oss;
@@ -86,7 +86,7 @@ PyObject *THPDevice_type(THPDevice *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDevice_index(THPDevice *self)
+PyObject *THPDevice_index(THPDevice *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   if (self->device.has_index()) {
@@ -138,7 +138,7 @@ PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDevice_reduce(THPDevice *self)
+PyObject *THPDevice_reduce(THPDevice *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto ret = THPObjectPtr{PyTuple_New(2)};

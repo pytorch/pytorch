@@ -9,4 +9,4 @@ def check_env_flag(name, default=''):
 def check_negative_env_flag(name, default=''):
     return os.getenv(name, default).upper() in ['OFF', '0', 'NO', 'FALSE', 'N']
 
-BUILD_NAMEDTENSOR = check_env_flag('BUILD_NAMEDTENSOR')
+BUILD_NAMEDTENSOR = True

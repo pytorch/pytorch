@@ -30,7 +30,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
-  PythonValue(py::object the_self) : self(std::move(the_self)) {}
+  PythonValue(py::object the_self, c10::optional<py::object> rcb = c10::nullopt)
+      : self(std::move(the_self)), rcb(std::move(rcb)) {}
 
   FunctionSchema getSchema(
       const size_t n_args,
@@ -63,6 +64,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   void checkForAddToConstantsError(std::stringstream& ss);
 
   py::object self;
+  c10::optional<py::object> rcb;
 };
 
 struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
@@ -150,45 +152,6 @@ struct VISIBILITY_HIDDEN ConstantTupleMethod : public SugaredValue {
 
   std::vector<std::shared_ptr<SugaredValue>> tup_;
   const std::string name_;
-};
-
-struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
-  OverloadedMethodValue(Value* module, std::vector<std::string> method_names)
-      : module_(module), method_names_(std::move(method_names)) {}
-
-  std::string kind() const override {
-    return "overloaded function";
-  }
-
-  std::shared_ptr<SugaredValue> call(
-      const SourceRange& loc,
-      Function& caller,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override;
-
- private:
-  Value* module_;
-  std::vector<std::string> method_names_;
-};
-
-struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
-  OverloadedFunctionValue(std::vector<StrongFunctionPtr> compiled_overloads)
-      : compiled_overloads_(std::move(compiled_overloads)) {}
-
-  std::string kind() const override {
-    return "overloaded function";
-  }
-
-  std::shared_ptr<SugaredValue> call(
-      const SourceRange& loc,
-      Function& caller,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override;
-
- private:
-  std::vector<StrongFunctionPtr> compiled_overloads_;
 };
 
 // defines how modules/methods behave inside the script subset.

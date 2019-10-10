@@ -194,10 +194,10 @@ class Hardtanh(Module):
     def __init__(self, min_val=-1., max_val=1., inplace=False, min_value=None, max_value=None):
         super(Hardtanh, self).__init__()
         if min_value is not None:
-            warnings.warn("keyword argument min_value is deprecated and renamed to min_val")
+            warnings.warn("keyword argument min_value is deprecated and rename to min_val")
             min_val = min_value
         if max_value is not None:
-            warnings.warn("keyword argument max_value is deprecated and renamed to max_val")
+            warnings.warn("keyword argument max_value is deprecated and rename to max_val")
             max_val = max_value
 
         self.min_val = min_val
@@ -687,12 +687,12 @@ class MultiheadAttention(Module):
         self.head_dim = embed_dim // num_heads
         assert self.head_dim * num_heads == self.embed_dim, "embed_dim must be divisible by num_heads"
 
-        self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
-
         if self._qkv_same_embed_dim is False:
             self.q_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
             self.k_proj_weight = Parameter(torch.Tensor(embed_dim, self.kdim))
             self.v_proj_weight = Parameter(torch.Tensor(embed_dim, self.vdim))
+        else:
+            self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
 
         if bias:
             self.in_proj_bias = Parameter(torch.empty(3 * embed_dim))
@@ -759,7 +759,7 @@ class MultiheadAttention(Module):
         if hasattr(self, '_qkv_same_embed_dim') and self._qkv_same_embed_dim is False:
             return F.multi_head_attention_forward(
                 query, key, value, self.embed_dim, self.num_heads,
-                self.in_proj_weight, self.in_proj_bias,
+                None, self.in_proj_bias,  # set self.in_proj_weight = None
                 self.bias_k, self.bias_v, self.add_zero_attn,
                 self.dropout, self.out_proj.weight, self.out_proj.bias, 
                 training=self.training,

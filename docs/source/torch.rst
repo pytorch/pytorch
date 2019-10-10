@@ -52,6 +52,8 @@ Creation Ops
 .. autofunction:: empty_strided
 .. autofunction:: full
 .. autofunction:: full_like
+.. autofunction:: quantize_per_tensor
+.. autofunction:: quantize_per_channel
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -331,7 +333,6 @@ BLAS and LAPACK Operations
 .. autofunction:: cholesky_solve
 .. autofunction:: dot
 .. autofunction:: eig
-.. autofunction:: gels
 .. autofunction:: geqrf
 .. autofunction:: ger
 .. autofunction:: inverse

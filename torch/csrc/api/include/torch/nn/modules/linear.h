@@ -2,6 +2,7 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
+#include <torch/nn/options/linear.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -10,22 +11,31 @@
 
 namespace torch {
 namespace nn {
-/// Options for the `Linear` module.
-struct TORCH_API LinearOptions {
-  LinearOptions(int64_t in, int64_t out);
-  /// The number of input features (columns of the input matrix).
-  TORCH_ARG(int64_t, in);
-  /// The number of output features to produce (columns of the output matrix).
-  TORCH_ARG(int64_t, out);
-  /// Whether to learn and add a bias after the linear transformation.
-  TORCH_ARG(bool, with_bias) = true;
+
+/// A placeholder identity operator that is argument-insensitive.
+class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
+ public:
+  void reset() override;
+
+  /// Pretty prints the `Identity` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input);
 };
+
+/// A `ModuleHolder` subclass for `IdentityImpl`.
+/// See the documentation for `IdentityImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Identity);
+
+// ============================================================================
 
 /// Applies a linear transformation with optional bias.
 class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
  public:
   LinearImpl(int64_t in, int64_t out) : LinearImpl(LinearOptions(in, out)) {}
-  explicit LinearImpl(LinearOptions options);
+  explicit LinearImpl(const LinearOptions& options_);
 
   void reset() override;
 

@@ -3,9 +3,12 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/tracer.h>
+#include <ATen/core/ATenDispatch.h>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
+
 namespace {
 
 at::Tensor wrap_tensor(at::Tensor&& tensor) {
@@ -135,7 +138,14 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         jit::tracer::setTracingState(nullptr);
       }
 
-      c10::Dispatcher::singleton().lookup(op, &stack).call(&stack);
+#ifdef USE_STATIC_DISPATCH
+      {
+        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        c10::Dispatcher::singleton().callBoxed(op, &stack);
+      }
+#else
+      c10::Dispatcher::singleton().callBoxed(op, &stack);
+#endif // USE_STATIC_DISPATCH
 
       // wrap tensor outputs as variable
       for (auto iter = stack.end() - output_size; iter != stack.end(); ++iter) {
@@ -174,6 +184,12 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 class RegistrationListener final : public c10::OpRegistrationListener {
 public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
+    if(at::aten_op_is_already_moved_to_c10(op.schema().operator_name())) {
+      // Ignore ATen ops for now because they have their own code
+      // to expose them to JIT in register_aten_ops.cpp
+      // TODO Remove register_aten_ops.cpp and also use this registration here
+      return;
+    }
     torch::jit::registerOperator(createOperatorFromC10(op));
   }
 

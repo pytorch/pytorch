@@ -140,7 +140,7 @@ option(USE_METAL "Use Metal for iOS build" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
-    "USE_CUDA;UNIX;NOT APPLE" OFF)
+    "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(
     USE_STATIC_NCCL "Use static NCCL" OFF
     "USE_NCCL" OFF)
@@ -162,6 +162,7 @@ option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
+option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
 option(USE_REDIS "Use Redis" OFF)
 option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
@@ -280,6 +281,13 @@ if (ANDROID OR IOS)
   set(INTERN_BUILD_MOBILE ON)
 endif()
 
+# Setting `PYTORCH_BUILD_MOBILE` environment variable can force it to do mobile
+# build with host toolchain.
+if (DEFINED ENV{PYTORCH_BUILD_MOBILE})
+  set(INTERN_BUILD_MOBILE ON)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DC10_MOBILE")
+endif()
+
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
 # It's disabled for caffe2 mobile library.
 if (INTERN_BUILD_MOBILE AND BUILD_CAFFE2_MOBILE)
@@ -302,9 +310,12 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
+  set(USE_PYTORCH_QNNPACK ON)
+  set(USE_QNNPACK OFF)
   set(USE_STATIC_DISPATCH ON)
   set(INTERN_DISABLE_ONNX ON)
   set(INTERN_DISABLE_AUTOGRAD ON)
+  set(INTERN_USE_EIGEN_BLAS ON)
 endif()
 
 # ---[ Utils
@@ -373,8 +384,8 @@ if(USE_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_QNNPACK")
 endif()
 
-if(USE_STATIC_DISPATCH)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_STATIC_DISPATCH")
+if(USE_PYTORCH_QNNPACK)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PYTORCH_QNNPACK")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
