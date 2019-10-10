@@ -11,5 +11,7 @@ SoftmaxOptions::SoftmaxOptions(int64_t dim) : dim_(dim) {}
 
 SoftminOptions::SoftminOptions(int64_t dim) : dim_(dim) {}
 
+ReLUOptions::ReLUOptions(bool inplace) : inplace_(inplace) {}
+
 } // namespace nn
 } // namespace torch
