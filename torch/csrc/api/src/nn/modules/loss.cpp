@@ -1,4 +1,8 @@
 #include <torch/nn/modules/loss.h>
+<<<<<<< HEAD
+=======
+using namespace std
+>>>>>>> Add C++ Frontend - triplet-margin-loss
 namespace F = torch::nn::functional;
 
 namespace torch {
@@ -41,7 +45,11 @@ void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::TripletMarginLoss(margin=" << options.margin() << 
             ", p=" << options.p() <<
             ", eps=" << options.eps() << std::boolalpha <<
+<<<<<<< HEAD
             ", swap=" << options.swap() <<
+=======
+            ", swap=" <<options.swap() <<
+>>>>>>> Add C++ Frontend - triplet-margin-loss
             ", reduction=" << options.reduction() << ")";
 }
 
