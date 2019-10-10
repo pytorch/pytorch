@@ -140,7 +140,7 @@ static PyObject* get_tensor_torch_function(void)
 }
 
 // checks if `overloaded_args[]` has args with `__torch_function__`
-bool FunctionParameter::check_has_torch_function(PyObject* obj)
+static bool check_has_torch_function(PyObject* obj)
 {
   PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
   if(method != NULL){
@@ -149,11 +149,76 @@ bool FunctionParameter::check_has_torch_function(PyObject* obj)
   return false;
 }
 
-bool FunctionParameter::check(PyObject* obj)
+bool FunctionParameter::check_exact(PyObject* obj)
 {
   switch (type_) {
     case ParameterType::TENSOR: {
       return THPVariable_CheckExact(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
+    }
+    case ParameterType::SCALAR:
+    case ParameterType::COMPLEX:
+      if (PyComplex_Check(obj)) {
+        return true;
+      }
+      // fallthrough
+    case ParameterType::DOUBLE: {
+      if (THPUtils_checkDouble(obj)) {
+        return true;
+      }
+      if (THPVariable_CheckExact(obj)) {
+        auto& var = ((THPVariable*)obj)->cdata;
+        return !var.requires_grad() && var.dim() == 0;
+      }
+      return false;
+    }
+    case ParameterType::INT64: {
+      if (THPUtils_checkLong(obj)) {
+        return true;
+      }
+      if (THPVariable_CheckExact(obj)) {
+        auto& var = ((THPVariable*)obj)->cdata;
+        return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
+      }
+      return false;
+    }
+#ifdef BUILD_NAMEDTENSOR
+    case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
+    case ParameterType::DIMNAME_LIST: {
+      if (THPUtils_checkDimnameList(obj)) {
+        return true;
+      }
+      // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
+      return size == 1 && THPUtils_checkDimname(obj);
+    }
+#endif
+    case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
+    case ParameterType::INT_LIST: {
+      if (PyTuple_Check(obj) || PyList_Check(obj)) {
+        return true;
+      }
+      // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
+      return size > 0 && THPUtils_checkLong(obj);
+    }
+    case ParameterType::GENERATOR: return THPGenerator_Check(obj);
+    case ParameterType::BOOL: return PyBool_Check(obj);
+    case ParameterType::STORAGE: return isStorage(obj);
+    case ParameterType::PYOBJECT: return true;
+    case ParameterType::SCALARTYPE: return THPDtype_Check(obj) || THPPythonScalarType_Check(obj);
+    case ParameterType::LAYOUT: return THPLayout_Check(obj);
+    case ParameterType::MEMORY_FORMAT: return THPMemoryFormat_Check(obj);
+    case ParameterType::QSCHEME: return THPQScheme_Check(obj);
+    case ParameterType::DEVICE:
+      return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
+    case ParameterType::STRING: return THPUtils_checkString(obj);
+    default: throw std::runtime_error("unknown parameter type");
+  }
+}
+
+bool FunctionParameter::check(PyObject* obj)
+{
+  switch (type_) {
+    case ParameterType::TENSOR: {
+      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:
@@ -568,7 +633,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         missing_args(*this, i);
       }
       return false;
-    } else if (param.check(obj)) {
+    } else if (param.check_exact(obj)) {
       dst[i++] = obj;
     // XXX: the Variable check is necessary because sizes become tensors when
     // tracer is enabled. This behavior easily leads to ambiguities, and we
@@ -580,8 +645,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       dst[i++] = args;
       arg_pos = nargs;
       continue;
-    }
-    else if (param.check_has_torch_function(obj)) {
+    } else if (check_has_torch_function(obj)) {
       // Collects arguments with __torch_function__ and
       // in the order in which they should be tried (i.e., skipping redundant types).
       // by checking for subclasses
@@ -612,7 +676,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
           ++num_overloaded_args;
         }
       }
-    } else if(THPVariable_Check(obj)){
+    } else if(param.check(obj)){
       dst[i++] = obj;
     } else if (raise_exception) {
       if (is_kwd) {
