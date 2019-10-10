@@ -3,8 +3,11 @@
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
 #include <gtest/gtest.h>
+#include <torch/csrc/cuda/nccl.h>
 
 using namespace c10d::test;
+
+constexpr int kNcclErrorHandlingVersion = 2400;
 
 class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
  public:
@@ -71,8 +74,14 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
 class ProcessGroupNCCLErrorsTest : public ::testing::Test {
  protected:
   bool skipTest() {
-    // Skip test if no cuda devices found.
-    return cudaNumDevices() == 0;
+    if (cudaNumDevices() == 0) {
+      return true;
+    }
+#ifdef USE_C10D_NCCL
+    return torch::cuda::nccl::version() < kNcclErrorHandlingVersion;
+#else
+    return false;
+#endif
   }
 
   void SetUp() override {

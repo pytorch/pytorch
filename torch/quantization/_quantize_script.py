@@ -72,11 +72,13 @@ class LinearPackedParams(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        return self._weight_bias()
+        return self._weight_bias(), self.training
 
     @torch.jit.export
     def __setstate__(self, state):
-        self.set_weight_bias(state[0], state[1])
+        # type: (Tuple[Tuple[Tensor, Optional[Tensor]], bool]) -> None
+        self.set_weight_bias(state[0][0], state[0][1])
+        self.training = state[1]
 
 
 linear_packed_params = None
