@@ -80,12 +80,10 @@ def add_observer_(module):
     has a valid qconfig attribute.
 
     Args:
-        module: input module with qconfig attributes for all the leaf modules
-        that we want to quantize
+        module: input module with qconfig attributes for all the leaf modules that we want to quantize
 
     Return:
-        None, module is modified inplace with added observer modules and
-            forward_hooks
+        None, module is modified inplace with added observer modules and forward_hooks
     """
     for child in module.children():
         if type(child) == nnq.FloatFunctional:
@@ -109,7 +107,7 @@ def add_quant_dequant(module):
 
     Args:
         module: input module with qconfig attributes for all the leaf modules
-        that we want to quantize
+                that we want to quantize
 
     Return:
         Either the inplace modified module with submodules wrapped in
@@ -252,7 +250,8 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     Args:
         model: input model
         run_fn: a function for evaluating the prepared model, can be a
-            function that simply runs the prepared model or a training loop
+                function that simply runs the prepared model or a training 
+                loop
         run_args: positional arguments for `run_fn`
 
     Return:
@@ -269,10 +268,11 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
 def convert(module, mapping=None, inplace=False):
     r"""Converts the float module with observers (where we can get quantization
     parameters) to a quantized module.
+
     Args:
         module: calibrated module with observers
-        mapping: a dictionary that maps from float module type to quantized
-           module type, can be overwrritten to allow swapping user defined Modules
+        mapping: a dictionary that maps from float module type to quantized module type, can 
+                 be overwrritten to allow swapping user defined Modules
         inplace: carry out model transformations in-place, the original module is mutated
     """
     if mapping is None:
