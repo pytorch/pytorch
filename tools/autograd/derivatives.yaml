@@ -1015,9 +1015,6 @@
 - name: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: smooth_l1_loss_backward(grad, self, target, reduction)
 
-- name: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  self: soft_margin_loss_backward(grad, self, target, reduction)
-
 - name: relu(Tensor self) -> Tensor
   self: threshold_backward(grad, self, 0)
 
@@ -1348,10 +1345,6 @@
 - name: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   grad_output: _softmax_backward_data(grad.to(output.dtype()), output, dim, self)
   self: softmax_double_backward(grad.to(output.dtype()), grad_output, dim, output).to(self.dtype())
-
-- name: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  grad_output: soft_margin_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
-  self: soft_margin_loss_double_backward(grad * grad_output, self, target, reduction)
 
 - name: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
   grad_output: softshrink_backward(grad, self, lambd)

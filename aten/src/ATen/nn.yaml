@@ -62,12 +62,6 @@
     output: 'false'
     grad_input: 'false'
 
-- name: _thnn_soft_margin_loss(Tensor self, Tensor target, int64_t reduction)
-  cname: SoftMarginCriterion
-  scalar_check:
-    output: 'false'
-    grad_input: 'false'
-
 # Activation functions
 
 - name: _thnn_elu(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)

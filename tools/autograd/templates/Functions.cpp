@@ -1003,24 +1003,6 @@ Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & 
   return (r * grad).sum();
 }
 
-Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto z = (input * -target).exp();
-  auto zplus1 = z + 1;
-  auto grad_input = grad * (target * target) * z / (zplus1 * zplus1);
-  if (reduction == Reduction::Mean) {
-    grad_input /= input.numel();
-  }
-  return grad_input;
-}
-
-Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
-  if (reduction == Reduction::None) {
-    return soft_margin_loss_backward(grad, input, target, reduction);
-  }
-  auto r = soft_margin_loss_backward(ones_like(grad_output), input, target, reduction);
-  return (r * grad).sum();
-}
-
 Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scalar beta, Scalar threshold) {
   auto x = (input * beta);
   return sigmoid_backward(grad, x.sigmoid()) * (x < threshold).type_as(grad) * beta;

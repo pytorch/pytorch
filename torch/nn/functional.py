@@ -2259,7 +2259,7 @@ def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='m
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
+    return torch.soft_margin_loss(input, target, reduction_enum)
 
 
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
