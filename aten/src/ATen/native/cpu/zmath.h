@@ -156,5 +156,35 @@ inline std::complex<double> trunc_impl (std::complex<double> z) {
   return std::complex<double>(std::trunc(std::real(z)), std::trunc(std::imag(z)));
 }
 
+template <typename TYPE>
+inline TYPE max_impl (TYPE a, TYPE b) {
+  return std::max(a, b);
+}
+
+template <>
+inline std::complex<float> max_impl (std::complex<float> a, std::complex<float> b) {
+  return std::complex<float>(std::abs(a) > std::abs(b) ? a : b);
+}
+
+template <>
+inline std::complex<double> max_impl (std::complex<double> a, std::complex<double> b) {
+  return std::complex<double>(std::abs(a) > std::abs(b) ? a : b);
+}
+
+template <typename TYPE>
+inline TYPE min_impl (TYPE a, TYPE b) {
+  return std::min(a, b);
+}
+
+template <>
+inline std::complex<float> min_impl (std::complex<float> a, std::complex<float> b) {
+  return std::complex<float>(std::abs(a) < std::abs(b) ? a : b);
+}
+
+template <>
+inline std::complex<double> min_impl (std::complex<double> a, std::complex<double> b) {
+  return std::complex<double>(std::abs(a) < std::abs(b) ? a : b);
+}
+
 } // end namespace
 }} //end at::native
