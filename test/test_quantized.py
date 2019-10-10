@@ -886,19 +886,22 @@ class TestQuantizedOps(TestCase):
         torch.testing.assert_allclose(out.dequantize(), ref.dequantize())
         self.assertNotEqual(out.stride(), sorted(out.stride()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=3,
-                                              min_side=1, max_side=2),
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=1, max_side=4),
                        qparams=hu.qparams()),
-           dim=st.integers(1, 2))
-    def test_mean(self, X, dim):
-        X, (scale, zero_point, torch_type) = X
-        qX = torch.quantize_per_tensor(torch.tensor(X).float(), scale, zero_point, torch_type)
-
-        Y = torch.mean(qX.dequantize(), dim)
-        Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
-        qY = torch.mean(qX, dim)
-
-        self.assertEqual(Y, qY.dequantize())
+           dim=st.integers(1, 2),
+           qengine=st.sampled_from(('qnnpack', 'none')))
+    def test_mean(self, X, dim, qengine):
+        with override_quantized_engine(qengine):
+            if qengine == 'qnnpack':
+                dim = (2, 3)
+            X, (scale, zero_point, torch_type) = X
+            torch_type = torch.quint8
+            qX = torch.quantize_per_tensor(torch.tensor(X).float(), scale, zero_point, torch_type)
+            Y = torch.mean(qX.dequantize(), dim)
+            Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
+            qY = torch.mean(qX, dim)
+            self.assertEqual(Y, qY.dequantize())
 
     """Tests the correctness of the quantized equal op."""
     @unittest.skip("temporarily disable until failures are fixed. " +
@@ -1683,6 +1686,7 @@ class TestQNNPackOps(TestCase):
 
             np.testing.assert_array_almost_equal(a_pool.numpy(),
                                                  qa_pool.int_repr().numpy(), decimal=0)
+
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
