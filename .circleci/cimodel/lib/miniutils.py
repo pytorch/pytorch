@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-
 def quote(s):
     return sandwich('"', s)
 
