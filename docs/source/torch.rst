@@ -52,6 +52,8 @@ Creation Ops
 .. autofunction:: empty_strided
 .. autofunction:: full
 .. autofunction:: full_like
+.. autofunction:: quantize_per_tensor
+.. autofunction:: quantize_per_channel
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
