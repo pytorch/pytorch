@@ -419,3 +419,12 @@ TEST_F(FunctionalTest, Softmax) {
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
 }
+
+TEST_F(FunctionalTest, PReLU) {
+  const auto x = torch::rand({42, 24}) * 200 - 100;
+  const auto w = torch::rand(24) * 200 - 100;
+  const auto y = F::prelu(x, w);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({42, 24}));
+  const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
