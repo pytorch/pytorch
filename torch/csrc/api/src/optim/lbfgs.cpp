@@ -21,10 +21,14 @@ Tensor LBFGS::gather_flat_grad() {
   std::vector<Tensor> views;
   for (auto& parameter : parameters_) {
     if (!parameter.grad().defined()) {
-      continue;
+      views.push_back(parameter.new_empty({parameter.numel()}).zero_());
     }
-
-    views.push_back(parameter.grad().view(-1));
+    else if (parameter.grad().is_sparse()) {
+      views.push_back(parameter.grad().to_dense().view(-1));
+    }
+    else {
+      views.push_back(parameter.grad().view(-1));
+    }
   }
   return torch::cat(views);
 }
@@ -33,10 +37,6 @@ void LBFGS::add_grad(const torch::Tensor& step_size, const Tensor& update) {
   NoGradGuard guard;
   int64_t offset = 0;
   for (auto& parameter : parameters_) {
-    if (!parameter.grad().defined()) {
-      continue;
-    }
-
     int64_t numel = parameter.numel();
     parameter.add_(
         update.slice(0, offset, offset + numel, 1).view_as(parameter),
