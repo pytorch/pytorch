@@ -8,6 +8,7 @@ from unittest import mock
 
 import torch
 import torch.distributed as dist
+import torch.distributed.model_parallel as mp
 import torch.distributed.rpc as rpc
 from common_utils import load_tests
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
@@ -234,7 +235,7 @@ class RpcTest(object):
         rpc.register_backend(
             backend_name, stub_init_rpc_backend_handler
         )
-        rpc.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
+        mp.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
 
     @unittest.skipIf(
         TEST_CONFIG.backend != RpcBackend.PROCESS_GROUP,
@@ -243,7 +244,7 @@ class RpcTest(object):
     def test_duplicate_name(self):
         dist.init_process_group(backend="gloo", init_method=self.init_method)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
-            rpc.init_model_parallel(
+            mp.init_model_parallel(
                 self_name="duplicate_name",
                 backend=TEST_CONFIG.backend,
                 self_rank=self.rank,
@@ -253,14 +254,14 @@ class RpcTest(object):
 
     def test_reinit(self):
         dist.init_process_group(backend="gloo", init_method=self.init_method)
-        rpc.init_model_parallel(
+        mp.init_model_parallel(
             self_name="worker{}".format(self.rank),
             backend=TEST_CONFIG.backend,
             self_rank=self.rank,
             init_method=self.init_method,
         )
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
-            rpc.init_model_parallel(
+            mp.init_model_parallel(
                 self_name="worker{}".format(self.rank),
                 backend=TEST_CONFIG.backend,
                 self_rank=self.rank,
@@ -270,7 +271,7 @@ class RpcTest(object):
 
     def test_init_invalid_backend(self):
         with self.assertRaisesRegex(RuntimeError, "Unrecognized RPC backend"):
-            rpc.init_model_parallel(
+            mp.init_model_parallel(
                 self_name="worker{}".format(self.rank),
                 backend="invalid",
                 self_rank=self.rank,
@@ -282,18 +283,18 @@ class RpcTest(object):
         dist.init_process_group(backend="gloo", init_method=self.init_method)
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            rpc.init_model_parallel(self_name="abc*")
+            mp.init_model_parallel(self_name="abc*")
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            rpc.init_model_parallel(self_name=" ")
+            mp.init_model_parallel(self_name=" ")
 
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            rpc.init_model_parallel(self_name="")
+            mp.init_model_parallel(self_name="")
 
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
-            rpc.init_model_parallel(
+            mp.init_model_parallel(
                 self_name="".join(["a" for _ in range(500)]),
                 backend=TEST_CONFIG.backend,
                 self_rank=self.rank,
