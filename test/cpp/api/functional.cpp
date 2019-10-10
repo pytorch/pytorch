@@ -565,6 +565,7 @@ TEST_F(FunctionalTest, ReLUDefaultOptions) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
 TEST_F(FunctionalTest, ReLU6) {
@@ -719,7 +720,7 @@ TEST_F(FunctionalTest, Softshrink) {
   for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
     auto x = torch::linspace(-10.0, 10.0, size * size * size);
     x.resize_({size, size, size}).set_requires_grad(true);
-    auto y = F::softshrink(x, SoftshrinkOptions(lambda));
+    auto y = F::softshrink(x, /*lambda=*/lambda);
     torch::Tensor s = y.sum();
 
     s.backward();
@@ -756,14 +757,6 @@ TEST_F(FunctionalTest, Softsign) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-TEST_F(FunctionalTest, Tanh) {
-  auto x = torch::randn(100) * 10;
-  auto y_exp = (x.exp() - (-x).exp()) / (x.exp() + (-x).exp());
-  auto y = F::tanh(x);
-
-  ASSERT_TRUE(torch::allclose(y, y_exp));
-}
-
 TEST_F(FunctionalTest, Tanhshrink) {
   auto x = torch::randn(100) * 10;
   auto y_exp = x - x.tanh();
@@ -793,3 +786,4 @@ TEST_F(FunctionalTest, Threshold) {
     }
   }
 }
+
