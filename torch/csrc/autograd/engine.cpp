@@ -278,9 +278,6 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
       try {
         evaluate_function(task);
       } catch (std::exception& e) {
-        LOG(WARNING)
-            << "Autograd engine received exception while executing func "
-            << task.fn_->name() << ": " << e.what();
         thread_on_exception(task, e);
       }
     }

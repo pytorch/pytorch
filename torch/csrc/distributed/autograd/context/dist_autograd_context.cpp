@@ -58,7 +58,7 @@ void DistAutogradContext::accumulateGrad(
   auto it = accumulatedGrads_.find(variable);
   if (it != accumulatedGrads_.end()) {
     // Accumulate multiple grads on the same variable.
-    it->setValue(it->value() + grad);
+    it->value().add_(grad);
   } else {
     // First grad for this variable.
     accumulatedGrads_.insert(variable, grad);
@@ -89,8 +89,7 @@ void DistAutogradContext::addOutstandingRpc(
 void DistAutogradContext::clearAndWaitForOutstandingRpcs() {
   // Copy futures under lock, but wait for them outside the lock.
   std::unique_lock<std::mutex> lock(lock_);
-  auto outStandingRpcs = outStandingRpcs_;
-  outStandingRpcs_.clear();
+  auto outStandingRpcs = std::move(outStandingRpcs_);
   lock.unlock();
 
   for (const auto& outStandingRpc : outStandingRpcs) {

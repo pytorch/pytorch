@@ -46,6 +46,21 @@ class TORCH_API DistAutogradContext {
   std::unordered_map<int64_t, std::shared_ptr<RecvRpcBackward>> recvFunctions()
       const;
 
+  // Adds a future message recording an outstanding RPC.
+  void addOutstandingRpc(
+      const std::shared_ptr<rpc::FutureMessage>& futureMessage);
+
+  // Returns all gradients.
+  const c10::Dict<torch::Tensor, torch::Tensor> getGradients() const;
+
+  DistAutogradContext(const DistAutogradContext&) = delete;
+  DistAutogradContext& operator=(const DistAutogradContext&) = delete;
+  DistAutogradContext(DistAutogradContext&&) = delete;
+  DistAutogradContext& operator=(DistAutogradContext&&) = delete;
+
+ private:
+  friend class DistEngine;
+
   // Record that we would like to accumulate the provided gradient on the given
   // variable.
   void accumulateGrad(
@@ -59,23 +74,10 @@ class TORCH_API DistAutogradContext {
   // once.
   void setGraphTask(std::unique_ptr<torch::autograd::GraphTask> graphTask);
 
-  // Adds a future message recording an outstanding RPC.
-  void addOutstandingRpc(
-      const std::shared_ptr<rpc::FutureMessage>& futureMessage);
-
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
   void clearAndWaitForOutstandingRpcs();
 
-  // Returns all gradients.
-  const c10::Dict<torch::Tensor, torch::Tensor> getGradients() const;
-
-  DistAutogradContext(const DistAutogradContext&) = delete;
-  DistAutogradContext& operator=(const DistAutogradContext&) = delete;
-  DistAutogradContext(DistAutogradContext&&) = delete;
-  DistAutogradContext& operator=(DistAutogradContext&&) = delete;
-
- private:
   const int64_t contextId_;
 
   // Map from autograd_message_id to appropriate 'send' autograd function.
