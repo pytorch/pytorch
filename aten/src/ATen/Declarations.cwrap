@@ -1356,6 +1356,7 @@
   name: _th_addmm
   cname: addmm
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants:
     - function
   return: argument 0
@@ -1374,6 +1375,7 @@
 [[
   name: _th_addmm_
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: [function]
   return: self
   options:
@@ -1390,6 +1392,7 @@
   name: _th_addmv
   cname: addmv
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   arguments:
@@ -1406,6 +1409,7 @@
   name: _th_addmv_
   cname: addmv
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: self
   arguments:
@@ -1420,6 +1424,7 @@
   name: _th_addr
   cname: addr
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   scalar_check: false
@@ -1436,6 +1441,7 @@
 [[
   name: _th_addr_
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: addr
   return: self
   variants: function
@@ -1451,6 +1457,7 @@
   name: _th_ger
   cname: addr
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   scalar_check: false
@@ -1468,6 +1475,7 @@
 [[
   name: _th_mv
   cpu_bfloat16: True
+  cuda_bfloat16: True
   cname: addmv
   variants: function
   return: argument 0
@@ -1486,6 +1494,7 @@
 [[
   name: _th_mm
   cpu_bfloat16: True
+  cuda_bfloat16: True
   variants: function
   return: argument 0
   options:
@@ -1504,6 +1513,7 @@
 ]]
 [[
   name: _th_bmm
+  cuda_bfloat16: True
   cname: baddbmm
   variants:
     - function
@@ -1524,6 +1534,7 @@
 ]]
 [[
   name: _th_addbmm
+  cuda_bfloat16: True
   cname: addbmm
   variants:
     - function
@@ -1541,6 +1552,7 @@
 ]]
 [[
   name: _th_addbmm_
+  cuda_bfloat16: True
   cname: addbmm
   variants: function
   return: self
@@ -1554,6 +1566,7 @@
 ]]
 [[
   name: _th_baddbmm
+  cuda_bfloat16: True
   cname: baddbmm
   variants:
     - function
