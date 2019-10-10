@@ -541,3 +541,41 @@ TEST_F(FunctionalTest, Bilinear) {
   auto y_exp = torch::Tensor({{449, 1702}});
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
+
+TEST_F(FunctionalTest, ReLU) {
+  const auto size = 3;
+  for (const auto inplace : {false, true}) {
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size});
+    auto y_exp = (x < 0) * 0 + (x >= 0) * x;
+    auto y = F::relu(x, ReLUOptions().inplace(inplace));
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+    if (inplace) {
+      ASSERT_TRUE(torch::allclose(x, y_exp));
+    }
+
+    y = F::relu(x, /*inplace=*/inplace);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+    if (inplace) {
+      ASSERT_TRUE(torch::allclose(x, y_exp));
+    }
+  }
+}
+
+TEST_F(FunctionalTest, ReLUDefaultOptions) {
+  const auto size = 3;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size});
+  auto y_exp = (x < 0) * 0 + (x >= 0) * x;
+  auto y = F::relu(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
