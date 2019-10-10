@@ -114,21 +114,21 @@ static Variable applySelect(const Variable& self, int64_t dim, PyObject* index, 
     jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, var, jit::IntType::get());
   }
 
-  int64_t index_ = THPUtils_unpackLong(index);
-  if (index_ == 0 && dim == 0 && self.dim() == 0) {
+  int64_t unpacked_index = THPUtils_unpackLong(index);
+  if (unpacked_index == 0 && dim == 0 && self.dim() == 0) {
     throw IndexError(
         "invalid index of a 0-dim tensor. "
         "Use tensor.item() to convert a 0-dim tensor to a Python number");
   }
   int64_t size = self.size(dim);
-  if (index_ < -size || index_ >= size) {
+  if (unpacked_index < -size || unpacked_index >= size) {
     throw IndexError("index %lld is out of bounds for dimension %lld with size %lld",
-      index_, real_dim, size);
+      unpacked_index, real_dim, size);
   }
   // if the index is negative, do not normalize it because that would fix the index
   // on the current tensor size in the tracer.
   // aten::select also works on negative indices
-  return self.select(dim, index_);
+  return self.select(dim, unpacked_index);
 }
 
 static Variable sequenceToVariable(c10::TensorTypeId type_id, PyObject* seq) {
