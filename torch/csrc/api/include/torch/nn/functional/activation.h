@@ -110,11 +110,6 @@ inline Tensor softsign(const Tensor& input) {
   return input / (input.abs() + 1);
 }
 
-inline Tensor tanh(const Tensor& input) {
-  TORCH_WARN("nn.functional.tanh is deprecated. Use torch.tanh instead.");
-  return input.tanh();
-}
-
 } // namespace functional
 } // namespace nn
 } // namespace torch
