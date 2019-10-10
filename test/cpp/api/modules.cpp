@@ -1319,7 +1319,7 @@ TEST_F(ModulesTest, Softplus) {
 TEST_F(ModulesTest, Softshrink) {
   const auto size = 3;
   for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
-    Softshrink model {SoftshrinkOptions(lambda)};
+    Softshrink model {/*lambda=*/lambda};
     auto x = torch::linspace(-10.0, 10.0, size * size * size);
     x.resize_({size, size, size}).set_requires_grad(true);
     auto y = model(x);
