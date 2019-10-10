@@ -25,7 +25,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
   community/*
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Package Reference
 
    torch
@@ -42,6 +42,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    nn.init
    onnx
    optim
+   quantization
    torch.random <random>
    sparse
    storage
@@ -53,6 +54,8 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    torch.utils.model_zoo <model_zoo>
    torch.utils.tensorboard <tensorboard>
    type_info
+   named_tensor
+   name_inference
    torch.__config__ <__config__>
 
 .. toctree::
