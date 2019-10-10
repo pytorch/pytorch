@@ -1100,6 +1100,8 @@ struct Graph {
       bool is_list,
       bool is_tuple);
 
+  TORCH_API Value* insertUncheckedCast(Value* v, TypePtr type);
+
   TORCH_API Value* insertFunctionCall(
       Function* callee,
       const script::MatchedSchema& matched);
