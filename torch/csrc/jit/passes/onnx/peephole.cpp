@@ -715,7 +715,6 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   speculateOps(graph->block());
   fuseListUnpack(graph->block());
   eraseListConstruct(graph->block());
-  fuseSplitListUnpack(graph->block());
   fuseUnbindListUnpack(graph->block());
   removeMaxPoolUnusedOutput(graph->block());
 }
