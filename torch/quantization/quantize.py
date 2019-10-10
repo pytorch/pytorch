@@ -14,7 +14,7 @@ from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
                                DEFAULT_QAT_MODULE_MAPPING,
                                DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST)
 from .stubs import DeQuantStub, QuantWrapper
-from .QConfig import default_dynamic_qconfig, float16_dynamic_qconfig
+from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig
 
 def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
                               qconfig_parent=None, prefix=''):
