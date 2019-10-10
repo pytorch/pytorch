@@ -280,7 +280,7 @@ void SoftsignImpl::pretty_print(std::ostream& stream) const {
 // ============================================================================
 
 Tensor TanhImpl::forward(const Tensor& input) {
-  return input.tanh();
+  return torch::tanh(input);
 }
 
 void TanhImpl::reset() {}
