@@ -129,5 +129,43 @@ Tensor SoftmaxImpl::forward(const Tensor& input) {
   return F::softmax(input, options);
 }
 
+// ============================================================================
+
+PReLUImpl::PReLUImpl(const PReLUOptions& options_) : options(options_) {
+  reset();
+}
+
+Tensor PReLUImpl::forward(const Tensor& input) {
+  return F::prelu(input, weight);
+}
+
+void PReLUImpl::reset() {
+  weight = register_parameter("weight",
+    torch::full(options.num_parameters(), options.init()));
+}
+
+void PReLUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::PReLU(num_parameters="
+         << options.num_parameters() << ")";
+}
+
+// ============================================================================
+
+ReLUImpl::ReLUImpl(const ReLUOptions& options_) : options(options_) {}
+
+Tensor ReLUImpl::forward(Tensor& input) {
+  return F::relu(input, options);
+}
+
+void ReLUImpl::reset() {}
+
+void ReLUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::ReLU(";
+  if (options.inplace()) {
+    stream << std::boolalpha << "inplace=" << options.inplace();
+  }
+  stream << ")";
+}
+
 } // namespace nn
 } // namespace torch

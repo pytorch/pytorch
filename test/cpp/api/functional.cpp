@@ -161,6 +161,107 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, AffineGrid) {
+  {
+    // 2D affine.
+    auto theta = torch::arange(1, 13, torch::kDouble)
+                     .view(torch::IntArrayRef({2, 2, 3}));
+    auto size = torch::IntArrayRef({2, 3, 2, 2}).vec();
+    auto align_corners = true;
+    auto output = F::affine_grid(theta, size, !align_corners);
+    auto expected = torch::tensor(
+        {{{{1.50, 1.50}, {2.50, 5.50}}, {{3.50, 6.50}, {4.50, 10.50}}},
+         {{{1.50, 1.50}, {8.50, 11.50}}, {{9.50, 12.50}, {16.50, 22.50}}}});
+    auto output_aligned = F::affine_grid(theta, size, align_corners);
+    auto expected_aligned = torch::tensor(
+        {{{{0.0, -3.0}, {2.0, 5.0}}, {{4.0, 7.0}, {6.0, 15.0}}},
+         {{{-6.0, -9.0}, {8.0, 11.0}}, {{10.0, 13.0}, {24.0, 33.0}}}});
+
+    ASSERT_TRUE(output.allclose(expected));
+    ASSERT_TRUE(output_aligned.allclose(expected_aligned));
+  }
+  {
+    // 3D affine.
+    auto theta = torch::arange(1, 13, torch::kDouble)
+                     .view(torch::IntArrayRef({1, 3, 4}));
+    auto size = torch::IntArrayRef({1, 1, 3, 2, 2}).vec();
+    auto align_corners = true;
+    auto output = F::affine_grid(theta, size, !align_corners);
+    auto expected = torch::tensor(
+        {{{{{0.5000, -2.1667, -4.8333}, {1.5000, 2.8333, 4.1667}},
+           {{2.5000, 3.8333, 5.1667}, {3.5000, 8.8333, 14.1667}}},
+          {{{2.5000, 2.5000, 2.5000}, {3.5000, 7.5000, 11.5000}},
+           {{4.5000, 8.5000, 12.5000}, {5.5000, 13.5000, 21.5000}}},
+          {{{4.5000, 7.1667, 9.8333}, {5.5000, 12.1667, 18.8333}},
+           {{6.5000, 13.1667, 19.8333}, {7.5000, 18.1667, 28.8333}}}}});
+    auto output_aligned = F::affine_grid(theta, size, align_corners);
+    auto expected_aligned =
+        torch::tensor({{{{{-2.0, -10.0, -18.0}, {0.0, 0.0, 0.0}},
+                         {{2.0, 2.0, 2.0}, {4.0, 12.0, 20.0}}},
+                        {{{1.0, -3.0, -7.0}, {3.0, 7.0, 11.0}},
+                         {{5.0, 9.0, 13.0}, {7.0, 19.0, 31.0}}},
+                        {{{4.0, 4.0, 4.0}, {6.0, 14.0, 22.0}},
+                         {{8.0, 16.0, 24.0}, {10.0, 26.0, 42.0}}}}});
+
+    ASSERT_TRUE(output.allclose(expected, 1e-2));
+    ASSERT_TRUE(output_aligned.allclose(expected_aligned));
+  }
+  {
+    auto theta = torch::empty({1, 2, 3}, torch::kDouble);
+    auto size = torch::IntArrayRef({1, 1, 2, 2}).vec();
+    ASSERT_THROWS_WITH(
+        F::affine_grid(torch::empty({2, 2, 3}), {-1, 1, 2, 2}),
+        "Expected non-zero, positive output size. Got [-1, 1, 2, 2]");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(torch::empty({2, 2, 3}, torch::kInt), size),
+        "Expected theta to have floating point type, but got int");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta[0], size),
+        "Expected a batch of 2D affine matrices of shape Nx2x3 for size "
+        "[1, 1, 2, 2]. Got [2, 3].");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta.unsqueeze(0), size),
+        "Expected a batch of 2D affine matrices of shape Nx2x3 for size "
+        "[1, 1, 2, 2]. Got [1, 1, 2, 3].");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta.repeat({1, 2, 1}), size),
+        "Expected a batch of 2D affine matrices of shape Nx2x3 for size "
+        "[1, 1, 2, 2]. Got [1, 4, 3].");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta.repeat({1, 1, 2}), size),
+        "Expected a batch of 2D affine matrices of shape Nx2x3 for size "
+        "[1, 1, 2, 2]. Got [1, 2, 6].");
+  }
+  {
+    auto theta = torch::empty({1, 3, 4}, torch::kDouble);
+    auto size = torch::IntArrayRef({1, 1, 2, 2, 3}).vec();
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta[0], size),
+        "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
+        "[1, 1, 2, 2, 3]. Got [3, 4].");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta.unsqueeze(0), size),
+        "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
+        "[1, 1, 2, 2, 3]. Got [1, 1, 3, 4].");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta.repeat({1, 2, 1}), size),
+        "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
+        "[1, 1, 2, 2, 3]. Got [1, 6, 4].");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta.repeat({1, 1, 2}), size),
+        "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
+        "[1, 1, 2, 2, 3]. Got [1, 3, 8].");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta, {1, 1, 1, 2, 2, 3}),
+        "affine_grid only supports 4D and 5D sizes, for 2D and 3D affine "
+        "transforms, respectively. Got size [1, 1, 1, 2, 2, 3]");
+    ASSERT_THROWS_WITH(
+        F::affine_grid(theta, {1, 1}),
+        "affine_grid only supports 4D and 5D sizes, for 2D and 3D affine "
+        "transforms, respectively. Got size [1, 1]");
+  }
+}
+
 TEST_F(FunctionalTest, MultiMarginLoss) {
   auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
   auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::requires_grad());
@@ -418,4 +519,51 @@ TEST_F(FunctionalTest, Softmax) {
     auto expected = torch::exp(input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
+}
+
+TEST_F(FunctionalTest, PReLU) {
+  const auto x = torch::rand({42, 24}) * 200 - 100;
+  const auto w = torch::rand(24) * 200 - 100;
+  const auto y = F::prelu(x, w);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({42, 24}));
+  const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, ReLU) {
+  const auto size = 3;
+  for (const auto inplace : {false, true}) {
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size});
+    auto y_exp = (x < 0) * 0 + (x >= 0) * x;
+    auto y = F::relu(x, ReLUOptions().inplace(inplace));
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+    if (inplace) {
+      ASSERT_TRUE(torch::allclose(x, y_exp));
+    }
+
+    y = F::relu(x, /*inplace=*/inplace);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+    if (inplace) {
+      ASSERT_TRUE(torch::allclose(x, y_exp));
+    }
+  }
+}
+
+TEST_F(FunctionalTest, ReLUDefaultOptions) {
+  const auto size = 3;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size});
+  auto y_exp = (x < 0) * 0 + (x >= 0) * x;
+  auto y = F::relu(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
