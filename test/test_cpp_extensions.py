@@ -483,8 +483,8 @@ class TestCppExtension(common.TestCase):
 
         input = torch.randn(2, 5, dtype=dtype)
         cpp_linear = extension.Net(5, 2)
-        cpp_linear.to(dtype=dtype)
-        python_linear = torch.nn.Linear(5, 2).to(dtype=dtype)
+        cpp_linear.to(dtype)
+        python_linear = torch.nn.Linear(5, 2).to(dtype)
 
         # First make sure they have the same parameters
         cpp_parameters = dict(cpp_linear.named_parameters())
