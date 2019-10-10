@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 class DuckTensor(object):
-    def __torch_function__(self, func, args=None, kwargs={}):
+    def __torch_function__(self, func, args=None, kwargs=None):
         pass
 
 HANDLED_FUNCTIONS = {}
@@ -17,7 +17,10 @@ def implements(torch_function):
     return decorator
 
 class SubTensor(Tensor):
-    def __torch_function__(self, func, args=None, kwargs={}):
+    def __torch_function__(self, func, args=None, kwargs=None):
+        if(kwargs == None):
+            kwargs = {}
+
         if func not in HANDLED_FUNCTIONS:
             return NotImplemented
         # Note: this allows subclasses that don't override
@@ -37,10 +40,10 @@ def mm(mat1, mat2):
 class TorchFunction(Benchmark):
 
     def setup(self):
-        self.t1 = torch.ones(2, 2, dtype = torch.float32)
-        self.t2 = torch.zeros(2, 2, dtype = torch.float32)
-        self.t3 = SubTensor([[1,1],[1,1.]])
-        self.t4 = SubTensor([[0,0],[0,0.]])
+        self.t1 = torch.ones(2, 2, dtype=torch.float32)
+        self.t2 = torch.zeros(2, 2, dtype=torch.float32)
+        self.t3 = SubTensor([[1, 1], [1, 1.]])
+        self.t4 = SubTensor([[0, 0], [0, 0.]])
 
     def time_add(self):
         torch.add(self.t1, self.t2)
