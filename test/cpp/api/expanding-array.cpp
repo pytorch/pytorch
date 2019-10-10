@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/expanding_array.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
