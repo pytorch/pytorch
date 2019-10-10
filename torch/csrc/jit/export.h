@@ -55,6 +55,12 @@ TORCH_API void ExportModule(
     const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
     bool bytecode_format = false);
 
+TORCH_API void ExportModule(
+    const script::Module& module,
+    const std::function<size_t(const void*, size_t)>& writer_func,
+    const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
+    bool bytecode_format = false);
+
 // Surrounding system can install an additional hook to produce extra files
 // with metadata based on environment every time a module is serialized.
 using ExportModuleExtraFilesHook =
