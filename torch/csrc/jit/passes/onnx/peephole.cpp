@@ -597,7 +597,7 @@ static void fuseListUnpack(Block* b) {
         }
       }
 
-      if (input_node->kind() == onnx::Split) {
+      else if (input_node->kind() == onnx::Split) {
         auto origSplitNode = it->inputs().at(0)->node();
         Node* splitNode =
             b->owningGraph()->create(it->inputs().at(0)->node()->kind(), it->outputs().size());
