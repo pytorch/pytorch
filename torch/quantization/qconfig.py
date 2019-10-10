@@ -68,9 +68,9 @@ default_qat_qconfig = QConfig(activation=default_fake_quant,
                               weight=default_weight_fake_quant)
 
 default_weight_only_qconfig = QConfig(activation=torch.nn.Identity,
-                                            weight=default_weight_fake_quant)
+                                      weight=default_weight_fake_quant)
 default_activation_only_qconfig = QConfig(activation=default_fake_quant,
-                                                weight=torch.nn.Identity)
+                                          weight=torch.nn.Identity)
 
 def get_default_qconfig(backend='fbgemm'):
     if backend == 'fbgemm':
