@@ -4,7 +4,6 @@ import sys
 import math
 import tempfile
 import time
-import torch
 import unittest
 import warnings
 from copy import deepcopy
@@ -12,6 +11,12 @@ from collections import OrderedDict
 from itertools import product
 from operator import mul
 from functools import reduce
+import torch
+
+# TODO: remove this global setting
+# Autograd tests use double as the default dtype
+torch.set_default_dtype(torch.double)
+
 from torch import nn
 from torch._six import inf, nan, istuple
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
