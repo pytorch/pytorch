@@ -181,10 +181,15 @@ struct TORCH_API Variable : public at::Tensor {
   /// Gets the raw gradient function pointer, whatever it currently is.
   Node* grad_fn_unsafe() const;
 
+private:
   /// Set the gradient accumulator of the `Variable`. This is only applicable to
   /// leaf variables. Interior variables should call `set_gradient_edge()`.
   void set_grad_accumulator(std::weak_ptr<Node> grad_accumulator);
 
+  // Only user of set_grad_accumulator
+  friend class SavedVariable;
+
+public:
   /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
   /// if it still exists. If the gradient accumulator function has been
   /// destroyed, returns a `nullptr`.
