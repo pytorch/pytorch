@@ -128,8 +128,11 @@ def replicate(network, devices, detach=False):
                     if name in module._buffers.keys():
                         continue
                     cpp_replica._register_attribute(name, the_type, value)
-                replica = torch.jit.RecursiveScriptModule(cpp_replica)
-                replica._finalize()
+
+                def init_fn(script_module):
+                    # Don't do anything here, we'll initialize the ScriptModule below
+                    return
+                replica = torch.jit.RecursiveScriptModule._construct(cpp_replica, init_fn)
             else:
                 replica = module._replicate_for_data_parallel()
 

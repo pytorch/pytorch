@@ -1581,14 +1581,14 @@ if _enabled:
             """
             script_module = RecursiveScriptModule(cpp_module)
             init_fn(script_module)
-            script_module._finalize()
-            return script_module
 
-        def _finalize(self):
-            self._parameters = OrderedParameterDict(self._c)
-            self._buffers = OrderedBufferDict(self._c)
-            self._modules = OrderedModuleDict(self._c, self._modules)
-            self._initializing = False
+            # Finalize the ScriptModule: replace the nn.Module state with our
+            # custom implementations and flip the _initializing bit.
+            script_module._parameters = OrderedParameterDict(script_module._c)
+            script_module._buffers = OrderedBufferDict(script_module._c)
+            script_module._modules = OrderedModuleDict(script_module._c, script_module._modules)
+            script_module._initializing = False
+            return script_module
 
         @property
         def graph(self):
