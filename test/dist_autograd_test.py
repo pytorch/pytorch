@@ -79,8 +79,7 @@ class DistAutogradTest(object):
 
             # no worker ids should be recorded yet.
             worker_ids = ctx._known_worker_ids()
-            import pdb ; pdb.set_trace()
-            self.assertEqual(worker_ids, [1])
+            self.assertEqual(len(worker_ids), 1)
 
 
             # Retrieve the next functions in the graph.
