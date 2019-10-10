@@ -303,7 +303,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.MaxPool1d(2, stride=1, dilation=2)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
-    
+
     @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool(self):
         model = torch.nn.AvgPool1d(2, stride=1)
