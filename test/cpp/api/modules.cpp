@@ -1300,6 +1300,15 @@ TEST_F(ModulesTest, CELU) {
   }
 }
 
+TEST_F(ModulesTest, Sigmoid) {
+  Sigmoid model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = 1 / (1 + torch::exp(-x));
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1631,4 +1640,8 @@ TEST_F(ModulesTest, PrettyPrintCELU) {
   ASSERT_EQ(c10::str(CELU()), "torch::nn::CELU(alpha=1)");
   ASSERT_EQ(c10::str(CELU(CELUOptions().alpha(42.42).inplace(true))),
             "torch::nn::CELU(alpha=42.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSigmoid) {
+  ASSERT_EQ(c10::str(Sigmoid()), "torch::nn::Sigmoid()");
 }
