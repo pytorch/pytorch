@@ -5,8 +5,6 @@
 #include <ATen/core/Generator.h>
 #include <ATen/core/DistributionsHelper.h>
 
-TH_API void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor);
-
 #if !defined(TH_REAL_IS_HALF)
 
 TH_API void THTensor_(ltValue)(THBoolTensor *r_, THTensor* t, scalar_t value);
