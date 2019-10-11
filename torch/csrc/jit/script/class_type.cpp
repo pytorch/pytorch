@@ -55,21 +55,17 @@ size_t ClassType::addAttribute(
     const std::string& name,
     TypePtr type,
     bool is_parameter) {
-  const char* what = is_parameter ? "parameter" : "attribute";
   for (size_t i = 0; i < attributeNames_.size(); ++i) {
     TORCH_CHECK(
         name != attributeNames_[i],
         "attempting to add ",
-        what,
-        " '",
+        is_parameter ? "parameter"
+                     : "attribute"
+                       " '",
         name,
-        "' to ",
-        python_str(),
-        " but a field of the same name already exists with type ",
+        "' but a field of the same name already exists with type ",
         attributeTypes_[i]->python_str());
   }
-  checkNoAny(*this, what, name, type);
-
   size_t slot = attributeNames_.size();
   attributeNames_.push_back(name);
   attributeTypes_.push_back(type);

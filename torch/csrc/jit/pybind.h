@@ -27,7 +27,7 @@ struct type_caster<torch::jit::IValue> {
 
   bool load(handle src, bool) {
     try {
-      value = torch::jit::toTypeInferredIValue(src);
+      value = torch::jit::toIValue(src);
       return true;
     } catch (std::exception& e) {
       return false;
