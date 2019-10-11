@@ -1,53 +1,26 @@
 #pragma once
 
-#include <torch/nn/cloneable.h>
-#include <torch/nn/pimpl.h>
+#include <torch/arg.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
-
-#include <cstddef>
-#include <vector>
 
 namespace torch {
 namespace nn {
 
-// /// Options for the `Embedding` module.
-// struct TORCH_API EmbeddingOptions {
-//   EmbeddingOptions(int64_t count, int64_t dimension);
-//   /// The number of embeddings (number of rows in the table).
-//   TORCH_ARG(int64_t, count);
-//   /// The size of each embedding vector (number of columns in the table).
-//   TORCH_ARG(int64_t, dimension);
-// };
-
-/// Performs a lookup in a fixed size embedding table.
-class TORCH_API LayerNorm : public torch::nn::Cloneable<EmbeddingImpl> {
- public:
-  EmbeddingImpl(int64_t count, int64_t dimension)
-      : EmbeddingImpl(EmbeddingOptions(count, dimension)) {}
-  explicit EmbeddingImpl(EmbeddingOptions options);
-
-  void reset() override;
-
-  /// Pretty prints the `Embedding` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
-
-  /// Performs a lookup on the embedding table stored in `weight` using the
-  /// `indices` supplied and returns the result.
-  Tensor forward(const Tensor& indices);
-
-  /// The `Options` used to configure this `Embedding` module.
-  /// Changes to `EmbeddingOptions` *after construction* have no effect.
-  EmbeddingOptions options;
-
-  /// The embedding table.
-  Tensor weight;
+/// Options for the `BatchNorm` module.
+struct TORCH_API LayerNormOptions {
+  /* implicit */ LayerNormOptions(int64_t normalized_shape);
+  /// The number of features of the input tensor.
+  /// Changing this parameter after construction __has no effect__.
+  TORCH_ARG(int64_t, normalized_shape);
+  /// a boolean value that when set to ``True``, this module
+  /// has learnable per-element affine parameters initialized to ones (for weights)
+  /// and zeros (for biases).
+  TORCH_ARG(bool, elementwise_affine) = true;
+  /// The epsilon value added for numerical stability.
+  /// Changing this parameter after construction __is effective__.
+  TORCH_ARG(double, eps) = 1e-5;
 };
-
-/// A `ModuleHolder` subclass for `EmbeddingImpl`.
-/// See the documentation for `EmbeddingImpl` class to learn what methods it
-/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
-TORCH_MODULE(Embedding);
 
 } // namespace nn
 } // namespace torch
