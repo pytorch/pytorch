@@ -6,7 +6,7 @@ namespace torch {
 namespace nn{
 namespace functional {
 
-inline Tensor bilinear(Tensor& input1, Tensor& input2, Tensor& weight, Tensor& bias) {
+inline Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {
     return torch::bilinear(input1, input2, weight, bias);
 }
 

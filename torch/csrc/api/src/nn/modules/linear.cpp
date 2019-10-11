@@ -56,15 +56,15 @@ Tensor LinearImpl::forward(const Tensor& input) {
 
 BilinearOptions::BilinearOptions(int64_t in1_features, int64_t in2_features, int64_t out_features) : in1_features_(in1_features), in2_features_(in2_features), out_features_(out_features) {}
 
-BilinearImpl::BilinearImpl(BilinearOptions options) : options(options) {
+BilinearImpl::BilinearImpl(const BilinearOptions& options_) : options(options_) {
   reset();
 }
 
 void BilinearImpl::reset() {
   weight =
-      register_parameter("weight", torch::empty({options.out_features_, options.in1_features_, options.in2_features_}));
+      register_parameter("weight", torch::empty({options.out_features()), options.in1_features()), options.in2_features())}));
   if (options.bias_) {
-    bias = register_parameter("bias", torch::empty(options.out_features_));
+    bias = register_parameter("bias", torch::empty(options.out_features())));
   } else {
     bias = register_parameter("bias", torch::Tensor());
   }
@@ -77,8 +77,8 @@ void BilinearImpl::reset() {
 }
 
 void BilinearImpl::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha << "torch::nn::Bilinear(in1_features=" << options.in1_features_
-         << ", in2_features=" << options.in2_features_ << ", out_features=" << options.out_features_ << ", bias=" << options.bias_
+  stream << std::boolalpha << "torch::nn::Bilinear(in1_features=" << options.in1_features())
+         << ", in2_features=" << options.in2_features()) << ", out_features=" << options.out_features()) << ", bias=" << options.bias())
          << ")";
 }
 
