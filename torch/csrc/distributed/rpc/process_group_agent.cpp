@@ -407,8 +407,9 @@ void ProcessGroupAgent::markFutureWithMessage(
     std::lock_guard<std::mutex> lock{futureMutex_};
     fut = futures_[messageId];
   }
-  // Don't hold lock on markCompleted, as it could invoke callbacks
-  fut->markCompleted(exceptionMsg);
+  // Don't hold lock on markCompleted, as it could invoke callbacks that
+  // call agent_->send.
+  fut->markCompleted(std::move(exceptionMsg));
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
     futures_.erase(messageId);
