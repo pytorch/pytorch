@@ -26,7 +26,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
-from torch.nn.utils import (clip_grad_norm_, clip_grad_value_)
+from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 import torch.nn.utils.prune as prune
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import gradcheck
@@ -35,7 +35,8 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, download_file, PY3, to_gpu, \
-    get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES
+    get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
+    TemporaryFileName
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
@@ -1969,7 +1970,7 @@ class TestNN(NNTestCase):
         self.assertTrue(True)
 
     @unittest.skipIf(not TEST_NUMPY, "numpy not found")
-    def test_compute_nparams_toprune(self):
+    def test_compute_nparams_to_prune(self):
         r"""Test that requested pruning `amount` gets translated into the
         correct absolute number of units to prune.
         """
@@ -2228,7 +2229,7 @@ class TestNN(NNTestCase):
 
     def test_pruning_id_consistency(self):
         r"""Test that pruning doesn't change the id of the parameters, which
-        would otherwise introduce issues with pre-existing optitmizers that
+        would otherwise introduce issues with pre-existing optimizers that
         point to old parameters.
         """
         m = nn.Linear(5, 2, bias=False)
@@ -2259,7 +2260,7 @@ class TestNN(NNTestCase):
         weight_mask0 = m.weight_mask  # save it for later sanity check
 
         # prune again
-        prune.ln_structured(m, name='weight', amount=0.3, n=2, axis=0)
+        prune.ln_structured(m, name='weight', amount=0.3, n=2, dim=0)
         hook = next(iter(m._forward_pre_hooks.values()))
         self.assertIsInstance(
             hook,
@@ -2283,7 +2284,7 @@ class TestNN(NNTestCase):
         self.assertTrue(torch.all(m.weight_mask[weight_mask0 == 0] == 0))
 
         # prune again
-        prune.ln_structured(m, name='weight', amount=0.1, n=float('inf'), axis=1)
+        prune.ln_structured(m, name='weight', amount=0.1, n=float('inf'), dim=1)
         # check that container._tensor_name is correctly set no matter how 
         # many pruning methods are in the container
         hook = next(iter(m._forward_pre_hooks.values()))
@@ -2341,7 +2342,7 @@ class TestNN(NNTestCase):
         self.assertEqual(expected_mask, computed_mask)
 
         # 2) test structured pruning
-        q = prune.LnStructuredPruningMethod(amount=1, n=2, axis=0)
+        q = prune.LnStructuredPruningMethod(amount=1, n=2, dim=0)
         q._tensor_name = 'test'
         container.add_pruning_method(q)
         # since we are pruning the lowest magnitude one of the two rows, the 
@@ -2351,7 +2352,7 @@ class TestNN(NNTestCase):
         self.assertEqual(expected_mask, computed_mask)
 
         # 2) test structured pruning, along another axis
-        r = prune.LnStructuredPruningMethod(amount=1, n=2, axis=1)
+        r = prune.LnStructuredPruningMethod(amount=1, n=2, dim=1)
         r._tensor_name = 'test'
         container.add_pruning_method(r)
         # since we are pruning the lowest magnitude of the four columns, the 
@@ -2369,8 +2370,9 @@ class TestNN(NNTestCase):
         m = nn.Linear(4, 2)
         # modify its weight matrix by hand
         m.weight = torch.nn.Parameter(
-            torch.tensor([[1, 2, 3, 4], [-4, -3, -2, -1]]).to(
-                dtype=torch.float32)
+            torch.tensor(
+                [[1, 2, 3, 4], [-4, -3, -2, -1]], dtype=torch.float32
+            )
         )
 
         prune.l1_unstructured(m, 'weight', amount=2)
@@ -2402,7 +2404,7 @@ class TestNN(NNTestCase):
 
         AMOUNT = 0.6
         AXIS = 2
-        p = prune.RandomStructuredPruningMethod(amount=AMOUNT, axis=AXIS)
+        p = prune.RandomStructuredPruningMethod(amount=AMOUNT, dim=AXIS)
         t = 2 * torch.randint(low=-1, high=2, size=(5, 4, 2)).to(
             dtype=torch.float32
         )
@@ -2430,14 +2432,14 @@ class TestNN(NNTestCase):
         expected_mask_axis1 = torch.ones_like(m.weight)
         expected_mask_axis1[:, 1] = 0.
 
-        prune.ln_structured(m, 'weight', amount=1, n=2, axis=1)
+        prune.ln_structured(m, 'weight', amount=1, n=2, dim=1)
         self.assertEqual(expected_mask_axis1, m.weight_mask)
 
         # expected effect of pruning 1 of the 2 columns along axis -1 by L1-norm
         expected_mask_axis3 = expected_mask_axis1
         expected_mask_axis3[:, :, :, 0] = 0.
 
-        prune.ln_structured(m, 'weight', amount=1, n=1, axis=-1)
+        prune.ln_structured(m, 'weight', amount=1, n=1, dim=-1)
         self.assertEqual(expected_mask_axis3, m.weight_mask)
 
 
@@ -2571,6 +2573,92 @@ class TestNN(NNTestCase):
                         self.assertFalse(
                             name + '_orig' in dict(m.named_parameters())
                         )
+
+    def test_pruning_serialization_model(self):
+        # create a model
+        model = torch.nn.Sequential(
+            torch.nn.Linear(10, 10), 
+            torch.nn.ReLU(),
+            torch.nn.Linear(10, 1),
+        )
+        # check that everything looks normal before pruning
+        self.assertNotIn('0.weight_orig', model.state_dict())
+        self.assertNotIn('0.weight_mask', model.state_dict())
+        self.assertIn('0.weight', model.state_dict())
+
+        # prune one of its parameters
+        prune.l1_unstructured(module=model[0], name='weight', amount=0.9)
+
+        # check that the original weight and the new mask are present
+        self.assertIn('0.weight_orig', model.state_dict())
+        self.assertIn('0.weight_mask', model.state_dict())
+        self.assertNotIn('0.weight', model.state_dict())
+        self.assertTrue(hasattr(model[0], 'weight'))
+
+        pruned_weight = getattr(model[0], 'weight')
+
+        with TemporaryFileName() as fname:
+            torch.save(model, fname)
+            new_model = torch.load(fname)
+
+        # check that the original weight and the new mask are present
+        self.assertIn('0.weight_orig', new_model.state_dict())
+        self.assertIn('0.weight_mask', new_model.state_dict())
+        self.assertNotIn('0.weight', new_model.state_dict())
+        self.assertTrue(hasattr(new_model[0], 'weight'))
+
+        self.assertEqual(pruned_weight, new_model[0].weight)
+
+
+    def test_pruning_serialization_state_dict(self):
+        # create a model
+        model = torch.nn.Sequential(
+            torch.nn.Linear(10, 10), 
+            torch.nn.ReLU(),
+            torch.nn.Linear(10, 1),
+        )
+        # check that everything looks normal before pruning
+        self.assertNotIn('0.weight_orig', model.state_dict())
+        self.assertNotIn('0.weight_mask', model.state_dict())
+        self.assertIn('0.weight', model.state_dict())
+
+        # prune one of its parameters
+        prune.l1_unstructured(module=model[0], name='weight', amount=0.9)
+
+        # check that the original weight and the new mask are present
+        self.assertIn('0.weight_orig', model.state_dict())
+        self.assertIn('0.weight_mask', model.state_dict())
+        self.assertNotIn('0.weight', model.state_dict())
+        self.assertTrue(hasattr(model[0], 'weight'))
+
+        pruned_weight = getattr(model[0], 'weight')
+
+        # make pruning permanent and restore parameter names as in base 
+        # architecture
+        prune.remove(module=model[0], name='weight')
+
+        # check that the original weight and the new mask are no longer present
+        self.assertNotIn('0.weight_orig', model.state_dict())
+        self.assertNotIn('0.weight_mask', model.state_dict())
+        self.assertIn('0.weight', model.state_dict())
+
+        # save the state dict of model and reload it into new_model
+        new_model = torch.nn.Sequential(
+            torch.nn.Linear(10, 10), 
+            torch.nn.ReLU(),
+            torch.nn.Linear(10, 1),
+        )
+        with TemporaryFileName() as fname:
+            torch.save(model.state_dict(), fname)
+            new_model.load_state_dict(torch.load(fname))
+
+        # check that the original weight and the new mask are not present in 
+        # new_model either.
+        self.assertNotIn('0.weight_orig', new_model.state_dict())
+        self.assertNotIn('0.weight_mask', new_model.state_dict())
+        self.assertIn('0.weight', new_model.state_dict())
+
+        self.assertEqual(pruned_weight, new_model[0].weight)
 
 
     def test_weight_norm(self):
