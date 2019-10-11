@@ -369,52 +369,65 @@ static void THCTensor_(addmmImpl)(THCState *state, THCTensor *r_, THCTensor *t, 
     m2_ = THCTensor_(newContiguous)(state, m2);
   }
 
+
+  if (r__->size(0) == 0 || r__->size(1) == 0) {
+    // No-op for empty matrix
+  } else if (m1->size(1) == 0) {
+    // Special handling for k == 0, since stride can be in one of the inputs 0
+    //  which will fail BLAS routines
+    if (ScalarConvert<scalar_t, double>::to(beta) != 0.0) {
+      THCTensor_(mul)(state, r__, r__, beta);
+    } else {
+      THCTensor_(zero)(state, r__);
+    }
+  } else {
 #ifdef THC_REAL_IS_HALF
-  THCudaBlas_Hgemm(state,
-                   transpose_m1,
-                   transpose_m2,
-                   r__->size((transpose_r == 'n' ? 0 : 1)),
-                   r__->size((transpose_r == 'n' ? 1 : 0)),
-                   m1_->size((transpose_r == 'n' ? 1 : 0)),
-                   alpha,
-                   THCTensor_(data)(state, m1_),
-                   (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1))),
-                   THCTensor_(data)(state, m2_),
-                   (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1))),
-                   beta,
-                   THCTensor_(data)(state, r__),
-                   r__->stride((transpose_r == 'n' ? 1 : 0)));
+    THCudaBlas_Hgemm(state,
+                     transpose_m1,
+                     transpose_m2,
+                     r__->size((transpose_r == 'n' ? 0 : 1)),
+                     r__->size((transpose_r == 'n' ? 1 : 0)),
+                     m1_->size((transpose_r == 'n' ? 1 : 0)),
+                     alpha,
+                     THCTensor_(data)(state, m1_),
+                     (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1))),
+                     THCTensor_(data)(state, m2_),
+                     (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1))),
+                     beta,
+                     THCTensor_(data)(state, r__),
+                     r__->stride((transpose_r == 'n' ? 1 : 0)));
 #elif defined(THC_REAL_IS_FLOAT)
-  THCudaBlas_Sgemm(state,
-                   transpose_m1,
-                   transpose_m2,
-                   r__->size((transpose_r == 'n' ? 0 : 1)),
-                   r__->size((transpose_r == 'n' ? 1 : 0)),
-                   m1_->size((transpose_r == 'n' ? 1 : 0)),
-                   alpha,
-                   THCTensor_(data)(state, m1_),
-                   (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1))),
-                   THCTensor_(data)(state, m2_),
-                   (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1))),
-                   beta,
-                   THCTensor_(data)(state, r__),
-                   r__->stride((transpose_r == 'n' ? 1 : 0)));
+    THCudaBlas_Sgemm(state,
+                     transpose_m1,
+                     transpose_m2,
+                     r__->size((transpose_r == 'n' ? 0 : 1)),
+                     r__->size((transpose_r == 'n' ? 1 : 0)),
+                     m1_->size((transpose_r == 'n' ? 1 : 0)),
+                     alpha,
+                     THCTensor_(data)(state, m1_),
+                     (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1))),
+                     THCTensor_(data)(state, m2_),
+                     (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1))),
+                     beta,
+                     THCTensor_(data)(state, r__),
+                     r__->stride((transpose_r == 'n' ? 1 : 0)));
 #elif defined(THC_REAL_IS_DOUBLE)
-  THCudaBlas_Dgemm(state,
-                   transpose_m1,
-                   transpose_m2,
-                   r__->size((transpose_r == 'n' ? 0 : 1)),
-                   r__->size((transpose_r == 'n' ? 1 : 0)),
-                   m1_->size((transpose_r == 'n' ? 1 : 0)),
-                   alpha,
-                   THCTensor_(data)(state, m1_),
-                   (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1))),
-                   THCTensor_(data)(state, m2_),
-                   (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1))),
-                   beta,
-                   THCTensor_(data)(state, r__),
-                   r__->stride((transpose_r == 'n' ? 1 : 0)));
+    THCudaBlas_Dgemm(state,
+                     transpose_m1,
+                     transpose_m2,
+                     r__->size((transpose_r == 'n' ? 0 : 1)),
+                     r__->size((transpose_r == 'n' ? 1 : 0)),
+                     m1_->size((transpose_r == 'n' ? 1 : 0)),
+                     alpha,
+                     THCTensor_(data)(state, m1_),
+                     (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1))),
+                     THCTensor_(data)(state, m2_),
+                     (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1))),
+                     beta,
+                     THCTensor_(data)(state, r__),
+                     r__->stride((transpose_r == 'n' ? 1 : 0)));
 #endif
+  }
 
   /* free intermediate variables */
   if(m1_ != m1) {

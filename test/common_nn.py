@@ -56,6 +56,18 @@ module_tests = [
         desc='no_bias',
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t())
     ),
+    #dict(
+    #    module_name='Linear',
+    #    constructor_args=(10, 8),
+    #    input_size=(0, 10),
+    #    desc='zero_batch',
+    #),
+    #dict(
+    #    module_name='Linear',
+    #    constructor_args=(10, 8, False),
+    #    input_size=(0, 10),
+    #    desc='zero_batch_no_bias',
+    #),
     dict(
         module_name='Threshold',
         constructor_args=(2., 1.),
