@@ -20,7 +20,15 @@ LBFGSOptions::LBFGSOptions(double learning_rate)
 Tensor LBFGS::gather_flat_grad() {
   std::vector<Tensor> views;
   for (auto& parameter : parameters_) {
-    views.push_back(parameter.grad().view(-1));
+    if (!parameter.grad().defined()) {
+      views.push_back(parameter.new_empty({parameter.numel()}).zero_());
+    }
+    else if (parameter.grad().is_sparse()) {
+      views.push_back(parameter.grad().to_dense().view(-1));
+    }
+    else {
+      views.push_back(parameter.grad().view(-1));
+    }
   }
   return torch::cat(views);
 }
