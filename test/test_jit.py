@@ -4225,6 +4225,19 @@ def foo(xyz):
             scripted_obj = torch.jit.script(Test(CustomModuleDict()))
 
 
+        class TestScript(torch.jit.ScriptModule):
+            __constants__ = ['embed']
+
+            def __init__(self, mod):
+                super().__init__()
+                self.embed = mod
+
+            def forward(self, x):
+                return self.embed(x)
+
+        with self.assertRaisesRegex(Exception, "ModuleDict"):
+            scripted_obj = torch.jit.script(TestScript(CustomModuleDict()))
+
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
 

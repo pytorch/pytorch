@@ -1586,10 +1586,12 @@ if _enabled:
             if hasattr(self, attr):
                 raise RuntimeError("attempting to re-assign constant '{}' in {}".format(attr, type(self).__name__))
 
+
             def conv_module_to_const(module_value):
                 if not isinstance(module_value, (ModuleList, Sequential, ModuleDict)):
                     return module_value
                 if isinstance(module_value, ModuleDict):
+                    torch.jit._recursive.check_custom_container(module_value, ModuleDict)
                     for key, val in module_value:
                         module_value[key] = conv_module_to_const(val)
                     return _ConstModuleDict(module_value)
@@ -1597,8 +1599,10 @@ if _enabled:
                     for i in range(len(module_value)):
                         module_value[i] = conv_module_to_const(module_value[i])
                     if isinstance(module_value, Sequential):
+                        torch.jit._recursive.check_custom_container(module_value, Sequential)
                         return _ConstSequential(module_value)
                     else:
+                        torch.jit._recursive.check_custom_container(module_value, ModuleList)
                         return _ConstModuleList(module_value)
 
             if isinstance(value, (ModuleList, Sequential, ModuleDict)):
