@@ -1127,10 +1127,10 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         observer_dict = {}
         get_observer_dict(model, observer_dict)
 
-        self.assertTrue('fc1.module.observer' in observer_dict.keys(),
+        self.assertTrue('fc1.module.activation_post_process' in observer_dict.keys(),
                         'observer is not recorded in the dict')
-        self.assertEqual(len(observer_dict['fc1.module.observer'].get_tensor_value()), 2 * len(self.calib_data))
-        self.assertEqual(observer_dict['fc1.module.observer'].get_tensor_value()[0], model(self.calib_data[0][0]))
+        self.assertEqual(len(observer_dict['fc1.module.activation_post_process'].get_tensor_value()), 2 * len(self.calib_data))
+        self.assertEqual(observer_dict['fc1.module.activation_post_process'].get_tensor_value()[0], model(self.calib_data[0][0]))
 
     @no_deadline
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),

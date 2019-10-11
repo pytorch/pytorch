@@ -71,7 +71,7 @@ def propagate_qconfig_(module, qconfig_dict=None):
 def _observer_forward_hook(self, input, output):
     r"""Forward hook that calls observer on the output
     """
-    return self.observer(output)
+    return self.activation_post_process(output)
 
 def add_observer_(module):
     r"""Add observer for the leaf child of the module.
@@ -88,7 +88,7 @@ def add_observer_(module):
     for child in module.children():
         if type(child) == nnq.FloatFunctional:
             if hasattr(child, 'qconfig') and child.qconfig is not None:
-                child.observer = child.qconfig.activation()
+                child.activation_post_process = child.qconfig.activation()
         else:
             add_observer_(child)
 
@@ -97,7 +97,7 @@ def add_observer_(module):
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
        len(module._modules) == 0:
         # observer and hook will be gone after we swap the module
-        module.add_module('observer', module.qconfig.activation())
+        module.add_module('activation_post_process', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
 
 def add_quant_dequant(module):
@@ -250,7 +250,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     Args:
         model: input model
         run_fn: a function for evaluating the prepared model, can be a
-                function that simply runs the prepared model or a training 
+                function that simply runs the prepared model or a training
                 loop
         run_args: positional arguments for `run_fn`
 
@@ -270,7 +270,7 @@ def convert(module, mapping=None, inplace=False):
     parameters) to a quantized module.
     Args:
         module: calibrated module with observers
-        mapping: a dictionary that maps from float module type to quantized module type, can 
+        mapping: a dictionary that maps from float module type to quantized module type, can
                  be overwrritten to allow swapping user defined Modules
         inplace: carry out model transformations in-place, the original module is mutated
     """
@@ -326,8 +326,8 @@ def get_observer_dict(mod, target_dict, prefix=""):
     def get_prefix(prefix):
         return prefix if prefix == "" else prefix + '.'
 
-    if hasattr(mod, 'observer'):
-        target_dict[get_prefix(prefix) + 'observer'] = mod.observer
+    if hasattr(mod, 'activation_post_process'):
+        target_dict[get_prefix(prefix) + 'activation_post_process'] = mod.activation_post_process
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
         get_observer_dict(child, target_dict, module_prefix)

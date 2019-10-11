@@ -15,8 +15,7 @@ class Conv2d(NNConv2d):
     default.
 
     Attributes:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
+        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
     """
     _FLOAT_MODULE = NNConv2d
@@ -29,11 +28,11 @@ class Conv2d(NNConv2d):
                                      groups=groups, bias=bias, padding_mode=padding_mode)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.observer = qconfig.activation()
+        self.activation_post_process = qconfig.activation()
         self.weight_fake_quant = qconfig.weight()
 
     def forward(self, input):
-        return self.observer(
+        return self.activation_post_process(
             self.conv2d_forward(input, self.weight_fake_quant(self.weight)))
 
     @classmethod
