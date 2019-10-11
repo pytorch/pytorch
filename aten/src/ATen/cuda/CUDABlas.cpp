@@ -271,11 +271,9 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 #endif
 }
 
+#ifdef __HIP_PLATFORM_HCC__
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
-#ifndef __HIP_PLATFORM_HCC__
-  TORCH_CHECK(false, "at::cuda::blas::gemm: doesn't support at::BFloat16 type");
-#else
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -309,8 +307,8 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       rocblas_gemm_algo_standard,
       0,
       0));
-#endif
 }
+#endif
 
 
 /* LEVEL 2 BLAS FUNCTIONS */
@@ -358,6 +356,7 @@ void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half)) {
       stream, trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
 }
 
+#ifdef __HIP_PLATFORM_HCC__
 template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16)) {
   TORCH_CHECK(
@@ -369,6 +368,7 @@ void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16)) {
   gemm<at::BFloat16>(
       stream, trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
 }
+#endif
 
 } // namespace blas
 } // namespace cuda
