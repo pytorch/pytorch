@@ -83,7 +83,7 @@ Tensor CosineEmbeddingLossImpl::forward(
   return F::cosine_embedding_loss(input1, input2, target, options);
 }
 
-/ ============================================================================
+// ============================================================================
 
 TripletMarginLossImpl::TripletMarginLossImpl(
     const TripletMarginLossOptions& options_)
