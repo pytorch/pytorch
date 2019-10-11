@@ -73,6 +73,16 @@ struct TORCH_API SoftmaxOptions {
 
 // ============================================================================
 
+/// Options for the LogSoftmax functional and module.
+struct TORCH_API LogSoftmaxOptions {
+  LogSoftmaxOptions(int64_t dim);
+
+  /// Dimension along which LogSoftmax will be computed.
+  TORCH_ARG(int64_t, dim);
+};
+
+// ============================================================================
+
 /// Options for PReLU functional and module.
 struct TORCH_API PReLUOptions {
   /// number of `a` to learn. Although it takes an int as input, there is only
