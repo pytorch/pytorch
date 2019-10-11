@@ -77,9 +77,12 @@ Tensor arange(
     Scalar step,
     const TensorOptions& options) {
   bool set_to_integral_dtype = !options.has_dtype() && allIntegral({start, end, step});
-  TensorOptions updated_options =
-      set_to_integral_dtype ? options.dtype(at::ScalarType::Long) : options;
-  Tensor result = at::empty({0}, updated_options);  // to be filled by arange_out
+  Tensor result;
+  if (set_to_integral_dtype) {
+      result = at::empty({0}, options.dtype(at::ScalarType::Long));
+  } else {
+      result = at::empty({0}, options);
+  }
   return at::arange_out(result, start, end, step);
 }
 

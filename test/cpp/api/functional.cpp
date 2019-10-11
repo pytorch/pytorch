@@ -272,13 +272,6 @@ TEST_F(FunctionalTest, Hardshrink) {
   }
 }
 
-TEST_F(FunctionalTest, Arange) {
-  { // Test #1
-    auto x = torch::arange(0, 5);
-    TORCH_INTERNAL_ASSERT(x.dtype() == at::ScalarType::Long);
-  }
-}
-
 TEST_F(FunctionalTest, OneHot) {
   { // Test #1
     auto x = torch::arange(0, 5, torch::kLong);

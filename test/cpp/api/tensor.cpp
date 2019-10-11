@@ -306,6 +306,13 @@ TEST(TensorTest, MultidimTensorCtor_CUDA) {
   }
 }
 
+TEST(TensorTest, Arange) {
+  { // Test #1
+    auto x = torch::arange(0, 5);
+    TORCH_INTERNAL_ASSERT(x.dtype() == at::ScalarType::Long);
+  }
+}
+
 TEST(TensorTest, PrettyPrintInitListTensor) {
   {
     ASSERT_EQ(
