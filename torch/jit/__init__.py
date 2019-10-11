@@ -114,10 +114,10 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
            This is different from :func:`load <torch.jit.load>`'s semantics and may change in the future.
 
         Arguments:
-            m: A ScriptModule to save.
-            f: A file-like object (has to implement write and flush) or a string
-               containing a file name.
-            _extra_files: Map from filename to contents which will be stored as part of 'f'.
+            m: a ScriptModule to save
+            f: a file-like object (has to implement write and flush) or a string
+               containing a file name
+            _extra_files: Map from filename to contents which will be stored as part of 'f'
 
         .. warning::
             If you are using Python 2, ``torch.jit.save`` does NOT support ``StringIO.StringIO``
@@ -164,8 +164,7 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
 
 def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     r"""
-        Load a :class:`ScriptModule` or :class:`ScriptFunction` previously
-        saved with :func:`torch.jit.save <torch.jit.save>`
+        Load a ``ScriptModule`` previously saved with :func:`torch.jit.save <torch.jit.save>`
 
         All previously saved modules, no matter their device, are first loaded onto CPU,
         and then are moved to the devices they were saved from. If this fails (e.g. because
@@ -181,7 +180,7 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
                 would be stored in the provided map.
 
         Returns:
-            A :class:`ScriptModule` object.
+            A ``ScriptModule`` object.
 
         Example:
 
@@ -727,16 +726,15 @@ def trace(func,
           _module_class=None,
           _compilation_unit=_python_cu):
     """
-    Trace a function and return an executable  or :class:`ScriptFunction`
-    that will be optimized using just-in-time compilation. Tracing is ideal for
-    code that operates only on ``Tensor``\\s and lists, dictionaries, and tuples of ``Tensor``\\s.
+    Trace a function and return an executable ``ScriptModule`` or ``torch.jit.ScriptFunction``
+    that will be optimized using just-in-time compilation.
 
     Using ``torch.jit.trace`` and :func:`torch.jit.trace_module<torch.jit.trace_module>`, you can turn an existing module or Python
-    function into a TorchScript :class:`ScriptFunction` or :class:`ScriptModule`. You must provide example inputs,
+    function into a TorchScript ``torch.jit.ScriptFunction`` or ``ScriptModule``. You must provide example inputs,
     and we run the function, recording the operations performed on all the tensors.
 
-    * The resulting recording of a standalone function produces :class:`ScriptFunction`.
-    * The resulting recording of ``forward`` function of ``nn.Module`` or ``nn.Module`` produces :class:`ScriptModule`.
+    * The resulting recording of a standalone function produces ``torch.jit.ScriptFunction``.
+    * The resulting recording of ``forward`` function of ``nn.Module`` or ``nn.Module`` produces ``ScriptModule``.
 
     This module also contains any parameters that the original
     module had as well.
@@ -747,7 +745,7 @@ def trace(func,
         any untracked external dependencies (e.g., perform input/output or
         access global variables). Tracing only records operations done when the given
         function is run on the given
-        tensors. Therefore, the returned :class:`ScriptModule` will always run the same traced
+        tensors. Therefore, the returned ``ScriptModule`` will always run the same traced
         graph on any input. This has some important implications when your module is
         expected to run different sets of operations, depending on the input and/or the
         module state. For example,
@@ -757,10 +755,10 @@ def trace(func,
           inlines the control-flow decisions. But sometimes the control-flow is actually part
           of the model itself. For instance, a recurrent network is a loop over
           the (possibly dynamic) length of an input sequence.
-        * In the returned :class:`ScriptModule`, operations that have different
+        * In the returned ``ScriptModule``, operations that have different
           behaviors in ``training`` and ``eval`` modes will always behave as if it
           is in the mode it was in during tracing, no matter which mode the
-          :class:`ScriptModule` is in.
+          ``ScriptModule`` is in.
 
         In cases like these, tracing would not be appropriate and :func:`scripting <torch.jit.script>` is a better
         choice. If you trace such models, you may silently get
@@ -769,22 +767,19 @@ def trace(func,
         incorrect trace to be produced.
 
     Arguments:
-        func (callable or torch.nn.Module):  A Python function or ``torch.nn.Module``
+        func (callable or torch.nn.Module):  a Python function or ``torch.nn.Module``
                                              that will be run with ``example_inputs``.
                                              arguments and returns to ``func`` must be tensors
                                              or (possibly nested) tuples that
-                                             contain tensors. When a module is passed to
-                                             :func:`torch.jit.trace <torch.jit.trace>`, only the
-                                             ``forward`` method is run and traced
-                                             (see :func:`torch.jit.trace <torch.jit.trace_module>` for details).
-        example_inputs (tuple):  A tuple of example inputs that will be passed to the function
+                                             contain tensors.
+        example_inputs (tuple):  a tuple of example inputs that will be passed to the function
                                  while tracing. The resulting trace can be run with
                                  inputs of different types and shapes assuming the traced operations
                                  support those types and shapes. ``example_inputs`` may also be a single
-                                 Tensor in which case it is automatically wrapped in a tuple.
+                                 Tensor in which case it is automatically wrapped in a tuple
 
     Keyword arguments:
-        check_trace (bool, optional): Check if the same inputs run through
+        check_trace (bool, optional): check if the same inputs run through
                                       traced code produce the same outputs. Default: ``True``. You might want
                                       to disable this if, for example, your network contains non-
                                       deterministic ops or if you are sure that the network is correct despite
@@ -802,11 +797,11 @@ def trace(func,
                                            results diverge numerically for a known reason, such as operator fusion.
 
     Returns:
-        If ``callable`` is ``nn.Module`` or ``forward`` of ``nn.Module``, ``trace`` returns
-        a :class:`ScriptModule` object with a single ``forward`` method containing the traced code.
-        The returned :class:`ScriptModule` will have the same set of sub-modules and parameters as the
+        if ``callable`` is ``nn.Module`` or ``forward()`` of ``nn.Module``, ``trace`` returns
+        a ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
+        The returned ``ScriptModule`` will have the same set of sub-modules and parameters as the
         original ``nn.Module``.
-        If ``callable`` is a standalone function, ``trace`` returns :class:`ScriptFunction`
+        If ``callable`` is a standalone function, ``trace`` returns ``torch.jit.ScriptFunction``
 
     Example (tracing a function):
 
@@ -847,7 +842,6 @@ def trace(func,
         # Trace a module (implicitly traces `forward`) and construct a
         # `ScriptModule` with a single `forward` method
         module = torch.jit.trace(n, example_forward_input)
-
     """
     if not _enabled:
         return func
@@ -910,7 +904,7 @@ def trace_module(mod,
                  _module_class=None,
                  _compilation_unit=_python_cu):
     """
-    Trace a module and return an executable :class:`ScriptModule` that will be optimized
+    Trace a module and return an executable ``ScriptModule`` that will be optimized
     using just-in-time compilation. When a module is passed to :func:`torch.jit.trace <torch.jit.trace>`, only
     the ``forward`` method is run and traced. With ``trace_module``, you can specify a dictionary of
     method names to example inputs to trace (see the ``example_inputs``) argument below.
@@ -918,15 +912,15 @@ def trace_module(mod,
     See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing.
 
     Arguments:
-        mod (torch.nn.Module):  A ``torch.nn.Module`` containing methods whose names are
-                                specified in ``example_inputs``. The given methods will be compiled
-                                as a part of a single `ScriptModule`.
-        example_inputs (dict):  A dict containing sample inputs indexed by method names in ``mod``.
-                                The inputs will be passed to methods whose names correspond to inputs'
-                                keys while tracing.
-                                ``{ 'forward' : example_forward_input, 'method2': example_method2_input}``
+        mod (torch.nn.Module):           a ``torch.nn.Module`` containing methods whose names are
+                                         specified in ``example_inputs``. The given methods will be compiled
+                                         as a part of a single `ScriptModule`
+        example_inputs (dict):           a dict containing sample inputs indexed by method names in ``mod``
+                                         The inputs will be passed to methods whose names correspond to inputs'
+                                         keys while tracing.
+                                         ``{ 'forward' : example_forward_input, 'method2': example_method2_input}``
     Keyword arguments:
-        check_trace (bool, optional): Check if the same inputs run through
+        check_trace (bool, optional): check if the same inputs run through
                                       traced code produce the same outputs. Default: ``True``. You might want
                                       to disable this if, for example, your network contains non-
                                       deterministic ops or if you are sure that the network is correct despite
@@ -944,8 +938,8 @@ def trace_module(mod,
                                            results diverge numerically for a known reason, such as operator fusion.
 
     Returns:
-        A :class:`ScriptModule` object with a single ``forward`` method containing the traced code.
-        When ``func`` is a ``torch.nn.Module``, the returned :class:`ScriptModule` will have the same set of
+        A ``ScriptModule`` object with a single ``forward()`` method containing the traced code.
+        When ``func`` is a ``torch.nn.Module``, the returned ``ScriptModule`` will have the same set of
         sub-modules and parameters as ``func``.
 
     Example (tracing a module with multiple methods)::
@@ -981,7 +975,6 @@ def trace_module(mod,
         # a `ScriptModule` with `forward` and `weighted_kernel_sum` methods
         inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
         module = torch.jit.trace_module(n, inputs)
-
     """
     if not _enabled:
         return mod
@@ -1088,8 +1081,8 @@ def _compile_and_register_class(obj, rcb, qualified_name):
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
-    it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
-    :class:`ScriptFunction`. TorchScript itself is a subset of the Python language, so not all
+    it as TorchScript code using the TorchScript compiler, and return a ``ScriptModule`` or
+    ``torch.jit.ScriptFunction``. TorchScript itself is a subset of the Python language, so not all
     features in Python work, but we provide enough functionality to compute on
     tensors and do control-dependent operations. For a complete guide, see the
     `TorchScript Language Reference`_.
@@ -1098,7 +1091,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     ``@torch.jit.script`` for `TorchScript Classes <TorchScript Class_>`_ and functions.
 
     **Scripting a function**
-        The ``@torch.jit.script`` decorator will construct a :class:`ScriptFunction`
+        The ``@torch.jit.script`` decorator will construct a ``torch.jit.ScriptFunction``
         by compiling the body of the function.
 
         Example (scripting a function):
@@ -1115,19 +1108,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                     r = y
                 return r
 
-            print(type(foo))  # torch.jit.ScriptFuncion
-
-            # See the compiled graph as Python code
-            print(foo.code)
-
-            # Call the function using the TorchScript interpreter
-            foo(torch.ones(2, 2), torch.ones(2, 2))
-
     **Scripting an nn.Module**
         Scripting an ``nn.Module`` by default will compile the ``forward`` method and recursively
         compile any methods, submodules, and functions called by ``forward``. If a ``nn.Module`` only uses
         features supported in TorchScript, no changes to the original module code should be necessary. ``script``
-        will construct :class:`ScriptModule` that has copies of the attributes, parameters, and methods of
+        will construct ``torch.jit.ScriptModule`` that has copies of the attributes, parameters, and methods of
         the original module.
 
         Example (scripting a simple module with a Parameter):
@@ -1496,15 +1481,6 @@ if _enabled:
 
         ``ScriptModule``\s should not be created manually, instead use
         either :func:`tracing <torch.jit.trace>` or :func:`scripting <torch.jit.script>`.
-        Tracing and scripting can be applied incrementally and :ref:`composed as necessary <Types>`.
-
-        * Tracing records the tensor operations as executed with a set of example inputs and uses these
-          operations to construct a computation graph. You can use the full dynamic behavior of Python with tracing,
-          but values other than Tensors and control flow aren't captured in the graph.
-
-        * Scripting inspects the Python code of the model
-          and compiles it to TorchScript. Scripting allows the use of many `types`_ of values and supports dynamic control flow.
-          Many, but not all features of Python are supported by the compiler, so changes to the source code may be necessary.
         """
         def __init__(self, optimize=None, _qualified_name=None, _compilation_unit=None, _cpp_module=None):
             if _qualified_name is None:
@@ -1865,16 +1841,19 @@ def is_scripting():
     Function that returns True when in compilation and False otherwise. This
     is useful especially with the @unused decorator to leave code in your
     model that is not yet TorchScript compatible.
+    .. testcode::
 
-    @torch.jit.unused
-    def unsupported_linear_op(x):
-        return x
+        import torch
 
-    def linear(x):
-       if not torch.jit.is_scripting():
-          return torch.linear(x)
-       else:
-          return unsupported_linear_op(x)
+        @torch.jit.unused
+        def unsupported_linear_op(x):
+            return x
+
+        def linear(x):
+           if not torch.jit.is_scripting():
+              return torch.linear(x)
+           else:
+              return unsupported_linear_op(x)
     """
     return False
 
@@ -2124,10 +2103,6 @@ def _graph_for(self, *args, **kwargs):
 torch._C.ScriptMethod.graph_for = _graph_for
 torch._C.ScriptFunction.graph_for = _graph_for
 ScriptFunction = torch._C.ScriptFunction
-ScriptFunction.__doc__ = """
-Functionally equivalent to a :class:`ScriptModule`, but represents a single
-function and does not have any attributes or Parameters.
-"""
 set_module(ScriptFunction, "torch.jit")
 
 if not torch._C._jit_init():
