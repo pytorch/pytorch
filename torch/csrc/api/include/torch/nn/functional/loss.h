@@ -34,8 +34,7 @@ inline Tensor _smooth_l1_loss(const Tensor& input, const Tensor& target) {
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
-    const SmoothL1LossOptions& options) {
-  
+    const SmoothL1LossOptions& options = {}) {
   if (target.sizes() != input.sizes()) {
     TORCH_WARN("Using a target size (", target.sizes(), ") that is different to the input size (", input.sizes(), "). ",
                   "This will likely lead to incorrect results due to broadcasting. ",
@@ -50,8 +49,8 @@ inline Tensor smooth_l1_loss(
       ret = options.reduction() == Reduction::Mean ? torch::mean(ret) : torch::sum(ret);
     }
   } else {
-        std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
-        ret = torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], options.reduction());
+    std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
+    ret = torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], options.reduction());
   }
   return ret;
 }

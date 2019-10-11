@@ -55,11 +55,11 @@ SmoothL1LossImpl::SmoothL1LossImpl(
     const torch::nn::SmoothL1LossOptions& options_) : options(options_) {}
 
 void SmoothL1LossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::SmoothL1Loss(reduction=" << options.reduction() << ")";
+  stream << "torch::nn::SmoothL1Loss";
 }
 
 Tensor SmoothL1LossImpl::forward(const Tensor& input, const Tensor& target) {
-  return torch::smooth_l1_loss(input, target, options.reduction());
+  return F::smooth_l1_loss(input, target, options);
 }
 
 } // namespace nn
