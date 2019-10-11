@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/pybind_utils.h>
-#include <torch/csrc/jit/script/concrete_module_type.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/sugared_value.h>
 #include <memory>
@@ -31,13 +30,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 c10::optional<StrongFunctionPtr> as_function(const py::object& obj);
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
-  PythonValue(
-      py::object the_self,
-      c10::optional<py::object> rcb = c10::nullopt,
-      Value* module_self = nullptr)
-      : self(std::move(the_self)),
-        rcb(std::move(rcb)),
-        moduleSelf_(module_self) {}
+  PythonValue(py::object the_self, c10::optional<py::object> rcb = c10::nullopt)
+      : self(std::move(the_self)), rcb(std::move(rcb)) {}
 
   FunctionSchema getSchema(
       const size_t n_args,
@@ -71,7 +65,6 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   py::object self;
   c10::optional<py::object> rcb;
-  Value* moduleSelf_ = nullptr;
 };
 
 struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
@@ -161,10 +154,18 @@ struct VISIBILITY_HIDDEN ConstantTupleMethod : public SugaredValue {
   const std::string name_;
 };
 
+// defines how modules/methods behave inside the script subset.
+// for now this does not have any interaction with python.
+// in the future, we will add the ability to resolve `self.foo` to python
+// {functions, modules, contants} so this SugaredValue is defined here
+// anticipating we will eventually need to replace Module with a py::object
+// holding the actual nn.Module class.
 
 struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
-  ModuleValue(Value* self, std::shared_ptr<ConcreteModuleType> concreteType)
-      : self_(self), concreteType_(std::move(concreteType)) {}
+  ModuleValue(Value* self, Module module, py::object py_module)
+      : self_(self),
+        module_(std::move(module)),
+        py_module_(std::move(py_module)) {}
 
   std::string kind() const override {
     return "module";
@@ -201,13 +202,15 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       Value* newValue) override;
 
  private:
+  Value* self_;
+  Module module_;
+  py::object py_module_;
+
   std::vector<std::shared_ptr<SugaredValue>> desugarModuleContainer(
       bool get_keys,
       bool get_values,
       const SourceRange& loc,
       Function& m);
-  Value* self_;
-  std::shared_ptr<ConcreteModuleType> concreteType_;
 };
 
 struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {

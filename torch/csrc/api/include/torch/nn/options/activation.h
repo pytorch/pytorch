@@ -73,6 +73,16 @@ struct TORCH_API SoftmaxOptions {
 
 // ============================================================================
 
+/// Options for the LogSoftmax functional and module.
+struct TORCH_API LogSoftmaxOptions {
+  LogSoftmaxOptions(int64_t dim);
+
+  /// Dimension along which LogSoftmax will be computed.
+  TORCH_ARG(int64_t, dim);
+};
+
+// ============================================================================
+
 /// Options for PReLU functional and module.
 struct TORCH_API PReLUOptions {
   /// number of `a` to learn. Although it takes an int as input, there is only
@@ -81,6 +91,16 @@ struct TORCH_API PReLUOptions {
 
   /// the initial value of `a`. Default: 0.25
   TORCH_ARG(double, init) = 0.25;
+};
+
+// ============================================================================
+
+/// Options for ReLU functional and module.
+struct TORCH_API ReLUOptions {
+  /* implicit */ ReLUOptions(bool inplace = false);
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace);
 };
 
 } // namespace nn

@@ -840,15 +840,10 @@ bool Node::matches(
 }
 
 bool Node::mustBeNone() const {
-  // We can statically deduce this Node has returning None if:
-  return
-      // It's an AutogradZero node, or ...
-      kind_ == prim::AutogradZero ||
-      // It has only one output and that output is NoneType, or ...
-      (outputs().size() == 1 && output()->type() == NoneType::get()) ||
-      // It's a constant optional with no value in the attributes.
+  return kind_ == prim::AutogradZero ||
       (kind_ == prim::Constant && !this->hasAttributes() &&
-       output()->type()->cast<OptionalType>());
+       (output()->type()->cast<OptionalType>() ||
+        output()->type() == NoneType::get()));
 }
 
 void Node::dump() const {
