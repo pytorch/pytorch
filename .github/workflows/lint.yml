@@ -161,6 +161,7 @@ jobs:
         run: |
           set -eux
           pip install flake8
+          rm -rf .circleci
           flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
           cat ${GITHUB_WORKSPACE}/flake8-output.txt
       - name: Add annotations
