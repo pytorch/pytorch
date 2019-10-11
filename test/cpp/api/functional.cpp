@@ -532,8 +532,8 @@ TEST_F(FunctionalTest, PReLU) {
 
 TEST_F(FunctionalTest, Normalize) {
   const auto expected = torch::tensor(
-    {{{0.0000, 0.1000, 0.2000, 0.3000, 0.4000},
-      {0.1429, 0.1714, 0.2000, 0.2286, 0.2571}}}, torch::requires_grad().dtype(torch::kFloat));
+    {{{0.00000000, 0.10000000, 0.2000, 0.30000000, 0.40000000},
+      {0.14285715, 0.17142858, 0.2000, 0.22857143, 0.25714287}}}, torch::requires_grad().dtype(torch::kFloat));
   { // Test #1 
     auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat).requires_grad(true));
     auto norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
