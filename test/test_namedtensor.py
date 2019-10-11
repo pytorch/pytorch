@@ -1,5 +1,5 @@
 import unittest
-from common_utils import TestCase, run_tests, TEST_NUMPY
+from common_utils import TestCase, run_tests, TEST_NUMPY, default_floating_dtype
 from common_cuda import TEST_CUDA
 from collections import namedtuple, OrderedDict
 import itertools
@@ -275,6 +275,7 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NYI"):
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
+    @default_floating_dtype(torch.double)
     def test_big_tensor_repr(self):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
@@ -1341,7 +1342,7 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.shape, [3, 5, 1, 2])
 
         # All input dimensions must be named
-        with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):
+        with self.assertRaisesRegex(RuntimeError, "All input dims must be named. Found unnamed dim at index 0"):
             create('None:2,C:3').align_to('N', 'C')
 
         # not enough names
@@ -1365,6 +1366,11 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.names, ['H', 'C', 'W', 'N'])
         self.assertEqual(output.shape, [3, 2, 5, 7])
 
+        # ... = ['N', 'W']
+        output = tensor.align_to('H', 'C', '...')
+        self.assertEqual(output.names, ['H', 'C', 'N', 'W'])
+        self.assertEqual(output.shape, [3, 2, 7, 5])
+
         # ... = ['H', 'C']
         output = tensor.align_to('W', '...', 'N')
         self.assertEqual(output.names, ['W', 'H', 'C', 'N'])
@@ -1376,16 +1382,20 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.shape, [7, 2, 1, 3, 5])
 
         # Input tensor partially named
-        partiall_named = create('N:7,None:1')
-        with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):
-            partiall_named.align_to('...', 'N')
+        partially_named = create('None:2,None:3,None:5,C:7')
+        output = partially_named.align_to('C', '...')
+        self.assertEqual(output.names, ['C', None, None, None])
+        self.assertEqual(output.shape, [7, 2, 3, 5])
+
+        with self.assertRaisesRegex(RuntimeError, "order of dimensions cannot contain a None"):
+            partially_named.align_to('C', None, '...')
 
         # Input order partially named
-        with self.assertRaisesRegex(RuntimeError, "desired order must not contain None"):
+        with self.assertRaisesRegex(RuntimeError, "cannot contain a None name"):
             tensor.align_to('...', 'N', None)
 
         # Input order duplicate names
-        with self.assertRaisesRegex(RuntimeError, "Duplicate names"):
+        with self.assertRaisesRegex(RuntimeError, "duplicate names"):
             tensor.align_to('...', 'N', 'N')
 
     def test_align_as(self):
@@ -1397,6 +1407,7 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.names, ['N', 'H', 'W', 'C'])
         self.assertEqual(output.shape, [3, 5, 1, 2])
 
+    @unittest.skip("Not implemented yet")
     def test_align_tensors_two_inputs(self):
         def _test(tensor_namedshape, align_names, expected_sizes, expected_error):
             tensor_names, tensor_sizes = tensor_namedshape
@@ -1507,6 +1518,7 @@ class TestNamedTensor(TestCase):
         for test in tests:
             _test(*test)
 
+    @unittest.skip("Not implemented yet")
     def test_align_tensors(self):
         def reference_fn(*tensors):
             longest_names = tensors[0].names
@@ -1823,6 +1835,53 @@ class TestNamedTensor(TestCase):
                 torch.dot, device=device,
                 args=(create('C:2'), create('W:2')),
                 expected_names=[])
+
+    def test_comparison_ops(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.randn(3, 3, names=('N', 'C'), device=device)
+            b = torch.randn(3, 3, names=('N', 'C'), device=device)
+            scalar = torch.randn([], device=device)
+
+            self.assertEqual((a == b).names, ['N', 'C'])
+            self.assertEqual((a != b).names, ['N', 'C'])
+            self.assertEqual((a > b).names, ['N', 'C'])
+            self.assertEqual((a < b).names, ['N', 'C'])
+            self.assertEqual((a >= b).names, ['N', 'C'])
+            self.assertEqual((a <= b).names, ['N', 'C'])
+
+            self.assertEqual((a == 1).names, ['N', 'C'])
+            self.assertEqual((a != 1).names, ['N', 'C'])
+            self.assertEqual((a > 1).names, ['N', 'C'])
+            self.assertEqual((a < 1).names, ['N', 'C'])
+            self.assertEqual((a >= 1).names, ['N', 'C'])
+            self.assertEqual((a <= 1).names, ['N', 'C'])
+
+            self.assertEqual((a == scalar).names, ['N', 'C'])
+            self.assertEqual((a != scalar).names, ['N', 'C'])
+            self.assertEqual((a > scalar).names, ['N', 'C'])
+            self.assertEqual((a < scalar).names, ['N', 'C'])
+            self.assertEqual((a >= scalar).names, ['N', 'C'])
+            self.assertEqual((a <= scalar).names, ['N', 'C'])
+
+            res = torch.empty(3, 3, dtype=torch.bool, device=device)
+            torch.eq(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.ne(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.lt(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.gt(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.le(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+            torch.ge(a, b, out=res)
+            self.assertEqual(res.names, ['N', 'C'])
+
+            res = torch.isnan(a)
+            self.assertEqual(res.names, ['N', 'C'])
+
+            res = torch.isinf(a)
+            self.assertEqual(res.names, ['N', 'C'])
 
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):

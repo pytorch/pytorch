@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import argparse
 
 from caffe2.python import workspace
+import torch
 
 import benchmark_core
 import benchmark_utils
@@ -127,7 +128,18 @@ def main():
         workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
         workspace.ClearGlobalNetObserver()
     if args.omp_num_threads:
+        # benchmark_utils.set_omp_threads sets the env variable OMP_NUM_THREADS
+        # which doesn't have any impact as C2 init logic has already been called
+        # before setting the env var.
+
+        # In general, OMP_NUM_THREADS (and other OMP env variables) needs to be set
+        # before the program is started.
+        # From Chapter 4 in OMP standard: https://www.openmp.org/wp-content/uploads/openmp-4.5.pdf
+        # "Modifications to the environment variables after the program has started,
+        # even if modified by the program itself, are ignored by the OpenMP implementation"
         benchmark_utils.set_omp_threads(args.omp_num_threads)
+        if benchmark_utils.is_pytorch_enabled(args.framework):
+            torch.set_num_threads(args.omp_num_threads)
     if args.mkl_num_threads:
         benchmark_utils.set_mkl_threads(args.mkl_num_threads)
 

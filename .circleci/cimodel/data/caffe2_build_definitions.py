@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from collections import OrderedDict
 
 import cimodel.data.dimensions as dimensions
@@ -14,7 +12,7 @@ from dataclasses import dataclass
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 
-DOCKER_IMAGE_VERSION = 315
+DOCKER_IMAGE_VERSION = 325
 
 
 @dataclass
