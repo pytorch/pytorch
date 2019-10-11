@@ -660,7 +660,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   // methods here have been explicitly annotated to not be compiled,
   // so they do not have the same overload and compile checks as for functions
   if (isFunction || isMethod) {
-    auto rcb = py::module::import("torch.jit").attr("_gen_rcb")(obj, 0);
+    auto rcb = py::module::import("torch._jit_internal")
+                   .attr("createResolutionCallbackFromClosure")(obj);
     return std::make_shared<PythonValue>(obj, rcb);
   }
 

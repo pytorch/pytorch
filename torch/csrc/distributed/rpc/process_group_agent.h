@@ -75,8 +75,8 @@ class ProcessGroupAgent : public RpcAgent {
   // receiving messages
   void listenLoop();
 
-  // a helper function to mark a future in the futures_ map with an exception.
-  void markFutureWithException(long futureId, const Message& exceptionMsg);
+  // a helper function to mark a future in the futures_ map with a message.
+  void markFutureWithMessage(long futureId, const Message& exceptionMsg);
 
   // Note [Termination Detection]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

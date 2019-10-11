@@ -179,16 +179,10 @@ void ProcessGroupAgent::join() {
   lock.unlock();
   pg_->barrier()->wait();
   int dst = (pg_->getRank() + 1) % pg_->getSize();
-  auto future = std::make_shared<FutureMessage>();
-  auto shutdownMSgId = nextId();
-  {
-    std::lock_guard<std::mutex> lock{futureMutex_};
-    futures_[shutdownMSgId] = future;
-  }
 
-  enqueueSend(SendWork(
-      allWorkerInfo_[dst],
-      Message({}, {}, MessageType::SHUTDOWN, shutdownMSgId)));
+  auto shutdownMsg = Message({}, {}, MessageType::SHUTDOWN);
+  send(allWorkerInfo_[dst], std::move(shutdownMsg));
+  this does not exist.
   threadPool_.waitWorkComplete();
   listenerThread_.join();
 }
@@ -343,13 +337,13 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         } catch (std::exception& e) {
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(work.message_, e);
-            markFutureWithException(work.message_.id(), exceptionMsg);
+            markFutureWithMessage(work.message_.id(), exceptionMsg);
           }
         } catch (...) {
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(
                 work.message_, "Unknown exception occured.");
-            markFutureWithException(work.message_.id(), exceptionMsg);
+            markFutureWithMessage(work.message_.id(), exceptionMsg);
           }
         }
       },
@@ -367,20 +361,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
-          auto id = message.id();
-          std::shared_ptr<FutureMessage> fm = nullptr;
-          {
-            std::lock_guard<std::mutex> lock{futureMutex_};
-            fm = futures_[id];
-          }
-          // Not holding lock on markCompleted as this could run callbacks that
-          // call agent_->send
-          fm->markCompleted(std::move(message));
-          {
-            std::lock_guard<std::mutex> lock{futureMutex_};
-            futures_.erase(id);
-          }
-          futureCV_.notify_all();
+          markFutureWithMessage(message.id(), std::move(message));
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
           TORCH_INTERNAL_ASSERT(
@@ -419,19 +400,19 @@ void ProcessGroupAgent::listenLoop() {
   }
 }
 
-void ProcessGroupAgent::markFutureWithException(
-    long futureId,
+void ProcessGroupAgent::markFutureWithMessage(
+    long messageId,
     const Message& exceptionMsg) {
   std::shared_ptr<FutureMessage> fut = nullptr;
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
-    fut = futures_[futureId];
+    fut = futures_[messageId];
   }
   // Don't hold lock on markCompleted, as it could invoke callbacks
   fut->markCompleted(exceptionMsg);
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
-    futures_.erase(futureId);
+    futures_.erase(messageId);
   }
   futureCV_.notify_all();
 }
