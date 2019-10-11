@@ -129,8 +129,8 @@ upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
 def __interpolate(g, input, size, scale_factor, mode , align_corners):
-    scales, mode = sym_help._interpolate_get_scales_and_mode_from_args(g, input, size, scale_factor,
-                                                                       mode , align_corners)
+    scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
+                                                             mode , align_corners)
     return g.op("Resize", input, scales, mode_s=mode)
 
 

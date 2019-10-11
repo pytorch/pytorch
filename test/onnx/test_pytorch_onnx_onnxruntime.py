@@ -519,7 +519,9 @@ class TestONNXRuntime(unittest.TestCase):
                     elif xi.dim() == 5:
                         mode_i = "trilinear"
                 self._interpolate(xi, mode_i, True, is_upsample)
-                if self.opset_version >= 9:  # throws unimplemented
+                # the following cases, require dynamic sizes/scales,
+                # which which is not supported for opset_version < 9
+                if self.opset_version >= 9:
                     self._interpolate_script(xi, mode_i, True, is_upsample)
                     self._interpolate(xi, mode_i, False, is_upsample)
                     self._interpolate_script(xi, mode_i, False, is_upsample)
