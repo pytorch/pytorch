@@ -29,7 +29,7 @@ inline Tensor cosine_embedding_loss(
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    const MultiLabelSoftMarginLossOptions& options) {
+    const MultiLabelSoftMarginLossOptions& options = {}) {
   auto loss = -(target * torch::log_sigmoid(input) + (1 - target) * torch::log_sigmoid(-input));
   if (options.weight().defined()) {
     loss = loss * options.weight();

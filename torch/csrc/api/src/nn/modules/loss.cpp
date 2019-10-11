@@ -52,21 +52,20 @@ Tensor CosineEmbeddingLossImpl::forward(
 
 MultiLabelSoftMarginLossImpl::MultiLabelSoftMarginLossImpl(
     const torch::nn::MultiLabelSoftMarginLossOptions& options_)
-    : options(options_) {}
+    : options(options_) {
+  reset();
+}
 
 void MultiLabelSoftMarginLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::MultiLabelSoftMarginLoss(weight=" << options.weight()
-    << ", reduction=" << options.reduction() << ")";
+  stream << "torch::nn::MultiLabelSoftMarginLoss";
 }
 
 void MultiLabelSoftMarginLossImpl::reset() {
-    TORCH_CHECK(!options.weight().defined() || options.weight().dim() == 1);
-
-    register_buffer("weight", options.weight());
+  register_buffer("weight", options.weight());
 }
 
 Tensor MultiLabelSoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
-  return torch::nn::functional::multilabel_soft_margin_loss(input,
+  return F::multilabel_soft_margin_loss(input,
     target,
     options);
 }

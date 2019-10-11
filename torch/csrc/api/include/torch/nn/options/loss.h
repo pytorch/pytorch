@@ -43,7 +43,6 @@ struct TORCH_API CosineEmbeddingLossOptions {
 
 /// Options for a multi-label soft margin loss functional and module.
 struct TORCH_API MultiLabelSoftMarginLossOptions {
-
   /// A manual rescaling weight given to each
   /// class. If given, it has to be a Tensor of size `C`. Otherwise, it is
   /// treated as if having all ones.
