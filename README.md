@@ -250,7 +250,7 @@ python setup.py install
 
 ```
 
-##### Adjust Build Options (Optional)
+#### Adjust Build Options (Optional)
 
 You can adjust the configuration of cmake variables optionally (without building first), by doing
 the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
