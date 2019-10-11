@@ -610,6 +610,7 @@ FunctionOption = TypedDict('FunctionOption', {
     'with_gil': bool,
     'cpu_half': bool,
     'cpu_bfloat16': bool,
+    'cuda_bfloat16': bool,
     'deprecated': bool,
     'cpu_bool': bool,
     'cuda_bool': bool,
