@@ -62,8 +62,44 @@ inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
   return ret;
 }
 
+inline Tensor log_softmax(const Tensor& input, const LogSoftmaxOptions& options,
+                          c10::optional<torch::Dtype> dtype = c10::nullopt) {
+  int64_t dim = options.dim();
+  Tensor ret;
+
+  if (dtype == c10::nullopt) {
+    ret = input.log_softmax(dim);
+  } else {
+    ret = input.log_softmax(dim, dtype);
+  }
+
+  return ret;
+}
+
 inline Tensor prelu(const Tensor& input, const Tensor& weight) {
   return torch::prelu(input, weight);
+}
+
+inline Tensor relu(Tensor& input, const ReLUOptions& options = {}) {
+  if (options.inplace()) {
+    return torch::relu_(input);
+  } else {
+    return torch::relu(input);
+  }
+}
+
+inline Tensor relu6(Tensor& input, const ReLU6Options& options = {}) {
+  return hardtanh(input,
+    HardtanhOptions().min_val(0).max_val(6).inplace(options.inplace()));
+}
+
+inline Tensor rrelu(Tensor& input, const RReLUOptions& options = {},
+                    bool training = false) {
+  if (options.inplace()) {
+    return torch::rrelu_(input, options.lower(), options.upper(), training);
+  } else {
+    return torch::rrelu(input, options.lower(), options.upper(), training);
+  }
 }
 
 } // namespace functional

@@ -996,7 +996,13 @@ struct to_ir {
       case TK_NOT: {
         CondValue v = emitCondExpr(Expr(expr.tree()->trees()[0]));
         Value* result = emitBuiltinCall(
-            expr.range(), *graph, aten::__not__, {v.value()}, {});
+            expr.range(),
+            *graph,
+            aten::__not__,
+            c10::nullopt,
+            {v.value()},
+            {},
+            /*required=*/true);
         c10::optional<bool> static_if;
         if (v.staticIf()) {
           static_if = !*v.staticIf();
@@ -1032,8 +1038,10 @@ struct to_ir {
               expr.get()->range(),
               *method.graph(),
               kind,
+              c10::nullopt,
               {lhs_val, rhs_val},
-              {});
+              {},
+              /*required=*/true);
           auto refinements = RefinementSet(findIsNoneRefinements(
               cond_op.lhs(), lhs_val, cond_op.rhs(), rhs_val, expr.kind()));
           return CondValue(cond_value, refinements, c10::nullopt);
@@ -1807,9 +1815,10 @@ struct to_ir {
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhsValue->type()),
+          self,
           {rhs},
           {},
-          self);
+          /*required=*/true);
 
     } else {
       throw ErrorReport(stmt.lhs())
@@ -1832,9 +1841,10 @@ struct to_ir {
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhsValue->type()),
+          self,
           {rhs},
           {},
-          self);
+          /*required=*/true);
 
       environment_stack->setVar(lhs.range(), lhs.name().name(), output);
     } else {
@@ -1915,9 +1925,10 @@ struct to_ir {
             stmt.range(),
             *method.graph(),
             getAugOp(stmt, sliceable->type()),
+            slicedArg,
             {rhs},
             {},
-            slicedArg);
+            /*required=*/true);
       } else {
         // Special case: we tried to do "advanced indexing". Lower this expr
         // into `index` and `index_put_` ops with tensordices of Tensor?[]
@@ -1931,9 +1942,10 @@ struct to_ir {
             stmt.range(),
             *method.graph(),
             getAugOp(stmt, sliceable->type()),
+            indexed,
             {rhs},
             {},
-            indexed);
+            /*required=*/true);
         graph->insert(
             aten::index_put_,
             {slicedArg, indices, augmented},
@@ -2651,7 +2663,13 @@ struct to_ir {
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
         return emitBuiltinCall(
-            tree->range(), *method.graph(), kind, named_values, {});
+            tree->range(),
+            *method.graph(),
+            kind,
+            c10::nullopt,
+            named_values,
+            {},
+            /*required=*/true);
       }
       case TK_IN:
       case TK_POW:
@@ -2824,7 +2842,8 @@ struct to_ir {
       Value* input,
       Value* dim,
       Value* index) {
-    return emitBuiltinCall(loc, *graph, aten::select, {input, dim, index}, {});
+    return emitBuiltinCall(
+        loc, *graph, aten::select, c10::nullopt, {input, dim, index}, {}, true);
   }
 
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
@@ -2870,11 +2889,13 @@ struct to_ir {
 
     auto step = emitExpr(Expr(slice.stepOr(1)));
     NamedValue step_nv = NamedValue(loc, "step", step);
-    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
+    return emitBuiltinCall(
+        loc, *graph, aten::slice, c10::nullopt, args, {step_nv}, true);
   }
 
   Value* emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
-    return emitBuiltinCall(loc, *graph, aten::unsqueeze, {input, dim_val}, {});
+    return emitBuiltinCall(
+        loc, *graph, aten::unsqueeze, c10::nullopt, {input, dim_val}, {}, true);
   }
 
   Value* emitIndex(
@@ -2887,7 +2908,8 @@ struct to_ir {
     auto* index =
         graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
             ->output();
-    return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {});
+    return emitBuiltinCall(
+        loc, *graph, aten::index, c10::nullopt, {input, index}, {}, true);
   }
 
   // Emits multidimensional slicing with int and slice indices.
