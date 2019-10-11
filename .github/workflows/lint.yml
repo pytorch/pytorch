@@ -7,6 +7,78 @@ on:
   pull_request:
 
 jobs:
+  consistent-circleci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7.4
+          architecture: x64
+      - name: Ensure consistent CircleCI YAML config
+        run: |
+          pip install -r requirements.txt
+          cd .circleci && ./ensure-consistency.py
+
+  validate-docker-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7.4
+          architecture: x64
+      - name: Ensure Docker version is correctly deployed
+        run: .circleci/validate-docker-version.py
+
+  shellcheck-jenkins:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Shellcheck Jenkins scripts
+        run: |
+          sudo apt-get install -y shellcheck
+          .jenkins/run-shellcheck.sh
+
+  ensure-no-tabs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure no tabs
+        run: |
+          (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
+
+  ensure-not-executable:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure C++ source files are not executable
+        run: |
+          (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
+
+  mypy-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7.4
+          architecture: x64
+      - name: MyPy typecheck
+        run: |
+          pip install mypy mypy-extensions
+          mypy @mypy-files.txt
+
+  cpp_doc_check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7.4
+          architecture: x64
+      - name: C++ docs check
+        run: |
+          sudo apt-get install -y doxygen && pip install -r requirements.txt
+          cd docs/cpp/source && ./check-doxygen.sh
+
   flake8-py3:
     runs-on: ubuntu-latest
     steps:
