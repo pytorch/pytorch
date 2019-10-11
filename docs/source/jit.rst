@@ -183,7 +183,8 @@ The new usage looks like this:
 
 * The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``.
 * To compile a method other than ``forward`` that is not called from ``forward``, add ``@torch.jit.export``.
-* To stop the compiler from compiling a method and leave it as a call to Python, add ``@torch.jit.ignore``.
+* To stop the compiler from compiling a method, add :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`@torch.jit.unused <torch.jit.unused>`. ``@ignore`` leaves the
+* method as a call to python, and ``@unused`` replaces it with an exception. ``@ignored`` cannot be exported; ``@unused`` can.
 * Most attribute types can be inferred, so ``torch.jit.Attribute`` is not necessary. For empty container types, annotate their types using `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
 * Constants can be marked with a ``Final`` class annotation instead of adding the name of the member to ``__constants__``.
 * Python 3 type hints can be used in place of ``torch.jit.annotate``
@@ -202,9 +203,9 @@ Modules
     The :func:`@torch.jit.ignore <torch.jit.ignore>` annotation's behavior changes in
     PyTorch 1.2. Before PyTorch 1.2 the @ignore decorator was used to make a function
     or method callable from code that is exported. To get this functionality back,
-    use ``@torch.jit.ignore(drop_on_export=True)``. ``@torch.jit.ignore`` is now equivalent
-    to ``@torch.jit.ignore(drop_on_export=False)``. See :func:`@torch.jit.ignore <torch.jit.ignore>`
-    for details.
+    use ``@torch.jit.unused()``. ``@torch.jit.ignore`` is now equivalent
+    to ``@torch.jit.ignore(drop=False)``. See :func:`@torch.jit.ignore <torch.jit.ignore>`
+    and :func:`@torch.jit.unused<torch.jit.unused>` for details.
 
 When passed to the :func:`torch.jit.script <torch.jit.script>` function, a ``torch.nn.Module``\'s data is
 copied to a ``ScriptModule`` and the TorchScript compiler compiles the module.
@@ -216,7 +217,7 @@ lazily compiled in the order they are used in ``forward``, as well as any
 
 Functions
 ~~~~~~~~~
-Functions don't change much, they can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` if needed.
+Functions don't change much, they can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`torch.jit.unused <torch.jit.unused>` if needed.
 
 .. testcode::
 
@@ -231,10 +232,17 @@ Functions don't change much, they can be decorated with :func:`@torch.jit.ignore
     def some_fn2():
         return 2
 
+    # As with ignore, if nothing calls it then it has no effect.
+    # If it is called in script it is replaced with an exception.
+    @torch.jit.unused
+    def some_fn3():
+      import pdb; pdb.set_trace()
+      return 4
+
     # Doesn't do anything, this function is already
     # the main entry point
     @torch.jit.export
-    def some_fn3():
+    def some_fn4():
         return 2
 
 
@@ -450,8 +458,11 @@ Example (a type mismatch)
          ~~~~~...  <--- HERE
              r = torch.rand(1)
          else:
+     and was used here:
+         else:
              r = 4
          return r
+                ~ <--- HERE
      ...
 
 
@@ -1093,6 +1104,10 @@ to TorchScript, leaving calls to Python functions in place. This way you can inc
 check the correctness of the model as you go.
 
 .. autofunction:: ignore
+
+.. autofunction:: unused
+
+.. autofunction:: is_scripting
 
 
 Attribute Lookup On Python Modules

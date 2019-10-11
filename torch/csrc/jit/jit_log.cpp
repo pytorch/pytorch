@@ -1,33 +1,97 @@
-#include <torch/csrc/jit/jit_log.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir.h>
-#include <c10/util/StringUtil.h>
+
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
+#include <vector>
+
+#include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
+#include <torch/csrc/jit/function.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/script/error_report.h>
 
 namespace torch {
 namespace jit {
 
-JitLoggingLevels jit_log_level() {
-  static const char* c_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
-  static const JitLoggingLevels log_level = c_log_level
-      ? static_cast<JitLoggingLevels>(std::atoi(c_log_level))
-      : JitLoggingLevels::OFF;
-  return log_level;
+// gets a string representation of a node header
+// (e.g. outputs, a node kind and outputs)
+std::string getHeader(const Node *node) {
+  std::stringstream ss;
+  node->print(ss, 0, {}, false, false, false, false);
+  return ss.str();
 }
 
-std::string debugValueOrDefault(const Node* n) {
-  return n->outputs().size() > 0 ? n->outputs().at(0)->debugName() : "n/a";
+static std::unordered_map<std::string, size_t>
+parseJITLogOption(const char *option) {
+
+  std::stringstream in_ss;
+  in_ss << "function:";
+  if (option) {
+    in_ss << option;
+  }
+
+  std::unordered_map<std::string, size_t> files_to_levels;
+  std::string line;
+  while (std::getline(in_ss, line, ':')) {
+    if (line.size() == 0) {
+      continue;
+    }
+
+    auto index_at = line.find_last_of('>');
+    auto begin_index = index_at == std::string::npos ? 0 : index_at + 1;
+    size_t logging_level = index_at == std::string::npos ? 1 : index_at + 2;
+    auto end_index = line.find_last_of('.') == std::string::npos
+                         ? line.size()
+                         : line.find_last_of('.');
+    auto filename = line.substr(begin_index, end_index - begin_index);
+    files_to_levels.insert({filename, logging_level});
+  }
+
+  return files_to_levels;
+}
+
+bool is_enabled(const char *cfname, JitLoggingLevels level) {
+
+  static const char* c_log_level = std::getenv("PYTORCH_JIT_LOG_LEVEL");
+  static const std::unordered_map<std::string, size_t> files_to_levels =
+      parseJITLogOption(c_log_level);
+  std::string fname{cfname};
+  fname = c10::detail::StripBasename(fname);
+  auto end_index = fname.find_last_of('.') == std::string::npos
+                       ? fname.size()
+                       : fname.find_last_of('.');
+  auto fname_no_ext = fname.substr(0, end_index);
+
+  auto it = files_to_levels.find(fname_no_ext);
+  if (it == files_to_levels.end()) {
+    return false;
+  }
+
+  return level <= static_cast<JitLoggingLevels>(it->second);
+}
+
+// Unfortunately, in `GraphExecutor` where `log_function` is invoked
+// we won't have access to an original function, so we have to construct
+// a dummy function to give to PythonPrint
+std::string log_function(const std::shared_ptr<torch::jit::Graph> &graph) {
+  torch::jit::Function func("source_dump", graph, nullptr);
+  std::stringstream ss;
+  std::vector<at::Tensor> tensors;
+  std::vector<c10::NamedTypePtr> deps;
+  SourceRangeRecords source_ranges;
+  PythonPrint(ss, source_ranges, func, false, tensors, deps, false);
+  return ss.str();
 }
 
 std::string jit_log_prefix(
     const std::string& prefix,
     const std::string& in_str) {
   std::stringstream in_ss(in_str);
-  std::stringstream out_ss(in_str);
+  std::stringstream out_ss;
   std::string line;
-  while (std::getline(in_ss, line, '\n')) {
+  while (std::getline(in_ss, line)) {
     out_ss << prefix << line << std::endl;
   }
 
@@ -51,9 +115,6 @@ std::string jit_log_prefix(
 
 std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {
   switch (level) {
-    case JitLoggingLevels::OFF:
-      TORCH_INTERNAL_ASSERT("UNREACHABLE");
-      break;
     case JitLoggingLevels::GRAPH_DUMP:
       out << "DUMP";
       break;
@@ -64,7 +125,7 @@ std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {
       out << "DEBUG";
       break;
     default:
-      TORCH_INTERNAL_ASSERT("Invalid level");
+      TORCH_INTERNAL_ASSERT(false, "Invalid level");
   }
 
   return out;

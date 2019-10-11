@@ -61,7 +61,7 @@
 #   BUILD_CAFFE2_OPS=0
 #     disable Caffe2 operators build
 #
-#   USE_GLOO_IBVERBS
+#   USE_IBVERBS
 #     toggle features related to distributed support
 #
 #   USE_OPENCV
@@ -184,7 +184,7 @@ from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
-from tools.setup_helpers.cuda import CUDA_HOME, CUDA_VERSION
+from tools.setup_helpers.cuda import CUDA_HOME
 
 try:
     FileNotFoundError
@@ -257,7 +257,7 @@ cmake_python_include_dir = distutils.sysconfig.get_python_inc()
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
-version = '1.3.0a0'
+version = open('version.txt', 'r').read().strip()
 sha = 'Unknown'
 
 try:
@@ -280,15 +280,6 @@ cmake = CMake()
 # all the work we need to do _before_ setup runs
 def build_deps():
     report('-- Building version ' + version)
-    version_path = os.path.join(cwd, 'torch', 'version.py')
-    with open(version_path, 'w') as f:
-        f.write("__version__ = '{}'\n".format(version))
-        # NB: This is not 100% accurate, because you could have built the
-        # library code with DEBUG, but csrc without DEBUG (in which case
-        # this would claim to be a release build when it's not.)
-        f.write("debug = {}\n".format(repr(build_type.is_debug())))
-        f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
-        f.write("git_version = {}\n".format(repr(sha)))
 
     def check_file(f):
         if not os.path.exists(f):
@@ -318,6 +309,18 @@ def build_deps():
                  rerun_cmake=RERUN_CMAKE,
                  cmake_only=CMAKE_ONLY,
                  cmake=cmake)
+
+    version_path = os.path.join(cwd, 'torch', 'version.py')
+    with open(version_path, 'w') as f:
+        f.write("__version__ = '{}'\n".format(version))
+        # NB: This is not 100% accurate, because you could have built the
+        # library code with DEBUG, but csrc without DEBUG (in which case
+        # this would claim to be a release build when it's not.)
+        f.write("debug = {}\n".format(repr(build_type.is_debug())))
+        cmake_cache_vars = defaultdict(lambda: None, cmake.get_cmake_cache_variables())
+        f.write("cuda = {}\n".format(repr(cmake_cache_vars['CUDA_VERSION'])))
+        f.write("git_version = {}\n".format(repr(sha)))
+
     if CMAKE_ONLY:
         report('Finished running cmake. Run "ccmake build" or '
                '"cmake-gui build" to adjust build options and '
@@ -350,9 +353,6 @@ install_requires = []
 
 if sys.version_info <= (2, 7):
     install_requires += ['future']
-
-if sys.version_info[0] == 2:
-    install_requires += ['requests']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -804,6 +804,7 @@ if __name__ == '__main__':
                 'include/c10/*.h',
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
+                'include/ATen/core/boxing/*.h',
                 'include/ATen/core/dispatch/*.h',
                 'include/ATen/core/op_registration/*.h',
                 'include/c10/core/impl/*.h',
@@ -825,8 +826,12 @@ if __name__ == '__main__':
                 'include/torch/csrc/api/include/torch/detail/*.h',
                 'include/torch/csrc/api/include/torch/detail/ordered_dict.h',
                 'include/torch/csrc/api/include/torch/nn/*.h',
+                'include/torch/csrc/api/include/torch/nn/functional/*.h',
+                'include/torch/csrc/api/include/torch/nn/options/*.h',
                 'include/torch/csrc/api/include/torch/nn/modules/*.h',
+                'include/torch/csrc/api/include/torch/nn/modules/container/*.h',
                 'include/torch/csrc/api/include/torch/nn/parallel/*.h',
+                'include/torch/csrc/api/include/torch/nn/utils/*.h',
                 'include/torch/csrc/api/include/torch/optim/*.h',
                 'include/torch/csrc/api/include/torch/serialize/*.h',
                 'include/torch/csrc/autograd/*.h',

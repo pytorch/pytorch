@@ -110,7 +110,7 @@ static inline void vectorized_outer_reduction(char** data, int64_t inner_stride,
 
 template<typename traits, typename res_t>
 static void set_result(const int index, const res_t result, const TensorIterator &iter, const int num_outputs) {
-  static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
+  // static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
   if (index < num_outputs) {
     char *out = (char *) iter.data_ptr(index);
     *(res_t *) out = result;
@@ -154,12 +154,13 @@ struct all_same : c10::guts::conjunction<
 // data_t is the input/output data type.
 // acc_t is a type that contains all the necessary data
 // to continue reducing.
+// index_t is a one-dimensional index
 //
 // ops_t is such that &ops_t::reduce, &ops_t::combine, and &ops_t::project exist and satisfy
 // the following.
-// reduce: (acc_t, data_t) -> acc_t adds one data point to the accumulated value.
+// reduce: (acc_t, data_t, index_t) -> acc_t adds one data point to the accumulated value.
 // combine: (acc_t, acc_t) -> acc_t combines two accumulated values into one.
-// project: acc_t -> data_t finishes the reduction, getting the required output.
+// project: acc_t -> out_t finishes the reduction, getting the required output.
 //
 // Additionally, acc_t must be default-constructible:
 // acc_t {} is an identity for combine,
@@ -204,12 +205,12 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
   iter.foreach_reduced_elt([&ops, &init, num_outputs](TensorIterator &sub_iter) {
     auto reduction_body = [&ops, &sub_iter, num_outputs](acc_t acc, int64_t begin, int64_t end) -> acc_t {
       int ntensors = sub_iter.ntensors();
-      sub_iter.serial_for_each([&acc, &ops, num_outputs, ntensors](char** data, const int64_t* strides, int64_t size) {
+      sub_iter.serial_for_each([&acc, &ops, num_outputs, ntensors, begin](char** data, const int64_t* strides, int64_t size) {
         AT_ASSERT(ntensors - num_outputs == 1);
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];
         for (int64_t i = 0; i < size; ++i) {
-          acc = ops.reduce(acc, *(data_t*)in);
+          acc = ops.reduce(acc, *(data_t*)in, begin + i);
           in += stride;
         }
       }, {begin, end});

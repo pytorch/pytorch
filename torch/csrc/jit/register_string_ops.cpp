@@ -389,7 +389,7 @@ auto reg_str_ops_2 =
                   return stringFindImpl(string, substr, start, end, true);
                 }))
 
-        .op("aten::index(str self, str substr, int start=0, int end=-1) -> int",
+        .op("aten::index.str(str self, str substr, int start=0, int end=-1) -> int",
             torch::RegisterOperators::options()
                 .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
                 .catchAllKernel([](std::string string,

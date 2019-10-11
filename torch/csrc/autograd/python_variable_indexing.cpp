@@ -111,14 +111,11 @@ static Variable sequenceToVariable(c10::TensorTypeId type_id, PyObject* seq) {
   return torch::utils::indexing_tensor_from_data(type_id, kLong, c10::nullopt, seq);
 }
 
-static Variable valueToTensor(c10::TensorTypeId type_id, ScalarType scalar_type, PyObject* value) {
+static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
-  auto options = TensorOptions(scalar_type)
-      .device(computeDeviceType(type_id))
-      .layout(layout_from_backend(tensorTypeIdToBackend(type_id)))
-      .is_variable(true);
+  options = options.is_variable(true);
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), options);
   }
@@ -128,7 +125,7 @@ static Variable valueToTensor(c10::TensorTypeId type_id, ScalarType scalar_type,
   throw TypeError(
     "can't assign a %s to a %s",
     Py_TYPE(value)->tp_name,
-    torch::utils::type_to_string(getNonVariableDeprecatedTypeProperties(tensorTypeIdToBackend(type_id), scalar_type)).c_str());
+    torch::utils::type_to_string(getNonVariableDeprecatedTypeProperties(options.backend(), typeMetaToScalarType(options.dtype()))).c_str());
 }
 
 static Variable boolToIndexingTensor(const Variable& self, bool value) {
@@ -190,7 +187,9 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
         handle_var(var);
       }
     } else if (PySequence_Check(obj)) {
-      handle_var(sequenceToVariable(self.type_id(), obj));
+      // TODO: Naughty naughty get out of jail free
+      // (Fixing this means I have to fix the call chain though :/)
+      handle_var(sequenceToVariable(legacyExtractTypeId(self), obj));
     } else {
       auto index = THPObjectPtr(PyNumber_Index(obj));
       if (!index) {
@@ -347,10 +346,11 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
   Variable value;
+  // TODO: This qint special case looks very suspicious...
   if (isQIntType(self_.scalar_type())) {
-    value = valueToTensor(TensorTypeId::CPUTensorId, kFloat, py_value);
+    value = valueToTensor(device(kCPU).dtype(kFloat), py_value);
   } else {
-    value = valueToTensor(self_.type_id(), self_.scalar_type(), py_value);
+    value = valueToTensor(self_.options(), py_value);
   }
 
   // handle simple types: integers, slices, ellipsis, bool

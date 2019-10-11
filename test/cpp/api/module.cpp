@@ -1,11 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/nn/module.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/nn/modules/rnn.h>
-#include <torch/nn/modules/sequential.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
@@ -113,6 +108,17 @@ TEST_F(ModuleTest, ReplaceModule) {
   model->l1 = model->replace_module("l1", torch::nn::Linear(5, 6));
   ASSERT_EQ(model->named_parameters()["l1.weight"].size(0), 6);
   ASSERT_EQ(model->l1.get(), model->named_modules()["l1"]->as<Linear>());
+}
+
+TEST_F(ModuleTest, UnregisterModule) {
+  struct TestModel : public torch::nn::Module {};
+  TestModel model;
+  ASSERT_THROWS_WITH(
+      model.unregister_module("linear"),
+      "No Module with name `linear` is registered");
+  model.register_module("linear", torch::nn::Linear(3, 4));
+  model.unregister_module("linear");
+  ASSERT_TRUE(model.children().empty());
 }
 
 TEST_F(ModuleTest, RegisterParameterThrowsForEmptyOrDottedName) {

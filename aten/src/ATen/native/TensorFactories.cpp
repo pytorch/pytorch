@@ -18,6 +18,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <cctype>
@@ -217,14 +218,24 @@ Tensor empty_like(
                 "It is currently not supported to specify a dtype that doesn't match "
                 "the input tensor's dtype via empty_like.  Specified: ", options.dtype(),
                 " Input tensor's dtype: ", self.dtype());
-    // TODO: uncomment when qscheme diff is landed
-    // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
-    //                       "empty_like for quantized Tensor only works for
-    //                        PerTensorAffine scheme right now");
-    return at::_empty_affine_quantized(self.sizes(), options,
-                                       self.q_scale(),
-                                       self.q_zero_point(),
-                                       use_memory_format);
+    auto qscheme = self.qscheme();
+    if (qscheme == kPerTensorAffine) {
+      return at::_empty_affine_quantized(self.sizes(), options,
+                                         self.q_scale(),
+                                         self.q_zero_point(),
+                                         use_memory_format);
+    } else if (qscheme == kPerChannelAffine) {
+      // Copy the tensors with channels to avoid accidental overrides
+      return at::_empty_per_channel_affine_quantized(
+          self.sizes(),
+          self.q_per_channel_scales().clone(),
+          self.q_per_channel_zero_points().clone(),
+          self.q_per_channel_axis(),
+          options,
+          use_memory_format);
+    } else {
+      TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
+    }
   }
 
 #ifdef BUILD_NAMEDTENSOR
@@ -700,6 +711,14 @@ Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   return native::zeros(self.sizes(), options);
 }
 
+Tensor new_zeros(
+    const Tensor& self,
+    IntArrayRef size,
+    const TensorOptions& options
+    ) {
+  return at::zeros(size, self.options().merge_in(options));
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor bartlett_window(int64_t window_length, const TensorOptions& options) {
@@ -856,8 +875,20 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor clone(const Tensor& src) {
-  auto self = at::empty_like(src);
+Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+  if (memory_format == MemoryFormat::Preserve) {
+    if (src.is_non_overlapping_and_dense()) {
+      // Copy all strides
+      auto self = at::empty_strided(src.sizes(), src.strides(), src.options());
+      self.copy_(src);
+      return self;
+    } else {
+      memory_format = src.suggest_memory_format();
+    }
+  }
+  auto self = at::empty_like(src, src.options(), memory_format);
   self.copy_(src);
   return self;
 }

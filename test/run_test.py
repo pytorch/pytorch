@@ -27,14 +27,13 @@ TESTS = [
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
-    'dist_autograd',
+    'dist_autograd_fork',
     'distributed',
     'distributions',
     'docs_coverage',
     'expecttest',
     'fake_quant',
     'indexing',
-    'indexing_cuda',
     'jit',
     'logging',
     'mkldnn',
@@ -50,7 +49,6 @@ TESTS = [
     'quantized_tensor',
     'quantized_nn_mods',
     'quantizer',
-    'rpc',
     'sparse',
     'torch',
     'type_info',
@@ -65,12 +63,27 @@ TESTS = [
     'function_schema',
 ]
 
-# skip < 3.6 b/c fstrings added in 3.6
+# skip < 3.6 b/c fstrings added in 3.6 for jit_py3
+# skip < 3.6 for rpc_spawn and dist_autograd_spawn temporarily because
+# a segmenation fault was triggered on python 3.5,
+# rpc_spawn and dist_autograd_spawn tests were added in
+# https://github.com/pytorch/pytorch/pull/25656
+# skip < 3.6 for rpc_fork as it imports mock that is only available in 3.6, mock
+# was added to rpc_fork in https://github.com/pytorch/pytorch/pull/26997
 if PY36:
-    TESTS.append('jit_py3')
+    TESTS.extend([
+        'jit_py3',
+        'rpc_fork',
+        'rpc_spawn',
+        'dist_autograd_spawn',
+    ])
 
 WINDOWS_BLACKLIST = [
     'distributed',
+    'rpc_fork',
+    'rpc_spawn',
+    'dist_autograd_fork',
+    'dist_autograd_spawn',
 ]
 
 ROCM_BLACKLIST = [
@@ -80,13 +93,13 @@ ROCM_BLACKLIST = [
     'distributed',
     'multiprocessing',
     'nccl',
+    'rpc_fork',
+    'rpc_spawn',
+    'dist_autograd_fork',
+    'dist_autograd_spawn',
 ]
 
-DISTRIBUTED_TESTS_CONFIG = {
-    'gloo': {
-        'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
-    },
-}
+DISTRIBUTED_TESTS_CONFIG = {}
 
 
 if dist.is_available():
@@ -98,7 +111,10 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
         }
-
+    if dist.is_gloo_available():
+        DISTRIBUTED_TESTS_CONFIG['gloo'] = {
+            'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
+        }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {getattr(signal, n): n for n in dir(signal)
@@ -387,6 +403,8 @@ def get_selected_tests(options):
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
         if target_arch != 'x64':
             WINDOWS_BLACKLIST.append('cpp_extensions')
+            WINDOWS_BLACKLIST.append('jit')
+            WINDOWS_BLACKLIST.append('jit_fuser')
 
         selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
 

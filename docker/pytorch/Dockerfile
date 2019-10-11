@@ -1,5 +1,6 @@
 FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu16.04
 ARG PYTHON_VERSION=3.6
+ARG WITH_TORCHVISION=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
          build-essential \
          cmake \
@@ -28,7 +29,7 @@ RUN TORCH_CUDA_ARCH_LIST="3.5 5.2 6.0 6.1 7.0+PTX" TORCH_NVCC_FLAGS="-Xfatbin -c
     CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
     pip install -v .
 
-RUN git clone https://github.com/pytorch/vision.git && cd vision && pip install -v .
+RUN if [ "$WITH_TORCHVISION" = "1" ] ; then git clone https://github.com/pytorch/vision.git && cd vision && pip install -v . ; else echo "building without torchvision" ; fi
 
 WORKDIR /workspace
 RUN chmod -R a+w .
