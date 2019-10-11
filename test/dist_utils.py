@@ -22,7 +22,7 @@ class TestConfig:
             setattr(self, k, v)
 
 
-TEST_CONFIG = TestConfig(backend=getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP))
+TEST_CONFIG = TestConfig(rpc_backend=getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP))
 INIT_METHOD_TEMPLATE = "file://{file_name}?rank={rank}&world_size={world_size}"
 
 
