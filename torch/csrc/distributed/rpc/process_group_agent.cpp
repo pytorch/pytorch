@@ -182,7 +182,6 @@ void ProcessGroupAgent::join() {
 
   auto shutdownMsg = Message({}, {}, MessageType::SHUTDOWN);
   send(allWorkerInfo_[dst], std::move(shutdownMsg));
-  this does not exist.
   threadPool_.waitWorkComplete();
   listenerThread_.join();
 }
