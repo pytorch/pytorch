@@ -223,6 +223,10 @@ def try_compile_fn(fn, loc):
     return torch.jit.script(fn, _rcb=rcb)
 
 
+def check_custom_container(module, type):
+    if module.forward != type.forward:
+        raise RuntimeError("Custom forward of classes which inherit from {} not supported in TorchScript: {}".format(type, module))
+
 def create_constant_iterable_module(module):
     modules = collections.OrderedDict()
 
@@ -234,10 +238,13 @@ def create_constant_iterable_module(module):
             modules[key] = recursive_script(submodule)
 
     if isinstance(module, Sequential):
+        check_custom_container(module, Sequential)
         return torch.jit._ConstSequential(Sequential(modules))
     elif isinstance(module, ModuleList):
+        check_custom_container(module, ModuleList)
         return torch.jit._ConstModuleList(modules)
     elif isinstance(module, ModuleDict):
+        check_custom_container(module, ModuleDict)
         return torch.jit._ConstModuleDict(modules)
     else:
         raise RuntimeError("Only nn.ModuleList, nn.Sequential, and nn.ModuleDict can be made "
