@@ -280,8 +280,6 @@ class TestNamedTensor(TestCase):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
             expected = "{}, names={})".format(repr(unnamed_tensor)[:-1], named_tensor.names)
-            print(repr(named_tensor))
-            print(expected)
             self.assertEqual(repr(named_tensor), expected)
 
         check_repr(torch.randn(128, 3, 64, 64, names=('N', 'C', 'H', 'W')))
