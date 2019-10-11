@@ -10355,6 +10355,31 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(
             torch.tensor([1], dtype=torch.float, device=device),
             actual)
+        # tensors with inf; min, max not provided -- should throw a RuntimeError
+        self.assertEqual(
+            torch.histc(torch.tensor([float("inf")], dtype=torch.float, device=device)),
+            "range of [inf, inf] is not finite")
+        self.assertEqual(
+            torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device)),
+            "range of [1, inf] is not finite")
+        # tensors with inf; min, max provided
+        self.assertEqual(
+            torch.histc(torch.tensor([float("inf")], dtype=torch.float, device=device),
+            bins=1, min=0, max=3),
+            torch.tensor([0], dtype=torch.float, device=device))
+        self.assertEqual(
+            torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device),
+            bins=4, max=3),
+            torch.tensor([1, 0, 1, 0], dtype=torch.float, device=device))
+        # tensor with nan -- should throw a RuntimeError
+        self.assertEqual(
+            torch.histc(torch.tensor([float("nan")], dtype=torch.float, device=device)),
+            "range of [nan, nan] is not finite")
+        # tensors with min > max -- should throw a RuntimeError
+        self.assertEqual(
+            torch.histc(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
+            bins=4, min=5, max=1),
+            "max must be larger than min")
 
         # test against numpy.histogram()
         def test_against_np(tensor, bins=100, min=0, max=0):
