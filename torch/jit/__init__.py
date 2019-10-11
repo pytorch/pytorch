@@ -1823,18 +1823,39 @@ class _ConstSequential(_ConstModuleList):
 
     def __init__(self, mods):
         super(_ConstSequential, self).__init__(mods._modules)
+        i = 0
+        for mod in self._modules.values():
+            setattr(self, "const_layers_" + str(i), mod)
+            i += 1
 
         # we define the forward method via self.define rather than
         # making it a direct class member (with a @script) annotation
         # because, in optimized runtime environments where only .pyc files
         # are shipped, we cant retrieve the source code.
         # TODO: find a workaround for this and remove this hack
-        self.define("""
-        def forward(self, input):
-            for m in self:
-                input = m(input)
-            return input
-        """)
+
+        # TorchScript does not allow re-defining the type of a variable
+        # in a new scope if it shadowing another variable.
+        # If we were to emit this as a standard for-loop over the modules like:
+        # def forward(self, input):
+        #     for m in self:
+        #         input = m(input)
+        #     return input
+        # Because for loop introduces a new scope, then the output of each
+        # module would have to subtype the type of the ininput
+        # To get around this, we manually unroll the body here;
+        func = """
+            def forward(self, input):
+        """
+        for i in range(len(mods)):
+            func += """
+                input = self.const_layers_{i}.forward(input)
+            """.format(i=i)
+        func += """
+                return input
+            """
+        self.define(func)
+
 
 def is_scripting():
     r"""

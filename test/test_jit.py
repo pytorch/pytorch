@@ -9994,6 +9994,33 @@ a")
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs)
 
+    def test_sequential_intermediary_types(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            def forward(self, x):
+                return x + 3
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+
+            def forward(self, x):
+                return {"1": x}
+
+        class C(torch.nn.Module):
+            __constants__ = ['foo']
+
+            def __init__(self):
+                super(C, self).__init__()
+                self.foo = torch.nn.Sequential(A(), B())
+
+            def forward(self, x):
+                return self.foo(x)
+
+        self.checkModule(C(), (torch.tensor(1),))
+
     def test_onnx_export_script_inline_script(self):
         class ModuleToInline(torch.jit.ScriptModule):
             def __init__(self):
