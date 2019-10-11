@@ -468,11 +468,18 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
-          "_dump",
+          "dump",
           &Module::dump,
           py::arg("code") = true,
           py::arg("attrs") = true,
           py::arg("params") = true)
+      .def(
+          "dump_to_str",
+          &Module::dump_to_str,
+          py::arg("code") = true,
+          py::arg("attrs") = true,
+          py::arg("params") = true,
+          py::arg("indent") = 0)
       .def(
           "_define",
           [](Module& m,
@@ -685,7 +692,7 @@ void initJitScriptBindings(PyObject* module) {
             cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
           });
 
-  py::class_<StrongFunctionPtr>(m, "Function", py::dynamic_attr())
+  py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
@@ -709,6 +716,14 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             Module module("__torch__.PlaceholderModule");
+            // [issue 27343]
+            // Modules have 'training' attributes by defualt, but due to
+            // https://github.com/pytorch/pytorch/issues/27343, functions end
+            // up having a training attribute when they are loaded. This adds
+            // a fake 'training' attribute that shouldn't be used, but prevents
+            // jitter on saving and loading. Once that issue is fixed this can
+            // be deleted.
+            module.register_attribute("training", BoolType::get(), true);
             addFunctionToModule(module, self);
             module.save(filename, _extra_files);
           },
@@ -720,6 +735,8 @@ void initJitScriptBindings(PyObject* module) {
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
             Module module("__torch__.PlaceholderModule");
+            // see [issue 27343]
+            module.register_attribute("training", BoolType::get(), true);
             addFunctionToModule(module, self);
             module.save(buf, _extra_files);
             return py::bytes(buf.str());

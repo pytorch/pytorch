@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
@@ -12,65 +13,6 @@ using c10::QualifiedName;
 
 namespace torch {
 namespace jit {
-
-// unix isprint but insensitive to locale
-static bool isPrint(char s) {
-  return s > 0x1f && s < 0x7f;
-}
-
-void printQuotedString(std::ostream& stmt, const std::string& str) {
-  stmt << "\"";
-  for (auto s : str) {
-    switch (s) {
-      case '\\':
-        stmt << "\\\\";
-        break;
-      case '\'':
-        stmt << "\\'";
-        break;
-      case '\"':
-        stmt << "\\\"";
-        break;
-      case '\a':
-        stmt << "\\a";
-        break;
-      case '\b':
-        stmt << "\\b";
-        break;
-      case '\f':
-        stmt << "\\f";
-        break;
-      case '\n':
-        stmt << "\\n";
-        break;
-      case '\r':
-        stmt << "\\r";
-        break;
-      case '\t':
-        stmt << "\\t";
-        break;
-      case '\v':
-        stmt << "\\v";
-        break;
-      default:
-        if (isPrint(s)) {
-          stmt << s;
-        } else {
-          // C++ io has stateful formatting settings. Messing with
-          // them is probably worse than doing this manually.
-          char buf[4] = "000";
-          buf[2] += s % 8;
-          s /= 8;
-          buf[1] += s % 8;
-          s /= 8;
-          buf[0] += s;
-          stmt << "\\" << buf;
-        }
-        break;
-    }
-  }
-  stmt << "\"";
-}
 
 static bool isValidIdentifierChar(char c, size_t pos) {
   return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
@@ -136,6 +78,8 @@ const static std::unordered_set<std::string> reserved_names = {
     "while",
     "with",
     "yield",
+    "uninitialized",
+    "unchecked_cast",
 };
 
 struct PythonPrintPass {
@@ -342,6 +286,15 @@ struct PythonPrintPass {
     // subgraph may use this more than once, so disable inlining
     if (use.user->kind() == prim::fork)
       return false;
+
+    // isinstance appearing in an if expression
+    // causes type refinement to occur, but we have
+    // already handled the refinement and inserted cast
+    // expressions. By not inlining it into the if condition,
+    // we prevent it from happening again.
+    if (v->node()->kind() == prim::isinstance) {
+      return false;
+    }
 
     return true;
   }
@@ -764,9 +717,7 @@ struct PythonPrintPass {
       registerClassDependencies(containedType);
     }
   }
-
-  void printNode(Node* node, bool print_const) {
-    WithSourceRange guard(&source_range_stack_, node);
+  void scanTypeDependencies(Node* node) {
     // Check for class dependencies. If this node inputs or outputs a class
     // type, we need to add it to our table of dependencies.
     for (const auto input : node->inputs()) {
@@ -775,7 +726,26 @@ struct PythonPrintPass {
     for (const auto output : node->outputs()) {
       registerClassDependencies(output->type());
     }
+    for (const auto& name : node->attributeNames()) {
+      switch (node->kindOf(name)) {
+        case AttributeKind::ty:
+          registerClassDependencies(node->ty(name));
+          break;
+        case AttributeKind::tys:
+          for (const TypePtr& t : node->tys(name)) {
+            registerClassDependencies(t);
+          }
+          break;
+        default:
+          // noop
+          break;
+      }
+    }
+  }
 
+  void printNode(Node* node, bool print_const) {
+    WithSourceRange guard(&source_range_stack_, node);
+    scanTypeDependencies(node);
     if (!print_const && node->kind() == prim::Constant)
       return;
     splitLongInlines(node->inputs());
@@ -891,12 +861,12 @@ struct PythonPrintPass {
     if (v.isTensor()) {
       ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if (v.isString()) {
-      printQuotedString(ss, v.toStringRef());
+      c10::printQuotedString(ss, v.toStringRef());
     } else if (v.isDevice()) {
       std::stringstream device_stream;
       device_stream << v.toDevice();
       ss << "torch.device(";
-      printQuotedString(ss, device_stream.str());
+      c10::printQuotedString(ss, device_stream.str());
       ss << ")";
     } else if (v.isTensorList()) {
       ss << "[";
@@ -1078,7 +1048,7 @@ struct PythonPrintPass {
         } else {
           stmt << "getattr(" << useOf(obj) << ", ";
           std::stringstream field_stream;
-          printQuotedString(field_stream, field);
+          c10::printQuotedString(field_stream, field);
           stmt << field_stream.str() << ")";
         }
       } break;
@@ -1113,7 +1083,6 @@ struct PythonPrintPass {
         }
 
       } break;
-      case prim::unchecked_unwrap_optional:
       case aten::_unwrap_optional: {
         printOpName(stmt, node->kind());
         stmt << "(";
@@ -1127,6 +1096,45 @@ struct PythonPrintPass {
                << useOf(node->input()) << ")";
         } else {
           stmt << useOf(node->input());
+        }
+        stmt << ")";
+      } break;
+      // unchecked_unwrap_optional is no longer generated by the compiler,
+      // but may end up here if it was first loaded from a old model and
+      // re-saved. On re-save we upgrade it to an unchecked_cast, which is an
+      // equivalent op
+      case prim::unchecked_unwrap_optional:
+      case prim::unchecked_cast: {
+        stmt << "unchecked_cast(" << node->output()->type()->python_str()
+             << ", " << useOf(node->input()) << ")";
+      } break;
+      case prim::isinstance: {
+        stmt << "isinstance(" << useOf(node->input()) << ", ";
+        const auto& types = node->tys(attr::types);
+        const auto& kinds = node->ss(attr::kinds);
+        if (types.size() == 1 && kinds.size() == 0) {
+          stmt << types.at(0)->python_str();
+        } else if (kinds.size() == 1 && types.size() == 0) {
+          stmt << kinds.at(0);
+        } else {
+          // check multiple things, e.g. (str, list, int)
+          stmt << "(";
+          bool first = true;
+          for (const TypePtr& typ : types) {
+            if (!first) {
+              stmt << ", ";
+            }
+            stmt << typ->python_str();
+            first = false;
+          }
+          for (const std::string& kind : kinds) {
+            if (!first) {
+              stmt << ", ";
+            }
+            stmt << kind;
+            first = false;
+          }
+          stmt << ")";
         }
         stmt << ")";
       } break;
@@ -1497,6 +1505,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::GetAttr,
       prim::SetAttr,
       prim::CallFunction,
+      prim::isinstance,
+      prim::unchecked_cast,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your

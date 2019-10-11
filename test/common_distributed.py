@@ -6,6 +6,7 @@ import time
 import unittest
 import logging
 import six
+import traceback
 
 from collections import namedtuple
 from functools import wraps
@@ -63,6 +64,18 @@ def requires_gloo():
         "c10d was not compiled with the Gloo backend",
     )
 
+def requires_nccl_version(version, msg):
+    if not c10d.is_nccl_available():
+        return unittest.skip(
+            "c10d was not compiled with the NCCL backend",
+        )
+    else:
+        return unittest.skipIf(
+            torch.cuda.nccl.version() < version,
+            "Requires NCCL version greater than or equal to: {}, found: {}, reason: {}".format(
+                version,
+                torch.cuda.nccl.version(), msg),
+        )
 
 def requires_nccl():
     return unittest.skipUnless(
@@ -108,8 +121,8 @@ class MultiProcessTestCase(TestCase):
                 try:
                     fn(self)
                 except Exception as e:
-                    logging.error('Caught exception: {}, exiting process with exit code: {}'
-                                  .format(e, MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
+                    logging.error('Caught exception: \n{}exiting process with exit code: {}'
+                                  .format(traceback.format_exc(), MultiProcessTestCase.TEST_ERROR_EXIT_CODE))
                     sys.exit(MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
         return wrapper
 

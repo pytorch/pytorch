@@ -13,6 +13,10 @@
 //   c10 implementations in `detail` namespace.
 // - `struct in_place_t` is renamed to `struct variant_in_place_t`, to not
 //   conflict with `struct in_place_t` in c10/util/Optional.h.
+// - In two functions, the template name reference `I` is changed to
+//   `detail_::best_match<Arg, Ts...>::value` to work around gcc 7.3.1 bug.
+//   However, this workaround also limits the use cases of `c10::variant`.
+//   Please see NOTE [gcc 7.3.1 bug workaround] for details.
 
 #ifndef C10_UTIL_VARIANT_H_
 #define C10_UTIL_VARIANT_H_
@@ -2240,6 +2244,24 @@ namespace c10 {
     variant(const variant &) = default;
     variant(variant &&) = default;
 
+    // NOTE [gcc 7.3.1 bug workaround]
+    //
+    // The original line `typename T = lib::type_pack_element_t<I, Ts...>`
+    // throws the following compiler error on gcc 7.3.1:
+    // ```
+    // ../c10/util/variant.h:2250:9: internal compiler error:
+    // unexpected expression ‘I’ of kind template_parm_index
+    //          typename T = lib::type_pack_element_t<I, Ts...>,
+    //          ^~~~~~~~
+    // ```
+    // As a workaround, `I` is changed to `detail_::best_match<Arg, Ts...>::value`,
+    // which is the default value for `I` in this template. Note that this workaround
+    // effectively disallows setting `I` to any other non-default value, and we add a
+    // `static_assert` in the function body to check for this.
+    //
+    // See the following issues for more context:
+    // - https://github.com/mpark/variant/issues/43
+    // - https://github.com/eggs-cpp/variant/issues/31
     template <
         typename Arg,
         typename Decayed = lib::decay_t<Arg>,
@@ -2247,11 +2269,16 @@ namespace c10 {
         lib::enable_if_t<!detail_::is_in_place_index<Decayed>::value, int> = 0,
         lib::enable_if_t<!detail_::is_in_place_type<Decayed>::value, int> = 0,
         std::size_t I = detail_::best_match<Arg, Ts...>::value,
-        typename T = lib::type_pack_element_t<I, Ts...>,
+        typename T = lib::type_pack_element_t<detail_::best_match<Arg, Ts...>::value, Ts...>,
         lib::enable_if_t<std::is_constructible<T, Arg>::value, int> = 0>
     inline constexpr variant(Arg &&arg) noexcept(
         std::is_nothrow_constructible<T, Arg>::value)
-        : impl_(in_place_index_t<I>{}, lib::forward<Arg>(arg)) {}
+        : impl_(in_place_index_t<I>{}, lib::forward<Arg>(arg)) {
+          static_assert(
+            I == detail_::best_match<Arg, Ts...>::value,
+            "Setting template parameter `I` to a custom non-default value is not supported. "
+            "Please file a feature request if you see this.");
+        }
 
     template <
         std::size_t I,
@@ -2318,17 +2345,22 @@ namespace c10 {
     variant &operator=(const variant &) = default;
     variant &operator=(variant &&) = default;
 
+    // NOTE: See NOTE [gcc 7.3.1 bug workaround] for the changes made to this function.
     template <typename Arg,
               lib::enable_if_t<!std::is_same<lib::decay_t<Arg>, variant>::value,
                                int> = 0,
               std::size_t I = detail_::best_match<Arg, Ts...>::value,
-              typename T = lib::type_pack_element_t<I, Ts...>,
+              typename T = lib::type_pack_element_t<detail_::best_match<Arg, Ts...>::value, Ts...>,
               lib::enable_if_t<(std::is_assignable<T &, Arg>::value &&
                                 std::is_constructible<T, Arg>::value),
                                int> = 0>
     inline variant &operator=(Arg &&arg) noexcept(
         (std::is_nothrow_assignable<T &, Arg>::value &&
          std::is_nothrow_constructible<T, Arg>::value)) {
+      static_assert(
+        I == detail_::best_match<Arg, Ts...>::value,
+        "Setting template parameter `I` to a custom non-default value is not supported. "
+        "Please file a feature request if you see this.");
       impl_.template assign<I>(lib::forward<Arg>(arg));
       return *this;
     }

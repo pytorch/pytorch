@@ -282,6 +282,53 @@ addr_(beta=1, alpha=1, vec1, vec2) -> Tensor
 In-place version of :meth:`~Tensor.addr`
 """)
 
+add_docstr_all('align_as',
+               r"""
+align_as(other) -> Tensor
+
+Permutes the dimensions of the :attr:`self` tensor to match the dimension order
+in the :attr:`other` tensor, adding size-one dims for any new names.
+
+This operation is useful for explicit broadcasting by names (see examples).
+
+All of the dims of :attr:`self` must be named in order to use this method.
+The resulting tensor is a view on the original tensor.
+
+All dimension names of :attr:`self` must be present in ``other.names``.
+:attr:`other` may contain named dimensions that are not in ``self.names``;
+the output tensor has a size-one dimension for each of those new names.
+
+To align a tensor to a specific order, use :meth:`~Tensor.align_to`.
+
+Examples::
+
+    # Example 1: Applying a mask
+    >>> mask = torch.randint(2, [127, 128], dtype=torch.bool).refine_names('W', 'H')
+    >>> imgs = torch.randn(32, 128, 127, 3, names=('N', 'H', 'W', 'C'))
+    >>> imgs.masked_fill_(mask.align_as(imgs), 0)
+
+
+    # Example 2: Applying a per-channel-scale
+    def scale_channels(input, scale):
+        scale = scale.refine_names('C')
+        return input * scale.align_as(input)
+
+    >>> num_channels = 3
+    >>> scale = torch.randn(num_channels, names='C')
+    >>> imgs = torch.rand(32, 128, 128, num_channels, names=('N', 'H', 'W', 'C'))
+    >>> more_imgs = torch.rand(32, num_channels, 128, 128, names=('N', 'C', 'H', 'W'))
+    >>> videos = torch.randn(3, num_channels, 128, 128, 128, names=('N', 'C', 'H', 'W', 'D'))
+
+    # scale_channels is agnostic to the dimension order of the input
+    >>> scale_channels(imgs, scale)
+    >>> scale_channels(more_imgs, scale)
+    >>> scale_channels(videos, scale)
+
+.. warning::
+    The named tensor API is experimental and subject to change.
+
+""")
+
 add_docstr_all('all',
                r"""
 .. function:: all() -> bool
@@ -330,6 +377,13 @@ add_docstr_all('allclose',
 allclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 
 See :func:`torch.allclose`
+""")
+
+add_docstr_all('angle',
+               r"""
+angle() -> Tensor
+
+See :func:`torch.angle`
 """)
 
 add_docstr_all('any',
@@ -635,6 +689,13 @@ Args:
     non_blocking (bool): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
         cases, this argument has no effect.
+""")
+
+add_docstr_all('conj',
+               r"""
+conj() -> Tensor
+
+See :func:`torch.conj`
 """)
 
 add_docstr_all('cos',
@@ -999,6 +1060,13 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
+add_docstr_all('real',
+               r"""
+real() -> Tensor
+
+See :func:`torch.real`
+""")
+
 add_docstr_all('roll',
                r"""
 roll(shifts, dims) -> Tensor
@@ -1095,6 +1163,13 @@ ger(vec2) -> Tensor
 See :func:`torch.ger`
 """)
 
+add_docstr_all('imag',
+               r"""
+imag() -> Tensor
+
+See :func:`torch.imag`
+""")
+
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
@@ -1152,6 +1227,11 @@ add_docstr_all('gt_',
 gt_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.gt`
+""")
+
+add_docstr_all('has_names',
+               r"""
+Is ``True`` if any of this tensor's dimensions are named. Otherwise, is ``False``.
 """)
 
 add_docstr_all('hardshrink',
@@ -2253,10 +2333,6 @@ dimensions. It is also required that ``index.size(d) <= other.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``.
 
-Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
-between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row along
-the specified dimension :attr:`dim` must be unique.
-
 .. include:: cuda_deterministic.rst
 
 Args:
@@ -3321,6 +3397,24 @@ Example::
     True
     # f requires grad, has no operation creating it
 
+
+""")
+
+add_docstr_all('names',
+               r"""
+Stores names for each of this tensor's dimensions.
+
+``names[idx]`` corresponds to the name of tensor dimension ``idx``.
+Names are either a string if the dimension is named or ``None`` if the
+dimension is unnamed.
+
+Dimension names may contain characters or underscore. Furthermore, a dimension
+name must be a valid Python variable name (i.e., does not start with underscore).
+
+Tensors may not have two named dimensions with the same name.
+
+.. warning::
+    The named tensor API is experimental and subject to change.
 
 """)
 

@@ -42,7 +42,6 @@ import torch.backends.cudnn
 import torch.backends.mkl
 
 
-torch.set_default_tensor_type('torch.DoubleTensor')
 torch.backends.disable_global_flags()
 
 
@@ -185,7 +184,6 @@ TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
 TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-TEST_WITH_QNNPACK = os.getenv('PYTORCH_TEST_WITH_QNNPACK', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -208,6 +206,26 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+
+def skipIfCompiledWithoutNumpy(fn):
+    # Even if the numpy module is present, if `USE_NUMPY=0` is used during the
+    # build, numpy tests will fail
+    numpy_support = TEST_NUMPY
+    if numpy_support:
+        try:
+            # The numpy module is present, verify that PyTorch is compiled with
+            # numpy support
+            torch.from_numpy(numpy.array([2, 2]))
+        except RuntimeError:
+            numpy_support = False
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not numpy_support:
+            raise unittest.SkipTest("PyTorch was compiled without numpy support")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 
 def _test_function(fn, device):
@@ -279,6 +297,20 @@ def suppress_warnings(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def default_floating_dtype(dtype):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            old_type = torch.tensor(()).dtype
+            torch.set_default_dtype(dtype)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                torch.set_default_dtype(old_type)
+
+        return wrapper
+
+    return decorator
 
 def get_cpu_type(type_name):
     module, name = type_name.rsplit('.', 1)
@@ -951,7 +983,6 @@ class TestCase(expecttest.TestCase):
         assertNotRegex = unittest.TestCase.assertNotRegexpMatches
 
 
-
 def download_file(url, binary=True):
     if sys.version_info < (3,):
         from urlparse import urlsplit
@@ -1015,9 +1046,9 @@ def prod_single_zero(dim_size):
     return result
 
 
-def random_square_matrix_of_rank(l, rank):
+def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l
-    A = torch.randn(l, l)
+    A = torch.randn(l, l, dtype=dtype, device=device)
     u, s, v = A.svd()
     for i in range(l):
         if i >= rank:
@@ -1027,20 +1058,28 @@ def random_square_matrix_of_rank(l, rank):
     return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
 
 
-def random_symmetric_matrix(l, *batches):
-    A = torch.randn(*(batches + (l, l)))
+def random_symmetric_matrix(l, *batches, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
     A = (A + A.transpose(-2, -1)).div_(2)
     return A
 
 
-def random_symmetric_psd_matrix(l, *batches):
-    A = torch.randn(*(batches + (l, l)))
+def random_symmetric_psd_matrix(l, *batches, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
     return torch.matmul(A, A.transpose(-2, -1))
 
 
-def random_symmetric_pd_matrix(matrix_size, *batch_dims):
-    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)))
-    return torch.matmul(A, A.transpose(-2, -1)) + torch.eye(matrix_size) * 1e-5
+def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)),
+                    dtype=dtype, device=device)
+    return torch.matmul(A, A.transpose(-2, -1)) \
+        + torch.eye(matrix_size, dtype=dtype, device=device) * 1e-5
 
 
 def make_nonzero_det(A, sign=None, min_singular_value=0.1):
@@ -1061,46 +1100,18 @@ def make_nonzero_det(A, sign=None, min_singular_value=0.1):
     return A
 
 
-def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims, **kwargs):
+def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
+                                                   **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
     silent = kwargs.get("silent", False)
     if silent and not torch._C.has_lapack:
-        return torch.ones(matrix_size, matrix_size)
+        return torch.ones(matrix_size, matrix_size, dtype=dtype, device=device)
 
-    A = torch.randn(batch_dims + (matrix_size, matrix_size))
+    A = torch.randn(batch_dims + (matrix_size, matrix_size), dtype=dtype, device=device)
     u, _, v = A.svd()
-    s = torch.arange(1., matrix_size + 1).mul_(1.0 / (matrix_size + 1)).diag()
+    s = torch.arange(1., matrix_size + 1, dtype=dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
     return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
-
-
-def lu_solve_test_helper(self, A_dims, b_dims, cast, pivot):
-    b = cast(torch.randn(*b_dims))
-    A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
-    LU_data, LU_pivots, info = torch.lu(A, get_infos=True, pivot=pivot)
-    self.assertEqual(info, torch.zeros_like(info))
-    return b, A, LU_data, LU_pivots
-
-
-def cholesky_solve_test_helper(A_dims, b_dims, cast, upper):
-    b = cast(torch.randn(*b_dims))
-    A = cast(random_symmetric_pd_matrix(*A_dims))
-    L = torch.cholesky(A, upper=upper)
-    return b, A, L
-
-
-def triangular_solve_test_helper(A_dims, b_dims, cast, upper, unitriangular):
-    triangle_function = torch.triu if upper else torch.tril
-    b = cast(torch.randn(*b_dims))
-    A = cast(torch.randn(*A_dims))
-    A_triangular = triangle_function(A)
-    if unitriangular:
-        A_triangular.diagonal(dim1=-2, dim2=-1).fill_(1.)
-    return b, A_triangular
-
-
-def solve_test_helper(A_dims, b_dims, cast):
-    b = cast(torch.randn(*b_dims))
-    A = cast(random_fullrank_matrix_distinct_singular_value(*A_dims))
-    return b, A
 
 
 def brute_pdist(inp, p=2):

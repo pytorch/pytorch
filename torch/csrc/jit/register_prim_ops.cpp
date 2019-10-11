@@ -1254,13 +1254,13 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     // This op can be removed in preprocessing before being run in the
-     // interpreter (but is currently not removed), even when it is removed it
-     // needs to remain a registered op so that constant prop can run.
+     // This op is no longer generated, but old models use it instead of
+     // unchecked_cast, so we keep it here so it gets handled correctly.
      Operator(
          "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
          noop,
          aliasAnalysisFromSchema()),
+     Operator(prim::unchecked_cast, noop, aliasAnalysisSpecialCase()),
      Operator(
          prim::fork,
          [](const Node* node) -> Operation {
@@ -1311,6 +1311,39 @@ RegisterOperators reg(
              auto userObj = c10::ivalue::Object::create(
                  c10::StrongTypePtr(cu, type), numAttrs);
              push(stack, std::move(userObj));
+             return 0;
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::isinstance,
+         [](const Node* node) -> Operation {
+           std::vector<TypePtr> types = node->tys(attr::types);
+           bool is_list = false;
+           bool is_tuple = false;
+           for (const std::string& kind : node->ss(attr::kinds)) {
+             if (kind == "list") {
+               is_list = true;
+             } else if (kind == "tuple") {
+               is_tuple = true;
+             } else {
+               TORCH_INTERNAL_ASSERT(false, "unrecognized type kind ", kind);
+             }
+           }
+           return [types, is_list, is_tuple](Stack& stack) {
+             TypePtr ty = pop(stack).type();
+             if ((is_list && ty->kind() == ListType::Kind) ||
+                 (is_tuple && ty->kind() == TupleType::Kind)) {
+               push(stack, true);
+               return 0;
+             }
+             for (const TypePtr& to_check : types) {
+               if (ty->isSubtypeOf(to_check)) {
+                 push(stack, true);
+                 return 0;
+               }
+             }
+             push(stack, false);
              return 0;
            };
          },
