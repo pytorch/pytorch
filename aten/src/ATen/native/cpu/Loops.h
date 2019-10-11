@@ -80,12 +80,23 @@ dereference_vec(char* C10_RESTRICT data[], const typename traits::result_type& o
   return dereference_vec_impl<traits>(data, opt_scalar, S, i, Indices{});
 }
 
+// Basic loop operation (one output, N inputs). May be auto-vectorized
+// by the compiler. Supports inputs and outputs of different types.
 template <typename func_t,
     typename std::enable_if<!std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
 static inline void
-execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t op) {
+basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t op) {
   using traits = function_traits<func_t>;
   using result_type = typename traits::result_type;
+  constexpr int ntensors = traits::arity + 1;
+
+  // Copying strides to temporary array helps auto vectorization in older GCC
+  // versions.
+  int64_t strides[ntensors];
+  for (int arg = 0; arg < ntensors; arg++) {
+    strides[arg] = strides_[arg];
+  }
+
   for (; i < n; i++) {
     result_type* out_ptr = (result_type*)(data[0] + i * strides[0]);
     *out_ptr = c10::guts::apply(op, dereference<traits>(
@@ -96,25 +107,11 @@ execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t
 }
 
 template <typename func_t,
-    typename std::enable_if<std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
-static inline void
-execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t op) {
-  using traits = function_traits<func_t>;
-  for (; i < n; i++) {
-    c10::guts::apply(op, dereference<traits>(
-        &data[0],
-        &strides[0],
-        i));
-  }
-}
-
-// Basic loop operation (one output, N inputs). May be auto-vectorized
-// by the compiler. Supports inputs and outputs of different types.
-template <typename func_t>
+      typename std::enable_if<std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
 static inline void
 basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_t n, func_t op) {
   using traits = function_traits<func_t>;
-  constexpr int ntensors = traits::arity + 1;
+  constexpr int ntensors = traits::arity;
 
   // Copying strides to temporary array helps auto vectorization in older GCC
   // versions.
@@ -123,7 +120,12 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
     strides[arg] = strides_[arg];
   }
 
-  execute_op(data, strides, i, n, op);
+  for (; i < n; i++) {
+    c10::guts::apply(op, dereference<traits>(
+        &data[0],
+        &strides[0],
+        i));
+  }
 }
 
 // Explicitly vectorized loop implementation. All inputs and outputs must be

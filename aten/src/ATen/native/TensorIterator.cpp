@@ -14,6 +14,9 @@ using loop_t = TensorIterator::loop_t;
 using loop2d_t = TensorIterator::loop2d_t;
 
 void TensorIterator::reorder_dimensions() {
+  if (!reorder_dimensions_) {
+    return;
+  }
   // Sort the dimensions based on strides in ascending order with reduced dims
   // at the front. NOTE: that this inverts the order of C-contiguous tensors.
   // strides[0] is the fastest moving dimension instead of strides[ndim - 1].
@@ -309,6 +312,9 @@ void TensorIterator::propagate_names_to_outputs() {
 #endif
 
 void TensorIterator::coalesce_dimensions() {
+  if (!coalesce_dimensions_) {
+    return;
+  }
   if (ndim() <= 1) {
     return;
   }

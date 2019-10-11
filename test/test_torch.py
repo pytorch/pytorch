@@ -11380,6 +11380,31 @@ class TestTorchDeviceType(TestCase):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
+    def test_nonzero_noncontiguous(self, device):
+        a = (torch.rand(5, 5) < 0.5).double()
+        b = a.t()
+        actual = torch.nonzero(b).numpy()
+        actual.sort()
+        expected = []
+        for i in range(5):
+            for j in range(5):
+                if b[i][j].item() != 0:
+                    expected.append([i, j])
+        self.assertEqual(expected.tolist(), actual)
+
+    def test_nonzero_with_out(self, device):
+        a = (torch.rand(5, 5) < 0.5).double()
+        out = torch.empty(a.numel(), a.dim()).long()
+        torch.nonzero(a, out=out)
+        actual = out.numpy()
+        actual.sort()
+        expected = []
+        for i in range(5):
+            for j in range(5):
+                if a[i][j].item() != 0:
+                    expected.append([i, j])
+        self.assertEqual(expected.tolist(), actual)
+
     def test_pdist_norm(self, device):
         def test_pdist_single(shape, device, p, dtype, trans):
             x = torch.randn(shape, dtype=dtype, device=device)
