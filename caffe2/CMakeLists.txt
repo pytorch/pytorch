@@ -21,6 +21,7 @@ if (INTERN_BUILD_ATEN_OPS)
     --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
   DEPENDS
   ATEN_CPU_FILES_GEN_TARGET
+  ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
 
@@ -44,14 +45,6 @@ if (INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
   list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
-else()
-  # Only add "ATen Core", a minimal, easy-to-compile fragment of ATen.
-  # This codepath should only be exercised by the Android build.
-  add_subdirectory(../aten/src/ATen/core ATen_core)
-  list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
-  list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
-  list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
-  # See cmake/Codegen.cmake for header installation
 endif()
 
 # ---[ Caffe2 build
@@ -478,21 +471,37 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
   endif()
 
+  if (USE_NCCL)
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
+  endif()
+
   if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_call.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_with_autograd.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_rref_proto.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_ret.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
   endif()
 
@@ -538,6 +547,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
@@ -550,6 +560,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/named_any.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/dropout.cpp
@@ -606,6 +617,11 @@ ELSEIF(USE_CUDA)
 ELSE()
   add_library(torch ${Caffe2_CPU_SRCS})
 ENDIF()
+
+if (USE_NCCL)
+  target_link_libraries(torch PRIVATE __caffe2_nccl)
+  target_compile_definitions(torch PRIVATE USE_NCCL)
+endif()
 
 
 # ==========================================================

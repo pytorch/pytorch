@@ -11,10 +11,22 @@ namespace enumtype {
   // error: default initialization of an object of const type 'const enumtype::Enum1'
   // without a user-provided default constructor
   // ```
-  struct Enum1 { Enum1() {} };
-  struct Enum2 { Enum2() {} };
-  struct Enum3 { Enum3() {} };
+  struct Enum1 { Enum1() {}; };
+  struct Enum2 { Enum2() {}; };
+  struct Enum3 { Enum3() {}; };
 } // namespace enumtype
+
+struct enum_name {
+  std::string operator()(enumtype::Enum1& v) const {
+    return "Enum1";
+  }
+  std::string operator()(enumtype::Enum2& v) const {
+    return "Enum2";
+  }
+  std::string operator()(enumtype::Enum3& v) const {
+    return "Enum3";
+  }
+};
 
 const enumtype::Enum1 kEnum1;
 const enumtype::Enum2 kEnum2;
@@ -38,4 +50,18 @@ TEST(VariantTest, Basic) {
   ASSERT_EQ(func(testns::kEnum1), "Enum1");
   ASSERT_EQ(func(testns::kEnum2), "Enum2");
   ASSERT_EQ(func(testns::kEnum3), "Enum3");
+
+  c10::variant<testns::enumtype::Enum1, testns::enumtype::Enum2, testns::enumtype::Enum3> v;
+  {
+    v = testns::kEnum1;
+    ASSERT_EQ(c10::visit(testns::enum_name{}, v), "Enum1");
+  }
+  {
+    v = testns::kEnum2;
+    ASSERT_EQ(c10::visit(testns::enum_name{}, v), "Enum2");
+  }
+  {
+    v = testns::kEnum3;
+    ASSERT_EQ(c10::visit(testns::enum_name{}, v), "Enum3");
+  }
 }

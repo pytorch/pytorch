@@ -54,6 +54,8 @@ def _parse_arg(value, desc):
         return value
     if desc == 'v' or not _is_value(value):
         return value
+    if value.node().mustBeNone():
+        return None
     if value.node().kind() == 'onnx::Constant':
         tval = value.node()['value']
         if desc == 'i':
@@ -184,6 +186,7 @@ def _try_get_scalar_type(*args):
             pass
     return None
 
+
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if _export_onnx_opset_version <= 9:
         from torch.onnx.symbolic_opset9 import _slice
@@ -191,6 +194,45 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
     else:
         from torch.onnx.symbolic_opset10 import _slice
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
+
+
+def _is_fp(value):
+    type = value.type().scalarType()
+    return (type == 'Float') or (type == 'Double') or (type == 'Half')
+
+
+def _sort_helper(g, input, dim, decending=True, out=None):
+    if out is not None:
+        _unimplemented("Sort", "Out parameter is not supported")
+    shape_ = g.op("Shape", input)
+    axis = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
+    start = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64))
+    end = g.op("Constant", value_t=torch.tensor(dim + 1, dtype=torch.int64))
+    slice_ = _slice_helper(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
+    if _export_onnx_opset_version <= 10:
+        if not decending:
+            _unimplemented("Sort", "Ascending is not supported")
+        return g.op("TopK", input, slice_, axis_i=dim, outputs=2)
+    else:
+        return g.op("TopK", input, slice_, axis_i=dim, largest_i=decending, outputs=2)
+
+
+def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
+    if out is not None:
+        _unimplemented("TopK", "Out parameter is not supported")
+    if _export_onnx_opset_version <= 10:
+        if not largest:
+            _unimplemented("TopK", "Ascending is not supported")
+            return g.op("TopK", input, k_i=k, axis_i=dim, outputs=2)
+        k = _maybe_get_const(k, 'i')
+        if not _is_value(k):
+            k = g.op("Constant", value_t=torch.tensor(k, dtype=torch.int64))
+        from torch.onnx.symbolic_opset9 import unsqueeze
+        k = unsqueeze(g, k, 0)
+        return g.op("TopK", input, k, axis_i=dim, outputs=2)
+    else:
+        return g.op("TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2)
+
 
 def _interpolate_warning(interpolate_mode):
     onnx_op = "onnx:Resize" if _export_onnx_opset_version >= 10 else "onnx:Upsample"
@@ -201,6 +243,7 @@ def _interpolate_warning(interpolate_mode):
                   "Attributes to determine how to transform the input were added in onnx:Resize in opset 11 "
                   "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
                   "We recommend using opset 11 and above for models using this operator. ")
+
 
 def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, 'is')
@@ -218,7 +261,6 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
                            for i in range(0, dim)]
         scales = g.op("Constant", value_t=torch.tensor(scales_constant))
     return scales
-
 
 def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:
