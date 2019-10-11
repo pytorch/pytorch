@@ -2595,7 +2595,7 @@ class TestNN(NNTestCase):
         self.assertNotIn('0.weight', model.state_dict())
         self.assertTrue(hasattr(model[0], 'weight'))
 
-        pruned_weight = getattr(model[0], 'weight')
+        pruned_weight = model[0].weight
 
         with TemporaryFileName() as fname:
             torch.save(model, fname)
@@ -2631,7 +2631,7 @@ class TestNN(NNTestCase):
         self.assertNotIn('0.weight', model.state_dict())
         self.assertTrue(hasattr(model[0], 'weight'))
 
-        pruned_weight = getattr(model[0], 'weight')
+        pruned_weight = model[0].weight
 
         # make pruning permanent and restore parameter names as in base 
         # architecture
