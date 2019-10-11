@@ -235,7 +235,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
 #define CAFFE_ENFORCE_LE(x, y, ...) \
   CAFFE_ENFORCE_THAT_IMPL(LessEquals((x), (y)), #x " <= " #y, __VA_ARGS__)
 #define CAFFE_ENFORCE_LT(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL(Less((x), (y)), #x " < " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_THAT_IMPL(c10::enforce_detail::Less((x), (y)), #x " < " #y, __VA_ARGS__)
 #define CAFFE_ENFORCE_GE(x, y, ...) \
   CAFFE_ENFORCE_THAT_IMPL(GreaterEquals((x), (y)), #x " >= " #y, __VA_ARGS__)
 #define CAFFE_ENFORCE_GT(x, y, ...) \
@@ -250,7 +250,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
   CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
       LessEquals((x), (y)), #x " <= " #y, __VA_ARGS__)
 #define CAFFE_ENFORCE_LT_WITH_CALLER(x, y, ...) \
-  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(Less((x), (y)), #x " < " #y, __VA_ARGS__)
+  CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(c10::enforce_detail::Less((x), (y)), #x " < " #y, __VA_ARGS__)
 #define CAFFE_ENFORCE_GE_WITH_CALLER(x, y, ...) \
   CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(          \
       GreaterEquals((x), (y)), #x " >= " #y, __VA_ARGS__)
