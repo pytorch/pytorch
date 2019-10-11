@@ -296,6 +296,10 @@ Limitations
         def forward(self, x):
             return [torch.squeeze(out, 0) for out in torch.split(x, [1,1,1], dim=0)]
 
+* Only tuples, lists and Variables are supported as JIT inputs/outputs. Dictionaries and strings are also accepted
+  but their usage is not recommended. Users need to verify their dict inputs carefully, and keep in mind that
+  dynamic lookups are not available.
+
 * PyTorch and ONNX backends(Caffe2, ONNX Runtime, etc) often have implementations of operators with some
   numeric differences.  Depending on model structure, these differences
   may be negligible, but they can also cause major divergences in behavior
@@ -352,6 +356,8 @@ The following operators are supported:
 * div
 * dropout
 * elu
+* empty
+* empty_like
 * eq
 * erf
 * exp
