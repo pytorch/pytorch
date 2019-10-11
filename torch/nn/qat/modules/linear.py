@@ -31,7 +31,7 @@ class Linear(nn.Linear):
 
     def forward(self, input):
         return self.activation_post_process(
-            F.linear(input,self.weight_fake_quant(self.weight), self.bias))
+            F.linear(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

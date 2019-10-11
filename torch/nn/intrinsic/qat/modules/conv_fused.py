@@ -253,8 +253,7 @@ class ConvReLU2d(nnqat.Conv2d):
 
     def forward(self, input):
         return self.activation_post_process(F.relu(
-            super(ConvReLU2d, self).conv2d_forward(input,
-                self.weight_fake_quant(self.weight))))
+            super(ConvReLU2d, self).conv2d_forward(input, self.weight_fake_quant(self.weight))))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
