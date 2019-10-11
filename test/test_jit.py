@@ -4334,6 +4334,25 @@ a")
                 return a
             ''')
 
+    @_tmp_donotuse_dont_inline_everything
+    def test_sequential_indices_are_legal(self):
+        class FooBar(torch.nn.Module):
+            def forward(self, x):
+                return torch.neg(x)
+
+        class Baz(torch.nn.Module):
+            def __init__(self):
+                super(Baz, self).__init__()
+                self.l = torch.nn.ModuleList([FooBar() for _ in range(3)])
+
+            def forward(self, x):
+                for layer in self.l:
+                    x = layer(x)
+                return x
+
+        b = torch.jit.script(Baz())
+        FileCheck().check('name="_0"').check('name="_1"').run(b.graph)
+
     def test_string_single_escape(self):
         with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
             torch.jit.CompilationUnit('''
