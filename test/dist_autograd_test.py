@@ -81,10 +81,6 @@ class DistAutogradTest(object):
             worker_ids = ctx._known_worker_ids()
             self.assertEqual(len(worker_ids), 1)
             self.assertEqual(dst_rank, worker_ids[0])
-            # TODO why not
-            # dest_worker = rpc.get_worker_info("worker{}".format(dst_rank))
-            # self.assertEqual(worker_ids[0], dest_worker.id_)
-
 
             # Retrieve the next functions in the graph.
             next_funcs = list(send_functions.values())[0].next_functions
