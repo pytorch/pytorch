@@ -101,7 +101,10 @@ def get_num_params(fn, loc):
     elif hasattr(py_def.args, 'kwonlyargs') and len(py_def.args.kwonlyargs) > 0:
         return None
     else:
-        return len(py_def.args.args)
+        num_params = len(py_def.args.args)
+        if inspect.ismethod(fn):
+            num_params = num_params - 1
+        return num_params
 
 
 def parse_type_line(type_line, rcb, loc):

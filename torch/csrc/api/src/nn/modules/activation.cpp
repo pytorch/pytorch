@@ -131,6 +131,21 @@ Tensor SoftmaxImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
+LogSoftmaxImpl::LogSoftmaxImpl(const LogSoftmaxOptions& options_)
+    : options(options_) {}
+
+void LogSoftmaxImpl::reset() {}
+
+void LogSoftmaxImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::LogSoftmax(dim=" << options.dim() << ")";
+}
+
+Tensor LogSoftmaxImpl::forward(const Tensor& input) {
+  return F::log_softmax(input, options);
+}
+
+// ============================================================================
+
 PReLUImpl::PReLUImpl(const PReLUOptions& options_) : options(options_) {
   reset();
 }
@@ -147,6 +162,24 @@ void PReLUImpl::reset() {
 void PReLUImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::PReLU(num_parameters="
          << options.num_parameters() << ")";
+}
+
+// ============================================================================
+
+ReLUImpl::ReLUImpl(const ReLUOptions& options_) : options(options_) {}
+
+Tensor ReLUImpl::forward(Tensor& input) {
+  return F::relu(input, options);
+}
+
+void ReLUImpl::reset() {}
+
+void ReLUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::ReLU(";
+  if (options.inplace()) {
+    stream << std::boolalpha << "inplace=" << options.inplace();
+  }
+  stream << ")";
 }
 
 } // namespace nn
