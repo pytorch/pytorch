@@ -86,6 +86,8 @@ jobs:
         with:
           python-version: 3.7.4
           architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
       - name: C++ docs check
         run: |
           sudo apt-get install -y doxygen && pip install -r requirements.txt
