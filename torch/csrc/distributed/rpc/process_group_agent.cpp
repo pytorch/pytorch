@@ -360,7 +360,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
-          markFutureWithMessage(message.id(), std::move(message));
+          markFutureWithMessage(message.id(), message);
         } else {
           // TODO: pass the error back to the caller instead of crashing here.
           TORCH_INTERNAL_ASSERT(
@@ -409,7 +409,7 @@ void ProcessGroupAgent::markFutureWithMessage(
   }
   // Don't hold lock on markCompleted, as it could invoke callbacks that
   // call agent_->send.
-  fut->markCompleted(std::move(exceptionMsg));
+  fut->markCompleted(exceptionMsg);
   {
     std::lock_guard<std::mutex> lock{futureMutex_};
     futures_.erase(messageId);
