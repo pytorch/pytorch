@@ -275,7 +275,7 @@ template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 #ifndef __HIP_PLATFORM_HCC__
   TORCH_CHECK(false, "at::cuda::blas::gemm: doesn't support at::BFloat16 type");
-#endif
+#else
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   cublasOperation_t opa = _cublasOpFromChar(transa);
   cublasOperation_t opb = _cublasOpFromChar(transb);
@@ -309,6 +309,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       rocblas_gemm_algo_standard,
       0,
       0));
+#endif
 }
 
 

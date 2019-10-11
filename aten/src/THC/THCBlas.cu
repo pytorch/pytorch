@@ -284,7 +284,7 @@ void THCudaBlas_BgemmStridedBatched(THCState *state, char transa, char transb, i
 {
 #ifndef __HIP_PLATFORM_HCC__
   TORCH_CHECK(false, "gemmStridedBatched not supported with at::BFloat16");
-#endif
+#else
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 
   {
@@ -307,6 +307,7 @@ void THCudaBlas_BgemmStridedBatched(THCState *state, char transa, char transb, i
                                    c, rocblas_datatype_bf16_r, (int)ldc, strideC,
                                    (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0, NULL, NULL));
+#endif // __HIP_PLATFORM_HCC__
 }
 
 #endif
