@@ -11390,7 +11390,7 @@ class TestTorchDeviceType(TestCase):
             for j in range(5):
                 if b[i][j].item() != 0:
                     expected.append([i, j])
-        self.assertEqual(expected.tolist(), actual)
+        self.assertEqual(expected, actual.tolist())
 
     def test_nonzero_with_out(self, device):
         a = (torch.rand(5, 5) < 0.5).double()
@@ -11403,7 +11403,7 @@ class TestTorchDeviceType(TestCase):
             for j in range(5):
                 if a[i][j].item() != 0:
                     expected.append([i, j])
-        self.assertEqual(expected.tolist(), actual)
+        self.assertEqual(expected, actual.tolist())
 
     def test_pdist_norm(self, device):
         def test_pdist_single(shape, device, p, dtype, trans):
