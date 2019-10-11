@@ -52,6 +52,8 @@ Creation Ops
 .. autofunction:: empty_strided
 .. autofunction:: full
 .. autofunction:: full_like
+.. autofunction:: quantize_per_tensor
+.. autofunction:: quantize_per_channel
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -188,12 +190,14 @@ Pointwise Ops
 .. autofunction:: add
 .. autofunction:: addcdiv
 .. autofunction:: addcmul
+.. autofunction:: angle
 .. autofunction:: asin
 .. autofunction:: atan
 .. autofunction:: atan2
 .. autofunction:: bitwise_not
 .. autofunction:: ceil
 .. autofunction:: clamp
+.. autofunction:: conj
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
@@ -206,6 +210,7 @@ Pointwise Ops
 .. autofunction:: floor
 .. autofunction:: fmod
 .. autofunction:: frac
+.. autofunction:: imag
 .. autofunction:: lerp
 .. autofunction:: log
 .. autofunction:: log10
@@ -217,6 +222,7 @@ Pointwise Ops
 .. autofunction:: mvlgamma
 .. autofunction:: neg
 .. autofunction:: pow
+.. autofunction:: real
 .. autofunction:: reciprocal
 .. autofunction:: remainder
 .. autofunction:: round
