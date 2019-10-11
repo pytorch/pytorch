@@ -183,7 +183,8 @@ The new usage looks like this:
 
 * The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``.
 * To compile a method other than ``forward`` that is not called from ``forward``, add ``@torch.jit.export``.
-* To stop the compiler from compiling a method and leave it as a call to Python, add ``@torch.jit.ignore``.
+* To stop the compiler from compiling a method, add :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`@torch.jit.unused <torch.jit.unused>`. ``@ignore`` leaves the
+* method as a call to python, and ``@unused`` replaces it with an exception. ``@ignored`` cannot be exported; ``@unused`` can.
 * Most attribute types can be inferred, so ``torch.jit.Attribute`` is not necessary. For empty container types, annotate their types using `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
 * Constants can be marked with a ``Final`` class annotation instead of adding the name of the member to ``__constants__``.
 * Python 3 type hints can be used in place of ``torch.jit.annotate``
@@ -216,7 +217,7 @@ lazily compiled in the order they are used in ``forward``, as well as any
 
 Functions
 ~~~~~~~~~
-Functions don't change much, they can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` if needed.
+Functions don't change much, they can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`torch.jit.unused <torch.jit.unused>` if needed.
 
 .. testcode::
 
@@ -231,10 +232,17 @@ Functions don't change much, they can be decorated with :func:`@torch.jit.ignore
     def some_fn2():
         return 2
 
+    # As with ignore, if nothing calls it then it has no effect.
+    # If it is called in script it is replaced with an exception.
+    @torch.jit.unused
+    def some_fn3():
+      import pdb; pdb.set_trace()
+      return 4
+
     # Doesn't do anything, this function is already
     # the main entry point
     @torch.jit.export
-    def some_fn3():
+    def some_fn4():
         return 2
 
 
@@ -1096,6 +1104,10 @@ to TorchScript, leaving calls to Python functions in place. This way you can inc
 check the correctness of the model as you go.
 
 .. autofunction:: ignore
+
+.. autofunction:: unused
+
+.. autofunction:: is_scripting
 
 
 Attribute Lookup On Python Modules

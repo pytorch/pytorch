@@ -34,6 +34,34 @@ Tensor HingeEmbeddingLossImpl::forward(
 
 // ============================================================================
 
+MultiMarginLossImpl::MultiMarginLossImpl(
+    const MultiMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
+    : options(options_) {
+      reset();
+    }
+
+void MultiMarginLossImpl::reset() {
+  TORCH_CHECK((options.p() == 1) || (options.p() == 2), "only p == 1 and p == 2 supported");
+  TORCH_CHECK(!options.weight().defined() || options.weight().dim() == 1);
+
+  register_buffer("weight", options.weight());
+}
+
+void MultiMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::MultiMarginLoss(p=" << options.p() << 
+            ", margin=" << options.margin() <<
+            ", weight=" << options.weight() <<
+            ", reduction=" << options.reduction() << ")";
+}
+
+Tensor MultiMarginLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+  return F::multi_margin_loss(input, target, options);
+}
+
+// ============================================================================
+  
 CosineEmbeddingLossImpl::CosineEmbeddingLossImpl(
     const CosineEmbeddingLossOptions& options_)
     : options(options_) {}
