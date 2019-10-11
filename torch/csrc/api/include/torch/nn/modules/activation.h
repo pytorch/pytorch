@@ -136,7 +136,6 @@ class TORCH_API LogSigmoidImpl : public torch::nn::Cloneable<LogSigmoidImpl> {
 
 TORCH_MODULE(LogSigmoid);
 
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softmax ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the Softmax function.
@@ -158,6 +157,180 @@ class TORCH_API SoftmaxImpl : public torch::nn::Cloneable<SoftmaxImpl> {
 };
 
 TORCH_MODULE(Softmax);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LogSoftmax ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the LogSoftmax function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LogSoftmax to learn
+/// about the exact behavior of this module.
+class TORCH_API LogSoftmaxImpl : public torch::nn::Cloneable<LogSoftmaxImpl> {
+ public:
+  explicit LogSoftmaxImpl(int64_t dim) : LogSoftmaxImpl(LogSoftmaxOptions(dim)) {}
+  explicit LogSoftmaxImpl(const LogSoftmaxOptions& options_);
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `LogSoftmax` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  LogSoftmaxOptions options;
+};
+
+TORCH_MODULE(LogSoftmax);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the PReLU function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.PReLU to learn
+/// about the exact behavior of this module.
+class TORCH_API PReLUImpl : public torch::nn::Cloneable<PReLUImpl> {
+ public:
+  explicit PReLUImpl(const PReLUOptions& options_ = {});
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `PReLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  PReLUOptions options;
+
+  /// The learned weight.
+  Tensor weight;
+};
+
+TORCH_MODULE(PReLU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the ReLU function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReLU to learn
+/// about the exact behavior of this module.
+class TORCH_API ReLUImpl : public torch::nn::Cloneable<ReLUImpl> {
+ public:
+  explicit ReLUImpl(const ReLUOptions& options_ = {});
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `ReLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ReLUOptions options;
+};
+
+TORCH_MODULE(ReLU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReLU6 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the ReLU6 function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReLU6 to learn
+/// about the exact behavior of this module.
+class TORCH_API ReLU6Impl : public torch::nn::Cloneable<ReLU6Impl> {
+ public:
+  explicit ReLU6Impl(const ReLU6Options& options_ = {});
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `ReLU6` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ReLU6Options options;
+};
+
+TORCH_MODULE(ReLU6);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the RReLU function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.RReLU to learn
+/// about the exact behavior of this module.
+class TORCH_API RReLUImpl : public torch::nn::Cloneable<RReLUImpl> {
+ public:
+  explicit RReLUImpl(const RReLUOptions& options_ = {});
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `RReLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  RReLUOptions options;
+};
+
+TORCH_MODULE(RReLU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies celu over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.CELU to learn
+/// about the exact behavior of this module.
+class TORCH_API CELUImpl : public torch::nn::Cloneable<CELUImpl> {
+ public:
+  explicit CELUImpl(const CELUOptions& options_ = {});
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `CELU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  CELUOptions options;
+};
+
+TORCH_MODULE(CELU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Sigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies sigmoid over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Sigmoid to learn
+/// about the exact behavior of this module.
+class TORCH_API SigmoidImpl : public torch::nn::Cloneable<SigmoidImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Sigmoid` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(Sigmoid);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softplus ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies softplus over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softplus to learn
+/// about the exact behavior of this module.
+class TORCH_API SoftplusImpl : public torch::nn::Cloneable<SoftplusImpl> {
+ public:
+  explicit SoftplusImpl(const SoftplusOptions& options_ = {});
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Softplus` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  SoftplusOptions options;
+};
+
+TORCH_MODULE(Softplus);
 
 } // namespace nn
 } // namespace torch
