@@ -888,7 +888,7 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=4),
-                       qparams=hu.qparams()),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
            dim=st.integers(1, 2),
            qengine=st.sampled_from(('qnnpack', 'none')))
     def test_mean(self, X, dim, qengine):
@@ -896,7 +896,6 @@ class TestQuantizedOps(TestCase):
             if qengine == 'qnnpack':
                 dim = (2, 3)
             X, (scale, zero_point, torch_type) = X
-            torch_type = torch.quint8
             qX = torch.quantize_per_tensor(torch.tensor(X).float(), scale, zero_point, torch_type)
             Y = torch.mean(qX.dequantize(), dim)
             Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
