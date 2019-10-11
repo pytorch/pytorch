@@ -27,7 +27,6 @@ TESTS = [
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
-    'dist_autograd_fork',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -75,6 +74,7 @@ if PY36:
         'jit_py3',
         'rpc_fork',
         'rpc_spawn',
+        'dist_autograd_fork',
         'dist_autograd_spawn',
     ])
 
