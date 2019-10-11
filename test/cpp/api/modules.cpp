@@ -1201,6 +1201,24 @@ TEST_F(ModulesTest, LogSoftmax) {
   }
 }
 
+TEST_F(ModulesTest, Softmax2d) {
+  Softmax2d m;
+  auto input = torch::arange(24, torch::kFloat).reshape({1, 2, 3, 4});
+  auto output = m(input);
+  auto sum = torch::sum(torch::exp(input), 1);
+
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < 2; j++) {
+      for (int k = 0; k < 3; k++) {
+        for (int l = 0; l < 4; l++) {
+          auto expected = torch::exp(input[i][j][k][l]) / sum[i][k][l];
+          ASSERT_TRUE(torch::allclose(output[i][j][k][l], expected));
+        }
+      }
+    }
+  }
+}
+
 TEST_F(ModulesTest, PReLU) {
   const auto num_parameters = 42;
   const auto init = 0.42;
@@ -1577,6 +1595,10 @@ TEST_F(ModulesTest, PrettyPrintLogSoftmax) {
             "torch::nn::LogSoftmax(dim=1)");
 }
 
+TEST_F(ModulesTest, PrettyPrintSoftmax2d) {
+  ASSERT_EQ(c10::str(Softmax2d()), "torch::nn::Softmax2d()");
+}
+
 TEST_F(ModulesTest, PrettyPrintPReLU) {
   ASSERT_EQ(c10::str(PReLU()), "torch::nn::PReLU(num_parameters=1)");
   ASSERT_EQ(c10::str(PReLU(PReLUOptions().num_parameters(42))),
@@ -1606,3 +1628,4 @@ TEST_F(ModulesTest, PrettyPrintRReLU) {
       RReLUOptions().lower(0.24).upper(0.42).inplace(true))),
     "torch::nn::RReLU(lower=0.24, upper=0.42, inplace=true)");
 }
+
