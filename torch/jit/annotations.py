@@ -5,10 +5,9 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any
+    is_optional, _qualified_name
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType
-
+    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType
 from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
@@ -29,6 +28,15 @@ class Module(object):
             raise RuntimeError("Module {} has no member called {}".format(self.name, name))
 
 
+_eval_env = {
+    'torch': Module('torch', {'Tensor': torch.Tensor}),
+    'Tensor': torch.Tensor,
+    'typing': Module('typing', {'Tuple': Tuple}),
+    'Tuple': Tuple,
+    'List': List,
+    'Dict': Dict,
+    'Optional': Optional,
+}
 class EvalEnv(object):
     env = {
         'torch': Module('torch', {'Tensor': torch.Tensor}),
@@ -239,8 +247,6 @@ def ann_to_type(ann, resolver=None):
         return StringType.get()
     elif ann is bool:
         return BoolType.get()
-    elif ann is Any:
-        return AnyType.get()
     elif hasattr(ann, "__torch_script_class__"):
         return ClassType(_qualified_name(ann))
     elif hasattr(ann, "__torch_script_interface__"):
@@ -255,7 +261,6 @@ def ann_to_type(ann, resolver=None):
 
 
 __all__ = [
-    'Any',
     'List',
     'BroadcastingList1',
     'BroadcastingList2',
@@ -272,7 +277,6 @@ __all__ = [
     'ListType',
     'StringType',
     'DictType',
-    'AnyType',
     'Module',
     # TODO: Consider not exporting these during wildcard import (reserve
     # that for the types; for idiomatic typing code.)
