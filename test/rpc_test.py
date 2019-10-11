@@ -383,8 +383,16 @@ class RpcTest(object):
             self.assertEqual(ret1, torch.ones(n, n) * 2)
             self.assertEqual(ret2, torch.ones(n, n) * 3)
 
-    @dist_init
     def test_join_rpc(self):
+        # Initialize RPC.
+        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        rpc.init_model_parallel(
+            self_name="worker%d" % self.rank,
+            backend=TEST_CONFIG.backend,
+            self_rank=self.rank,
+            init_method=self.init_method,
+        )
+
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
