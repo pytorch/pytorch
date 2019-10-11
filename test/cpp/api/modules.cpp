@@ -1298,6 +1298,35 @@ TEST_F(ModulesTest, RReLU) {
   }
 }
 
+TEST_F(ModulesTest, CELU) {
+  const auto size = 3;
+  for (const auto alpha : {0.42, 1.0, 4.2, 42.42}) {
+    CELU model {CELUOptions().alpha(alpha)};
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = torch::max(torch::zeros_like(x), x) +
+        torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
+TEST_F(ModulesTest, Sigmoid) {
+  Sigmoid model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = 1 / (1 + torch::exp(-x));
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1629,3 +1658,12 @@ TEST_F(ModulesTest, PrettyPrintRReLU) {
     "torch::nn::RReLU(lower=0.24, upper=0.42, inplace=true)");
 }
 
+TEST_F(ModulesTest, PrettyPrintCELU) {
+  ASSERT_EQ(c10::str(CELU()), "torch::nn::CELU(alpha=1)");
+  ASSERT_EQ(c10::str(CELU(CELUOptions().alpha(42.42).inplace(true))),
+            "torch::nn::CELU(alpha=42.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSigmoid) {
+  ASSERT_EQ(c10::str(Sigmoid()), "torch::nn::Sigmoid()");
+}
