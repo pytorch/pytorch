@@ -24,7 +24,8 @@ struct TORCH_API SourceImporter {
       // The compilation unit that will own the imported source
       std::shared_ptr<CompilationUnit> cu,
       const std::vector<at::Tensor>* tensor_table,
-      SourceLoader loader);
+      SourceLoader loader,
+      size_t version);
 
   TypePtr loadNamedType(const QualifiedName& name) const;
 
