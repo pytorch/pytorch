@@ -293,5 +293,22 @@ class TORCH_API CELUImpl : public torch::nn::Cloneable<CELUImpl> {
 
 TORCH_MODULE(CELU);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Sigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies sigmoid over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Sigmoid to learn
+/// about the exact behavior of this module.
+class TORCH_API SigmoidImpl : public torch::nn::Cloneable<SigmoidImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Sigmoid` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(Sigmoid);
+
 } // namespace nn
 } // namespace torch
