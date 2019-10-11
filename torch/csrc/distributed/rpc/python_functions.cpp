@@ -92,7 +92,7 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
       return PythonRpcHandler::getInstance().loadPythonUDFResult(
           resp.pickledPayload(), resp.tensors());
     }
-    case MessageType::MESSAGE_WITH_AUTOGRAD_RESP: {
+    case MessageType::FORWARD_AUTOGRAD_RESP: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
       // Attach 'recv' autograd function.
@@ -134,7 +134,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
         autogradContext.contextId(), autogradContainer.newAutogradMessageId());
     RpcWithAutograd rpcWithAutograd(
         agent.getWorkerInfo().id_,
-        MessageType::MESSAGE_WITH_AUTOGRAD_REQ,
+        MessageType::FORWARD_AUTOGRAD_REQ,
         autogradMetadata,
         std::move(scriptCall));
 

@@ -65,14 +65,15 @@ void DistAutogradContext::accumulateGrad(
   }
 }
 
-torch::autograd::GraphTask& DistAutogradContext::retrieveGraphTask() {
+std::shared_ptr<torch::autograd::GraphTask> DistAutogradContext::
+    retrieveGraphTask() {
   std::lock_guard<std::mutex> guard(lock_);
   TORCH_INTERNAL_ASSERT(graphTask_);
-  return *graphTask_;
+  return graphTask_;
 }
 
 void DistAutogradContext::setGraphTask(
-    std::unique_ptr<torch::autograd::GraphTask> graphTask) {
+    std::shared_ptr<torch::autograd::GraphTask> graphTask) {
   std::lock_guard<std::mutex> guard(lock_);
   TORCH_INTERNAL_ASSERT(
       !graphTask_,

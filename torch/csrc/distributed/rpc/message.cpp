@@ -75,9 +75,9 @@ bool Message::isRequest() const {
       MessageType::RREF_USER_DELETE == type_ ||
       MessageType::RREF_CHILD_ACCEPT == type_ ||
       MessageType::RREF_FORK_REQUEST == type_ ||
-      MessageType::PROPAGATE_GRADIENTS_REQ == type_ ||
       // Autograd message
-      MessageType::MESSAGE_WITH_AUTOGRAD_REQ == type_;
+      MessageType::BACKWARD_AUTOGRAD_REQ == type_ ||
+      MessageType::FORWARD_AUTOGRAD_REQ == type_;
 }
 
 bool Message::isResponse() const {
@@ -87,9 +87,9 @@ bool Message::isResponse() const {
       MessageType::RREF_FETCH_RET == type_ || // ret on RRef::toHere()
       MessageType::EXCEPTION == type_ || // propagate back exceptions
       MessageType::RREF_ACK == type_ || // ret of other types
-      MessageType::PROPAGATE_GRADIENTS_RESP == type_ ||
       // Autograd response
-      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == type_;
+      MessageType::BACKWARD_AUTOGRAD_RESP == type_ ||
+      MessageType::FORWARD_AUTOGRAD_RESP == type_;
 }
 
 bool Message::isShutdown() const {

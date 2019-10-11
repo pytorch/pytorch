@@ -5,7 +5,7 @@ namespace distributed {
 namespace autograd {
 
 rpc::Message PropagateGradientsResp::toMessage() && {
-  return rpc::Message({}, {}, rpc::MessageType::PROPAGATE_GRADIENTS_RESP);
+  return rpc::Message({}, {}, rpc::MessageType::BACKWARD_AUTOGRAD_RESP);
 }
 
 std::unique_ptr<PropagateGradientsResp> PropagateGradientsResp::fromMessage(

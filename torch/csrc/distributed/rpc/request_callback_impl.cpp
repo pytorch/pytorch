@@ -133,7 +133,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
       return c10::guts::make_unique<RRefAck>();
     }
-    case MessageType::MESSAGE_WITH_AUTOGRAD_REQ: {
+    case MessageType::FORWARD_AUTOGRAD_REQ: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
       const auto& autogradMetadata = rpcWithAutograd.autogradMetadata();
 
@@ -157,7 +157,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
 
       auto response = c10::guts::make_unique<RpcWithAutograd>(
           rpc::RpcAgent::getDefaultRpcAgent()->getWorkerInfo().id_,
-          MessageType::MESSAGE_WITH_AUTOGRAD_RESP,
+          MessageType::FORWARD_AUTOGRAD_RESP,
           responseAutogradMetadata,
           std::move(wrappedRpcResponse));
 
@@ -168,7 +168,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       }
       return std::move(response);
     }
-    case MessageType::PROPAGATE_GRADIENTS_REQ: {
+    case MessageType::BACKWARD_AUTOGRAD_REQ: {
       auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
       const auto& autogradMetadata = gradientsCall.getAutogradMetadata();
 

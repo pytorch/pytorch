@@ -42,10 +42,10 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
     case MessageType::RREF_FORK_REQUEST: {
       return RRefForkRequest::fromMessage(request);
     }
-    case MessageType::MESSAGE_WITH_AUTOGRAD_REQ: {
+    case MessageType::FORWARD_AUTOGRAD_REQ: {
       return autograd::RpcWithAutograd::fromMessage(request);
     }
-    case MessageType::PROPAGATE_GRADIENTS_REQ: {
+    case MessageType::BACKWARD_AUTOGRAD_REQ: {
       return autograd::PropagateGradientsReq::fromMessage(request);
     }
     default: {
@@ -76,10 +76,10 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
       std::string err(response.payload().begin(), response.payload().end());
       throw std::runtime_error(err);
     }
-    case MessageType::MESSAGE_WITH_AUTOGRAD_RESP: {
+    case MessageType::FORWARD_AUTOGRAD_RESP: {
       return autograd::RpcWithAutograd::fromMessage(response);
     }
-    case MessageType::PROPAGATE_GRADIENTS_RESP: {
+    case MessageType::BACKWARD_AUTOGRAD_RESP: {
       return autograd::RpcWithAutograd::fromMessage(response);
     }
     default: {

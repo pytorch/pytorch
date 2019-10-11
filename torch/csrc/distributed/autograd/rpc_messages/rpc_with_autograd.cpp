@@ -23,8 +23,8 @@ RpcWithAutograd::RpcWithAutograd(
       autogradMetadata_(autogradMetadata) {
   TORCH_INTERNAL_ASSERT(wrappedRpc != nullptr, "wrappedRpc cannot be null!");
   TORCH_INTERNAL_ASSERT(
-      messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_REQ ||
-      messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_RESP);
+      messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||
+      messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
   wrappedMessage_ = std::move(*wrappedRpc).toMessage();
   tensors_ = wrappedMessage_.tensors();
   wrappedMessageType_ = wrappedMessage_.type();
@@ -45,8 +45,8 @@ RpcWithAutograd::RpcWithAutograd(
       tensors_(std::move(tensors)) {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
   TORCH_INTERNAL_ASSERT(
-      messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_REQ ||
-      messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_RESP);
+      messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||
+      messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
 }
 
 Message RpcWithAutograd::toMessage() && {
@@ -91,13 +91,13 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
     const Message& message) {
   MessageType originalMessageType = message.type();
   TORCH_INTERNAL_ASSERT(
-      MessageType::MESSAGE_WITH_AUTOGRAD_REQ == originalMessageType ||
-      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == originalMessageType);
+      MessageType::FORWARD_AUTOGRAD_REQ == originalMessageType ||
+      MessageType::FORWARD_AUTOGRAD_RESP == originalMessageType);
 
   std::vector<torch::Tensor> tensors = message.tensors();
   int64_t messageId = message.id();
   // Decode message type, autograd context id, autograd message id and worker
-  // id.
+  // id from which we received this message.
   auto payload = message.payload();
 
   // Read the autograd payload remove it from the payload.
@@ -135,7 +135,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
       std::move(payload), std::move(tensors), wrappedMessageType, messageId);
 
   std::unique_ptr<RpcCommandBase> wrappedRpc;
-  if (originalMessageType == MessageType::MESSAGE_WITH_AUTOGRAD_REQ) {
+  if (originalMessageType == MessageType::FORWARD_AUTOGRAD_REQ) {
     wrappedRpc = deserializeRequest(wrappedMessage);
   } else {
     wrappedRpc = deserializeResponse(wrappedMessage);

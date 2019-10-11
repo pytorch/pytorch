@@ -68,11 +68,11 @@ class TORCH_API DistAutogradContext {
       const torch::Tensor& grad);
 
   // Retrieve the GraphTask.
-  torch::autograd::GraphTask& retrieveGraphTask();
+  std::shared_ptr<torch::autograd::GraphTask> retrieveGraphTask();
 
   // Set the appropriate graph task for the backward pass. Can be called only
   // once.
-  void setGraphTask(std::unique_ptr<torch::autograd::GraphTask> graphTask);
+  void setGraphTask(std::shared_ptr<torch::autograd::GraphTask> graphTask);
 
   // Waits for all outstanding RPCs for this context to finish and clears all
   // outstanding rpcs held in this context. This should be called only once.
@@ -94,7 +94,7 @@ class TORCH_API DistAutogradContext {
   c10::Dict<torch::Tensor, torch::Tensor> accumulatedGrads_;
 
   // The autograd GraphTask for the backward pass on this node for this context.
-  std::unique_ptr<torch::autograd::GraphTask> graphTask_;
+  std::shared_ptr<torch::autograd::GraphTask> graphTask_;
 
   // List of futures for RPCs initiated by this node to propagate gradients to
   // other nodes. The distributed autograd engine on this node can return

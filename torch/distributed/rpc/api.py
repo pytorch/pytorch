@@ -1,6 +1,6 @@
 from torch.distributed import invoke_rpc_builtin, invoke_rpc_python_udf
 from torch.distributed import invoke_remote_builtin, invoke_remote_python_udf
-from torch.distributed import init_rpc_agent
+from torch.distributed import _init_rpc_agent
 from torch.distributed import _destroy_rref_context
 from torch.distributed import ProcessGroupAgent
 from torch.distributed import WorkerInfo
@@ -87,7 +87,7 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
         )
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
-    init_rpc_agent(_agent)
+    _init_rpc_agent(_agent)
 
 
 @_require_initialized

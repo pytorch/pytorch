@@ -34,8 +34,8 @@ def backward(roots):
     Kicks off the distributed backward pass using the provided roots. This
     currently implements the "FAST" mode
     (see https://github.com/pytorch/pytorch/issues/23110) algorithm which
-    assumes all RPC messages across workers would be part of the autograd graph
-    during the backward pass.
+    assumes all RPC messages sent in the same distributed autograd context
+    across workers would be part of the autograd graph during the backward pass.
 
     We use the provided roots to discover the autograd graph and compute
     appropriate dependencies. This method blocks until the entire

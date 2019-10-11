@@ -33,7 +33,7 @@ Message PropagateGradientsReq::toMessage() && {
   return Message(
       std::move(payload),
       std::move(tensorTable),
-      MessageType::PROPAGATE_GRADIENTS_REQ);
+      MessageType::BACKWARD_AUTOGRAD_REQ);
 }
 
 std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
