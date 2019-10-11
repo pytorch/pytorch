@@ -134,26 +134,26 @@ def round(g, self):
 def arange(g, *args):
     def _get_arange_dtype(dtype):
         dtype = sym_help._maybe_get_const(dtype, 'i')
-        if sym_help._is_value(dtype):
-            dtype = 4  # default to int64
         return dtype
 
     if len(args) == 5:
         # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[1])
-        start_default = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
-        delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
-        arange_tensor = g.op("Range", start_default, args[0], delta_default)
+        type, end, start, step = sym_help._arange_cast_helper(g, end=args[0], dtype=dtype)
+        start_default = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[type]))
+        delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[type]))
+        arange_tensor = g.op("Range", start_default, end, delta_default)
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[2])
-        delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
-        arange_tensor = g.op("Range", args[0], args[1], delta_default)
+        type, end, start, step = sym_help._arange_cast_helper(g,  start=args[0], end=args[1], dtype=dtype)
+        delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[type]))
+        arange_tensor = g.op("Range", start, end, delta_default)
     elif len(args) == 7:
         # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[3])
-        step = g.op("Cast", args[2], to_i=sym_help.scalar_type_to_onnx[dtype])
-        arange_tensor = g.op("Range", args[0], args[1], step)
+        type, end, start, step = sym_help._arange_cast_helper(g,  start=args[0], end=args[1], step=args[2], dtype=dtype)
+        arange_tensor = g.op("Range", start, end, step)
     else:
         raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
     return arange_tensor

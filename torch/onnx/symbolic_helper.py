@@ -197,8 +197,10 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 
 def _is_fp(value):
-    type = value.type().scalarType()
-    return (type == 'Float') or (type == 'Double') or (type == 'Half')
+    if value:
+        type = value.type().scalarType()
+        return (type == 'Float') or (type == 'Double') or (type == 'Half')
+    return False
 
 
 def _sort_helper(g, input, dim, decending=True, out=None):
@@ -262,12 +264,30 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
         scales = g.op("Constant", value_t=torch.tensor(scales_constant))
     return scales
 
+
 def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
         from torch.onnx.symbolic_opset11 import scatter
     return scatter(g, self, dim, index, src)
+
+
+def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
+    # This logic is based on torch.arange docs. If 'dtype' is provided,
+    # infer input types from dtype. If not, then check if any of start, stop,
+    # or step are floating point, and infer the type from get_default.
+    # Otherwise, the dtype is inferred to be torch.int64.
+    if dtype:
+        type = dtype
+    else:
+        type = scalar_type_to_pytorch_type.index(torch.get_default_dtype())\
+            if _is_fp(start) or _is_fp(end) or _is_fp(step) else 4  # default torch.int64
+
+    start = g.op("Cast", start, to_i=scalar_type_to_onnx[type]) if start else None
+    end = g.op("Cast", end, to_i=scalar_type_to_onnx[type]) if end else None
+    step = g.op("Cast", step, to_i=scalar_type_to_onnx[type]) if step else None
+    return type, end, start, step
 
 # ---------------------------------------------------------------------
 # ONNX operator version
