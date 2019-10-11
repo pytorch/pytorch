@@ -568,7 +568,7 @@ TEST_F(FunctionalTest, Normalize) {
   
   { // Test #3 Base case of scalar tensor
     auto input = torch::randn({}, torch::requires_grad());
-    torch::Tensor norm = F::normalize(input, NormalizeOptions().p(2));
+    torch::Tensor norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
     norm.backward();
 
     ASSERT_EQ(input.grad().numel(), 1);
