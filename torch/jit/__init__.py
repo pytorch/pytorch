@@ -1019,7 +1019,7 @@ class CompilationUnit(object):
 
     def define(self, lang, rcb=None, _frames_up=0):
         if not rcb:
-            rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
+            rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         self._c.define(lang, rcb)
 
     def __getattr__(self, attr):
@@ -1217,36 +1217,18 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             raise RuntimeError("TorchScript classes must be new-style classes. "
                                "Please inherit from 'object'")
         if _rcb is None:
-            _rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
+            _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
     else:
         _check_directly_compile_overloaded(obj)
         ast = get_jit_def(obj)
         if _rcb is None:
-            _rcb = _gen_rcb(obj, _frames_up)
+            _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
         fn = torch._C._jit_script_compile(qualified_name, ast, _rcb, get_default_args(obj))
         # Forward docstrings
         fn.__doc__ = obj.__doc__
         return fn
-
-def _gen_rcb(obj, _frames_up):
-    _frames_up = _frames_up + 1  # for invoking _gen_rcb()
-
-    closure_rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
-    stack_rcb = _jit_internal.createResolutionCallback(_frames_up + 1)
-
-    def _rcb(name):
-        # since type comments aren't captured in the function's closures,
-        # we still need to try to the rcb based on stack frames if the
-        # closure rcb fails
-        result = closure_rcb(name)
-        if result:
-            return result
-        return stack_rcb(name)
-
-    return _rcb
-
 
 def interface(obj):
     if not inspect.isclass(obj):
@@ -1255,7 +1237,7 @@ def interface(obj):
         raise RuntimeError("TorchScript interfaces must inherit from 'object'")
     qualified_name = _qualified_name(obj)
     ast = get_jit_class_def(obj, obj.__name__)
-    rcb = _jit_internal.createResolutionCallback(1)
+    rcb = _jit_internal.createResolutionCallbackFromFrame(1)
     torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
     obj.__torch_script_interface__ = True
     return obj
@@ -1279,7 +1261,7 @@ def script_method(fn, _rcb=None):
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     if _rcb is None:
-        _rcb = _jit_internal.createResolutionCallback(frames_up=2)
+        _rcb = _jit_internal.createResolutionCallbackFromFrame(frames_up=2)
     ast = get_jit_def(fn, self_name="ScriptModule")
     return ScriptMethodStub(_rcb, ast, fn)
 
@@ -1515,8 +1497,15 @@ if _enabled:
             else:
                 self.__dict__['_c'] = torch._C.ScriptModule(_qualified_name, _compilation_unit, True)
 
-            Module._Module__construct(self)
-            Module.__setattr__(self, "training", True)
+            training = None
+            if self._c._has_attribute('training'):
+                training = self._c._get_attribute('training')
+            super(ScriptModule, self).__init__()
+            if training is not None:
+                self.training = training
+                self._c._register_attribute('training', torch._C.BoolType.get(), training)
+            elif not self._c._has_attribute('training'):
+                self._c._register_attribute('training', torch._C.BoolType.get(), self.training)
 
             self._parameters = OrderedParameterDict(self._c)
             self._buffers = OrderedBufferDict(self._c)
@@ -1582,11 +1571,6 @@ if _enabled:
 
         def __setattr__(self, attr, value):
             if attr not in self._constants_set:
-                if attr == 'training':
-                    if self._c._has_attribute('training'):
-                        self.__dict__['training'] = value
-                        self._c._set_attribute('training', value)
-                        return
                 if isinstance(value, Attribute):
                     the_type = torch.jit.annotations.ann_to_type(value.type)
                     try:
@@ -1595,6 +1579,8 @@ if _enabled:
                         raise RuntimeError("Could not register attribute '{}' of type '{}' for a value of type '{}'"
                                            .format(attr, value.type, type(value.value)))
                     return
+                if self._c._has_attribute(attr):
+                    self._c._set_attribute(attr, value)
                 return super(ScriptModule, self).__setattr__(attr, value)
 
             if hasattr(self, attr):
@@ -1636,7 +1622,7 @@ if _enabled:
             #
             # createResolutionCallback internally adds 1 to get us to our frame, then
             # we add 1 to get to the proper surrounding scope.
-            rcb = _jit_internal.createResolutionCallback(frames_up=1)
+            rcb = _jit_internal.createResolutionCallbackFromFrame(frames_up=1)
             self._c._define(self, lang, rcb)
 
         def copy(self):
@@ -1855,16 +1841,19 @@ def is_scripting():
     Function that returns True when in compilation and False otherwise. This
     is useful especially with the @unused decorator to leave code in your
     model that is not yet TorchScript compatible.
+    .. testcode::
 
-    @torch.jit.unused
-    def unsupported_linear_op(x):
-        return x
+        import torch
 
-    def linear(x):
-       if not torch.jit.is_scripting():
-          return torch.linear(x)
-       else:
-          return unsupported_linear_op(x)
+        @torch.jit.unused
+        def unsupported_linear_op(x):
+            return x
+
+        def linear(x):
+           if not torch.jit.is_scripting():
+              return torch.linear(x)
+           else:
+              return unsupported_linear_op(x)
     """
     return False
 
@@ -2009,7 +1998,7 @@ _compiled_overloaded_fns = {}
 def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
     impl_ast = torch.jit.get_jit_def(impl_fn)
     _frames_up = 0
-    _rcb = _gen_rcb(impl_fn, _frames_up)
+    _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
 
