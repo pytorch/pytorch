@@ -11384,7 +11384,6 @@ class TestTorchDeviceType(TestCase):
         a = (torch.rand(5, 5) < 0.5).double()
         b = a.t()
         actual = torch.nonzero(b).numpy()
-        actual.sort()
         expected = []
         for i in range(5):
             for j in range(5):
@@ -11397,7 +11396,6 @@ class TestTorchDeviceType(TestCase):
         out = torch.empty(a.numel(), a.dim()).long()
         torch.nonzero(a, out=out)
         actual = out.numpy()
-        actual.sort()
         expected = []
         for i in range(5):
             for j in range(5):
