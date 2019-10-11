@@ -1189,6 +1189,145 @@ TEST_F(ModulesTest, Softmax) {
   }
 }
 
+TEST_F(ModulesTest, LogSoftmax) {
+  LogSoftmax m(/*dim=*/1);
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = m(input);
+  auto sum = torch::sum(torch::exp(input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::log(torch::exp(input[i]) / sum[i]);
+    ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
+TEST_F(ModulesTest, PReLU) {
+  const auto num_parameters = 42;
+  const auto init = 0.42;
+
+  PReLU model {PReLUOptions().num_parameters(num_parameters).init(init)};
+
+  ASSERT_EQ(model->weight.sizes(), torch::IntArrayRef({num_parameters}));
+  ASSERT_TRUE(torch::allclose(model->weight,
+              torch::full(num_parameters, init)));
+
+  const auto x = torch::rand({100, num_parameters}) * 200 - 100;
+  const auto y = model(x);
+  const auto s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), x.ndimension());
+  ASSERT_EQ(y.sizes(), x.sizes());
+  const auto y_exp = (x < 0) * model->weight * x  + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, ReLU) {
+  const auto size = 3;
+  ReLU model;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size}).set_requires_grad(true);
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  auto y_exp = (x < 0) * 0 + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, ReLU6) {
+  const auto size = 3;
+  ReLU6 model;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size}).set_requires_grad(true);
+  auto y = model(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  auto y_exp = (x < 0) * 0 + ((x >= 0) * (x <= 6)) * x + (x > 6) * 6;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, RReLU) {
+  const auto size = 3;
+  for (const auto lower : {0.01, 0.1, 0.2}) {
+    for (const auto upper : {0.3, 0.4, 0.5}) {
+      RReLU model {RReLUOptions().lower(lower).upper(upper)};
+      auto x = torch::linspace(-10.0, 10.0, size * size * size);
+      x.resize_({size, size, size}).set_requires_grad(true);
+      auto y = model(x);
+      torch::Tensor s = y.sum();
+
+      s.backward();
+      ASSERT_EQ(s.ndimension(), 0);
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      auto z = ((x >= 0) * (x == y) +
+        (x < 0) * (y >= x * upper) * (y <= lower * x)) * 1.0;
+      ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
+    }
+  }
+}
+
+TEST_F(ModulesTest, CELU) {
+  const auto size = 3;
+  for (const auto alpha : {0.42, 1.0, 4.2, 42.42}) {
+    CELU model {CELUOptions().alpha(alpha)};
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = torch::max(torch::zeros_like(x), x) +
+        torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
+TEST_F(ModulesTest, Sigmoid) {
+  Sigmoid model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = 1 / (1 + torch::exp(-x));
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, Softplus) {
+  const auto size = 3;
+  for (const auto beta : {0.5, 1.0, 2.0}) {
+    for (const auto threshold : {1.0, 3.0, 5.0}) {
+      Softplus model {SoftplusOptions().beta(beta).threshold(threshold)};
+      auto x = torch::linspace(-3.0, 3.0, 61);
+      x.resize_({size, size, size});
+      auto y_exp =
+        (x <= threshold) * torch::log(1 + torch::exp(x * beta)) / beta +
+        (x > threshold) * x;
+      auto y = model(x);
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+    }
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1479,4 +1618,57 @@ TEST_F(ModulesTest, PrettyPrintLogSigmoid) {
 
 TEST_F(ModulesTest, PrettyPrintSoftmax) {
   ASSERT_EQ(c10::str(Softmax(SoftmaxOptions(1))), "torch::nn::Softmax(dim=1)");
+}
+
+TEST_F(ModulesTest, PrettyPrintLogSoftmax) {
+  ASSERT_EQ(c10::str(LogSoftmax(LogSoftmaxOptions(1))),
+            "torch::nn::LogSoftmax(dim=1)");
+}
+
+TEST_F(ModulesTest, PrettyPrintPReLU) {
+  ASSERT_EQ(c10::str(PReLU()), "torch::nn::PReLU(num_parameters=1)");
+  ASSERT_EQ(c10::str(PReLU(PReLUOptions().num_parameters(42))),
+            "torch::nn::PReLU(num_parameters=42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintReLU) {
+  ASSERT_EQ(c10::str(ReLU()), "torch::nn::ReLU()");
+  ASSERT_EQ(c10::str(ReLU(ReLUOptions().inplace(true))),
+    "torch::nn::ReLU(inplace=true)");
+  ASSERT_EQ(c10::str(ReLU(/*inplace=*/true)),
+    "torch::nn::ReLU(inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintReLU6) {
+  ASSERT_EQ(c10::str(ReLU6()), "torch::nn::ReLU6()");
+  ASSERT_EQ(c10::str(ReLU6(ReLU6Options().inplace(true))),
+    "torch::nn::ReLU6(inplace=true)");
+  ASSERT_EQ(c10::str(ReLU6(/*inplace=*/true)),
+    "torch::nn::ReLU6(inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintRReLU) {
+  ASSERT_EQ(c10::str(RReLU()),
+    "torch::nn::RReLU(lower=0.125, upper=0.333333)");
+  ASSERT_EQ(c10::str(RReLU(
+      RReLUOptions().lower(0.24).upper(0.42).inplace(true))),
+    "torch::nn::RReLU(lower=0.24, upper=0.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintCELU) {
+  ASSERT_EQ(c10::str(CELU()), "torch::nn::CELU(alpha=1)");
+  ASSERT_EQ(c10::str(CELU(CELUOptions().alpha(42.42).inplace(true))),
+            "torch::nn::CELU(alpha=42.42, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSigmoid) {
+  ASSERT_EQ(c10::str(Sigmoid()), "torch::nn::Sigmoid()");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftplus) {
+  ASSERT_EQ(c10::str(Softplus()),
+    "torch::nn::Softplus(beta=1, threshold=20)");
+  ASSERT_EQ(c10::str(Softplus(
+      SoftplusOptions().beta(0.24).threshold(42.42))),
+    "torch::nn::Softplus(beta=0.24, threshold=42.42)");
 }
