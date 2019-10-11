@@ -229,8 +229,6 @@ class _TestTorchMixin(object):
                        'log_softmax',
                        'map2_',
                        'new',
-                       'polygamma',
-                       'polygamma_',
                        'reinforce',
                        'relu',
                        'relu_',
