@@ -177,7 +177,7 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
         model won't have gradients.
 
     .. warning:
-        Since PyTorch 1.3, it allows only one Tensor as the input and
+        Since PyTorch 1.4, it allows only one Tensor as the input and
         intermediate outputs, just like :class:`torch.nn.Sequential`.
 
     Args:
