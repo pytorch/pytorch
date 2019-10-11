@@ -272,7 +272,13 @@ std::ostream &Node::print(std::ostream &out, size_t level,
 
   // In debug print, append file:line:col as a comment after each node
   if (print_source_locations) {
-    if (auto file_line_col = sourceRange().file_line_col()) {
+    SourceRange r = sourceRange();
+    if (sourceRange().source()) {
+      if (auto orig = sourceRange().source()->findSourceRangeThatGenerated(r)) {
+        r = *orig;
+      }
+    }
+    if (auto file_line_col = r.file_line_col()) {
       std::string filename;
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
@@ -1534,6 +1540,11 @@ Node* Graph::createIsInstance(
   n->tys_(attr::types, types.vec());
   n->output()->setType(BoolType::get());
   return n;
+}
+Value* Graph::insertUncheckedCast(Value* v, TypePtr type) {
+  Node* n = insertNode(create(prim::unchecked_cast, {v}));
+  n->output()->setType(std::move(type));
+  return n->output();
 }
 
 Value* Graph::insertFunctionCall(
