@@ -102,6 +102,19 @@ inline Tensor rrelu(Tensor& input, const RReLUOptions& options = {},
   }
 }
 
+inline Tensor celu(Tensor& input, const CELUOptions& options = {}) {
+  if (options.inplace()) {
+    return torch::celu_(input, options.alpha());
+  } else {
+    return torch::celu(input, options.alpha());
+  }
+}
+
+inline Tensor softplus(const Tensor& input,
+                       const SoftplusOptions& options = {}) {
+  return torch::softplus(input, options.beta(), options.threshold());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
