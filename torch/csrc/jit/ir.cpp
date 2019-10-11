@@ -1535,11 +1535,6 @@ Node* Graph::createIsInstance(
   n->output()->setType(BoolType::get());
   return n;
 }
-Value* Graph::insertUncheckedCast(Value* v, TypePtr type) {
-  Node* n = insertNode(create(prim::unchecked_cast, {v}));
-  n->output()->setType(std::move(type));
-  return n->output();
-}
 
 Value* Graph::insertFunctionCall(
     Function* callee,
