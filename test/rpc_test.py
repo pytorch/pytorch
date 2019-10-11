@@ -605,6 +605,52 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
 
+    def test_asymmetric_load_with_join(self):
+        """Test graceful termination."""
+        # Initialize RPC.
+        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        rpc.init_model_parallel(
+            self_name="worker%d" % self.rank,
+            backend=TEST_CONFIG.backend,
+            self_rank=self.rank,
+            init_method=self.init_method,
+        )
+
+        # worker0 drives and waits for worker1 and worker2
+        # throughout the test.
+        if self.rank == 0:
+            assert self.world_size >= 3
+
+            num_repeat = 200
+            futs = []
+
+            # Phase 1: Only worker1 has workload.
+            dst = "worker1"
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+            # Phase 1: Only worker2 has workload.
+            # If join is not correctly implemented,
+            # worker2 should be closed by now.
+            dst = "worker2"
+            num_repeat = 200
+            futs = []
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+        # Close RPC.
+        rpc.join_rpc()
+
     def _test_multi_remote_call(self, fn, args_fn=lambda x: (), kwargs_fn=lambda x: {}):
         m = 10
         n = self.rank + 1
