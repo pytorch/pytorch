@@ -457,14 +457,15 @@ try:
                 derandomize=True,
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
-                max_examples=100))
+                max_examples=100,
+                verbosity=hypothesis.Verbosity.quiet))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
                 max_examples=10,
-                verbosity=hypothesis.Verbosity.verbose))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "debug",
             hypothesis.settings(
@@ -480,7 +481,8 @@ try:
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
                 max_examples=100,
-                min_satisfying_examples=1))
+                min_satisfying_examples=1,
+                verbosity=hypothesis.Verbosity.quiet))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -488,7 +490,7 @@ try:
                 database=None,
                 max_examples=10,
                 min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.verbose))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "debug",
             hypothesis.settings(
