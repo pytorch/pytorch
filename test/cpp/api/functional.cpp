@@ -73,12 +73,25 @@ TEST_F(FunctionalTest, CosineSimilarity) {
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
-TEST_F(FunctionalTest, SoftMarginLoss) {
+TEST_F(FunctionalTest, SoftMarginLossDefaultOptions) {
   auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output =
-      F::soft_margin_loss(input, target, SoftMarginLossOptions());
+      F::soft_margin_loss(input, target);
   auto expected = torch::tensor({1.3767317}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, SoftMarginLossNoReduction) {
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
+  auto output =
+      F::soft_margin_loss(input, target, Reduction::None);
+  auto expected = torch::tensor({2.1269281, 0.01814993, 0.3132617, 3.0485873}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 

@@ -55,11 +55,11 @@ SoftMarginLossImpl::SoftMarginLossImpl(
     const torch::nn::SoftMarginLossOptions& options_) : options(options_) {}
 
 void SoftMarginLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::SoftMarginLoss(reduction=" << options.reduction() << ")";
+  stream << "torch::nn::SoftMarginLoss";
 }
 
 Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
-  return torch::soft_margin_loss(input, target, options.reduction());
+  return F::soft_margin_loss(input, target, options);
 }
 
 } // namespace nn

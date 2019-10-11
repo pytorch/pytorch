@@ -29,10 +29,8 @@ inline Tensor cosine_embedding_loss(
 inline Tensor soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    const SoftMarginLossOptions& options) {
-  return torch::soft_margin_loss(input,
-    target,
-    options.reduction());
+    const SoftMarginLossOptions& options = {}) {
+  return torch::soft_margin_loss(input, target, options.reduction());
 }
 
 } // namespace functional
