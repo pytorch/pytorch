@@ -89,7 +89,7 @@ graph {
     }
   }
   node {
-    input: "9"
+    input: "3"
     output: "10"
     op_type: "Cast"
     attribute {
@@ -99,7 +99,7 @@ graph {
     }
   }
   node {
-    input: "3"
+    input: "8"
     output: "11"
     op_type: "Cast"
     attribute {
@@ -109,7 +109,7 @@ graph {
     }
   }
   node {
-    input: "8"
+    input: "9"
     output: "12"
     op_type: "Cast"
     attribute {
@@ -119,9 +119,9 @@ graph {
     }
   }
   node {
+    input: "10"
     input: "11"
     input: "12"
-    input: "10"
     output: "13"
     op_type: "Range"
   }
