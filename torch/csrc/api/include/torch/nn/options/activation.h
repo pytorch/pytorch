@@ -73,6 +73,16 @@ struct TORCH_API SoftmaxOptions {
 
 // ============================================================================
 
+/// Options for the LogSoftmax functional and module.
+struct TORCH_API LogSoftmaxOptions {
+  LogSoftmaxOptions(int64_t dim);
+
+  /// Dimension along which LogSoftmax will be computed.
+  TORCH_ARG(int64_t, dim);
+};
+
+// ============================================================================
+
 /// Options for PReLU functional and module.
 struct TORCH_API PReLUOptions {
   /// number of `a` to learn. Although it takes an int as input, there is only
@@ -91,6 +101,41 @@ struct TORCH_API ReLUOptions {
 
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace);
+};
+
+// ============================================================================
+
+/// Options for ReLU6 functional and module.
+struct TORCH_API ReLU6Options {
+  /* implicit */ ReLU6Options(bool inplace = false);
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace);
+};
+
+// ============================================================================
+
+/// Options for RReLU functional and module.
+struct TORCH_API RReLUOptions {
+  /// lower bound of the uniform distribution. Default: 1/8
+  TORCH_ARG(double, lower) = 1.0 / 8.0;
+
+  /// upper bound of the uniform distribution. Default: 1/3
+  TORCH_ARG(double, upper) = 1.0 / 3.0;
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
+};
+
+// ============================================================================
+
+/// Options for CELU functional and module.
+struct TORCH_API CELUOptions {
+  /// The `alpha` value for the CELU formulation. Default: 1.0
+  TORCH_ARG(double, alpha) = 1.0;
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
 };
 
 } // namespace nn
