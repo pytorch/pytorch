@@ -56,11 +56,11 @@ MultiLabelMarginLossImpl::MultiLabelMarginLossImpl(
     : options(options_) {}
 
 void MultiLabelMarginLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::MultiLabelMarginLoss(reduction=" << options.reduction() << ")";
+  stream << "torch::nn::MultiLabelMarginLoss";
 }
 
 Tensor MultiLabelMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
-  return torch::multilabel_margin_loss(input, target, options.reduction());
+  return F::multilabel_margin_loss(input, target, options);
 }
 
 } // namespace nn

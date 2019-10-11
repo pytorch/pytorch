@@ -29,10 +29,8 @@ inline Tensor cosine_embedding_loss(
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    const MultiLabelMarginLossOptions& options) {
-  return torch::multilabel_margin_loss(input,
-    target,
-    options.reduction());
+    const MultiLabelMarginLossOptions& options = {}) {
+  return torch::multilabel_margin_loss(input, target, options.reduction());
 }
 
 } // namespace functional
