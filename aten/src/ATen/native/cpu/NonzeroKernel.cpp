@@ -16,24 +16,11 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self, bool resize_aft
   int64_t *idx = new int64_t[dimensions+1];
   int64_t *ii;
   int64_t *ss;
-  std::fill(idx, idx+dimensions+1, 0);
-  int64_t *ii_start;
-  int factor;
   int64_t count = 0;
-  if (self.is_contiguous())  {
-    for (int64_t i = 0; i < dimensions; ++i) {
-      sizes[dimensions - i - 1] = self.size(i); // reverse order important
-    }
-    ii_start = idx + dimensions;
-    factor = -1;
-  } else {
-    for (int64_t i = 0; i < dimensions; ++i) {
-      sizes[i] = self.size(i);
-    }
-    ii_start = idx - 1;
-    factor = 1;
+  std::fill(idx, idx+dimensions+1, 0);
+  for (int64_t i = 0; i < dimensions; ++i) {
+    sizes[dimensions - i - 1] = self.size(i); // reverse order important
   }
-
   sizes[dimensions] = 0;
   /* Second pass populates subscripts */
   auto subscript_data = subscript.data_ptr<int64_t>();
@@ -43,17 +30,16 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self, bool resize_aft
 
   auto iter = TensorIterator();
   iter.add_input(self);
-  if (!self.is_contiguous()) {
-    iter.dont_reorder_dimensions();
-    iter.dont_coalesce_dimensions();
+  if (self.is_contiguous()) {
+    iter.reverse_order_dims();
   }
   iter.build();
   cpu_serial_kernel(iter, [&](scalar_t a) {
     if (a != 0) {
       count++;
-      ii = ii_start;
+      ii = idx + dimensions;
       for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
-        ii += factor;
+        --ii;
         *subscript_data = *ii;
         subscript_data += stride1;
       }

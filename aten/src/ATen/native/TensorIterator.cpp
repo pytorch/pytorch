@@ -14,9 +14,6 @@ using loop_t = TensorIterator::loop_t;
 using loop2d_t = TensorIterator::loop2d_t;
 
 void TensorIterator::reorder_dimensions() {
-  if (!reorder_dimensions_) {
-    return;
-  }
   // Sort the dimensions based on strides in ascending order with reduced dims
   // at the front. NOTE: that this inverts the order of C-contiguous tensors.
   // strides[0] is the fastest moving dimension instead of strides[ndim - 1].
@@ -57,11 +54,13 @@ void TensorIterator::reorder_dimensions() {
     return ret;
   };
 
+  int factor = reverse_order_dims_ ? -1 : 1;
+
   // insertion sort with support for ambiguous comparisons
   for (int i = 1; i < ndim(); i++) {
     int dim1 = i;
     for (int dim0 = i - 1; dim0 >= 0; dim0--) {
-      int comparison = should_swap(perm_[dim0], perm_[dim1]);
+      int comparison = factor * should_swap(perm_[dim0], perm_[dim1]);
       if (comparison > 0) {
         std::swap(perm_[dim0], perm_[dim1]);
         dim1 = dim0;
@@ -312,9 +311,6 @@ void TensorIterator::propagate_names_to_outputs() {
 #endif
 
 void TensorIterator::coalesce_dimensions() {
-  if (!coalesce_dimensions_) {
-    return;
-  }
   if (ndim() <= 1) {
     return;
   }
