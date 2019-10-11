@@ -275,7 +275,7 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NYI"):
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
-    @unittest.SkipTest("Issue 27753")
+    @unittest.skip("Issue 27753")
     def test_big_tensor_repr(self):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
