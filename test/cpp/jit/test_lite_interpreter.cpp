@@ -44,10 +44,6 @@ void testLiteInterpreterAdd() {
 }
 
 void testLiteInterpreterConv() {
-  std::string envs = std::getenv("PYTORCH_TEST_WITH_TSAN");
-  if (envs == "1") {
-    return;
-  }
   std::vector<torch::jit::IValue> inputs;
 
   script::Module m("m");
