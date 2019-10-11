@@ -29,7 +29,7 @@ Node* preRecordPythonTrace(
 
 std::shared_ptr<Graph> createGraphByTracing(
     const py::function& func,
-    Stack inputs,
+    TypedStack inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
     script::Module* self = nullptr);
