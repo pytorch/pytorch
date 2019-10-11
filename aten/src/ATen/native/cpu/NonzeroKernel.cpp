@@ -30,7 +30,7 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self, bool resize_aft
 
   auto iter = TensorIterator();
   iter.add_input(self);
-  if (self.is_contiguous()) {
+  if (!self.is_contiguous()) {
     iter.reverse_order_dims();
   }
   iter.build();
@@ -62,8 +62,8 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self, bool resize_aft
 
 static void nonzero_kernel(Tensor& subscript, const Tensor& self) {
   AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, self.scalar_type(), "nonzero", [&] {
-    std::vector<int64_t> subscript_size{self.numel(), self.dim()};
     bool resize_after_compute = true;
+    std::vector<int64_t> subscript_size{self.numel(), self.dim()};
     if (subscript.sizes().vec() != subscript_size) {
       resize_after_compute = false;
       int64_t numel = 0;

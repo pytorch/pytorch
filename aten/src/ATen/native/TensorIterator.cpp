@@ -54,13 +54,11 @@ void TensorIterator::reorder_dimensions() {
     return ret;
   };
 
-  int factor = reverse_order_dims_ ? -1 : 1;
-
   // insertion sort with support for ambiguous comparisons
   for (int i = 1; i < ndim(); i++) {
     int dim1 = i;
     for (int dim0 = i - 1; dim0 >= 0; dim0--) {
-      int comparison = factor * should_swap(perm_[dim0], perm_[dim1]);
+      int comparison = reverse_order_dims_ ? 1 : should_swap(perm_[dim0], perm_[dim1]);
       if (comparison > 0) {
         std::swap(perm_[dim0], perm_[dim1]);
         dim1 = dim0;
