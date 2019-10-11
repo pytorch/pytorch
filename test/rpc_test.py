@@ -634,12 +634,10 @@ class RpcTest(object):
                 fut.wait()
                 self.assertEqual(fut.wait(), 0)
 
-            # Phase 1: Only worker2 has workload.
+            # Phase 2: Only worker2 has workload.
             # If join is not correctly implemented,
             # worker2 should be closed by now.
             dst = "worker2"
-            num_repeat = 200
-            futs = []
             for _ in range(num_repeat):
                 fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
                 futs.append(fut)
