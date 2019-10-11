@@ -391,6 +391,13 @@ def split_with_sizes(g, self, split_sizes, dim):
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
 
 
+@parse_args('v', 'i')
+def unbind(g, self, dim=0):
+    # NOTE: This conversion of this node is handled in onnx peephole pass.
+    # Due to that an additional Squeeze node needs to be inserted for each output from unbind.
+    return g.op("aten::unbind", self, axis_i=dim)
+
+
 @parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
     if dim > 1:
@@ -1193,6 +1200,8 @@ def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
@@ -1200,12 +1209,16 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros_like(g, input, dtype, layout, device, pin_memory=False):
     shape = g.op("Shape", input)
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v', 'v')
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
@@ -1213,11 +1226,15 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
 @parse_args('v', 'i', 'v', 'v', 'v')
 def ones_like(g, input, dtype, layout, device, pin_memory=False):
     shape = g.op("Shape", input)
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+    if dtype is None:
+        dtype = 6  # float
     const_value = sym_help._maybe_get_const(value, 't')
     if sym_help._is_value(const_value):
         tmp = zeros(g, sizes, dtype, layout, device)
@@ -1231,6 +1248,8 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
 @parse_args('v', 'f', 'i', 'v', 'v', 'v')
 def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
     shape = g.op("Shape", input)
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 

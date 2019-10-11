@@ -44,9 +44,15 @@ Streams and events
 Memory management
 -----------------
 .. autofunction:: empty_cache
+.. autofunction:: memory_stats
+.. autofunction:: memory_summary
+.. autofunction:: memory_snapshot
 .. autofunction:: memory_allocated
 .. autofunction:: max_memory_allocated
 .. autofunction:: reset_max_memory_allocated
+.. autofunction:: memory_reserved
+.. autofunction:: max_memory_reserved
+.. autofunction:: reset_max_memory_reserved
 .. autofunction:: memory_cached
 .. autofunction:: max_memory_cached
 .. autofunction:: reset_max_memory_cached
