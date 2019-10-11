@@ -228,7 +228,8 @@ def check_custom_container(module, module_type):
         return
 
     if module.forward != module_type.forward:
-        raise RuntimeError("Custom forward of classes which inherit from {} not supported in TorchScript: {}".format(module_type, module))
+        raise RuntimeError("Custom forward of classes which inherit from {} not"
+                           "supported in TorchScript: {}".format(module_type, module))
 
 
 def create_constant_iterable_module(module):
