@@ -240,7 +240,7 @@ class MinMaxObserver(_ObserverBase):
                 raise NotImplementedError("Cannot reduce range for symmetric \
                                            quantization for quint8")
 
-    def forward(self,  x):
+    def forward(self, x):
         """Records the running minimum and maximum of ``x``."""
         with torch.no_grad():
             min_val = self.min_val
@@ -257,7 +257,7 @@ class MinMaxObserver(_ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        """Calculates the quantization parameters.
+        r"""Calculates the quantization parameters.
 
         Given running min/max as :math:`r_\text{min}` and :math:`r_\text{max}`,
         scale :math:`s` and zero point :math:`z` are computed as:
