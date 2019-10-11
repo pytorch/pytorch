@@ -79,6 +79,8 @@ static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
   while (!to_process.empty()) {
     Work w = std::move(to_process.back());
     to_process.pop_back();
+    if (!w.static_type)
+      continue;
     // ensure we only scan each pointer value once, otherwise this
     // can become exponential (and if we allow recursive data in the future,
     // it would not terminiate).

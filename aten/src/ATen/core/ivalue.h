@@ -600,7 +600,7 @@ struct StrongTypePtr {
       std::shared_ptr<ClassType> type)
       : cu_(std::move(cu)), type_(type) {
     TORCH_INTERNAL_ASSERT(cu_);
-    TORCH_INTERNAL_ASSERT(type_);
+//    TORCH_INTERNAL_ASSERT(type_);
   }
   std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
   std::shared_ptr<ClassType> type_;

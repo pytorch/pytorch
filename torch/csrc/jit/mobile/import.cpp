@@ -149,12 +149,8 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
   };
 
   auto class_resolver = [&](const c10::QualifiedName& qn) {
-    if (compilation_unit_->get_class(qn) == nullptr) {
-      auto typeptr = ClassType::create(qn, compilation_unit_, true);
-      compilation_unit_->register_type(typeptr);
-    }
     return c10::StrongTypePtr(
-        compilation_unit_, compilation_unit_->get_class(qn));
+        compilation_unit_, nullptr);
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
