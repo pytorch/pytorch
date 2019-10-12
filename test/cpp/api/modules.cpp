@@ -1026,8 +1026,8 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
 TEST_F(ModulesTest, TripletMarginLoss) {
   TripletMarginLoss loss(TripletMarginLossOptions().margin(1.0));
   auto anchor = torch::tensor({{3., 3.}}, torch::requires_grad());
-  auto positive = torch::tensor({{2., 2.}}, torch::requires_grad);
-  auto negative = torch::tensor({{0., 0.}}, torch::requires_grad);
+  auto positive = torch::tensor({{2., 2.}}, torch::requires_grad());
+  auto negative = torch::tensor({{0., 0.}}, torch::requires_grad());
   auto output = loss->forward(anchor, positive, negative);
   auto expected = torch::tensor({0.}, torch::kFloat);
   auto s = output.sum();
