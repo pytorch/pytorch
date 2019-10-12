@@ -131,6 +131,21 @@ Tensor SoftmaxImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
+SoftminImpl::SoftminImpl(const SoftminOptions& options_)
+    : options(options_) {}
+
+void SoftminImpl::reset() {}
+
+void SoftminImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softmin(dim=" << options.dim() << ")";
+}
+
+Tensor SoftminImpl::forward(const Tensor& input) {
+  return F::softmin(input, options);
+}
+
+// ============================================================================
+
 LogSoftmaxImpl::LogSoftmaxImpl(const LogSoftmaxOptions& options_)
     : options(options_) {}
 
@@ -263,6 +278,21 @@ void SoftplusImpl::reset() {}
 void SoftplusImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Softplus(beta=" << options.beta()
          << ", threshold=" << options.threshold() << ")";
+}
+
+// ============================================================================
+
+SoftshrinkImpl::SoftshrinkImpl(const SoftshrinkOptions& options_)
+    : options(options_) {}
+
+Tensor SoftshrinkImpl::forward(const Tensor& input) {
+  return F::softshrink(input, options);
+}
+
+void SoftshrinkImpl::reset() {}
+
+void SoftshrinkImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softshrink(" << options.lambda() << ")";
 }
 
 } // namespace nn

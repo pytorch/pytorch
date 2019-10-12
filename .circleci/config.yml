@@ -837,10 +837,16 @@ jobs:
     - run_brew_for_ios_build
     - run:
         name: Build
-        contxt: org-member
         no_output_timeout: "1h"
         command: |
           script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
+          cat "$script"
+          source "$script"
+    - run:
+        name: Test
+        no_output_timeout: "30m"
+        command: |
+          script="/Users/distiller/project/.circleci/scripts/binary_ios_test.sh"
           cat "$script"
           source "$script"
     - persist_to_workspace:
@@ -3830,6 +3836,7 @@ workflows:
       - binary_ios_build:
           name: pytorch_ios_10_2_1_nightly_x86_64_build
           build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
+          context: org-member
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
           requires: 
@@ -3840,6 +3847,7 @@ workflows:
       - binary_ios_build:
           name: pytorch_ios_10_2_1_nightly_arm64_build
           build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
+          context: org-member
           ios_arch: "arm64"
           ios_platform: "OS"
           requires: 

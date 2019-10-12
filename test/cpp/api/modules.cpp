@@ -1189,6 +1189,18 @@ TEST_F(ModulesTest, Softmax) {
   }
 }
 
+TEST_F(ModulesTest, Softmin) {
+  Softmin m(/*dim=*/1);
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = m(input);
+  auto sum = torch::sum(torch::exp(-input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::exp(-input[i]) / sum[i];
+    ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
 TEST_F(ModulesTest, LogSoftmax) {
   LogSoftmax m(/*dim=*/1);
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
@@ -1325,6 +1337,25 @@ TEST_F(ModulesTest, Softplus) {
       ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
       ASSERT_TRUE(torch::allclose(y, y_exp));
     }
+  }
+}
+
+TEST_F(ModulesTest, Softshrink) {
+  const auto size = 3;
+  for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
+    Softshrink model {/*lambda=*/lambda};
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
   }
 }
 
@@ -1620,6 +1651,10 @@ TEST_F(ModulesTest, PrettyPrintSoftmax) {
   ASSERT_EQ(c10::str(Softmax(SoftmaxOptions(1))), "torch::nn::Softmax(dim=1)");
 }
 
+TEST_F(ModulesTest, PrettyPrintSoftmin) {
+  ASSERT_EQ(c10::str(Softmin(SoftminOptions(1))), "torch::nn::Softmin(dim=1)");
+}
+
 TEST_F(ModulesTest, PrettyPrintLogSoftmax) {
   ASSERT_EQ(c10::str(LogSoftmax(LogSoftmaxOptions(1))),
             "torch::nn::LogSoftmax(dim=1)");
@@ -1671,4 +1706,10 @@ TEST_F(ModulesTest, PrettyPrintSoftplus) {
   ASSERT_EQ(c10::str(Softplus(
       SoftplusOptions().beta(0.24).threshold(42.42))),
     "torch::nn::Softplus(beta=0.24, threshold=42.42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftshrink) {
+  ASSERT_EQ(c10::str(Softshrink()), "torch::nn::Softshrink(0.5)");
+  ASSERT_EQ(c10::str(Softshrink(SoftshrinkOptions(42.42))),
+            "torch::nn::Softshrink(42.42)");
 }
