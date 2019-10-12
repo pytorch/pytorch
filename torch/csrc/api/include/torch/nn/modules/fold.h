@@ -40,7 +40,7 @@ TORCH_MODULE(Fold);
 
 // ============================================================================
 
-/// Applies unfold over a 3-D input.
+/// Applies unfold over a 4-D input.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.Unfold to learn about
 /// the exact behavior of this module.
 class TORCH_API UnfoldImpl : public Cloneable<UnfoldImpl> {
