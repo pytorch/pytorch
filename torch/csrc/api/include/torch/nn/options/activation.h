@@ -138,5 +138,16 @@ struct TORCH_API CELUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
+// ============================================================================
+
+/// Options for Softplus functional and module.
+struct TORCH_API SoftplusOptions {
+  /// the `beta` value for the Softplus formulation. Default: 1
+  TORCH_ARG(double, beta) = 1.0;
+
+  /// values above this revert to a linear function. Default: 20
+  TORCH_ARG(double, threshold) = 20.0;
+};
+
 } // namespace nn
 } // namespace torch

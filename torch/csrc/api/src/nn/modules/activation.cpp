@@ -237,5 +237,33 @@ void CELUImpl::pretty_print(std::ostream& stream) const {
   stream << ")";
 }
 
+// ============================================================================
+
+Tensor SigmoidImpl::forward(const Tensor& input) {
+  return torch::sigmoid(input);
+}
+
+void SigmoidImpl::reset() {}
+
+void SigmoidImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Sigmoid()";
+}
+
+// ============================================================================
+
+SoftplusImpl::SoftplusImpl(const SoftplusOptions& options_)
+  : options(options_) {}
+
+Tensor SoftplusImpl::forward(const Tensor& input) {
+  return F::softplus(input, options);
+}
+
+void SoftplusImpl::reset() {}
+
+void SoftplusImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softplus(beta=" << options.beta()
+         << ", threshold=" << options.threshold() << ")";
+}
+
 } // namespace nn
 } // namespace torch
