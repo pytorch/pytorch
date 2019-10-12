@@ -237,7 +237,7 @@ class RpcTest(object):
         rpc.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
 
     @unittest.skipIf(
-        TEST_CONFIG.backend != RpcBackend.PROCESS_GROUP,
+        TEST_CONFIG.rpc_backend != RpcBackend.PROCESS_GROUP,
         "PROCESS_GROUP rpc backend specific test, skip",
     )
     def test_duplicate_name(self):
@@ -245,7 +245,7 @@ class RpcTest(object):
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             rpc.init_model_parallel(
                 self_name="duplicate_name",
-                backend=TEST_CONFIG.backend,
+                backend=TEST_CONFIG.rpc_backend,
                 self_rank=self.rank,
                 init_method=self.init_method,
             )
@@ -255,14 +255,14 @@ class RpcTest(object):
         dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
         rpc.init_model_parallel(
             self_name="worker{}".format(self.rank),
-            backend=TEST_CONFIG.backend,
+            backend=TEST_CONFIG.rpc_backend,
             self_rank=self.rank,
             init_method=self.init_method,
         )
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
             rpc.init_model_parallel(
                 self_name="worker{}".format(self.rank),
-                backend=TEST_CONFIG.backend,
+                backend=TEST_CONFIG.rpc_backend,
                 self_rank=self.rank,
                 init_method=self.init_method,
             )
@@ -295,7 +295,7 @@ class RpcTest(object):
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             rpc.init_model_parallel(
                 self_name="".join(["a" for _ in range(500)]),
-                backend=TEST_CONFIG.backend,
+                backend=TEST_CONFIG.rpc_backend,
                 self_rank=self.rank,
                 init_method=self.init_method,
             )
