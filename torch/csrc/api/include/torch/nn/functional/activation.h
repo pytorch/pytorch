@@ -62,6 +62,20 @@ inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
   return ret;
 }
 
+inline Tensor softmin(const Tensor& input, const SoftminOptions& options,
+                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
+  int64_t dim = options.dim();
+  Tensor ret;
+
+  if (dtype == c10::nullopt) {
+    ret = (-input).softmax(dim);
+  } else {
+    ret = (-input).softmax(dim, dtype);
+  }
+
+  return ret;
+}
+
 inline Tensor log_softmax(const Tensor& input, const LogSoftmaxOptions& options,
                           c10::optional<torch::Dtype> dtype = c10::nullopt) {
   int64_t dim = options.dim();
