@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
 #include <torch/torch.h>
 
 using namespace torch::distributed::autograd;
@@ -72,14 +72,14 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
       autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
   auto send_function = autogradContext.sendFunctions()[1];
 
-  // Build loss and attach it as input to send autograd function.
-  auto loss = torch::autograd::Variable(torch::ones({3, 3}));
-  loss.set_gradient_edge(torch::autograd::Edge(send_function, 1));
+  // This should fail since the SendRpcBackward function shouldn't receive any
+  // inputs grad.
+  EXPECT_THROW(send_function->apply({in1, in2}), c10::Error);
 
-  // This should fail since the SendRpcBackward function is looking for two
-  // inputs and as a result encounters an undefined grad.
-  EXPECT_THROW(
-      loss.backward(torch::autograd::Variable(), false, false), c10::Error);
+  // This should fail since the SendRpcBackward function encounters an undefined
+  // grad.
+  send_function->setGrads({in1, torch::autograd::Variable()});
+  EXPECT_THROW(send_function->apply({}), c10::Error);
 }
 
 TEST_F(DistAutogradTest, TestWorkerIdsRecorded) {

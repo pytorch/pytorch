@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <c10/util/C++17.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/pickle.h>
@@ -6,15 +6,12 @@
 
 namespace torch {
 namespace distributed {
-namespace rpc {
+namespace autograd {
 
-constexpr int kAutogradMessageSize = 17;
-
-AutogradMetadata::AutogradMetadata(
-    int64_t autogradContextId_,
-    int64_t autogradMessageId_)
-    : autogradContextId(autogradContextId_),
-      autogradMessageId(autogradMessageId_) {}
+using rpc::Message;
+using rpc::MessageType;
+using rpc::RpcCommandBase;
+using rpc::worker_id_t;
 
 RpcWithAutograd::RpcWithAutograd(
     worker_id_t fromWorkerId,
@@ -26,8 +23,8 @@ RpcWithAutograd::RpcWithAutograd(
       autogradMetadata_(autogradMetadata) {
   TORCH_INTERNAL_ASSERT(wrappedRpc != nullptr, "wrappedRpc cannot be null!");
   TORCH_INTERNAL_ASSERT(
-      messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_REQ ||
-      messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_RESP);
+      messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||
+      messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
   wrappedMessage_ = std::move(*wrappedRpc).toMessage();
   tensors_ = wrappedMessage_.tensors();
   wrappedMessageType_ = wrappedMessage_.type();
@@ -48,8 +45,8 @@ RpcWithAutograd::RpcWithAutograd(
       tensors_(std::move(tensors)) {
   TORCH_INTERNAL_ASSERT(wrappedRpc_ != nullptr, "wrappedRpc cannot be null!");
   TORCH_INTERNAL_ASSERT(
-      messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_REQ ||
-      messageType_ == MessageType::MESSAGE_WITH_AUTOGRAD_RESP);
+      messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||
+      messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
 }
 
 Message RpcWithAutograd::toMessage() && {
@@ -92,12 +89,15 @@ Message RpcWithAutograd::toMessage() && {
 
 std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
     const Message& message) {
+  MessageType originalMessageType = message.type();
   TORCH_INTERNAL_ASSERT(
-      MessageType::MESSAGE_WITH_AUTOGRAD_REQ == message.type() ||
-      MessageType::MESSAGE_WITH_AUTOGRAD_RESP == message.type());
+      MessageType::FORWARD_AUTOGRAD_REQ == originalMessageType ||
+      MessageType::FORWARD_AUTOGRAD_RESP == originalMessageType);
 
+  std::vector<torch::Tensor> tensors = message.tensors();
+  int64_t messageId = message.id();
   // Decode message type, autograd context id, autograd message id and worker
-  // id.
+  // id from which we received this message.
   auto payload = message.payload();
 
   // Read the autograd payload remove it from the payload.
@@ -131,25 +131,25 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   payload.resize(payload.size() - autogradPayLoadSize);
 
   // Create new message type and build wrapped RPC.
-  std::vector<torch::Tensor> tensors = message.tensors();
   Message wrappedMessage(
-      std::move(payload), std::move(tensors), wrappedMessageType, message.id());
+      std::move(payload), std::move(tensors), wrappedMessageType, messageId);
 
   std::unique_ptr<RpcCommandBase> wrappedRpc;
-  if (message.type() == MessageType::MESSAGE_WITH_AUTOGRAD_REQ) {
-    wrappedRpc = std::move(deserializeRequest(wrappedMessage));
+  if (originalMessageType == MessageType::FORWARD_AUTOGRAD_REQ) {
+    wrappedRpc = deserializeRequest(wrappedMessage);
   } else {
-    wrappedRpc = std::move(deserializeResponse(wrappedMessage));
+    wrappedRpc = deserializeResponse(wrappedMessage);
   }
 
   return c10::guts::make_unique<RpcWithAutograd>(
       workerId,
-      message.type(),
+      originalMessageType,
       autogradMetadata,
       std::move(wrappedRpc),
       wrappedMessageType,
-      message.tensors());
+      wrappedMessage.tensors());
 }
+
 std::vector<torch::Tensor>& RpcWithAutograd::tensors() {
   return tensors_;
 }
@@ -171,6 +171,6 @@ rpc::worker_id_t RpcWithAutograd::fromWorkerId() const {
   return fromWorkerId_;
 }
 
-} // namespace rpc
+} // namespace autograd
 } // namespace distributed
 } // namespace torch
