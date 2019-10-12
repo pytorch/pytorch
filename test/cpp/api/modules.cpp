@@ -729,6 +729,9 @@ TEST_F(ModulesTest, Linear) {
   ASSERT_EQ(y.size(1), 2);
 
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
+
+  auto y_exp = torch::addmm(model->bias, x, model->weight.t());
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
 TEST_F(ModulesTest, Fold) {
