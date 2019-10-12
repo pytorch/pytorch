@@ -7,6 +7,92 @@ on:
   pull_request:
 
 jobs:
+  consistent-circleci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7.4
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
+      - name: Ensure consistent CircleCI YAML config
+        run: |
+          pip install -r requirements.txt
+          cd .circleci && ./ensure-consistency.py
+
+  validate-docker-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7.4
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
+      - name: Ensure Docker version is correctly deployed
+        run: .circleci/validate-docker-version.py
+
+  shellcheck-jenkins:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
+      - name: Shellcheck Jenkins scripts
+        run: |
+          sudo apt-get install -y shellcheck
+          .jenkins/run-shellcheck.sh
+
+  ensure-no-tabs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
+      - name: Ensure no tabs
+        run: |
+          (! git grep -I -l $'\t' -- . ':(exclude)*.svg' ':(exclude)**Makefile' ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude).gitattributes' ':(exclude).gitmodules' || (echo "The above files have tabs; please convert them to spaces"; false))
+
+  ensure-not-executable:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
+      - name: Ensure C++ source files are not executable
+        run: |
+          (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
+
+  mypy-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7.4
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
+      - name: MyPy typecheck
+        run: |
+          pip install mypy mypy-extensions
+          mypy @mypy-files.txt
+
+  cpp_doc_check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7.4
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
+      - name: C++ docs check
+        run: |
+          sudo apt-get install -y doxygen && pip install -r requirements.txt
+          cd docs/cpp/source && ./check-doxygen.sh
+
   flake8-py3:
     runs-on: ubuntu-latest
     steps:
@@ -46,6 +132,48 @@ jobs:
           regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  flake8-py2:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 2.x
+          architecture: x64
+      - name: Fetch PyTorch
+        uses: actions/checkout@master
+      - name: Checkout PR tip
+        run: |
+          set -eux
+          if [ -z "${GITHUB_HEAD_REF}" ]; then
+            # We are on master, just set the SHA from our current location
+            echo ::set-output name=commit_sha::${GITHUB_SHA}
+          else
+            # We are on a PR, so actions/checkout leaves us on merge commit.
+            # Check out the actual tip of the branch.
+            PR_TIP=$(git rev-parse HEAD^2)
+            git checkout ${PR_TIP}
+            echo ::set-output name=commit_sha::${PR_TIP}
+          fi
+        id: get_pr_tip
+      - name: Run flake8
+        run: |
+          set -eux
+          pip install flake8
+          rm -rf .circleci
+          flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
+          cat ${GITHUB_WORKSPACE}/flake8-output.txt
+      - name: Add annotations
+        uses: pytorch/add-annotations-github-action@master
+        with:
+          check_name: 'flake8-py2'
+          linter_output_path: 'flake8-output.txt'
+          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   clang-tidy:
     if: github.event_name == 'pull_request'
