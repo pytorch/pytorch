@@ -38,11 +38,13 @@ def dist_init(test_method):
     def wrapper(self, *arg, **kwargs):
         self.worker_id = self.rank
         dist.init_process_group(backend="gloo", init_method=self.init_method)
+        # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
             backend=TEST_CONFIG.rpc_backend,
             self_rank=self.rank,
             init_method=self.init_method,
+            num_send_recv_threads=16
         )
         test_method(self, *arg, **kwargs)
         rpc.join_rpc()
