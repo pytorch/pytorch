@@ -20,6 +20,8 @@ namespace nn {
 struct TORCH_API L1LossImpl : public Cloneable<L1LossImpl> {
   explicit L1LossImpl(const L1LossOptions& options_ = {});
 
+  void reset() override;
+
   /// Pretty prints the `L1Loss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
@@ -46,6 +48,8 @@ struct TORCH_API HingeEmbeddingLossImpl : public Cloneable<HingeEmbeddingLossImp
   explicit HingeEmbeddingLossImpl(
       const HingeEmbeddingLossOptions& options_ = {});
 
+  void reset() override;
+
   /// Pretty prints the `HingeEmbeddingLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
@@ -71,7 +75,7 @@ struct TORCH_API MultiMarginLossImpl : public Cloneable<MultiMarginLossImpl> {
   explicit MultiMarginLossImpl(
       const MultiMarginLossOptions& options_ = {});
 
-  void reset();
+  void reset() override;
 
   /// Pretty prints the `MultiMarginLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -98,6 +102,8 @@ TORCH_MODULE(MultiMarginLoss);
 struct TORCH_API CosineEmbeddingLossImpl : public Cloneable<CosineEmbeddingLossImpl> {
   explicit CosineEmbeddingLossImpl(
       const CosineEmbeddingLossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `CosineEmbeddingLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
