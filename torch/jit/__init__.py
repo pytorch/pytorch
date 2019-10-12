@@ -1818,23 +1818,17 @@ class _ConstModuleDict(ScriptModule):
         raise NotImplementedError()
 
 
-class _ConstSequential(_ConstModuleList):
-    __constants__ = ['mods']
+class _ConstSequential(torch.nn.Sequential):
+    # __constants__ = ['mods']
 
-    def __init__(self, mods):
-        super(_ConstSequential, self).__init__(mods._modules)
+    # def __init__(self, mods):
+    #     super(_ConstSequential, self).__init__(mods._modules)
 
-        # we define the forward method via self.define rather than
-        # making it a direct class member (with a @script) annotation
-        # because, in optimized runtime environments where only .pyc files
-        # are shipped, we cant retrieve the source code.
-        # TODO: find a workaround for this and remove this hack
-        self.define("""
-        def forward(self, input):
-            for m in self:
-                input = m(input)
-            return input
-        """)
+    def forward(self, input):
+        for m in self:
+            input = m(input)
+        return input
+
 
 def is_scripting():
     r"""

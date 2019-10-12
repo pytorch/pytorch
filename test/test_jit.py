@@ -3431,6 +3431,11 @@ def foo(x):
         mod = torch.jit.script(MyMod())
         FileCheck().check_dag("NamedTuple").check_dag("Exception").run(mod.forward.graph)
 
+    def test_test(self):
+        a = torch.ones(2, 2, dtype=torch.float)
+        b = torch.ones(2, 2, dtype=torch.int)
+        self.assertEqual(a, b)
+
     def test_eval_python(self):
         def _test(m):
             self.assertTrue(m(torch.ones(2, 2)))

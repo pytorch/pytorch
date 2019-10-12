@@ -1,0 +1,17 @@
+// Scriptability of M1
+digraph {
+	"M1.something" [fillcolor=crimson style=filled]
+	"M1.forward" [fillcolor=chartreuse style=filled]
+	"M2.MY_something" [fillcolor=chartreuse style=filled]
+	"M2.forward" [fillcolor=chartreuse style=filled]
+	"M2.MY_something" [fillcolor=chartreuse style=filled]
+	<class '__main__.M2'> [fillcolor=chartreuse style=filled]
+	"M3.forward" [fillcolor=chartreuse style=filled]
+	<class '__main__.M3'> [fillcolor=chartreuse style=filled]
+	"M1.forward" -> "M2.MY_something"
+	"M1.forward" -> "M2.forward"
+	"M2.forward" -> "M2.MY_something"
+	"M1.forward" -> <class '__main__.M2'>
+	"M1.forward" -> "M3.forward"
+	"M1.forward" -> <class '__main__.M3'>
+}

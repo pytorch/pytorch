@@ -3308,7 +3308,9 @@ std::unique_ptr<Function> CompilationUnit::define(
       call_name = atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
     }
     ErrorReport::CallStack call(call_name);
+    std::cout << "Creating call to " << call_name << "\n";
     to_ir(def, _resolver, self, method);
+    std::cout << "Popping call to " << call_name << "\n";
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())
                      : QualifiedName(def.name().name());

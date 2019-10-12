@@ -201,6 +201,17 @@ def make_strong_submodule(field, module, parent):
     return new_strong_submodule
 
 
+from typing import Tuple, NamedTuple
+
+class BatchTuple(NamedTuple):
+    id_list_features: torch.Tensor
+
+def fn(x: BatchTuple):
+    return x.id_list_features
+
+
+
+
 def try_compile_fn(fn, loc):
     if _jit_internal.is_ignored_fn(fn):
         # Don't do anything for @ignore'd functions
@@ -224,6 +235,7 @@ def try_compile_fn(fn, loc):
 
 
 def create_constant_iterable_module(module):
+    print("Creating create_constant_iterable_module", module)
     modules = collections.OrderedDict()
 
     for key, submodule in module._modules.items():

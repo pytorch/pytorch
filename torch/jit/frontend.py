@@ -96,6 +96,7 @@ class FrontendError(Exception):
 
         # This has to be instantiated here so the ErrorReport is accurate to the
         # call stack when the FrontendError was raised
+        print("Definiding error report")
         self.error_report = torch._C.ErrorReport(self.source_range)
 
     def __str__(self):

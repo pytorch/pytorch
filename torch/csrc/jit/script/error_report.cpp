@@ -13,7 +13,9 @@ ErrorReport::ErrorReport(const ErrorReport& e)
     : ss(e.ss.str()),
       context(e.context),
       the_message(e.the_message),
-      error_stack(e.error_stack.begin(), e.error_stack.end()) {}
+      error_stack(e.error_stack.begin(), e.error_stack.end()) {
+        std::cout << "Construcing with message: " << e.the_message << "\n";
+      }
 
 ErrorReport::ErrorReport()
     : context(c10::nullopt), error_stack(calls.begin(), calls.end()) {}
@@ -42,8 +44,20 @@ const char* ErrorReport::what() const noexcept {
     msg << ".\n";
   }
 
+  std::cout << "WHAT STACK " << error_stack.size() << "\n";
+  for (auto e : error_stack) {
+    std::string name = "<none>";
+    if (e.caller_range) {
+      std::stringstream ss;
+      e.caller_range->highlight(ss);
+      name = ss.str();
+    }
+    std::cout << e.fn_name << " " << name <<  "\n";
+  }
+
   if (error_stack.size() > 0) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
+      std::cout << "\t iter\n";
       auto callee = it + 1;
 
       msg << "'" << it->fn_name
