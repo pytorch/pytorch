@@ -650,7 +650,7 @@ struct ParserImpl {
         paramlist.range(), List<Param>(paramlist), return_annotation);
   }
 
-  TreeRef parseClass() {
+TreeRef parseClass() {
     L.expect(TK_CLASS_DEF);
     const auto name = parseIdent();
     Maybe<Expr> superclass = Maybe<Expr>::create(name.range());
