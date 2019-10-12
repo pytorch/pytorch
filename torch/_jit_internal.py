@@ -415,7 +415,6 @@ def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
-
 def get_torchscript_modifier(fn):
     if not callable(fn):
         return None
@@ -423,6 +422,11 @@ def get_torchscript_modifier(fn):
         fn = fn.__func__
     return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
+def copy_torchscript_modifier(orig, new):
+    attr = get_torchscript_modifier(orig)
+    if attr is None:
+        return
+    new._torchscript_modifier = attr
 
 # overloading registration
 # overloads get registered in this file, and compiled in torch/jit/__init__.py

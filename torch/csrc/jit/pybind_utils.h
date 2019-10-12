@@ -126,6 +126,11 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(NoneType::get());
   }
 
+  if (py::isinstance<StrongFunctionPtr>(input)) {
+    auto fn = py::cast<StrongFunctionPtr>(input).function_;
+    return InferredType(FunctionType::create(fn));
+  }
+
   // Try basic types first
   if (py::isinstance<py::bool_>(input)) {
     return InferredType(BoolType::get());
@@ -241,15 +246,16 @@ inline InferredType tryToInferContainerType(py::handle input) {
     }
     return InferredType(ListType::create(element_type));
   } else {
+    // TODO: this message is not correct anymore, since this InferredType is
+    // used from a bunch of circumstances unrelated to tracing. We can re-use
+    // this instead of the attribute_failure stuff in concreteType
     return InferredType(c10::str(
         "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
         "are supported ",
         "as inputs or outputs of traced functions",
         ", but instead got value of type ",
         py::str(input.get_type().attr("__name__")),
-        ".",
-        "\nValue: ",
-        py::repr(input)));
+        "."));
   }
 }
 
@@ -680,6 +686,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
+    if (obj->type()->is_module()) {
+      return py::cast(script::Module(obj));
+    }
+
     auto pyCu = get_python_cu();
     auto res = tryToConvertToCustomClass(obj);
     if (res.has_value()) {
