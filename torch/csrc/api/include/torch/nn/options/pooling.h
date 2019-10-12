@@ -144,5 +144,28 @@ using MaxUnpool2dOptions = MaxUnpoolOptions<2>;
 /// `MaxUnpoolOptions` specialized for 3-D maxunpool.
 using MaxUnpool3dOptions = MaxUnpoolOptions<3>;
 
+// ============================================================================
+
+/// Options for a `D`-dimensional lppool functional and module.
+template <size_t D>
+struct LPPoolOptions {
+  LPPoolOptions(ExpandingArray<D> kernel_size)
+      : kernel_size_(kernel_size), stride_(kernel_size) {}
+
+  TORCH_ARG(float, norm_type) = 1.0f;
+
+  // the size of the window to take an average over
+  TORCH_ARG(ExpandingArray<D>, kernel_size);
+
+  // the stride of the window. Default value is `kernel_size`
+  TORCH_ARG(ExpandingArray<D>, stride);
+
+  // when True, will use `ceil` instead of `floor` to compute the output shape
+  TORCH_ARG(bool, ceil_mode) = false;
+};
+
+/// `LPPoolOptions` specialized for 1-D lppool.
+using LPPool1dOptions = LPPoolOptions<1>;
+
 } // namespace nn
 } // namespace torch

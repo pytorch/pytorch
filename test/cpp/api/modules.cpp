@@ -254,6 +254,21 @@ TEST_F(ModulesTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
 }
 
+TEST_F(ModulesTest, LPPool1d) {
+  int norm_type = 2;
+  int stride = 2;
+  int kernel_size = 3;
+
+  LPPool1d model(LPPool1dOptions(kernel_size).stride(stride).norm_type(norm_type));
+  auto x = torch::ones({1, 1, 5});
+  auto y = model(x);
+  auto expected = (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) * kernel_size).pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
 TEST_F(ModulesTest, Identity) {
   Identity identity;
   auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::requires_grad());
@@ -1382,6 +1397,15 @@ TEST_F(ModulesTest, PrettyPrintAvgPool) {
   ASSERT_EQ(
       c10::str(AvgPool2d(options)),
       "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0])");
+}
+
+TEST_F(ModulesTest, PrettyPrintLPPool) {
+  ASSERT_EQ(
+      c10::str(LPPool1d(5)),
+      "torch::nn::LPPool1d(kernel_size=5, stride=5, ceil_mode=false)");
+  ASSERT_EQ(
+      c10::str(LPPool1d(LPPool1dOptions(2).stride(5).ceil_mode(true))),
+      "torch::nn::LPPool1d(kernel_size=2, stride=5, ceil_mode=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {

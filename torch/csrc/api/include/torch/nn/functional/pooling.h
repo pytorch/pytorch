@@ -217,6 +217,21 @@ inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
                              options.stride(), options.padding());
 }
 
+inline Tensor lp_pool1d(const Tensor& input, const LPPool1dOptions& options) {
+  Tensor out;
+  float norm_type = options.norm_type();
+  ExpandingArray<1> kernel_size = options.kernel_size();
+  ExpandingArray<1> stride = options.stride();
+  bool ceil_mode = options.ceil_mode();
+
+  AvgPool1dOptions avg_pool_options(kernel_size);
+  avg_pool_options.ceil_mode(ceil_mode);
+  avg_pool_options.stride(stride);
+  out = avg_pool1d(input.pow(norm_type), avg_pool_options);
+
+  return ((torch::sign(out) * torch::relu(torch::abs(out))) * (*kernel_size)[0]).pow(1. / norm_type);
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
