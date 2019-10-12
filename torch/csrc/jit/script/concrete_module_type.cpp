@@ -99,6 +99,11 @@ IterableModuleKind ConcreteModuleType::getIterableModuleKind() const {
   return iterableModuleKind_;
 }
 
+void ConcreteModuleType::setPoisoned() {
+  TORCH_INTERNAL_ASSERT(!jitType_)
+  isPoisoned_ = true;
+}
+
 void ConcreteModuleType::addJitType(ClassTypePtr type) {
   TORCH_INTERNAL_ASSERT(!jitType_)
   jitType_ = std::move(type);

@@ -20683,6 +20683,29 @@ class TestTypeSharing(JitTestCase):
         self.assertSameType(a, b)
         self.assertNotEqual(a(), b())
 
+    def test_script_module_containing_traced_module(self):
+        class Traced(torch.nn.Module):
+            def __init__(self):
+                super(Traced, self).__init__()
+
+            def forward(self, x):
+                if x.sum() > 0:
+                    return x
+                else:
+                    return x + x
+
+        class M(torch.nn.Module):
+            def __init__(self, input):
+                super(M, self).__init__()
+                self.traced = torch.jit.trace(Traced(), input)
+
+            def forward(self, x):
+                return self.traced(x)
+
+        a = M((torch.ones(1), ))
+        b = M((torch.zeros(1), ))
+        self.assertDifferentType(a, b)
+
 for test in autograd_method_tests():
     add_autograd_test(*test)
 

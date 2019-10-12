@@ -286,6 +286,8 @@ def create_script_module_for_tracing(nn_module, stubs):
     cpp_module = torch._C.ScriptModule(torch._jit_internal._qualified_name(type(nn_module)),
                                        torch.jit._python_cu,
                                        True)
+    # Poison this concrete type to ensure that it never gets re-used
+    concrete_type.set_poisoned()
     concrete_type.add_jit_type(cpp_module._type())
 
     return create_script_module_impl(nn_module, concrete_type, cpp_module, stubs)

@@ -64,6 +64,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       std::vector<std::string> overloadedMethodNames);
   void addFailedAttribute(std::string name, std::string failureReason);
   void setIterableModuleKind(IterableModuleKind kind);
+  void setPoisoned();
 
   /**
    * Freezing methods
@@ -102,6 +103,9 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   friend bool operator==(
       const ConcreteModuleType& lhs,
       const ConcreteModuleType& rhs) {
+    if (lhs.isPoisoned_ || rhs.isPoisoned_) {
+      return false;
+    }
 
     // clang-format off
     // These are vaguely ordered so that cheap, discriminating checks happen first.
@@ -175,6 +179,11 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       return *(lhs.meta) == *(rhs.meta);
     }
   };
+
+  // If true, this type will never compare equally to anything else. This is
+  // used if we want to ensure that this type is not shared (for example, if it
+  // came from a traced module)
+  bool isPoisoned_;
 
   // The value of any constants defined by the module.
   std::unordered_map<std::string, Constant> constants_;
