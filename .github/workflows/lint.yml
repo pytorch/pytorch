@@ -146,6 +146,7 @@ jobs:
       - name: Checkout PR tip
         run: |
           set -eux
+          echo ${{ github.event.pull_request.head.sha }}
           if [ -z "${GITHUB_HEAD_REF}" ]; then
             # We are on master, just set the SHA from our current location
             echo ::set-output name=commit_sha::${GITHUB_SHA}
