@@ -4,6 +4,12 @@
 
 #include <test/cpp/api/support.h>
 
+#define TORCH_ENUM_PRETTY_PRINT_TEST(name) \
+{ \
+  v = torch::k##name; \
+  ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), #name); \
+}
+
 TEST_F(EnumTest, AllEnums) {
   c10::variant<
     torch::enumtype::kLinear,
@@ -21,57 +27,17 @@ TEST_F(EnumTest, AllEnums) {
     torch::enumtype::kFanOut
   > v;
 
-  // yf225 TODO: let's macro generate these:
-  {
-    v = torch::kLinear;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "Linear");
-  }
-  {
-    v = torch::kConv1D;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "Conv1D");
-  }
-  {
-    v = torch::kConv2D;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "Conv2D");
-  }
-  {
-    v = torch::kConv3D;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "Conv3D");
-  }
-  {
-    v = torch::kConvTranspose1D;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "ConvTranspose1D");
-  }
-  {
-    v = torch::kConvTranspose2D;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "ConvTranspose2D");
-  }
-  {
-    v = torch::kConvTranspose3D;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "ConvTranspose3D");
-  }
-  {
-    v = torch::kSigmoid;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "Sigmoid");
-  }
-  {
-    v = torch::kTanh;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "Tanh");
-  }
-  {
-    v = torch::kReLU;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "ReLU");
-  }
-  {
-    v = torch::kLeakyReLU;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "LeakyReLU");
-  }
-  {
-    v = torch::kFanIn;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "FanIn");
-  }
-  {
-    v = torch::kFanOut;
-    ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), "FanOut");
-  }
+  TORCH_ENUM_PRETTY_PRINT_TEST(Linear)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Conv1D)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Conv2D)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Conv3D)
+  TORCH_ENUM_PRETTY_PRINT_TEST(ConvTranspose1D)
+  TORCH_ENUM_PRETTY_PRINT_TEST(ConvTranspose2D)
+  TORCH_ENUM_PRETTY_PRINT_TEST(ConvTranspose3D)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Sigmoid)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Tanh)
+  TORCH_ENUM_PRETTY_PRINT_TEST(ReLU)
+  TORCH_ENUM_PRETTY_PRINT_TEST(LeakyReLU)
+  TORCH_ENUM_PRETTY_PRINT_TEST(FanIn)
+  TORCH_ENUM_PRETTY_PRINT_TEST(FanOu)
 }
