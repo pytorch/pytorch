@@ -1189,6 +1189,18 @@ TEST_F(ModulesTest, Softmax) {
   }
 }
 
+TEST_F(ModulesTest, Softmin) {
+  Softmin m(/*dim=*/1);
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = m(input);
+  auto sum = torch::sum(torch::exp(-input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::exp(-input[i]) / sum[i];
+    ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
 TEST_F(ModulesTest, LogSoftmax) {
   LogSoftmax m(/*dim=*/1);
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
@@ -1618,6 +1630,10 @@ TEST_F(ModulesTest, PrettyPrintLogSigmoid) {
 
 TEST_F(ModulesTest, PrettyPrintSoftmax) {
   ASSERT_EQ(c10::str(Softmax(SoftmaxOptions(1))), "torch::nn::Softmax(dim=1)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftmin) {
+  ASSERT_EQ(c10::str(Softmin(SoftminOptions(1))), "torch::nn::Softmin(dim=1)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLogSoftmax) {
