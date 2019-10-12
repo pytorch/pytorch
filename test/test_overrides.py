@@ -225,6 +225,10 @@ def sinh_override(input, out=None):
 def lgamma_override(input, out=None):
     return -1
 
+@implements_tensor_like(torch.mvlgamma)
+def mvlgamma_override(input, p):
+    return -1
+
 @implements_tensor_like(torch.asin)
 def asin_override(input, out=None):
     return -1
@@ -269,6 +273,15 @@ def log1p_override(input, out=None):
 def log2_override(input, out=None):
     return -1
 
+@implements_tensor_like(torch.logical_not)
+def logical_not_override(input, out=None):
+    return -1
+
+@implements_tensor_like(torch.logical_xor)
+def logical_xor_override(input, other, out=None):
+    return -1
+
+
 @implements_tensor_like(torch.sqrt)
 def sqrt_override(input, out=None):
     return -1
@@ -305,8 +318,16 @@ def rsqrt_override(input, out=None):
 def sigmoid_override(input, out=None):
     return -1
 
+@implements_tensor_like(torch.sign)
+def sign_override(input, out=None):
+    return -1
+
 @implements_tensor_like(torch.frac)
 def frac_override(input, out=None):
+    return -1
+
+@implements_tensor_like(torch.lerp)
+def lerp_override(input, end, weight, out=None):
     return -1
 
 @implements_tensor_like(torch.trunc)
@@ -341,6 +362,10 @@ def sub_override(input, other, out=None):
 def reciprocal_override(input, out=None):
     return -1
 
+@implements_tensor_like(torch.remainder)
+def remainder_override(input, other, out=None):
+    return -1
+
 @implements_tensor_like(torch.div)
 def div_override(input, other, out=None):
     return -1
@@ -367,6 +392,102 @@ def baddbmm_override(input, batch1, batch2, alpha=1, beta=1, out=None):
 
 @implements_tensor_like(torch.pow)
 def pow_override(input, exponent, out=None):
+    return -1
+
+@implements_tensor_like(torch.neg)
+def neg_override(input, out=None):
+    return -1
+
+@implements_tensor_like(torch.argmax)
+def argmax_override(input):
+    return -1
+
+@implements_tensor_like(torch.argmin)
+def argmin_override(input):
+    return -1
+
+@implements_tensor_like(torch.cumprod)
+def cumprod_override(input, dim, out=None, dtype=None):
+    return -1
+
+@implements_tensor_like(torch.cumsum)
+def cumsum_override(input, dim, out=None, dtype=None):
+    return -1
+
+@implements_tensor_like(torch.dist)
+def dist_override(input, other, p=2):
+    return -1
+
+@implements_tensor_like(torch.mean)
+def mean_override(input):
+    return -1
+
+@implements_tensor_like(torch.median)
+def median_override(input):
+    return -1
+
+@implements_tensor_like(torch.mode)
+def mode_override(input):
+    return -1
+
+@implements_tensor_like(torch.norm)
+def norm_override(input, other, p=2):
+    return -1
+
+@implements_tensor_like(torch.prod)
+def prod_override(input):
+    return -1
+
+@implements_tensor_like(torch.std)
+def std_override(input):
+    return -1
+
+@implements_tensor_like(torch.std_mean)
+def std_mean_override(input):
+    return -1
+
+@implements_tensor_like(torch.sum)
+def sum_override(input):
+    return -1
+
+@implements_tensor_like(torch.unique)
+def unique_override(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
+    return -1
+
+@implements_tensor_like(torch.unique_consecutive)
+def unique_consecutive_override(input, return_inverse=False, return_counts=False, dim=None):
+    return -1
+
+@implements_tensor_like(torch.var)
+def var_override(input):
+    return -1
+
+@implements_tensor_like(torch.var_mean)
+def var_override(input):
+    return -1
+
+@implements_tensor_like(torch.argsort)
+def argsort_override(input):
+    return -1
+
+@implements_tensor_like(torch.sort)
+def sort_override(input, dim=-1, descending=False, out=None):
+    return -1
+
+@implements_tensor_like(torch.topk)
+def topk_override(input, k, dim=None, largest=True, sorted=True, out=None):
+    return -1
+
+@implements_tensor_like(torch.chunk)
+def chunk_override(input, chunks, dim=0):
+    return -1
+
+@implements_tensor_like(torch.gather)
+def gather_override(input, dim, index, out=None, sparse_grad=False):
+    return -1
+
+@implements_tensor_like(torch.index_select)
+def index_select_override(input, dim, index, out=None):
     return -1
 
 class TestApis(TestCase):
@@ -403,7 +524,7 @@ class TestApis(TestCase):
         self.assertEqual(torch.lgamma(self.t1), -1)
 
     def test_mvlgamma(self):
-        pass
+        self.assertEqual(torch.mvlgamma(self.t1, 1), -1)
 
     def test_asin(self):
         self.assertEqual(torch.asin(self.t1), -1)
@@ -438,6 +559,12 @@ class TestApis(TestCase):
     def test_log2(self):
         self.assertEqual(torch.log2(self.t1), -1)
 
+    def test_logical_not(self):
+        self.assertEqual(torch.logical_not(self.t1), -1)
+
+    def test_logical_xor(self):
+        self.assertEqual(torch.logical_xor(self.t1, self.t2), -1)
+
     def test_sqrt(self):
         self.assertEqual(torch.sqrt(self.t1), -1)
 
@@ -465,8 +592,14 @@ class TestApis(TestCase):
     def test_sigmoid(self):
         self.assertEqual(torch.sigmoid(self.t1), -1)
 
+    def test_sign(self):
+        self.assertEqual(torch.sign(self.t1), -1)
+
     def test_frac(self):
         self.assertEqual(torch.frac(self.t1), -1)
+
+    def test_lerp(self):
+        self.assertEqual(torch.lerp(self.t1, self.t2, 2.0), -1)
 
     def test_trunc(self):
         self.assertEqual(torch.trunc(self.t1), -1)
@@ -498,6 +631,9 @@ class TestApis(TestCase):
     def test_reciprocal(self):
         self.assertEqual(torch.reciprocal(self.t1), -1)
 
+    def test_remainder(self):
+        self.assertEqual(torch.remainder(self.t1, self.t2), -1)
+
     def test_div(self):
         self.assertEqual(torch.div(self.t1, self.t2), -1)
 
@@ -520,9 +656,83 @@ class TestApis(TestCase):
         # self.assertEqual(torch.einsum('i,j->ij', self.t1, self.t2), -1)
         pass
 
+    def test_neg(self):
+        self.assertEqual(torch.neg(self.t1), -1)
+
     def test_pow(self):
         self.assertEqual(torch.pow(self.t1, 2), -1)
 
+    def test_argmax(self):
+        self.assertEqual(torch.argmax(self.t1), -1)
+
+    def test_argmin(self):
+        self.assertEqual(torch.argmin(self.t1), -1)
+
+    def test_cumprod(self):
+        self.assertEqual(torch.cumprod(self.t1, 1), -1)
+
+    def test_cumsum(self):
+        self.assertEqual(torch.cumsum(self.t1, 1), -1)
+
+    def test_dist(self):
+        self.assertEqual(torch.dist(self.t1, self.t2), -1)
+
+    def test_mean(self):
+        self.assertEqual(torch.mean(self.t1), -1)
+
+    def test_median(self):
+        self.assertEqual(torch.median(self.t1), -1)
+
+    def test_mode(self):
+        self.assertEqual(torch.mode(self.t1), -1)
+
+    @unittest.skip("norm is pending")
+    def test_norm(self):
+        self.assertEqual(torch.norm(self.t1, self.t2), -1)
+
+    def test_prod(self):
+        self.assertEqual(torch.prod(self.t1), -1)
+
+    def test_std(self):
+        self.assertEqual(torch.std(self.t1), -1)
+
+    def test_std_mean(self):
+        self.assertEqual(torch.std_mean(self.t1), -1)
+
+    def test_sum(self):
+        self.assertEqual(torch.sum(self.t1), -1)
+
+    @unittest.skip("unique is pending")
+    def test_unique(self):
+        self.assertEqual(torch.unique(self.t1), -1)
+
+    @unittest.skip("unique_consecutive is pending")
+    def test_unique_consecutive(self):
+        self.assertEqual(torch.unique_consecutive(self.t1), -1)
+
+    def test_var(self):
+        self.assertEqual(torch.var(self.t1), -1)
+
+    def test_var_mean(self):
+        self.assertEqual(torch.var(self.t1), -1)
+
+    def test_argsort(self):
+        self.assertEqual(torch.argsort(self.t1), -1)
+
+    def test_sort(self):
+        self.assertEqual(torch.sort(self.t1), -1)
+
+    def test_topk(self):
+        self.assertEqual(torch.topk(self.t1, 1), -1)
+
+    def test_chunk(self):
+        self.assertEqual(torch.chunk(self.t1, 2), -1)
+
+    def test_gather(self):
+        self.assertEqual(torch.gather(self.t1, 0, self.t2), -1)
+
+    def test_index_select(self):
+        self.assertEqual(torch.index_select(self.t1, 0, self.t2), -1)
+
 if __name__ == '__main__':
     unittest.main()
-
