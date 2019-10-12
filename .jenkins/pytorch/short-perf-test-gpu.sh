@@ -42,7 +42,11 @@ if [[ "$COMMIT_SOURCE" == master ]]; then
 fi
 
 # Include tests
-. ./test_gpu_speed_mnist.sh
+# test_gpu_speed_mnist.sh and test_cpu_speed_mnist.sh run
+# "conda install -c pytorch torchvision", which would install pytorch-1.3 libs.
+# These tests then work on Python source files from master, which is
+# inconsistent with underlying libs.
+#. ./test_gpu_speed_mnist.sh
 . ./test_gpu_speed_word_language_model.sh
 . ./test_gpu_speed_cudnn_lstm.sh
 . ./test_gpu_speed_lstm.sh
