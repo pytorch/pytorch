@@ -43,8 +43,11 @@ def dist_init(test_method):
             backend=TEST_CONFIG.backend,
             self_rank=self.rank,
             init_method=self.init_method,
+            num_send_recv_threads=16,
         )
         test_method(self, *arg, **kwargs)
-        rpc.join_rpc()
+
+        # Synchronize all processes before shutting down.
+        dist.barrier()
 
     return wrapper
