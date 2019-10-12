@@ -1695,18 +1695,24 @@ add_docstr(torch.div,
            r"""
 .. function:: div(input, other, out=None) -> Tensor
 
-Divides each element of the input :attr:`input` with the scalar :attr:`other`
-and returns a new resulting tensor.
+Divides each element of the input ``input`` with the scalar ``other`` and
+returns a new resulting tensor.
 
 .. math::
-    \text{out}_i = \frac{\text{input}_i}{\text{other}}
+    \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}
 
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`other`
-should be a real number, otherwise it should be an integer
+If the :class:`torch.dtype` of ``input`` and ``other`` differ, the
+:class:`torch.dtype` of the result tensor is determined following rules
+described in the type promotion :ref:`documentation <type-promotion-doc>`. If
+``out`` is specified, the result must be :ref:`castable <type-promotion-doc>`
+to the :class:`torch.dtype` of the specified output tensor. Integral division
+by zero leads to undefined behavior.
 
 Args:
     {input}
-    other (Number): the number to be divided to each element of :attr:`input`
+    other (Number): the number to be divided to each element of ``input``
+
+Keyword args:
     {out}
 
 Example::
@@ -1719,17 +1725,25 @@ Example::
 
 .. function:: div(input, other, out=None) -> Tensor
 
-Each element of the tensor :attr:`input` is divided by each element
-of the tensor :attr:`other`. The resulting tensor is returned. The shapes of
-:attr:`input` and :attr:`other` must be
-:ref:`broadcastable <broadcasting-semantics>`.
+Each element of the tensor ``input`` is divided by each element of the tensor
+``other``. The resulting tensor is returned.
 
 .. math::
-    \text{out}_i = \frac{\text{input}_i}{\text{other}_i}
-""" + r"""
+    \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}_i}}
+
+The shapes of ``input`` and ``other`` must be :ref:`broadcastable
+<broadcasting-semantics>`. If the :class:`torch.dtype` of ``input`` and
+``other`` differ, the :class:`torch.dtype` of the result tensor is determined
+following rules described in the type promotion :ref:`documentation
+<type-promotion-doc>`. If ``out`` is specified, the result must be
+:ref:`castable <type-promotion-doc>` to the :class:`torch.dtype` of the
+specified output tensor. Integral division by zero leads to undefined behavior.
+
 Args:
     input (Tensor): the numerator tensor
     other (Tensor): the denominator tensor
+
+Keyword args:
     {out}
 
 Example::
@@ -7012,6 +7026,62 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `1` appears `n2` times, `2` appears `n3` times, etc.
 """.format(**common_args))
 
+
+add_docstr(torch.quantize_per_tensor,
+           r"""
+quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+
+Converts a float tensor to quantized tensor with given scale and zero point.
+
+Arguments:
+    input (Tensor): float tensor to quantize
+    scale (float): scale to apply in quantization formula
+    zero_point (int): offset in integer value that maps to float zero
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+        Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``, ``torch.qint32``
+
+Returns:
+    Tensor: A newly quantized tensor
+
+Example::
+
+    >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8)
+    tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=0.1, zero_point=10)
+    >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8).int_repr()
+    tensor([ 0, 10, 20, 30], dtype=torch.uint8)
+""")
+
+add_docstr(torch.quantize_per_channel,
+           r"""
+quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
+
+Converts a float tensor to per-channel quantized tensor with given scales and zero points.
+
+Arguments:
+    input (Tensor): float tensor to quantize
+    scales (Tensor): float 1D tensor of scales to use, size should match ``input.size(axis)``
+    zero_points (int): integer 1D tensor of offset to use, size should match ``input.size(axis)``
+    axis (int): dimension on which apply per-channel quantization
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+        Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``, ``torch.qint32``
+
+Returns:
+    Tensor: A newly quantized tensor
+
+Example::
+
+    >>> x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])
+    >>> torch.quantize_per_channel(x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8)
+    tensor([[-1.,  0.],
+            [ 1.,  2.]], size=(2, 2), dtype=torch.quint8,
+           quantization_scheme=torch.per_channel_affine,
+           scale=tensor([0.1000, 0.0100], dtype=torch.float64),
+           zero_point=tensor([10,  0]), axis=0)
+    >>> torch.quantize_per_channel(x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8).int_repr()
+    tensor([[  0,  10],
+            [100, 200]], dtype=torch.uint8)
+""")
 
 add_docstr(torch._C.Generator,
            r"""
