@@ -54,13 +54,13 @@ fi
 
 # Run tests
 if [[ "$COMMIT_SOURCE" == master ]]; then
-    run_test test_gpu_speed_mnist 20 compare_and_update
+    #run_test test_gpu_speed_mnist 20 compare_and_update
     run_test test_gpu_speed_word_language_model 20 compare_and_update
     run_test test_gpu_speed_cudnn_lstm 20 compare_and_update
     run_test test_gpu_speed_lstm 20 compare_and_update
     run_test test_gpu_speed_mlstm 20 compare_and_update
 else
-    run_test test_gpu_speed_mnist 20 compare_with_baseline
+    #run_test test_gpu_speed_mnist 20 compare_with_baseline
     run_test test_gpu_speed_word_language_model 20 compare_with_baseline
     run_test test_gpu_speed_cudnn_lstm 20 compare_with_baseline
     run_test test_gpu_speed_lstm 20 compare_with_baseline
