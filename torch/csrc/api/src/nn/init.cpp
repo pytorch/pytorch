@@ -236,7 +236,7 @@ Tensor zeros_(Tensor tensor) {
   return tensor.zero_();
 }
 
-std::tuple<int64_t, int64_t> calculate_fan_in_and_fan_out(Tensor tensor) {
+std::tuple<int64_t, int64_t> calculate_fan_in_and_fan_out(const Tensor& tensor) {
   const auto dimensions = tensor.dim();
   TORCH_CHECK(dimensions >= 2,
     "Fan in and fan out can not be computed "
