@@ -769,5 +769,12 @@ TEST_F(FunctionalTest, SoftshrinkDefaultOptions) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
   auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+}
+
+TEST_F(FunctionalTest, Softsign) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x / (1 + x.abs());
+  auto y = F::softsign(x);
+
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
