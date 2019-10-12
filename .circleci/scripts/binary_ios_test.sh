@@ -4,7 +4,6 @@ set -ex -o pipefail
 echo ""
 echo "DIR: $(pwd)"
 PROJ_ROOT=/Users/distiller/project
-PROFILE=TestApp_CI
 cd ${PROJ_ROOT}/ios/TestApp
 # install fastlane
 sudo gem install bundler && bundle install
@@ -26,7 +25,7 @@ if ! [ -x "$(command -v xcodebuild)" ]; then
     echo 'Error: xcodebuild is not installed.'
     exit 1
 fi 
-echo ${IOS_DEV_TEAM_ID}
+PROFILE=TestApp_CI
 ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
 if ! [ "$?" -eq "0" ]; then
     echo 'xcodebuild failed!'
