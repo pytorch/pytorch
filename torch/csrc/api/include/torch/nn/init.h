@@ -9,7 +9,7 @@ namespace torch {
 namespace nn {
 namespace init {
 
-using Nonlinearity = c10::variant<
+using NonlinearityType = c10::variant<
   enumtype::kLinear,
   enumtype::kConv1D,
   enumtype::kConv2D,
@@ -20,37 +20,42 @@ using Nonlinearity = c10::variant<
   enumtype::kSigmoid,
   enumtype::kTanh,
   enumtype::kReLU,
-  enumtype::kLeakyReLU
+  enumtype::kLeakyReLU,
 >;
 
-using FanMode = c10::variant<
+using FanModeType = c10::variant<
   enumtype::kFanIn,
   enumtype::kFanOut
 >;
 
+// This enum class is deprecated and will be removed in 1.5.
+enum class Nonlinearity {
+  Linear,
+  Conv1D,
+  Conv2D,
+  Conv3D,
+  ConvTranspose1D,
+  ConvTranspose2D,
+  ConvTranspose3D,
+  Sigmoid,
+  Tanh,
+  ReLU,
+  LeakyReLU
+};
+
+// This enum class is deprecated and will be removed in 1.5.
+enum class FanMode { FanIn, FanOut };
+
 } // namespace init
 } // nn
-
-// TODO: Remove the declarations here in https://github.com/pytorch/pytorch/pull/26837.
-TORCH_API extern const nn::init::Nonlinearity kLinear;
-TORCH_API extern const nn::init::Nonlinearity kConv1D;
-TORCH_API extern const nn::init::Nonlinearity kConv2D;
-TORCH_API extern const nn::init::Nonlinearity kConv3D;
-TORCH_API extern const nn::init::Nonlinearity kConvTranspose1D;
-TORCH_API extern const nn::init::Nonlinearity kConvTranspose2D;
-TORCH_API extern const nn::init::Nonlinearity kConvTranspose3D;
-TORCH_API extern const nn::init::Nonlinearity kSigmoid;
-TORCH_API extern const nn::init::Nonlinearity kTanh;
-TORCH_API extern const nn::init::Nonlinearity kReLU;
-TORCH_API extern const nn::init::Nonlinearity kLeakyReLU;
-
-TORCH_API extern const nn::init::FanMode kFanIn;
-TORCH_API extern const nn::init::FanMode kFanOut;
 
 namespace nn {
 namespace init {
 
 /// Return the recommended gain value for the given nonlinearity function.
+TORCH_API double calculate_gain(NonlinearityType nonlinearity, double param = 0.01);
+
+/// This function is deprecated and will be removed in 1.5.
 TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
@@ -104,8 +109,15 @@ TORCH_API Tensor uniform_(Tensor tensor, double low = 0, double high = 1);
 TORCH_API Tensor kaiming_normal_(
     Tensor tensor,
     double a = 0,
-    FanMode mode = torch::kFanIn,
-    Nonlinearity nonlinearity = torch::kLeakyReLU);
+    FanModeType mode = torch::kFanIn,
+    NonlinearityType nonlinearity = torch::kLeakyReLU);
+
+/// This function is deprecated and will be removed in 1.5.
+TORCH_API Tensor kaiming_normal_(
+    Tensor tensor,
+    double a = 0,
+    FanMode mode = torch::nn::init::FanMode::FanIn,
+    Nonlinearity nonlinearity = torch::nn::init::FanMode::LeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Delving deep into rectifiers: Surpassing human-level
@@ -115,8 +127,15 @@ TORCH_API Tensor kaiming_normal_(
 TORCH_API Tensor kaiming_uniform_(
     Tensor tensor,
     double a = 0,
-    FanMode mode = torch::kFanIn,
-    Nonlinearity nonlinearity = torch::kLeakyReLU);
+    FanModeType mode = torch::kFanIn,
+    NonlinearityType nonlinearity = torch::kLeakyReLU);
+
+/// This function is deprecated and will be removed in 1.5.
+TORCH_API Tensor kaiming_uniform_(
+    Tensor tensor,
+    double a = 0,
+    FanMode mode = torch::nn::init::FanMode::FanIn,
+    Nonlinearity nonlinearity = torch::nn::init::FanMode::LeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Understanding the difficulty of training deep feedforward

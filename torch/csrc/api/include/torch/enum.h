@@ -23,6 +23,11 @@ namespace torch { \
 const enumtype::k##name k##name; \
 }
 
+#define TORCH_ENUM_PRETTY_PRINT(name) \
+std::string operator()(enumtype::k##name& v) const { \
+  return #name; \
+}
+
 TORCH_ENUM_DECLARE(Linear)
 TORCH_ENUM_DECLARE(Conv1D)
 TORCH_ENUM_DECLARE(Conv2D)
@@ -36,11 +41,6 @@ TORCH_ENUM_DECLARE(ReLU)
 TORCH_ENUM_DECLARE(LeakyReLU)
 TORCH_ENUM_DECLARE(FanIn)
 TORCH_ENUM_DECLARE(FanOut)
-
-#define TORCH_ENUM_PRETTY_PRINT(name) \
-std::string operator()(enumtype::k##name& v) const { \
-  return #name; \
-}
 
 namespace torch {
 namespace enumtype {

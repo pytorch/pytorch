@@ -12,22 +12,6 @@
 #include <tuple>
 
 namespace torch {
-
-const nn::init::Nonlinearity kLinear = nn::init::Nonlinearity::Linear;
-const nn::init::Nonlinearity kConv1D = nn::init::Nonlinearity::Conv1D;
-const nn::init::Nonlinearity kConv2D = nn::init::Nonlinearity::Conv2D;
-const nn::init::Nonlinearity kConv3D = nn::init::Nonlinearity::Conv3D;
-const nn::init::Nonlinearity kConvTranspose1D = nn::init::Nonlinearity::ConvTranspose1D;
-const nn::init::Nonlinearity kConvTranspose2D = nn::init::Nonlinearity::ConvTranspose2D;
-const nn::init::Nonlinearity kConvTranspose3D = nn::init::Nonlinearity::ConvTranspose3D;
-const nn::init::Nonlinearity kSigmoid = nn::init::Nonlinearity::Sigmoid;
-const nn::init::Nonlinearity kTanh = nn::init::Nonlinearity::Tanh;
-const nn::init::Nonlinearity kReLU = nn::init::Nonlinearity::ReLU;
-const nn::init::Nonlinearity kLeakyReLU = nn::init::Nonlinearity::LeakyReLU;
-
-const nn::init::FanMode kFanIn = nn::init::FanMode::FanIn;
-const nn::init::FanMode kFanOut = nn::init::FanMode::FanOut;
-
 namespace nn {
 namespace init {
 namespace {
@@ -51,11 +35,48 @@ struct Fan {
   int64_t out;
 };
 
+#define NONLINEARITY_ENUM_LEGACY_WARNING(name) \
+case Nonlinearity::##name: \
+  TORCH_WARN_ONCE( \
+    "The enum value `torch::nn::init::Nonlinearity::", #name, "` is deprecated and will be removed in 1.5. ", \
+    "Please use `torch::k", #name, "` instead."); \
+  return torch::k##name;
+
+#define FANMODE_ENUM_LEGACY_WARNING(name) \
+case FanMode::##name: \
+  TORCH_WARN_ONCE( \
+    "The enum value `torch::nn::init::FanMode::", #name, "` is deprecated and will be removed in 1.5. ", \
+    "Please use `torch::k", #name, "` instead."); \
+  return torch::k##name;
+
+NonlinearityType _compute_nonlinearity_type(Nonlinearity nonlinearity) {
+  switch (nonlinearity) {
+    NONLINEARITY_ENUM_LEGACY_WARNING(Linear)
+    NONLINEARITY_ENUM_LEGACY_WARNING(Conv1D)
+    NONLINEARITY_ENUM_LEGACY_WARNING(Conv2D)
+    NONLINEARITY_ENUM_LEGACY_WARNING(Conv3D)
+    NONLINEARITY_ENUM_LEGACY_WARNING(ConvTranspose1D)
+    NONLINEARITY_ENUM_LEGACY_WARNING(ConvTranspose2D)
+    NONLINEARITY_ENUM_LEGACY_WARNING(ConvTranspose3D)
+    NONLINEARITY_ENUM_LEGACY_WARNING(Sigmoid)
+    NONLINEARITY_ENUM_LEGACY_WARNING(Tanh)
+    NONLINEARITY_ENUM_LEGACY_WARNING(ReLU)
+    NONLINEARITY_ENUM_LEGACY_WARNING(LeakyReLU)
+  }
+}
+
+FanModeType _compute_fanmode_type(FanMode fanmode) {
+  switch (fanmode) {
+    FANMODE_ENUM_LEGACY_WARNING(FanIn);
+    FANMODE_ENUM_LEGACY_WARNING(FanOut);
+  }
+}
+
 double calculate_kaiming_std(
     Tensor tensor,
     double a,
-    FanMode mode,
-    Nonlinearity nonlinearity) {
+    FanModeType mode,
+    NonlinearityType nonlinearity) {
   NoGradGuard guard;
   Fan fan(tensor);
   const auto gain = calculate_gain(nonlinearity, a);
@@ -69,7 +90,7 @@ double calculate_kaiming_std(
 }
 } // namespace
 
-double calculate_gain(Nonlinearity nonlinearity, double param) {
+double calculate_gain(NonlinearityType nonlinearity, double param) {
   if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
     return 5.0 / 3.0;  // NOLINT
   } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {
@@ -79,6 +100,11 @@ double calculate_gain(Nonlinearity nonlinearity, double param) {
   }
 
   return 1.0;
+}
+
+// This function is deprecated and will be removed in 1.5.
+TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param) {
+  return calculate_gain(_compute_nonlinearity_type(nonlinearity), param);
 }
 
 Tensor constant_(Tensor tensor, Scalar value) {
@@ -194,8 +220,8 @@ Tensor uniform_(Tensor tensor, double low, double high) {
 Tensor kaiming_uniform_(
     Tensor tensor,
     double a,
-    FanMode mode,
-    Nonlinearity nonlinearity) {
+    FanModeType mode,
+    NonlinearityType nonlinearity) {
   NoGradGuard guard;
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   // Calculate uniform bounds from standard deviation
@@ -203,15 +229,43 @@ Tensor kaiming_uniform_(
   return tensor.uniform_(-bound, bound);
 }
 
+// This function is deprecated and will be removed in 1.5.
+Tensor kaiming_uniform_(
+    Tensor tensor,
+    double a,
+    FanMode mode,
+    Nonlinearity nonlinearity) {
+  return kaiming_uniform_(
+    tensor,
+    a,
+    _compute_fanmode_type(mode),
+    _compute_nonlinearity_type(nonlinearity)
+  );
+}
+
+Tensor kaiming_normal_(
+    Tensor tensor,
+    double a,
+    FanModeType mode,
+    NonlinearityType nonlinearity) {
+  NoGradGuard guard;
+
+  auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
+  return tensor.normal_(0, std);
+}
+
+// This function is deprecated and will be removed in 1.5.
 Tensor kaiming_normal_(
     Tensor tensor,
     double a,
     FanMode mode,
     Nonlinearity nonlinearity) {
-  NoGradGuard guard;
-
-  auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
-  return tensor.normal_(0, std);
+  return kaiming_normal_(
+    tensor,
+    a,
+    _compute_fanmode_type(mode),
+    _compute_nonlinearity_type(nonlinearity)
+  );
 }
 
 Tensor xavier_normal_(Tensor tensor, double gain) {

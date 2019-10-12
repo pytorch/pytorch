@@ -128,3 +128,38 @@ TEST(InitTest, CanInitializeCnnWithOrthogonal) {
   torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(3, 2, 3).stride(2));
   torch::nn::init::orthogonal_(conv_layer->named_parameters()["weight"]);
 }
+
+#define NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(name) \
+{ \
+  std::stringstream buffer; \
+  CerrRedirect cerr_redirect(buffer.rdbuf()); \
+  std::cerr << torch::nn::init::calculate_gain(torch::nn::init::Nonlinearity::name) << std::endl; \
+  ASSERT_EQ(count_substr_occurrences(buffer.str(), "torch::k" # name)), 1); \
+}
+
+#define FANMODE_ENUM_LEGACY_WARNING_CHECK(name) \
+{ \
+  std::stringstream buffer; \
+  CerrRedirect cerr_redirect(buffer.rdbuf()); \
+  std::cerr << torch::nn::init::kaiming_normal_(torch::Tensor(), 0, torch::nn::init::FanMode::name) << std::endl; \
+  ASSERT_EQ(count_substr_occurrences(buffer.str(), "torch::k" # name)), 1); \
+}
+
+TEST(InitTest, NonlinearityLegacyEnum) {
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(Linear)
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(Conv1D)
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(Conv2D)
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(Conv3D)
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(ConvTranspose1D)
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(ConvTranspose2D)
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(ConvTranspose3D)
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(Sigmoid)
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(Tanh)
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(ReLU)
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(LeakyReLU)
+}
+
+TEST(InitTest, FanModeLegacyEnum) {
+  FANMODE_ENUM_LEGACY_WARNING_CHECK(FanIn)
+  FANMODE_ENUM_LEGACY_WARNING_CHECK(FanOut)
+}
