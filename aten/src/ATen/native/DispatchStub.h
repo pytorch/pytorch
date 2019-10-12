@@ -96,9 +96,9 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
     return DEFAULT;
   }
 
-  FnPtr cpu_dispatch_ptr;
-  FnPtr cuda_dispatch_ptr;
-  FnPtr hip_dispatch_ptr;
+  FnPtr cpu_dispatch_ptr = nullptr;
+  FnPtr cuda_dispatch_ptr = nullptr;
+  FnPtr hip_dispatch_ptr = nullptr;
   static FnPtr DEFAULT;
 #ifdef HAVE_AVX_CPU_DEFINITION
   static FnPtr AVX;
@@ -132,9 +132,13 @@ struct RegisterHIPDispatch {
 // `fn`, e.g., grid_sampler_2d_backward_cpu_kernel in GridSampleKernel.h.
 #define DECLARE_DISPATCH(fn, name)         \
   struct name : DispatchStub<fn, name> {}; \
-  extern CAFFE2_API struct name name
+  CAFFE2_API struct name& get ## name
 
-#define DEFINE_DISPATCH(name) struct name name
+#define DEFINE_DISPATCH(name) \
+  struct name& get ## name { \
+    static struct name singleton; \
+    return singleton; \
+  }
 
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
   template <> decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
