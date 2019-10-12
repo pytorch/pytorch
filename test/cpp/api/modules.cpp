@@ -1024,17 +1024,17 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
 }
 
 TEST_F(ModulesTest, TripletMarginLoss) {
-  TripletMarginLoss loss(TripletMarginLossOptions().margin(3));
-  auto anchor = torch::tensor({{3, 3}}, torch::requires_grad());
-  auto positive = torch::tensor({{2, 2}}, torch::kFloat);
-  auto negative = torch::tensor({{0, 0}}, torch::kFloat);
+  TripletMarginLoss loss(TripletMarginLossOptions().margin(1.0));
+  auto anchor = torch::tensor({{3., 3.}}, torch::requires_grad());
+  auto positive = torch::tensor({{2., 2.}}, torch::requires_grad);
+  auto negative = torch::tensor({{0., 0.}}, torch::requires_grad);
   auto output = loss->forward(anchor, positive, negative);
-  auto expected = torch::tensor({0}, torch::kFloat);
+  auto expected = torch::tensor({0.}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
-  ASSERT_TRUE(output.allclose(expected));
-  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
 }
 
 TEST_F(ModulesTest, CosineSimilarity) {

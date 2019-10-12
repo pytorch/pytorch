@@ -285,14 +285,14 @@ TEST_F(FunctionalTest, CosineEmbeddingLoss) {
 }
 
 TEST_F(FunctionalTest, TripletMarginLoss) {
-  auto anchor = torch::tensor({{3, 3}}, torch::kFloat);
-  auto positive = torch::tensor({{2, 2}}, torch::kFloat);
-  auto negative = torch::tensor({{0, 0}}, torch::kFloat);
+  auto anchor = torch::tensor({{3., 3.}}, torch::kFloat);
+  auto positive = torch::tensor({{2., 2.}}, torch::kFloat);
+  auto negative = torch::tensor({{0., 0.}}, torch::kFloat);
   auto output = F::triplet_margin_loss(
-      anchor, positive, negative, TripletMarginLossOptions().margin(3));
-  auto expected = torch::tensor({0}, torch::kFloat);
+      anchor, positive, negative, TripletMarginLossOptions().margin(1.0));
+  auto expected = torch::tensor({0.}, torch::kFloat);
 
-  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
 TEST_F(FunctionalTest, MaxUnpool1d) {
