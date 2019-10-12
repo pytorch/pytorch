@@ -14,7 +14,7 @@ if not dist.is_available():
 
 
 class TestConfig:
-    __slots__ = ['backend']
+    __slots__ = ['rpc_backend']
 
     def __init__(self, *args, **kwargs):
         assert len(args) == 0, "TestConfig only takes kwargs."
