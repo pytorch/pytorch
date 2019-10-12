@@ -840,6 +840,6 @@ class RpcTest(object):
         if self.rank == 0:
             # allow worker 1 to exit without joining
             time.sleep(0.5)
-            fut = dist.rpc_async("worker1", torch.add, args=(torch.ones(1), 3))
+            fut = rpc.rpc_async("worker1", torch.add, args=(torch.ones(1), 3))
             with self.assertRaises(RuntimeError):
                 fut.wait()
