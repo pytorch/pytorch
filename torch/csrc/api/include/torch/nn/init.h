@@ -9,25 +9,6 @@ namespace torch {
 namespace nn {
 namespace init {
 
-using NonlinearityType = c10::variant<
-  enumtype::kLinear,
-  enumtype::kConv1D,
-  enumtype::kConv2D,
-  enumtype::kConv3D,
-  enumtype::kConvTranspose1D,
-  enumtype::kConvTranspose2D,
-  enumtype::kConvTranspose3D,
-  enumtype::kSigmoid,
-  enumtype::kTanh,
-  enumtype::kReLU,
-  enumtype::kLeakyReLU,
->;
-
-using FanModeType = c10::variant<
-  enumtype::kFanIn,
-  enumtype::kFanOut
->;
-
 // This enum class is deprecated and will be removed in 1.5.
 enum class Nonlinearity {
   Linear,
@@ -46,6 +27,31 @@ enum class Nonlinearity {
 // This enum class is deprecated and will be removed in 1.5.
 enum class FanMode { FanIn, FanOut };
 
+using NonlinearityType = c10::variant<
+  enumtype::kLinear,
+  enumtype::kConv1D,
+  enumtype::kConv2D,
+  enumtype::kConv3D,
+  enumtype::kConvTranspose1D,
+  enumtype::kConvTranspose2D,
+  enumtype::kConvTranspose3D,
+  enumtype::kSigmoid,
+  enumtype::kTanh,
+  enumtype::kReLU,
+  enumtype::kLeakyReLU,
+
+  // Support for this enum class is deprecated and will be removed in 1.5.
+  Nonlinearity
+>;
+
+using FanModeType = c10::variant<
+  enumtype::kFanIn,
+  enumtype::kFanOut,
+
+  // Support for this enum class is deprecated and will be removed in 1.5.
+  FanMode
+>;
+
 } // namespace init
 } // nn
 
@@ -54,9 +60,6 @@ namespace init {
 
 /// Return the recommended gain value for the given nonlinearity function.
 TORCH_API double calculate_gain(NonlinearityType nonlinearity, double param = 0.01);
-
-/// This function is deprecated and will be removed in 1.5.
-TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
 /// No gradient will be recorded for this operation.
@@ -112,13 +115,6 @@ TORCH_API Tensor kaiming_normal_(
     FanModeType mode = torch::kFanIn,
     NonlinearityType nonlinearity = torch::kLeakyReLU);
 
-/// This function is deprecated and will be removed in 1.5.
-TORCH_API Tensor kaiming_normal_(
-    Tensor tensor,
-    double a = 0,
-    FanMode mode = torch::nn::init::FanMode::FanIn,
-    Nonlinearity nonlinearity = torch::nn::init::FanMode::LeakyReLU);
-
 /// Fills the input `Tensor` with values according to the method
 /// described in "Delving deep into rectifiers: Surpassing human-level
 /// performance on ImageNet classification" - He, K. et al. (2015), using a
@@ -129,13 +125,6 @@ TORCH_API Tensor kaiming_uniform_(
     double a = 0,
     FanModeType mode = torch::kFanIn,
     NonlinearityType nonlinearity = torch::kLeakyReLU);
-
-/// This function is deprecated and will be removed in 1.5.
-TORCH_API Tensor kaiming_uniform_(
-    Tensor tensor,
-    double a = 0,
-    FanMode mode = torch::nn::init::FanMode::FanIn,
-    Nonlinearity nonlinearity = torch::nn::init::FanMode::LeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Understanding the difficulty of training deep feedforward

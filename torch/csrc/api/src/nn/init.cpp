@@ -35,15 +35,15 @@ struct Fan {
   int64_t out;
 };
 
-#define NONLINEARITY_ENUM_LEGACY_WARNING(name) \
-case Nonlinearity::##name: \
+#define COMPUTE_NONLINEARITY_ENUM(name) \
+case Nonlinearity::name: \
   TORCH_WARN_ONCE( \
     "The enum value `torch::nn::init::Nonlinearity::", #name, "` is deprecated and will be removed in 1.5. ", \
     "Please use `torch::k", #name, "` instead."); \
   return torch::k##name;
 
-#define FANMODE_ENUM_LEGACY_WARNING(name) \
-case FanMode::##name: \
+#define COMPUTE_FANMODE_ENUM(name) \
+case FanMode::name: \
   TORCH_WARN_ONCE( \
     "The enum value `torch::nn::init::FanMode::", #name, "` is deprecated and will be removed in 1.5. ", \
     "Please use `torch::k", #name, "` instead."); \
@@ -51,24 +51,34 @@ case FanMode::##name: \
 
 NonlinearityType _compute_nonlinearity_type(Nonlinearity nonlinearity) {
   switch (nonlinearity) {
-    NONLINEARITY_ENUM_LEGACY_WARNING(Linear)
-    NONLINEARITY_ENUM_LEGACY_WARNING(Conv1D)
-    NONLINEARITY_ENUM_LEGACY_WARNING(Conv2D)
-    NONLINEARITY_ENUM_LEGACY_WARNING(Conv3D)
-    NONLINEARITY_ENUM_LEGACY_WARNING(ConvTranspose1D)
-    NONLINEARITY_ENUM_LEGACY_WARNING(ConvTranspose2D)
-    NONLINEARITY_ENUM_LEGACY_WARNING(ConvTranspose3D)
-    NONLINEARITY_ENUM_LEGACY_WARNING(Sigmoid)
-    NONLINEARITY_ENUM_LEGACY_WARNING(Tanh)
-    NONLINEARITY_ENUM_LEGACY_WARNING(ReLU)
-    NONLINEARITY_ENUM_LEGACY_WARNING(LeakyReLU)
+    COMPUTE_NONLINEARITY_ENUM(Linear)
+    COMPUTE_NONLINEARITY_ENUM(Conv1D)
+    COMPUTE_NONLINEARITY_ENUM(Conv2D)
+    COMPUTE_NONLINEARITY_ENUM(Conv3D)
+    COMPUTE_NONLINEARITY_ENUM(ConvTranspose1D)
+    COMPUTE_NONLINEARITY_ENUM(ConvTranspose2D)
+    COMPUTE_NONLINEARITY_ENUM(ConvTranspose3D)
+    COMPUTE_NONLINEARITY_ENUM(Sigmoid)
+    COMPUTE_NONLINEARITY_ENUM(Tanh)
+    COMPUTE_NONLINEARITY_ENUM(ReLU)
+    COMPUTE_NONLINEARITY_ENUM(LeakyReLU)
+    default:
+      TORCH_INTERNAL_ASSERT(
+        false,
+        "The enum class `torch::nn::init::Nonlinearity` is deprecated. ",
+        "Please don't add new enum values to it.")
   }
 }
 
 FanModeType _compute_fanmode_type(FanMode fanmode) {
   switch (fanmode) {
-    FANMODE_ENUM_LEGACY_WARNING(FanIn);
-    FANMODE_ENUM_LEGACY_WARNING(FanOut);
+    COMPUTE_FANMODE_ENUM(FanIn);
+    COMPUTE_FANMODE_ENUM(FanOut);
+    default:
+      TORCH_INTERNAL_ASSERT(
+        false,
+        "The enum class `torch::nn::init::FanMode` is deprecated. ",
+        "Please don't add new enum values to it.")
   }
 }
 
@@ -97,14 +107,13 @@ double calculate_gain(NonlinearityType nonlinearity, double param) {
     return std::sqrt(2.0);  // NOLINT
   } else if (c10::get_if<enumtype::kLeakyReLU>(&nonlinearity)) {
     return std::sqrt(2.0 / (1 + pow(param, 2)));  // NOLINT
+  } else if (c10::get_if<Nonlinearity>(&nonlinearity)) {
+    return calculate_gain(
+      _compute_nonlinearity_type(c10::get<Nonlinearity>(nonlinearity)),
+      param);
   }
 
   return 1.0;
-}
-
-// This function is deprecated and will be removed in 1.5.
-TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param) {
-  return calculate_gain(_compute_nonlinearity_type(nonlinearity), param);
 }
 
 Tensor constant_(Tensor tensor, Scalar value) {
@@ -229,20 +238,6 @@ Tensor kaiming_uniform_(
   return tensor.uniform_(-bound, bound);
 }
 
-// This function is deprecated and will be removed in 1.5.
-Tensor kaiming_uniform_(
-    Tensor tensor,
-    double a,
-    FanMode mode,
-    Nonlinearity nonlinearity) {
-  return kaiming_uniform_(
-    tensor,
-    a,
-    _compute_fanmode_type(mode),
-    _compute_nonlinearity_type(nonlinearity)
-  );
-}
-
 Tensor kaiming_normal_(
     Tensor tensor,
     double a,
@@ -252,20 +247,6 @@ Tensor kaiming_normal_(
 
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   return tensor.normal_(0, std);
-}
-
-// This function is deprecated and will be removed in 1.5.
-Tensor kaiming_normal_(
-    Tensor tensor,
-    double a,
-    FanMode mode,
-    Nonlinearity nonlinearity) {
-  return kaiming_normal_(
-    tensor,
-    a,
-    _compute_fanmode_type(mode),
-    _compute_nonlinearity_type(nonlinearity)
-  );
 }
 
 Tensor xavier_normal_(Tensor tensor, double gain) {

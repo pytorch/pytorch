@@ -10,7 +10,7 @@
   ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), #name); \
 }
 
-TEST_F(EnumTest, AllEnums) {
+TEST(EnumTest, AllEnums) {
   c10::variant<
     torch::enumtype::kLinear,
     torch::enumtype::kConv1D,

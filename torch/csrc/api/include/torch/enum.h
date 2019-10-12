@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #define TORCH_ENUM_DECLARE(name) \
