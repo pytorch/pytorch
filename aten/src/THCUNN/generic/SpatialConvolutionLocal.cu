@@ -155,9 +155,11 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
 
     // weight:    oH*oW x nOutputPlane x nInputPlane*kH*kW
     // finput3d:  oH*oW x nInputPlane*kH*kW x 1
-    THCTensor_(baddbmm)(state, output3d, ScalarConvert<int, scalar_t>::to(1),
-                        output3d, ScalarConvert<int, scalar_t>::to(1),
-                        weight, finput3d);
+    THCTensor_(baddbmm)(state, output3d,
+                        output3d,
+                        weight, finput3d,
+                        ScalarConvert<int, scalar_t>::to(1),
+                        ScalarConvert<int, scalar_t>::to(1));
     // output3d:  oH*oW x nOutputPlane x 1
 
     THCTensor_(free)(state, output3d);
@@ -260,9 +262,10 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
     // weight:        oH*oW x nInputPlane*kH*kW x nOutputPlane
     // gradOutput3d:  oH*oW x nOutputPlane x 1
     THCTensor_(baddbmm)(state, fgradInput3d,
+                        fgradInput3d,
+                        tweight, gradOutput3d,
                         ScalarConvert<int, scalar_t>::to(0),
-                        fgradInput3d, ScalarConvert<int, scalar_t>::to(1),
-                        tweight, gradOutput3d);
+                        ScalarConvert<int, scalar_t>::to(1));
     // fgradInput3d:  oH*oW x nInputPlane*kH*kW x 1
 
     // Unpack columns back into input:
@@ -381,8 +384,9 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
 
     // gradOutput3d:  oH*oW x nOutputPlane x 1
     // finput3d:      oH*oW x 1 x kW*kH*nInputPlane
-    THCTensor_(baddbmm)(state, gradWeight, ScalarConvert<int, scalar_t>::to(1),
-                        gradWeight, scale, gradOutput3d, finput3d);
+    THCTensor_(baddbmm)(state, gradWeight,
+                        gradWeight, gradOutput3d, finput3d,
+                        ScalarConvert<int, scalar_t>::to(1), scale);
     // gradWeight:    oH*oW x nOutputPlane x kW*kH*nInputPlane
 
     THCTensor_(cadd)(state, gradBias, gradBias, scale, gradOutput_n);

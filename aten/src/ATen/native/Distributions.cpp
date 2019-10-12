@@ -5,6 +5,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>
@@ -12,14 +13,13 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 #include <type_traits>
 #include <functional>
 #include <assert.h>
 #include <cpuinfo.h>
+#include <float.h>
 
 #include <TH/THMath.h>
 
@@ -132,7 +132,10 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
 }
 
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
+#ifdef BUILD_NAMEDTENSOR
+  NoNamesGuard guard;
+#endif
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -152,7 +155,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
           self, p, [generator](self_t& ret_val, p_t& p_val) {
             at::bernoulli_distribution<float> bernoulli(p_val);
             ret_val = static_cast<self_t>(bernoulli(generator));
-          });
+        });
       });
     }
   });
@@ -169,7 +172,7 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
     return self;
   }
 #endif
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -295,4 +298,40 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
   });
   return ret;
 }
+
+/* The largest consecutive integer representable in float32 (2^24) */
+constexpr int64_t FLOAT32_MAX_CONSECUTIVE_INT = 1 << (FLT_MANT_DIG);
+
+Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
+  TORCH_CHECK(result.device() == self.device(), "multinomial arguments must have the same device");
+  TORCH_CHECK(self.dim() > 0 && self.dim() <= 2, "prob_dist must be 1 or 2 dim");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
+      "multinomial only supports floating-point dtypes for input, got: ", self.scalar_type());
+  TORCH_CHECK(result.scalar_type() == ScalarType::Long,
+      "multinomial expects Long tensor out, got: ", result.scalar_type());
+  TORCH_CHECK(n_sample > 0, "cannot sample n_sample <= 0 samples");
+  int64_t n_categories = self.size(-1);
+  TORCH_CHECK(with_replacement || (n_sample <= n_categories),
+      "cannot sample n_sample > prob_dist.size(-1) samples without replacement");
+  // Since the index tensor is float, numCategories cannot exceed max
+  // float integer precision
+  TORCH_CHECK(n_categories <= FLOAT32_MAX_CONSECUTIVE_INT, "number of categories cannot exceed 2^24");
+  if (self.dim() > 1) {
+    int64_t n_dist = self.size(-2);
+    result.resize_({n_dist, n_sample});
+  } else {
+    result.resize_({n_sample});
+  }
+  multinomial_stub(result.type().device_type(), result, self, n_sample, with_replacement, gen);
+  return result;
+}
+
+Tensor multinomial(const Tensor& self, int64_t n_sample, bool with_replacement, Generator *gen) {
+  Tensor result = at::empty({0}, self.options().dtype(kLong));
+  native::multinomial_out(result, self, n_sample, with_replacement, gen);
+  return result;
+}
+
+DEFINE_DISPATCH(multinomial_stub);
+
 }} // namespace at::native

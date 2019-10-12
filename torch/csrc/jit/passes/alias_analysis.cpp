@@ -15,15 +15,13 @@ namespace jit {
 // introduce more granularity here (e.g. List[int] will never alias
 // List[float]).
 c10::optional<TypeKind> AliasDb::getMutableTypeKind(const TypePtr& type) {
-  if (type->isSubtypeOf(TensorType::get())) {
-    return TypeKind::TensorType;
-  }
 
   switch (type->kind()) {
     case TypeKind::ListType:
     case TypeKind::TupleType:
     case TypeKind::DictType:
     case TypeKind::ClassType:
+    case TypeKind::TensorType:
       return type->kind();
     case TypeKind::OptionalType:
       return getMutableTypeKind(type->cast<OptionalType>()->getElementType());
@@ -200,7 +198,6 @@ void AliasDb::dump() const {
 
 std::string AliasDb::toString() const {
   std::stringstream ss{};
-  std::unordered_map<size_t, Element*> indexToElementMap;
 
   ss << "\n===1. GRAPH===\n";
   ss << graph_->toString();
@@ -208,7 +205,6 @@ std::string AliasDb::toString() const {
   ss << "\n===2. ALIAS DB===\n";
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
-    indexToElementMap[element->index] = element;
     if (!element->pointsTo.empty()) {
       ss << getElementName(element) << " points to: ";
       for (const auto pointedTo : element->pointsTo) {
@@ -232,7 +228,7 @@ std::string AliasDb::toString() const {
     ss << *node;
     ss << "  ";
     for (const auto value : values) {
-      ss << indexToElementMap[value]->value->debugName() << ", ";
+      ss << getElementName(memoryDAG_->fromIndex(value)) << ", ";
     }
     ss << "\n";
   }
@@ -260,9 +256,9 @@ void AliasDb::analyze(Node* node) {
 // Returns true if analysis was run using
 // the registered analyzer.
 bool AliasDb::tryRegisteredAnalysis(Node* node) {
-  const Operator& op = getOperatorFor(node);
+  const Operator& op = node->getOperator();
   auto analysis = op.aliasAnalysisKind();
-  if (AliasAnalysisKind::PURE == analysis) {
+  if (AliasAnalysisKind::PURE_FUNCTION == analysis) {
     analyzeCreator(node);
     return true;
   }
@@ -275,7 +271,7 @@ bool AliasDb::tryRegisteredAnalysis(Node* node) {
 //      information to the outputs. For unschematized nodes, a special analyzer
 //      will have to be handwritten.
 void AliasDb::analyzeImpl(Node* node) {
-  auto op = findOperatorFor(node);
+  auto op = node->maybeOperator();
   const bool hasSpecialCase = aliasAnalysisHasSpecialCaseFor(node->kind());
   if (op) {
     const auto analysis = op->aliasAnalysisKind();
@@ -349,12 +345,17 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile:
-      AT_ERROR("Analyzing prim::profile isn't yet implemented");
-      // TODO: simply mapping inputs' aliases to outputs'
-      // should work but a) we should probably avoid exposing
-      // prim::profile to optimizations b) the alias semantics
-      // might be more complicated than just mapAliases
-      // mapAliases(node->inputs(), node->outputs());
+      if (node->inputs().size() > 0) {
+        makePointerTo(node->output(), node->inputs().at(0));
+      }
+      return;
+    case prim::BailOut:
+      TORCH_INTERNAL_ASSERT(node->inputs().at(0)->node()->kind() ==
+                            prim::BailoutTemplate);
+      makePointerTo(node->output(), node->inputs().at(1));
+      return;
+    case prim::Guard:
+      makePointerTo(node->output(), node->inputs().at(0));
       return;
     case prim::CallFunction:
     case prim::CallMethod:
@@ -363,6 +364,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeConservative(node);
     case prim::Print:
     case prim::Uninitialized:
+    case prim::isinstance:
       // These ops do nothing
       return;
     default:
@@ -384,20 +386,16 @@ void AliasDb::analyzeImpl(Node* node) {
     // but this is the intended behavior for all current ops and a good error check.
     // We can consider lifting this constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
-        analysis == AliasAnalysisKind::FROM_SCHEMA,
-        "aten:: and prim:: operators should use AliasAnalysisKind::FROM_SCHEMA but ",
+        analysis == AliasAnalysisKind::FROM_SCHEMA ||
+            analysis == AliasAnalysisKind::CONSERVATIVE,
+        "aten:: and prim:: operators should use AliasAnalysisKind::FROM_SCHEMA or "
+        "AliasAnalysisKind::CONSERVATIVE(if really necessary), but ",
         node->kind().toDisplayString(),
         " doesn't. Note: Ideally, prim:: operators actually shouldn't have a schema ",
         "and then use AliasAnalysisKind::INTERNAL_SPECIAL_CASE instead.");
   }
 
   if (analysis == AliasAnalysisKind::CONSERVATIVE) {
-    TORCH_INTERNAL_ASSERT(
-        !node->kind().is_aten() && !node->kind().is_prim(),
-        "aten:: and prim:: operators should not use AliasAnalysisKind::CONSERVATIVE but ",
-        node->kind().toDisplayString(),
-        " does.");
-
     // TODO A previous implementation of alias analysis always accessed
     // node->schema , which cause the schema caches in the Node class to be
     // filled for the full graph. Unfortunately, our JIT passes started relying
@@ -416,7 +414,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
   TORCH_INTERNAL_ASSERT(
       analysis == AliasAnalysisKind::FROM_SCHEMA,
-      "AliasAnalysisKind::CONSERVATIVE/PURE/INTERNAL_SPECIAL_CASE should already have been handled above");
+      "AliasAnalysisKind::CONSERVATIVE/PURE_FUNCTION/INTERNAL_SPECIAL_CASE should already have been handled above");
   const auto& schema = node->schema();
 
   // Bind the schema's "formal" alias annotation to the actual values those
@@ -1254,6 +1252,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CallFunction,
       prim::CallMethod,
       aten::wait,
+      prim::isinstance,
   };
 
   // Operators that should not be used by alias analysis
@@ -1310,9 +1309,28 @@ void AliasDb::setWildcard(const Value* v) {
   if (!shouldAnnotate(v)) {
     return;
   }
-  auto e = getOrCreateWildcard(v->type());
-  TORCH_INTERNAL_ASSERT(e != nullptr);
-  memoryDAG_->makePointerTo(getOrCreateElement(v), e);
+  auto wildcardElement = getOrCreateWildcard(v->type());
+  TORCH_INTERNAL_ASSERT(wildcardElement != nullptr);
+
+  // Making a value a wildcard means that all its potential memory locations
+  // may alias the wildcard set.
+  const MemoryLocations pointeeSet = getOrCreateElement(v)->getMemoryLocations();
+  for (const auto& pointee : pointeeSet) {
+    auto from = memoryDAG_->fromIndex(pointee);
+    // avoid cycles where the wildcard points to itself
+    if (from != wildcardElement) {
+      memoryDAG_->makePointerTo(from, wildcardElement);
+    }
+  }
+
+  // We also need to update the write index with new writes to the wildcard set.
+  for (auto& pr : writeIndex_) {
+    auto& writtenTo = pr.second;
+    if (writtenTo.intersects(pointeeSet)) {
+      writtenTo.set(wildcardElement->index);
+    }
+  }
+  isWriteCacheStale_ = true;
 }
 
 void AliasDb::rebuildWriteCache() const {

@@ -81,4 +81,5 @@ static_assert(
   {"USE_TRT", "${CAFFE2_USE_TRT}"}, \
   {"DISABLE_NUMA", "${CAFFE2_DISABLE_NUMA}"},   \
   {"BUILD_NAMEDTENSOR", "${BUILD_NAMEDTENSOR}"},   \
+  {"USE_STATIC_DISPATCH", "${USE_STATIC_DISPATCH}"},   \
 }

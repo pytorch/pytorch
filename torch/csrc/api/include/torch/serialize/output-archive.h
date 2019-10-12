@@ -26,6 +26,7 @@ namespace serialize {
 class TORCH_API OutputArchive final {
  public:
   explicit OutputArchive(std::shared_ptr<jit::script::CompilationUnit> cu);
+  explicit OutputArchive() : cu_(std::make_shared<jit::script::CompilationUnit>()) {}
 
   // Move is allowed.
   OutputArchive(OutputArchive&&) = default;
@@ -38,6 +39,9 @@ class TORCH_API OutputArchive final {
   std::shared_ptr<jit::script::CompilationUnit> compilation_unit() const {
     return cu_;
   }
+
+  /// Writes an `IValue` to the `OutputArchive`.
+  void write(const std::string& key, const c10::IValue& ivalue);
 
   /// Writes a `(key, tensor)` pair to the `OutputArchive`, and marks it as
   /// being or not being a buffer (non-differentiable tensor).

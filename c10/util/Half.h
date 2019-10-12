@@ -427,9 +427,20 @@ struct Converter<
 #pragma warning( disable : 4804 )
 #endif
 
+
+// bool can be converted to any type.
+// Without specializing on bool, in pytorch_linux_trusty_py2_7_9_build:
+// `error: comparison of constant '255' with boolean expression is always false`
+// for `f > limit::max()` below
+template <typename To, typename From>
+typename std::enable_if<std::is_same<From, bool>::value, bool>::type overflows(
+    From f) {
+  return false;
+}
+
 // skip isnan and isinf check for integral types
 template <typename To, typename From>
-typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(
+typename std::enable_if<std::is_integral<From>::value && !std::is_same<From, bool>::value, bool>::type overflows(
     From f) {
   using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
   if (!limit::is_signed && std::numeric_limits<From>::is_signed) {

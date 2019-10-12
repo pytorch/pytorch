@@ -1,6 +1,7 @@
 #ifndef CAFFE2_CORE_NET_ASYNC_BASE_H_
 #define CAFFE2_CORE_NET_ASYNC_BASE_H_
 
+#include <c10/macros/Macros.h>
 #include "c10/core/thread_pool.h"
 #include "c10/util/Registry.h"
 #include "caffe2/core/common.h"

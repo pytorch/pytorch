@@ -1,10 +1,10 @@
 from common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List
-
+from typing import NamedTuple, List, Optional
+import unittest
+import sys
 import torch
-
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
@@ -47,6 +47,21 @@ class TestScriptPy3(JitTestCase):
             return rv
 
         self.assertEqual(foo(torch.rand(3, 4)), 18.0)
+
+    @unittest.skipIf(sys.version_info[0] < 3 and sys.version_info[1] < 6, "dict not ordered")
+    def test_dict_preserves_order(self):
+        def dict_ordering():
+            a : Dict[int, int] = {}
+            for i in range(1000):
+                a[i] = i + 1
+            return a
+
+        self.checkScript(dict_ordering, ())
+        di = torch.jit.script(dict_ordering)()
+        res = list(di.items())
+        for i in range(1000):
+            key, value = res[i]
+            self.assertTrue(key == i and value == i + 1)
 
     def test_return_named_tuple(self):
         class FeatureVector(NamedTuple):
@@ -95,6 +110,8 @@ class TestScriptPy3(JitTestCase):
         FileCheck().check_not('TupleConstruct').run(foo.graph)
 
     def test_named_tuple_type_annotation(self):
+        global MyCoolNamedTuple  # see [local resolution in python]
+
         class MyCoolNamedTuple(NamedTuple):
             a : int
             b : float
@@ -148,6 +165,7 @@ class TestScriptPy3(JitTestCase):
                 tup = MyCoolNamedTuple(c=[1, 2, 3], b=3.5, a=9)  # noqa
                 return tup
 
+    @unittest.skipIf(True, "broken while these tests were not in CI")
     def test_named_tuple_serialization(self):
         class MyCoolNamedTuple(NamedTuple):
             a : int
@@ -175,10 +193,12 @@ class TestScriptPy3(JitTestCase):
             a : List[int] = []
             b : torch.Tensor = torch.ones(2, 2)
             c : Optional[torch.Tensor] = None
+            d : Optional[torch.Tensor] = torch.ones(3, 4)
             for _ in range(10):
                 a.append(4)
                 c = torch.ones(2, 2)
-            return a, b, c
+                d = None
+            return a, b, c, d
 
         self.checkScript(fn, ())
 
@@ -188,6 +208,25 @@ class TestScriptPy3(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
             torch.jit.script(wrong_type)
+
+    def test_parser_bug(self):
+        def parser_bug(o: Optional[torch.Tensor]):
+            pass
+
+    def test_mismatched_annotation(self):
+        with self.assertRaisesRegex(RuntimeError, 'annotated with type'):
+            @torch.jit.script
+            def foo():
+                x : str = 4
+                return x
+
+    def test_reannotate(self):
+        with self.assertRaisesRegex(RuntimeError, 'declare and annotate'):
+            @torch.jit.script
+            def foo():
+                x = 5
+                if True:
+                    x : Optional[int] = 7
 
 
 if __name__ == '__main__':

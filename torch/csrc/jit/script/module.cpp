@@ -1,11 +1,13 @@
+#include <torch/csrc/jit/script/module.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
@@ -78,7 +80,7 @@ void Module::to(at::Device device, bool non_blocking) {
 
 void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
 #ifndef C10_MOBILE
-  ExportModule(*this, out, extra_files);
+  ExportModule(*this, out, extra_files, false);
 #else
   AT_ERROR("Saving module is not supported on mobile.");
 #endif
@@ -87,7 +89,24 @@ void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
 void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
     const {
 #ifndef C10_MOBILE
-  ExportModule(*this, filename, extra_files);
+  ExportModule(*this, filename, extra_files, false);
+#else
+  AT_ERROR("Saving module is not supported on mobile.");
+#endif
+}
+
+void Module::_save_for_mobile(std::ostream& out, const ExtraFilesMap& extra_files) const {
+#ifndef C10_MOBILE
+  ExportModule(*this, out, extra_files, true);
+#else
+  AT_ERROR("Saving module is not supported on mobile.");
+#endif
+}
+
+void Module::_save_for_mobile(const std::string& filename, const ExtraFilesMap& extra_files)
+    const {
+#ifndef C10_MOBILE
+  ExportModule(*this, filename, extra_files, true);
 #else
   AT_ERROR("Saving module is not supported on mobile.");
 #endif
@@ -137,6 +156,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     Graph& g_,
     size_t self_offset = 0) {
   std::shared_ptr<Graph> g = g_.copy();
+  // Inline to remove method/function calls
+  Inline(*g);
   std::vector<Slot> extra_ivalues;
   std::unordered_map<Slot, size_t> slot_to_offset;
   struct ToScan {
@@ -313,13 +334,9 @@ Module Module::clone_impl(
       const Module& orig = s.to_module();
       Module cloned = orig.clone_impl(type_remap);
       type_remap[orig.type()] = cloned.type();
-      r.set_or_add_slot(
-          s.name(),
-          type_remap.at(s.type()),
-          cloned.module_object(),
-          s.entity_type());
+      r.register_module(s.name(), cloned);
     } else {
-      r.set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+      r.register_attribute(s.name(), s.type(), s.value(), s.is_parameter());
     }
   }
 
@@ -337,7 +354,7 @@ void Module::train(bool on) {
   if (auto slot = find_attribute("training")) {
     slot->setValue(on);
   } else {
-    register_attribute("training", BoolType::get(), on);
+    TORCH_INTERNAL_ASSERT("'training' attribute not found");
   }
 }
 
@@ -398,6 +415,80 @@ void Module::apply(const std::function<void(Module&)>& fn) {
     submod.apply(fn);
   }
   fn(*this);
+}
+
+std::string Module::dump_to_str(
+    bool print_method_bodies,
+    bool print_attr_values,
+    bool print_param_values,
+    int level = 0) const {
+  std::stringstream ss;
+  std::stringstream parameters_ss;
+  std::stringstream attributes_ss;
+  std::stringstream methods_ss;
+  std::stringstream submodules_ss;
+
+  for (Slot param : get_parameters()) {
+    parameters_ss << param.name() << " = ";
+    if (print_param_values) {
+      parameters_ss << param.value().toTensor() << std::endl;
+    } else {
+      parameters_ss << "..." << std::endl;
+    }
+  }
+
+  for (Slot attr : get_attributes()) {
+    attributes_ss << attr.name() << " = ";
+    if (!attr.value().isTensor() || print_attr_values) {
+      attributes_ss << attr.value() << std::endl;
+    } else {
+      attributes_ss << "..." << std::endl;
+    }
+  }
+
+  for (const Method& method : get_methods()) {
+    methods_ss << "  method " << method.name() << " {" << std::endl;
+    if (print_method_bodies) {
+      methods_ss << torch::jit::jit_log_prefix(
+                        "    ", method.graph()->toString())
+                 << std::endl;
+    }
+    methods_ss << "  }" << std::endl;
+  }
+
+  ss << "module " << name().qualifiedName() << " {" << std::endl;
+  ss << "  parameters {" << std::endl;
+  ss << torch::jit::jit_log_prefix("    ", parameters_ss.str());
+  ss << "  }" << std::endl;
+  ss << "  attributes {" << std::endl;
+  ss << torch::jit::jit_log_prefix("    ", attributes_ss.str());
+  ss << "  }" << std::endl;
+  ss << "  methods {" << std::endl;
+  ss << torch::jit::jit_log_prefix("  ", methods_ss.str());
+  ss << "  }" << std::endl;
+  ss << "  submodules {" << std::endl;
+  for (const Module& submodule : get_modules()) {
+    // We do level + 2, because one level of indentation comes from 'submodules'
+    // scope and the other one goes from a specific submodule we're printing.
+    ss << submodule.dump_to_str(
+        print_method_bodies, print_attr_values, print_param_values, level + 2);
+  }
+  ss << "  }" << std::endl;
+  ss << "}" << std::endl;
+
+  std::string indent(2 * level, ' ');
+  return torch::jit::jit_log_prefix(indent, ss.str());
+}
+
+void Module::dump(
+    bool print_method_bodies = true,
+    bool print_attr_values = true,
+    bool print_param_values = true) const {
+  std::cout << dump_to_str(
+                   print_method_bodies,
+                   print_attr_values,
+                   print_param_values)
+            << std::endl;
 }
 
 } // namespace script

@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 
 namespace torch {
 namespace jit {
@@ -67,13 +66,16 @@ static void CanonicalizeOps(Block* block) {
                    /*const_inputs=*/{attr::chunks, attr::dim})) {
       if (auto orig_outputs = getChunkOutputs(*it)) {
         WithInsertPoint guard(*it);
-        SymbolicVariable self{it->namedInput(attr::self)};
-        auto outputs = self.chunk(
-            it->get<int64_t>(attr::chunks).value(),
-            it->get<int64_t>(attr::dim).value());
-        for (ChunkOutput orig_out : *orig_outputs) {
-          orig_out.val->replaceAllUsesWith(outputs.at(orig_out.offset));
-          outputs[orig_out.offset].value()->setType(orig_out.val->type());
+        auto* self = it->namedInput(attr::self);
+        auto* graph = it->owningGraph();
+        const auto chunks = it->get<int64_t>(attr::chunks).value();
+        const auto dim = it->get<int64_t>(attr::dim).value();
+        auto* node = graph->insertNode(graph->create(prim::ConstantChunk, chunks));
+        node->addInput(self);
+        node->i_(attr::chunks, chunks)->i_(attr::dim, dim);
+        for (const auto& orig_out : *orig_outputs) {
+          orig_out.val->replaceAllUsesWith(node->outputs()[orig_out.offset]);
+          node->outputs()[orig_out.offset]->setType(orig_out.val->type());
         }
       }
     }

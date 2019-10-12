@@ -217,7 +217,7 @@ void TestToCFloat() {
   ASSERT_EQ_RESOLVED(c.size(1), 11);
 
   Tensor e = rand({});
-  ASSERT_EQ_RESOLVED(*e.data<float>(), e.sum().item<float>());
+  ASSERT_EQ_RESOLVED(*e.data_ptr<float>(), e.sum().item<float>());
 }
 void TestToString() {
   Tensor b = ones({3, 7}) * .0000001f;

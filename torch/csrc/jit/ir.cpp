@@ -1,7 +1,9 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/schema_matching.h>
@@ -17,8 +19,6 @@
 
 namespace torch {
 namespace jit {
-
-void printQuotedString(std::ostream& stmt, const std::string& str);
 
 // Constants relating to maintaining the topological index of nodes.
 //
@@ -115,7 +115,20 @@ static void printStrList(
   for (auto& item : items) {
     if (i++ > 0)
       out << ", ";
-    printQuotedString(out, item);
+    c10::printQuotedString(out, item);
+  }
+  out << "]";
+}
+
+static void printTypeList(
+    std::ostream& out,
+    const std::vector<TypePtr>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    out << *item;
   }
   out << "]";
 }
@@ -135,7 +148,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      printQuotedString(out, s(name));
+      c10::printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
       printStrList(out, ss(name));
@@ -174,11 +187,17 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
     case AttributeKind::gs:
       out << "[<Graphs>]";
       break;
+    case AttributeKind::ty:
+      out << *ty(name);
+      break;
+    case AttributeKind::tys:
+      printTypeList(out, tys(name));
+      break;
   }
 }
 
-void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
-    const {
+void Node::printAttributes(std::ostream &out,
+                           bool ignore_subgraph = false) const {
   out << "[";
   auto names = attributeNames();
   int i = 0;
@@ -214,11 +233,10 @@ static std::ostream& indent(std::ostream& out, size_t level) {
   return out;
 }
 
-std::ostream& Node::print(
-    std::ostream& out,
-    size_t level,
-    std::vector<const Node*>* groups,
-    bool print_source_locations) const {
+std::ostream &Node::print(std::ostream &out, size_t level,
+                          std::vector<const Node *> *groups,
+                          bool print_source_locations, bool print_attributes,
+                          bool print_scopes, bool print_body) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -226,7 +244,7 @@ std::ostream& Node::print(
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
     pyOp->writeScalars(out);
-  } else {
+  } else if (print_attributes) {
     if (hasAttribute(attr::Subgraph) && groups) {
       out << kind().toQualString() << "_" << groups->size();
       if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
@@ -243,20 +261,33 @@ std::ostream& Node::print(
   }
 
   out << "(" << inputs() << ")";
-  std::string scName = scopeName();
-  if (!scName.empty()) {
-    out << ", ";
-    out << "scope: " << scName;
+
+  if (print_scopes) {
+    std::string scName = scopeName();
+    if (!scName.empty()) {
+      out << ", ";
+      out << "scope: " << scName;
+    }
   }
 
   // In debug print, append file:line:col as a comment after each node
   if (print_source_locations) {
-    if (auto file_line_col = sourceRange().file_line_col()) {
+    SourceRange r = sourceRange();
+    if (sourceRange().source()) {
+      if (auto orig = sourceRange().source()->findSourceRangeThatGenerated(r)) {
+        r = *orig;
+      }
+    }
+    if (auto file_line_col = r.file_line_col()) {
       std::string filename;
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
     }
+  }
+
+  if (!print_body) {
+    return out;
   }
 
   out << "\n";
@@ -314,7 +345,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
-    if (ProfiledTensorTypePtr type = v->type()->cast<ProfiledTensorType>()) {
+    if (TensorTypePtr type = v->type()->cast<TensorType>()) {
       if (type->device() && !has_device) {
         has_device = true;
         device = *type->device();
@@ -669,7 +700,7 @@ void Graph::remapTypes(const std::function<TypePtr(TypePtr)>& type_map) {
 }
 
 void Value::inferTypeFrom(const at::Tensor& output) {
-  setType(ProfiledTensorType::create(output));
+  setType(TensorType::create(output));
 }
 
 bool Value::mustBeNone() const {
@@ -819,17 +850,34 @@ void Node::dump() const {
   std::cout << *this << "\n";
 }
 
-void Node::findSchema() const {
-  schema_ = &getOperatorFor(this).schema();
+const FunctionSchema& Node::schema() const {
+  if (op_) {
+    return op_->schema();
+  }
+  return getOperatorFor(this).schema();
 }
 
 const FunctionSchema* Node::maybeSchema() const {
-  if (!schema_) {
+  if (auto op = maybeOperator()) {
+    return &op->schema();
+  }
+  return nullptr;
+}
+
+const Operator& Node::getOperator() const {
+  if (!op_) {
+    op_ = &getOperatorFor(this);
+  }
+  return *op_;
+}
+
+const Operator* Node::maybeOperator() const {
+  if (!op_) {
     if (auto op = findOperatorFor(this)) {
-      schema_ = &op->schema();
+      op_ = op.get();
     }
   }
-  return schema_;
+  return op_;
 }
 
 bool Node::isNondeterministic() const {
@@ -886,10 +934,11 @@ bool Node::hasSideEffects() const {
     case prim::CallFunction:
     case prim::CallMethod:
     case prim::BailoutTemplate:
+    case prim::profile:
       return true;
   }
 
-  auto op = findOperatorFor(this);
+  auto op = maybeOperator();
   if (!op) {
     TORCH_INTERNAL_ASSERT(
         kind_.is_prim(),
@@ -901,20 +950,24 @@ bool Node::hasSideEffects() const {
 
   if (kind_.is_prim() || kind_.is_aten()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
-    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
-    // but this is the intended behavior for all current ops and a good error check.
-    // We can consider lifting this constraint later if we have a use case for it.
+    // ops using AliasAnalysisKind::FROM_SCHEMA,
+    // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, or
+    // AliasAnalysisKind::CONSERVATIVE but this is the intended behavior for all
+    // current ops and a good error check. We can consider lifting this
+    // constraint later if we have a use case for it.
     TORCH_INTERNAL_ASSERT(
         op->aliasAnalysisKind() == AliasAnalysisKind::INTERNAL_SPECIAL_CASE ||
-            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA,
-        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE or AliasAnalysisKind::FROM_SCHEMA but ",
+            op->aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA ||
+            op->aliasAnalysisKind() == AliasAnalysisKind::CONSERVATIVE,
+        "aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE"
+        ", AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::CONSERVATIVE but ",
         kind_.toDisplayString(),
         " has ",
         toString(op->aliasAnalysisKind()));
   }
 
   switch (op->aliasAnalysisKind()) {
-    case AliasAnalysisKind::PURE:
+    case AliasAnalysisKind::PURE_FUNCTION:
       return false;
     case AliasAnalysisKind::FROM_SCHEMA:
       return false;
@@ -989,7 +1042,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
       graph_(graph_),
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
-      schema_(nullptr),
+      op_(nullptr),
       topo_position_(0) {
   graph_->all_nodes.emplace(this);
 }
@@ -997,7 +1050,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
 void Node::eraseOutput(size_t i) {
   AT_ASSERT(i < outputs_.size());
   AT_ASSERT(outputs_[i]->uses().empty());
-  schema_ = nullptr;
+  op_ = nullptr;
   Value* n = outputs_[i];
   outputs_.erase(outputs_.begin() + i);
   owningGraph()->freeValue(n);
@@ -1007,14 +1060,14 @@ void Node::eraseOutput(size_t i) {
 }
 
 Block* Node::addBlock() {
-  schema_ = nullptr;
+  op_ = nullptr;
   blocks_.push_back(new Block(owningGraph(), this));
   return blocks_.back();
 }
 
 void Node::eraseBlock(size_t i) {
   AT_ASSERT(i < blocks_.size());
-  schema_ = nullptr;
+  op_ = nullptr;
   Block* n = blocks_[i];
   blocks_.erase(blocks_.begin() + i);
   n->destroy();
@@ -1052,7 +1105,7 @@ void Node::replaceAllUsesWith(Node* n) {
 
 Value* Node::insertInput(size_t i, Value* value) {
   AT_ASSERT(graph_ == value->owningGraph());
-  schema_ = nullptr;
+  op_ = nullptr;
   // First we update the offsets for all existing inputs that will reside
   // after the one we're inserting. Concretely, these are the inputs at
   // indices [i, # input). Since we're inserting one input before all of
@@ -1071,7 +1124,7 @@ Value* Node::insertInput(size_t i, Value* value) {
 
 Value* Node::addInput(Value* value) {
   AT_ASSERT(graph_ == value->owningGraph());
-  schema_ = nullptr;
+  op_ = nullptr;
   value->uses_.emplace_back(this, inputs_.size());
   inputs_.push_back(value);
   return value;
@@ -1079,7 +1132,7 @@ Value* Node::addInput(Value* value) {
 
 Value* Node::replaceInput(size_t i, Value* newValue) {
   AT_ASSERT(newValue->owningGraph() == graph_);
-  schema_ = nullptr;
+  op_ = nullptr;
   Value* old = dropInput(i);
   inputs_[i] = newValue;
   newValue->uses_.emplace_back(this, i);
@@ -1089,7 +1142,7 @@ Value* Node::replaceInput(size_t i, Value* newValue) {
 void Node::replaceInputWith(Value* from, Value* to) {
   AT_ASSERT(from->owningGraph() == graph_);
   AT_ASSERT(to->owningGraph() == graph_);
-  schema_ = nullptr;
+  op_ = nullptr;
   size_t i = 0;
   for (auto input : inputs()) {
     if (input == from) {
@@ -1101,12 +1154,12 @@ void Node::replaceInputWith(Value* from, Value* to) {
 
 Value* Node::addOutput() {
   outputs_.push_back(new Value(this, outputs_.size()));
-  schema_ = nullptr;
+  op_ = nullptr;
   return outputs_.back();
 }
 
 Value* Node::insertOutput(size_t i) {
-  schema_ = nullptr;
+  op_ = nullptr;
   outputs_.insert(outputs_.begin() + i, new Value(this, i));
   for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
     outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
@@ -1193,7 +1246,7 @@ void Node::moveBefore(Node* n) {
 }
 
 void Node::removeInput(size_t i) {
-  schema_ = nullptr;
+  op_ = nullptr;
   dropInput(i);
   // everything after this input shifts left,
   // so we need to update their use offsets to match
@@ -1205,7 +1258,7 @@ void Node::removeInput(size_t i) {
 }
 
 void Node::removeAllInputs() {
-  schema_ = nullptr;
+  op_ = nullptr;
   for (size_t i = 0; i < inputs().size(); ++i) {
     dropInput(i);
   }
@@ -1213,7 +1266,7 @@ void Node::removeAllInputs() {
 }
 
 void Node::permuteInputs(const std::vector<size_t>& new_order) {
-  schema_ = nullptr;
+  op_ = nullptr;
   AT_ASSERT(new_order.size() == inputs_.size());
   std::vector<Value*> new_inputs;
   new_inputs.reserve(new_order.size());
@@ -1228,7 +1281,7 @@ void Node::permuteInputs(const std::vector<size_t>& new_order) {
 }
 
 void Node::permuteOutputs(const std::vector<size_t>& new_order) {
-  schema_ = nullptr;
+  op_ = nullptr;
   AT_ASSERT(new_order.size() == outputs_.size());
   std::vector<Value*> new_outputs;
   new_outputs.reserve(new_order.size());
@@ -1314,9 +1367,9 @@ Node* Graph::createAutogradZero() {
   return create(prim::AutogradZero);
 }
 
-Node* Graph::createNone(TypePtr typ) {
+Node* Graph::createNone() {
   Node* n = create(prim::Constant);
-  n->output()->setType(OptionalType::create(std::move(typ)));
+  n->output()->setType(NoneType::get());
   return n;
 }
 
@@ -1421,7 +1474,7 @@ Node* Graph::createDict(
 Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
-  result->output()->setType(ProfiledTensorType::fromNumberType(std::move(typ)));
+  result->output()->setType(TensorType::fromNumberType(std::move(typ)));
   return result;
 }
 
@@ -1470,10 +1523,31 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   return n;
 }
 
+Node* Graph::createIsInstance(
+    Value* v,
+    at::ArrayRef<TypePtr> types,
+    bool is_list,
+    bool is_tuple) {
+  auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
+  std::vector<std::string> kinds;
+  if (is_list) {
+    kinds.push_back("list");
+  }
+  if (is_tuple) {
+    kinds.push_back("tuple");
+  }
+  n->ss_(attr::kinds, std::move(kinds));
+  n->tys_(attr::types, types.vec());
+  n->output()->setType(BoolType::get());
+  return n;
+}
+
 Value* Graph::insertFunctionCall(
     Function* callee,
-    script::MatchedSchema& matched) {
+    const script::MatchedSchema& matched) {
+  std::string func_name = callee->name();
   Value* fn_constant = insertNode(create(prim::Constant))
+                           ->s_(attr::name, func_name)
                            ->output()
                            ->setType(FunctionType::create(std::move(callee)));
   std::vector<Value*> inputs = {fn_constant};
@@ -1486,7 +1560,7 @@ Value* Graph::insertFunctionCall(
 
 Value* Graph::insertMethodCall(
     std::string method_name,
-    script::MatchedSchema& matched) {
+    const script::MatchedSchema& matched) {
   Value* result = insertNode(create(prim::CallMethod, matched.inputs))
                       ->s_(attr::name, std::move(method_name))
                       ->output()
@@ -1517,11 +1591,10 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     IValue val,
-    const TypePtr& result_type,
     c10::optional<SourceRange> loc,
     c10::optional<ScopePtr> scope) {
   return jit::insertConstant(
-      *this, std::move(val), result_type, std::move(loc), std::move(scope));
+      *this, std::move(val), std::move(loc), std::move(scope));
 }
 
 std::string Graph::toString(bool print_source_locations) const {
@@ -1642,6 +1715,14 @@ void ProfileOp::cloneFrom(Node* other_) {
 }
 Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
+}
+
+TypePtr NamedValue::type() const {
+  if (value_) {
+    return value_->type();
+  } else {
+    return ivalue_.type();
+  }
 }
 
 constexpr Symbol ProfileOp::Kind;

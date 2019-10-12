@@ -41,7 +41,7 @@ struct TORCH_API TensorDesc {
   TensorDesc(const at::Tensor& t)
       : TensorDesc(t.scalar_type(), t.sizes(), t.strides()) {}
 
-  TensorDesc(const c10::ProfiledTensorTypePtr& type)
+  TensorDesc(const c10::TensorTypePtr& type)
       : TensorDesc(
             type->scalarType().value(),
             type->sizes().concrete_sizes().value(),

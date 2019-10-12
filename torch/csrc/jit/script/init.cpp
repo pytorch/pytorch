@@ -81,7 +81,7 @@ struct PythonResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
-      const SourceRange& loc) const override {
+      const SourceRange& loc) override {
     AutoGIL ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
@@ -97,7 +97,7 @@ struct PythonResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
-      const override {
+      override {
     if (classType_ && name == classname_) {
       return classType_;
     }
@@ -157,7 +157,6 @@ struct PythonResolver : public Resolver {
             tt->python_str());
             return type;
       }
-
       get_python_cu()->register_type(tt);
       return tt;
     }
@@ -280,7 +279,7 @@ struct VISIBILITY_HIDDEN ModuleSelf : public Self {
 };
 
 static TypePtr getTensorType(const at::Tensor& t, bool complete) {
-  auto r = ProfiledTensorType::create(t);
+  auto r = TensorType::create(t);
   if (!complete) {
     r = r->dimensionedOnly();
   }
@@ -354,8 +353,8 @@ static std::shared_ptr<Graph> _assign_output_shapes(
   for (size_t i = 0; i < outputs.size(); ++i) {
     auto scalar_type = outputs[i].scalar_type();
     auto sizes = outputs[i].sizes();
-    auto type = torch::jit::ProfiledTensorType::createContiguous(
-        scalar_type, at::kCPU, sizes);
+    auto type =
+        torch::jit::TensorType::createContiguous(scalar_type, at::kCPU, sizes);
     retval->outputs()[i]->setType(type);
   }
   return retval;
@@ -369,6 +368,73 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   const auto name = QualifiedName(module.name(), "forward");
   auto method = module.class_compilation_unit()->create_function(name, graph);
   module.type()->addMethod(method);
+}
+
+// this is used in our test suite to check that we correctly preserved type tags
+bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
+  struct Work {
+    IValue a;
+    IValue b;
+  };
+  std::unordered_set<const void*> visited;
+  std::vector<Work> work = {{lhs.module_object(), rhs.module_object()}};
+  while (!work.empty()) {
+    Work item = work.back();
+    work.pop_back();
+    if (item.a.isPtrType()) {
+      // uncomment to debug type matching errors
+      // std::cout << "MATCHING " << /*item.a <<*/ "(" << *item.a.type() << ") "
+      //          << item.a.internalToPointer() << " " << /*item.b <<*/ " ("
+      //          << *item.b.type() << ") " << item.b.internalToPointer() <<
+      //          "\n";
+
+      if (visited.count(item.a.internalToPointer())) {
+        continue;
+      }
+      visited.emplace(item.a.internalToPointer());
+    }
+    if (*unshapedType(item.a.type()) != *unshapedType(item.b.type())) {
+      return false;
+    }
+    // check tags for objects that contain subobjects
+    if (item.a.isObject()) {
+      auto ao = item.a.toObject();
+      auto bo = item.b.toObject();
+      for (size_t i = 0; i < ao->slots().size(); ++i) {
+        work.emplace_back(Work{ao->slots().at(i), bo->slots().at(i)});
+      }
+    } else if (item.a.isTuple()) {
+      auto at = item.a.toTuple();
+      auto bt = item.b.toTuple();
+      for (size_t i = 0; i < at->elements().size(); ++i) {
+        work.emplace_back(Work{at->elements().at(i), bt->elements().at(i)});
+      }
+    } else if (item.a.isGenericList()) {
+      auto al = item.a.toGenericList();
+      auto bl = item.b.toGenericList();
+      for (size_t i = 0; i < al.size(); ++i) {
+        work.emplace_back(Work{al.get(i), bl.get(i)});
+      }
+    } else if (item.a.isGenericDict()) {
+      auto ad = item.a.toGenericDict();
+      auto bd = item.b.toGenericDict();
+      for (auto& item : ad) {
+        // Dictionaory keys cannot contain List/Dicts that require tags
+        // so we do not have to check them.
+        // Furthermore without ordered dicts it is expensive to find the
+        // equivalent key
+        work.emplace_back(Work{item.value(), bd.at(item.key())});
+      }
+    } else if (item.a.isFuture()) {
+      auto af = item.a.toFuture();
+      auto bf = item.b.toFuture();
+      af->wait();
+      bf->wait();
+      work.emplace_back(Work{af->value(), bf->value()});
+    }
+  }
+
+  return true;
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -401,6 +467,19 @@ void initJitScriptBindings(PyObject* module) {
           },
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
+      .def(
+          "dump",
+          &Module::dump,
+          py::arg("code") = true,
+          py::arg("attrs") = true,
+          py::arg("params") = true)
+      .def(
+          "dump_to_str",
+          &Module::dump_to_str,
+          py::arg("code") = true,
+          py::arg("attrs") = true,
+          py::arg("params") = true,
+          py::arg("indent") = 0)
       .def(
           "_define",
           [](Module& m,
@@ -613,7 +692,7 @@ void initJitScriptBindings(PyObject* module) {
             cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
           });
 
-  py::class_<StrongFunctionPtr>(m, "Function", py::dynamic_attr())
+  py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
@@ -637,6 +716,14 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             Module module("__torch__.PlaceholderModule");
+            // [issue 27343]
+            // Modules have 'training' attributes by defualt, but due to
+            // https://github.com/pytorch/pytorch/issues/27343, functions end
+            // up having a training attribute when they are loaded. This adds
+            // a fake 'training' attribute that shouldn't be used, but prevents
+            // jitter on saving and loading. Once that issue is fixed this can
+            // be deleted.
+            module.register_attribute("training", BoolType::get(), true);
             addFunctionToModule(module, self);
             module.save(filename, _extra_files);
           },
@@ -648,6 +735,8 @@ void initJitScriptBindings(PyObject* module) {
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
             Module module("__torch__.PlaceholderModule");
+            // see [issue 27343]
+            module.register_attribute("training", BoolType::get(), true);
             addFunctionToModule(module, self);
             module.save(buf, _extra_files);
             return py::bytes(buf.str());
@@ -737,7 +826,14 @@ void initJitScriptBindings(PyObject* module) {
         auto new_def = implementation_def.withDecl(overload_decl);
         return script_compile_function(name, new_def, defaults, std::move(rcb));
       });
-
+  m.def(
+      "_replace_overloaded_method_decl",
+      [](const Decl& overload_decl,
+         const Def& implementation_def,
+         const std::string& new_name) {
+        checkOverloadDecl(overload_decl, implementation_def.decl());
+        return implementation_def.withDecl(overload_decl).withName(new_name);
+      });
   m.def(
       "_create_function_from_trace",
       [](std::string qualname,
@@ -786,6 +882,14 @@ void initJitScriptBindings(PyObject* module) {
         }
         const auto self = SimpleSelf(classType);
         cu->define(classname, methodDefs, rcbs, &self);
+      });
+  m.def(
+      "_jit_script_interface_compile",
+      [](const std::string& qualifiedName,
+         const ClassDef& classDef,
+         ResolutionCallback rcb) {
+        get_python_cu()->define_interface(
+            c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb));
       });
 
   m.def("parse_type_comment", [](const std::string& comment) {
@@ -852,6 +956,7 @@ void initJitScriptBindings(PyObject* module) {
         auto fn = cu->create_function(std::move(name), graph);
         return StrongFunctionPtr(std::move(cu), fn);
       });
+  m.def("_ivalue_tags_match", ivalue_tags_match);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())
@@ -905,6 +1010,12 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+
+  m.def(
+      "_resolve_type",
+      [](const std::string& name, SourceRange range, ResolutionCallback rcb) {
+        return pythonResolver(rcb)->resolveType(name, range);
+      });
 
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");

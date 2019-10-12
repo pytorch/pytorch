@@ -1,0 +1,28 @@
+caffe2_params: &caffe2_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    build_ios:
+      type: string
+      default: ""
+    docker_image:
+      type: string
+      default: ""
+    use_cuda_docker_runtime:
+      type: string
+      default: ""
+    build_only:
+      type: string
+      default: ""
+    resource_class:
+      type: string
+      default: "large"
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    BUILD_IOS: << parameters.build_ios >>
+    USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
+    DOCKER_IMAGE: << parameters.docker_image >>
+    BUILD_ONLY: << parameters.build_only >>
+  resource_class: << parameters.resource_class >>
+

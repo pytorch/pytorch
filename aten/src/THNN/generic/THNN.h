@@ -342,44 +342,6 @@ TH_API void THNN_(IndexLinear_updateParameters)(
           accreal weightDecay,
           accreal learningRate);
 
-TH_API void THNN_(TemporalRowConvolution_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW,
-          int dW,
-          int padW,
-          bool featFirst);
-TH_API void THNN_(TemporalRowConvolution_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *weight,
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW,
-          int dW,
-          int padW,
-          bool featFirst);
-TH_API void THNN_(TemporalRowConvolution_accGradParameters)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradWeight,
-          THTensor *gradBias,
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW,
-          int dW,
-          int padW,
-          bool featFirst,
-          accreal scale);
-
 TH_API void THNN_(SpatialConvolutionMM_updateGradInput)(
           THNNState *state,
           THTensor *input,

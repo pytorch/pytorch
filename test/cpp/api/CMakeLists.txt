@@ -5,13 +5,16 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/any.cpp
   ${TORCH_API_TEST_DIR}/dataloader.cpp
   ${TORCH_API_TEST_DIR}/expanding-array.cpp
+  ${TORCH_API_TEST_DIR}/functional.cpp
   ${TORCH_API_TEST_DIR}/integration.cpp
   ${TORCH_API_TEST_DIR}/init.cpp
   ${TORCH_API_TEST_DIR}/jit.cpp
   ${TORCH_API_TEST_DIR}/memory.cpp
   ${TORCH_API_TEST_DIR}/misc.cpp
   ${TORCH_API_TEST_DIR}/module.cpp
+  ${TORCH_API_TEST_DIR}/modulelist.cpp
   ${TORCH_API_TEST_DIR}/modules.cpp
+  ${TORCH_API_TEST_DIR}/nn_utils.cpp
   ${TORCH_API_TEST_DIR}/optim.cpp
   ${TORCH_API_TEST_DIR}/ordered_dict.cpp
   ${TORCH_API_TEST_DIR}/rnn.cpp

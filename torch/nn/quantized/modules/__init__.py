@@ -2,7 +2,7 @@
 
 from torch.nn.modules.pooling import MaxPool2d
 
-from .activation import ReLU
+from .activation import ReLU, ReLU6
 from .conv import Conv2d
 from .linear import Linear
 from .linear import Quantize
@@ -17,6 +17,7 @@ __all__ = [
     'MaxPool2d',
     'Quantize',
     'ReLU',
+    'ReLU6',
     # Wrapper modules
     'FloatFunctional',
     'QFunctional',

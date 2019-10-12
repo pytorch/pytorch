@@ -11,6 +11,7 @@ import torch.jit._logging
 import torch.jit.frontend
 import torch.jit.quantized
 import zipfile
+import functools
 
 # Testing utils
 from common_utils import TestCase, IS_WINDOWS, \
@@ -37,6 +38,10 @@ def execWrapper(code, glob, loc):
         exec(code) in glob, loc
     else:
         exec(code, glob, loc)
+
+
+def do_input_map(fn, input):
+    return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
 
 
 class JitTestCase(TestCase):
@@ -133,6 +138,7 @@ class JitTestCase(TestCase):
                 buffer_copy = buffer.getvalue()
 
                 code_files, debug_files = extract_files(buffer)
+
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
                     raise
@@ -153,10 +159,14 @@ class JitTestCase(TestCase):
             for a, b in zip(code_files, code_files_2):
                 self.assertMultiLineEqual(a, b)
 
+            if isinstance(m, torch._C.ScriptModule):
+                self.assertTrue(torch._C._ivalue_tags_match(m, imported._c))
+
 
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
-        if func.name == "<lambda>" or "aten::" in func.name or not _inline_everything:
+        inline_everything = torch._C._jit_get_inline_everything_mode()
+        if func.name == "<lambda>" or "aten::" in func.name or not inline_everything:
             return
         self._compared_saved_loaded(func)
 
@@ -314,6 +324,7 @@ class JitTestCase(TestCase):
                     inputs,
                     name='func',
                     optimize=True,
+                    inputs_requires_grad=False,
                     capture_output=False,
                     frames_up=1):
         with torch.jit.optimized_execution(optimize):
@@ -345,15 +356,20 @@ class JitTestCase(TestCase):
                 scripted_fn = torch.jit.script(script, _frames_up=1)
                 python_fn = script
 
+            if inputs_requires_grad:
+                recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
+            else:
+                recording_inputs = inputs
+
             if capture_output:
                 with self.capture_stdout() as script_stdout:
-                    script_outputs = scripted_fn(*inputs)
+                    script_outputs = scripted_fn(*recording_inputs)
                 with self.capture_stdout() as _python_stdout:
                     python_outputs = python_fn(*inputs)
                 if not IS_WINDOWS:
                     self.assertExpected(script_stdout[0], subname='stdout')
             else:
-                script_outputs = scripted_fn(*inputs)
+                script_outputs = scripted_fn(*recording_inputs)
                 python_outputs = python_fn(*inputs)
             self.assertEqual(python_outputs, script_outputs)
 
@@ -374,9 +390,6 @@ class JitTestCase(TestCase):
             return sum(math.log(i + 2) * v.sum() for i, v in enumerate(vs) if v is not None)
         if input_tensors is None:
             input_tensors = reference_tensors
-
-        def do_input_map(fn, input):
-            return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
 
         def flatten_inputs(inputs):
             def input_reduce(input, fn, acc):
@@ -479,6 +492,24 @@ class JitTestCase(TestCase):
             results = func(*inputs, **kwargs)
         return results
 
+    def checkModule(self, nn_module, args):
+        """
+        Check that a nn.Module's results in Script mode match eager and that it
+        can be exported
+        """
+        sm = torch.jit.script(nn_module)
+
+        with freeze_rng_state():
+            eager_out = nn_module(*args)
+
+        with freeze_rng_state():
+            script_out = sm(*args)
+
+        self.assertEqual(eager_out, script_out)
+        self.assertExportImportModule(sm, args)
+
+        return sm
+
 @contextmanager
 def enable_profiling_mode():
     torch._C._jit_set_profiling_mode(True)
@@ -487,17 +518,13 @@ def enable_profiling_mode():
     finally:
         torch._C._jit_set_profiling_mode(False)
 
-_inline_everything = True
 @contextmanager
-def disable_inline_everything_mode():
-    global _inline_everything
-    old = _inline_everything
-    _inline_everything = False
-    torch._C._jit_set_inline_everything_mode(False)
+def inline_everything_mode(should_inline):
+    old = torch._C._jit_get_inline_everything_mode()
+    torch._C._jit_set_inline_everything_mode(should_inline)
     try:
         yield
     finally:
-        _inline_everything = old
         torch._C._jit_set_inline_everything_mode(old)
 
 
@@ -510,6 +537,21 @@ def disable_autodiff_subgraph_inlining(enabled=True):
     finally:
         torch._C._debug_set_autodiff_subgraph_inlining(True)
 
+def _inline_everything(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with inline_everything_mode(True):
+            fn(*args, **kwargs)
+    return wrapper
+
+# this exists for forward compatibility reasons temporarily.
+# TODO(suo) remove
+def _tmp_donotuse_dont_inline_everything(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with inline_everything_mode(False):
+            fn(*args, **kwargs)
+    return wrapper
 
 # make it easy to quicky define/trace a function for these tests
 def _trace(*args, **kwargs):
@@ -537,3 +579,12 @@ def enable_cpu_fuser_if(cond):
                 return fn(*args, **kwargs)
             return wrapper
         return noop_fuser
+
+def get_forward(c):
+    return c._get_method('forward')
+
+def get_forward_graph(c):
+    return c._get_method('forward').graph
+
+def get_module_method(m, module, method):
+    return m._c._get_module(module)._get_method(method)

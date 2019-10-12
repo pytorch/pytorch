@@ -24,7 +24,7 @@ static auto registry = c10::RegisterOperators().op(
     c10::RegisterOperators::options()
       .kernel<
         decltype(stop_gradient_op_cpu_impl<float>),
-        &stop_gradient_op_cpu_impl<float>>(CPUTensorId()));
+        &stop_gradient_op_cpu_impl<float>>(TensorTypeId::CPUTensorId));
 
 } // namespace
 

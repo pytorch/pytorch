@@ -160,7 +160,7 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
 static inline void batchCheckErrors(const Tensor& infos, const char* name) {
   auto batch_size = infos.numel();
   auto infos_cpu = infos.to(at::kCPU);
-  auto infos_data = infos_cpu.data<int>();
+  auto infos_data = infos_cpu.data_ptr<int>();
   for (int64_t i = 0; i < batch_size; i++) {
     auto info = infos_data[i];
     if (info < 0) {
@@ -197,7 +197,7 @@ static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   }
 }
 
-static inline std::tuple<Tensor,Tensor> _linear_solve_broadcast_args(const Tensor& arg1, const Tensor& arg2, const char* name) {
+static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
   linearSolveCheckInputs(arg1, arg2, name);
 
   // broadcast the batch dimensions of arg1 and arg2.
