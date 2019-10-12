@@ -16,13 +16,13 @@ from torch.distributed.rpc import RpcBackend
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 
 
-def requires_process_group_agent(func):
-    from torch.distributed.rpc.api import _agent
-
-    return unittest.skipUnless(
-        isinstance(_agent, ProcessGroupAgent),
-        "Only ProcessGroupAgent supports global termination detection",
-    )
+def requires_process_group_agent(message=""):
+    def decorator(old_func):
+        return unittest.skipUnless(
+            TEST_CONFIG.backend == RpcBackend.PROCESS_GROUP,
+            message,
+        )(old_func)
+    return decorator
 
 
 VALUE_FUTURE = concurrent.futures.Future()
@@ -236,10 +236,7 @@ class RpcTest(object):
         )
         rpc.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
 
-    @unittest.skipIf(
-        TEST_CONFIG.backend != RpcBackend.PROCESS_GROUP,
-        "PROCESS_GROUP rpc backend specific test, skip",
-    )
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_duplicate_name(self):
         dist.init_process_group(backend="gloo", init_method=self.init_method)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
@@ -604,39 +601,6 @@ class RpcTest(object):
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
         self.assertEqual(rref.to_here(), torch.ones(n, n) * 2)
-
-    @dist_init
-    def test_asymmetric_load_with_join(self):
-        """Test graceful termination."""
-        # worker0 drives and waits for worker1 and worker2
-        # throughout the test.
-        if self.rank == 0:
-            assert self.world_size >= 3
-
-            num_repeat = 200
-            futs = []
-
-            # Phase 1: Only worker1 has workload.
-            dst = "worker1"
-            for _ in range(num_repeat):
-                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
-                futs.append(fut)
-
-            for fut in futs:
-                fut.wait()
-                self.assertEqual(fut.wait(), 0)
-
-            # Phase 2: Only worker2 has workload.
-            # If join is not correctly implemented,
-            # worker2 should be closed by now.
-            dst = "worker2"
-            for _ in range(num_repeat):
-                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
-                futs.append(fut)
-
-            for fut in futs:
-                fut.wait()
-                self.assertEqual(fut.wait(), 0)
 
     def _test_multi_remote_call(self, fn, args_fn=lambda x: (), kwargs_fn=lambda x: {}):
         m = 10
