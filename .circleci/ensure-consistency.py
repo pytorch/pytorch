@@ -35,5 +35,3 @@ def check_consistency():
         os.remove(temp_filename)
 
 
-if __name__ == "__main__":
-    check_consistency()
