@@ -15358,6 +15358,17 @@ a")
 
 
 class TestRecursiveScript(JitTestCase):
+    def test_inferred_nonetype(self):
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.x = None
+
+            def forward(self):
+                assert self.x is None
+
+        self.checkModule(M(), ())
+
     def test_init_error(self):
         class M(nn.Module):
             def __init__(self):
