@@ -146,8 +146,6 @@ Tensor LogSoftmaxImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
-Softmax2dImpl::Softmax2dImpl() {}
-
 void Softmax2dImpl::reset() {}
 
 void Softmax2dImpl::pretty_print(std::ostream& stream) const {

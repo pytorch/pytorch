@@ -187,8 +187,6 @@ TORCH_MODULE(LogSoftmax);
 /// about the exact behavior of this module.
 class TORCH_API Softmax2dImpl : public torch::nn::Cloneable<Softmax2dImpl> {
  public:
-  Softmax2dImpl();
-
   Tensor forward(const Tensor& input);
 
   void reset() override;
