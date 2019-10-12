@@ -18,7 +18,7 @@
 #ifdef USE_LAPACK
 
 // gesv
-extern "C" void zgesv_(int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info); 
+extern "C" void zgesv_(int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info);
 extern "C" void cgesv_(int *n, int *nrhs, std::complex<float> *a, int *lda, int *ipiv, std::complex<float> *b, int *ldb, int *info);
 extern "C" void dgesv_(int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
 extern "C" void sgesv_(int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
@@ -413,7 +413,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
   int lwork = -1;
   scalar_t wkopt;
   lapackGetri<scalar_t>(n, self_data, n, ipiv_data, &wkopt, lwork, &info);
-  lwork = static_cast<int>(zabs<scalar_t, value_t>(wkopt));
+  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
 
@@ -872,7 +872,7 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
   int lwork = -1;
   scalar_t wkopt;
   lapackGeqrf<scalar_t>(m, n, self_data, m, tau_data, &wkopt, lwork, &info);
-  lwork = static_cast<int>(zabs<scalar_t, value_t>(wkopt));
+  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
   for (int64_t i = 0; i < batch_size; i++) {
@@ -910,7 +910,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
   int lwork = -1;
   scalar_t wkopt;
   lapackOrgqr<scalar_t>(m, n_columns, k, self_data, m, tau_data, &wkopt, lwork, &info);
-  lwork = static_cast<int>(zabs<scalar_t, value_t>(wkopt));
+  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
   for (int64_t i = 0; i < batch_size; i++) {
@@ -1030,7 +1030,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
   int lwork = -1;
   scalar_t wkopt;
   lapackSymeig<scalar_t>(jobz, uplo, n, self_data, n, eigvals_data, &wkopt, lwork, &info);
-  lwork = static_cast<int>(zabs<scalar_t, value_t>(wkopt));
+  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
 
   for (int64_t i = 0; i < batch_size; i++) {
@@ -1110,11 +1110,19 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   int info;
   auto m = self.size(-2);
   auto n = self.size(-1);
-  auto k = std::min(m, n);
-  int64_t lrwork = jobz == 'N' ? 5*k : k*std::max(5*k+7,2*std::max(m,n)+2*k+1);
-  Tensor rwork = at::empty({lrwork}, at::kInt);
+  auto mn = std::min(m, n);
+  auto mx = std::max(m, n);
+  int64_t lrwork; // These settings are based on LAPACK 3.8.
+  if (jobz == 'N'){
+    lrwork = 5*mn;
+  }else if (mx > 10*mn){
+    lrwork = 5*mn*mn + 5*mn;
+  } else {
+    lrwork = std::max(5*mn*mn + 5*mn, 2*mx*mn + 2*mn*mn + mn);
+  }
+  Tensor rwork = at::empty({std::max(int64_t(1), lrwork)}, at::kInt);
   auto rwork_data = rwork.data_ptr<int>();
-  Tensor iwork = at::empty({8 * k}, at::kInt);
+  Tensor iwork = at::empty({8*mn}, at::kInt);
   auto iwork_data = iwork.data_ptr<int>();
 
   // Run once, first to get the optimum work size.
@@ -1124,7 +1132,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   int lwork = -1;
   scalar_t wkopt;
   lapackSvd<scalar_t, value_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, rwork_data, iwork_data, &info);
-  lwork = static_cast<int>(zabs<scalar_t, value_t>(wkopt));
+  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
 

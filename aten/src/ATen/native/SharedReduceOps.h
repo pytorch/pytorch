@@ -3,7 +3,6 @@
 // used across both CPU and GPU.
 
 #include <c10/macros/Macros.h>
-#include <ATen/native/cpu/zmath.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/NumericUtils.h>
 #if defined(__CUDACC__)
