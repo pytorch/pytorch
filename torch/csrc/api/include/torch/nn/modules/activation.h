@@ -227,44 +227,6 @@ class TORCH_API PReLUImpl : public torch::nn::Cloneable<PReLUImpl> {
 };
 
 TORCH_MODULE(PReLU);
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiheadAttention ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-/// Applies the MultiheadAttention function element-wise.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.MultiheadAttention
-/// to learn about the exact behavior of this module.
-class TORCH_API MultiheadAttentionImpl
-  : public torch::nn::Cloneable<MultiheadAttentionImpl> {
- public:
-  MultiheadAttentionImpl(int64_t embed_dim, int64_t num_heads)
-      : MultiheadAttentionImpl(MultiheadAttentionOptions(embed_dim, num_heads)) {}
-  explicit MultiheadAttentionImpl(const MultiheadAttentionOptions& options_);
-
-  Tensor forward(const Tensor& query, const Tensor& key, const Tensor& value,
-                 const c10::optional<Tensor>& key_padding_mask = c10::nullopt,
-                 bool need_weights = true,
-                 const c10::optional<Tensor>& attn_mask = c10::nullopt);
-
-  void reset() override;
-
-  /// Pretty prints the `MultiheadAttention` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
-
-  /// The options with which this `Module` was constructed.
-  MultiheadAttentionOptions options;
-
- private:
-  bool _qkv_same_embed_dim;
-  Tensor in_proj_weight;
-  Tensor in_proj_bias;
-  Tensor bias_k;
-  Tensor bias_v;
-  Linear out_proj = nullptr;
-  Tensor q_proj_weight;
-  Tensor k_proj_weight;
-  Tensor v_proj_weight;
-};
-
-TORCH_MODULE(MultiheadAttention);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -489,6 +451,45 @@ class TORCH_API ThresholdImpl : public torch::nn::Cloneable<ThresholdImpl> {
 };
 
 TORCH_MODULE(Threshold);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiheadAttention ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the MultiheadAttention function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MultiheadAttention
+/// to learn about the exact behavior of this module.
+class TORCH_API MultiheadAttentionImpl
+  : public torch::nn::Cloneable<MultiheadAttentionImpl> {
+ public:
+  MultiheadAttentionImpl(int64_t embed_dim, int64_t num_heads)
+      : MultiheadAttentionImpl(MultiheadAttentionOptions(embed_dim, num_heads)) {}
+  explicit MultiheadAttentionImpl(const MultiheadAttentionOptions& options_);
+
+  Tensor forward(const Tensor& query, const Tensor& key,
+                 const Tensor& value, const Tensor& key_padding_mask = {},
+                 bool need_weights = true, const Tensor& attn_mask = {});
+
+  void reset() override;
+
+  /// Pretty prints the `MultiheadAttention` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  MultiheadAttentionOptions options;
+
+ private:
+  bool _qkv_same_embed_dim;
+  Tensor in_proj_weight;
+  Tensor in_proj_bias;
+  Tensor bias_k;
+  Tensor bias_v;
+  Linear out_proj = nullptr;
+  Tensor q_proj_weight;
+  Tensor k_proj_weight;
+  Tensor v_proj_weight;
+  int head_dim;
+};
+
+TORCH_MODULE(MultiheadAttention);
 
 } // namespace nn
 } // namespace torch

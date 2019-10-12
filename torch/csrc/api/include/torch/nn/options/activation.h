@@ -135,45 +135,6 @@ struct TORCH_API RReLUOptions {
 
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace) = false;
-}
-
-// ============================================================================
-
-/// Options for MultiheadAttention functional and module.
-struct MultiheadAttentionOptions {
-  MultiheadAttentionOptions(int64_t embed_dim, int64_t num_heads)
-    : embed_dim_(embed_dim), num_heads_(num_heads) {
-    if (!kdim_) {
-      kdim_ = embed_dim;
-    }
-    if (!vdim_) {
-      vdim_ = embed_dim;
-    }
-  }
-
-  /// total dimension of the model.
-  TORCH_ARG(int64_t, embed_dim);
-
-  /// parallel attention heads.
-  TORCH_ARG(int64_t, num_heads);
-
-  /// a Dropout layer on attn_output_weights. Default: 0.0.
-  TORCH_ARG(double, dropout) = 0.0;
-
-  /// add bias as module parameter. Default: true.
-  TORCH_ARG(bool, bias) = true;
-
-  /// add bias to the key and value sequences at dim=0.
-  TORCH_ARG(bool, add_bias_kv) = false;
-
-  /// add a new batch of zeros to the key and value sequences at dim=1.
-  TORCH_ARG(bool, add_zero_attn) = false;
-
-  /// total number of features in key. Default: c10::nullopt.
-  TORCH_ARG(c10::optional<int64_t>, kdim) = c10::nullopt;
-
-  /// total number of features in key. Default: c10::nullopt.
-  TORCH_ARG(c10::optional<int64_t>, vdim) = c10::nullopt;
 };
 
 // ============================================================================
@@ -223,6 +184,116 @@ struct ThresholdOptions {
 
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace) = false;
+};
+
+// ============================================================================
+
+/// Options for MultiheadAttention functional and module.
+struct MultiheadAttentionOptions {
+  MultiheadAttentionOptions(int64_t embed_dim, int64_t num_heads)
+    : embed_dim_(embed_dim), num_heads_(num_heads) {
+    if (!kdim_) {
+      kdim_ = embed_dim;
+    }
+    if (!vdim_) {
+      vdim_ = embed_dim;
+    }
+  }
+
+  /// total dimension of the model.
+  TORCH_ARG(int64_t, embed_dim);
+
+  /// parallel attention heads.
+  TORCH_ARG(int64_t, num_heads);
+
+  /// a Dropout layer on attn_output_weights. Default: 0.0.
+  TORCH_ARG(double, dropout) = 0.0;
+
+  /// add bias as module parameter. Default: true.
+  TORCH_ARG(bool, bias) = true;
+
+  /// add bias to the key and value sequences at dim=0.
+  TORCH_ARG(bool, add_bias_kv) = false;
+
+  /// add a new batch of zeros to the key and value sequences at dim=1.
+  TORCH_ARG(bool, add_zero_attn) = false;
+
+  /// total number of features in key. Default: c10::nullopt.
+  TORCH_ARG(c10::optional<int64_t>, kdim) = c10::nullopt;
+
+  /// total number of features in key. Default: c10::nullopt.
+  TORCH_ARG(c10::optional<int64_t>, vdim) = c10::nullopt;
+};
+
+// ============================================================================
+
+/// Options for `torch::nn::functional::multi_head_attention_forward()`
+struct MultiheadAttentionForwardOptions {
+
+  MultiheadAttentionForwardOptions(
+    Tensor query, Tensor key, Tensor value,
+    int64_t embed_dim_to_check, int64_t num_heads,
+    Tensor in_proj_weight, Tensor in_proj_bias,
+    Tensor bias_k, Tensor bias_v,
+    bool add_zero_attn, double dropout_p,
+    Tensor out_proj_weight, Tensor out_proj_bias,
+    bool training = true,
+    Tensor key_padding_mask = {},
+    bool need_weights = true,
+    Tensor attn_mask = {},
+    bool use_separate_proj_weight = false,
+    Tensor q_proj_weight = {},
+    Tensor k_proj_weight = {},
+    Tensor v_proj_weight = {},
+    Tensor static_k = {},
+    Tensor static_v = {}
+  );
+
+  TORCH_ARG(Tensor, query);
+
+  TORCH_ARG(Tensor, key);
+
+  TORCH_ARG(Tensor, value);
+
+  TORCH_ARG(int64_t, embed_dim_to_check);
+
+  TORCH_ARG(int64_t, num_heads);
+
+  TORCH_ARG(Tensor, in_proj_weight);
+
+  TORCH_ARG(Tensor, in_proj_bias);
+
+  TORCH_ARG(Tensor, bias_k);
+
+  TORCH_ARG(Tensor, bias_v);
+
+  TORCH_ARG(bool, add_zero_attn);
+
+  TORCH_ARG(double, dropout_p);
+
+  TORCH_ARG(Tensor, out_proj_weight);
+
+  TORCH_ARG(Tensor, out_proj_bias);
+
+  TORCH_ARG(bool, training);
+
+  TORCH_ARG(Tensor, key_padding_mask);
+
+  TORCH_ARG(bool, need_weights);
+
+  TORCH_ARG(Tensor, attn_mask);
+
+  TORCH_ARG(bool, use_separate_proj_weight);
+
+  TORCH_ARG(Tensor, q_proj_weight);
+
+  TORCH_ARG(Tensor, k_proj_weight);
+
+  TORCH_ARG(Tensor, v_proj_weight);
+
+  TORCH_ARG(Tensor, static_k);
+
+  TORCH_ARG(Tensor, static_v);
 };
 
 } // namespace nn
