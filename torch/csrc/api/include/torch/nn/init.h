@@ -28,6 +28,28 @@ using FanMode = c10::variant<
   enumtype::kFanOut
 >;
 
+} // namespace init
+} // nn
+
+// TODO: Remove the declarations here in https://github.com/pytorch/pytorch/pull/26837.
+TORCH_API extern const nn::init::Nonlinearity kLinear;
+TORCH_API extern const nn::init::Nonlinearity kConv1D;
+TORCH_API extern const nn::init::Nonlinearity kConv2D;
+TORCH_API extern const nn::init::Nonlinearity kConv3D;
+TORCH_API extern const nn::init::Nonlinearity kConvTranspose1D;
+TORCH_API extern const nn::init::Nonlinearity kConvTranspose2D;
+TORCH_API extern const nn::init::Nonlinearity kConvTranspose3D;
+TORCH_API extern const nn::init::Nonlinearity kSigmoid;
+TORCH_API extern const nn::init::Nonlinearity kTanh;
+TORCH_API extern const nn::init::Nonlinearity kReLU;
+TORCH_API extern const nn::init::Nonlinearity kLeakyReLU;
+
+TORCH_API extern const nn::init::FanMode kFanIn;
+TORCH_API extern const nn::init::FanMode kFanOut;
+
+namespace nn {
+namespace init {
+
 /// Return the recommended gain value for the given nonlinearity function.
 TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
 

@@ -85,7 +85,7 @@ Tensor qnnpack_relu(Tensor input) {
 
 Tensor quantized_relu(const Tensor& qx) {
   #ifdef USE_PYTORCH_QNNPACK
-  if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
     return qnnpack_relu(qx);
   }
   #endif

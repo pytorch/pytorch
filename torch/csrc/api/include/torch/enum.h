@@ -36,3 +36,28 @@ TORCH_ENUM_DECLARE(ReLU)
 TORCH_ENUM_DECLARE(LeakyReLU)
 TORCH_ENUM_DECLARE(FanIn)
 TORCH_ENUM_DECLARE(FanOut)
+
+#define TORCH_ENUM_PRETTY_PRINT(name) \
+std::string operator()(enumtype::k##name& v) const { \
+  return #name; \
+}
+
+namespace torch {
+namespace enumtype {
+struct enum_name {
+  TORCH_ENUM_PRETTY_PRINT(Linear)
+  TORCH_ENUM_PRETTY_PRINT(Conv1D)
+  TORCH_ENUM_PRETTY_PRINT(Conv2D)
+  TORCH_ENUM_PRETTY_PRINT(Conv3D)
+  TORCH_ENUM_PRETTY_PRINT(ConvTranspose1D)
+  TORCH_ENUM_PRETTY_PRINT(ConvTranspose2D)
+  TORCH_ENUM_PRETTY_PRINT(ConvTranspose3D)
+  TORCH_ENUM_PRETTY_PRINT(Sigmoid)
+  TORCH_ENUM_PRETTY_PRINT(Tanh)
+  TORCH_ENUM_PRETTY_PRINT(ReLU)
+  TORCH_ENUM_PRETTY_PRINT(LeakyReLU)
+  TORCH_ENUM_PRETTY_PRINT(FanIn)
+  TORCH_ENUM_PRETTY_PRINT(FanOut)
+};
+} // namespace enumtype
+} // namespace torch
