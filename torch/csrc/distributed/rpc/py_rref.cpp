@@ -79,7 +79,7 @@ py::object PyRRef::localValue() {
   TORCH_CHECK(
       rref_->isOwner(),
       "Cannot call localValue() on a non-local reference. Call it on ",
-      RRefContext::getInstance()->getWorkerName());
+      RRefContext::getInstance().getWorkerName());
 
   if (rref_->isPyObj()) {
     const py::object& value =
@@ -109,7 +109,7 @@ py::tuple PyRRef::pickle() const {
   // install the dispatch table only when there are indeed RPC activities. As
   // a counter example, checkpointing a model with RRefs should not trigger
   // forks to be added as a fork or a child.
-  auto rfd = ctx->prepareChildFork(rref_);
+  auto rfd = ctx.prepareChildFork(rref_);
   return py::make_tuple(rfd.toPyTuple(), rref_->isPyObj());
 }
 
@@ -121,12 +121,12 @@ PyRRef PyRRef::unpickle(const py::tuple& t) {
   std::shared_ptr<RRef> rref = nullptr;
   bool isPyObj = t[TYPE_IDX].cast<bool>();
   if (isPyObj) {
-    rref = ctx->getOrCreateRRef<py::object>(rfd);
+    rref = ctx.getOrCreateRRef<py::object>(rfd);
   } else {
-    rref = ctx->getOrCreateRRef<IValue>(rfd);
+    rref = ctx.getOrCreateRRef<IValue>(rfd);
   }
 
-  ctx->notifyOwnerAndParentOfFork(rfd.forkId_, rfd.parent_, rref);
+  ctx.notifyOwnerAndParentOfFork(rfd.forkId_, rfd.parent_, rref);
   return PyRRef(std::move(rref));
 }
 
