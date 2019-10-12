@@ -746,6 +746,36 @@ TEST_F(ModulesTest, Fold) {
   ASSERT_EQ(y.size(3), 5);
 }
 
+TEST_F(ModulesTest, Unfold) {
+  {
+    Unfold model(UnfoldOptions({2, 4}));
+    auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
+    auto output = model(input);
+    auto expected_sizes = torch::IntArrayRef({2, 16, 3});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(output.sizes(), expected_sizes);
+    ASSERT_EQ(s.ndimension(), 0);
+  }
+  {
+    // input wrong dimension
+    Unfold model(UnfoldOptions({2, 4}));
+    ASSERT_THROWS_WITH(
+        model(torch::randn({1, 5, 2})),
+        "Input Error: Only 4D input Tensors are supported (got 3D)");
+  }
+  {
+    // calculated output shape is too small
+    Unfold model(UnfoldOptions({2, 3}));
+    ASSERT_THROWS_WITH(
+        model(torch::randn({1, 2, 2, 2})),
+        "Given input with spatial size (2, 2), kernel_size=(2, 3), "
+        "dilation=(1, 1), padding=(0, 0), calculated shape of the array of "
+        "sliding blocks as (1, 0), which is too small (non-positive).");
+  }
+}
+
 TEST_F(ModulesTest, SimpleContainer) {
   auto model = std::make_shared<SimpleContainer>();
   auto l1 = model->add(Linear(10, 3), "l1");
@@ -1353,6 +1383,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintUnfold) {
+  ASSERT_EQ(
+      c10::str(Unfold(torch::IntArrayRef({2, 4}))),
+      "torch::nn::Unfold(kernel_size=[2, 4], dilation=[1, 1], padding=[0, 0], stride=[1, 1])");
+  ASSERT_EQ(
+      c10::str(Unfold(UnfoldOptions({2, 4}).dilation(2).padding({2, 1}).stride(2))),
+      "torch::nn::Unfold(kernel_size=[2, 4], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
 }
 
 TEST_F(ModulesTest, PrettyPrintMaxPool) {

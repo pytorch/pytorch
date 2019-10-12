@@ -725,3 +725,11 @@ TEST_F(FunctionalTest, SoftplusDefaultOptions) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
+
+TEST_F(FunctionalTest, Unfold) {
+  auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
+  auto output = F::unfold(input, UnfoldOptions({2, 4}).padding(1).stride(2));
+  auto expected_sizes = torch::IntArrayRef({2, 16, 6});
+
+  ASSERT_EQ(output.sizes(), expected_sizes);
+}
