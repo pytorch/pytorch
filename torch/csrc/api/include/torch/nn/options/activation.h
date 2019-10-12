@@ -67,7 +67,27 @@ struct TORCH_API LeakyReLUOptions {
 struct TORCH_API SoftmaxOptions {
   SoftmaxOptions(int64_t dim);
 
-  // Dimension along which Softmax will be computed.
+  /// Dimension along which Softmax will be computed.
+  TORCH_ARG(int64_t, dim);
+};
+
+// ============================================================================
+
+/// Options for the Softmin functional and module.
+struct TORCH_API SoftminOptions {
+  SoftminOptions(int64_t dim);
+
+  /// Dimension along which Softmin will be computed.
+  TORCH_ARG(int64_t, dim);
+};
+
+// ============================================================================
+
+/// Options for the LogSoftmax functional and module.
+struct TORCH_API LogSoftmaxOptions {
+  LogSoftmaxOptions(int64_t dim);
+
+  /// Dimension along which LogSoftmax will be computed.
   TORCH_ARG(int64_t, dim);
 };
 
@@ -91,6 +111,62 @@ struct TORCH_API ReLUOptions {
 
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace);
+};
+
+// ============================================================================
+
+/// Options for ReLU6 functional and module.
+struct TORCH_API ReLU6Options {
+  /* implicit */ ReLU6Options(bool inplace = false);
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace);
+};
+
+// ============================================================================
+
+/// Options for RReLU functional and module.
+struct TORCH_API RReLUOptions {
+  /// lower bound of the uniform distribution. Default: 1/8
+  TORCH_ARG(double, lower) = 1.0 / 8.0;
+
+  /// upper bound of the uniform distribution. Default: 1/3
+  TORCH_ARG(double, upper) = 1.0 / 3.0;
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
+};
+
+// ============================================================================
+
+/// Options for CELU functional and module.
+struct TORCH_API CELUOptions {
+  /// The `alpha` value for the CELU formulation. Default: 1.0
+  TORCH_ARG(double, alpha) = 1.0;
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
+};
+
+// ============================================================================
+
+/// Options for Softplus functional and module.
+struct TORCH_API SoftplusOptions {
+  /// the `beta` value for the Softplus formulation. Default: 1
+  TORCH_ARG(double, beta) = 1.0;
+
+  /// values above this revert to a linear function. Default: 20
+  TORCH_ARG(double, threshold) = 20.0;
+};
+
+// ============================================================================
+
+/// Options for Softshrink functional and module.
+struct TORCH_API SoftshrinkOptions {
+  /* implicit */ SoftshrinkOptions(double lambda = 0.5);
+
+  /// the `lambda` value for the Softshrink formulation. Default: 0.5
+  TORCH_ARG(double, lambda);
 };
 
 } // namespace nn
