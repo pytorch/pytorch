@@ -1917,16 +1917,19 @@ def is_scripting():
     Function that returns True when in compilation and False otherwise. This
     is useful especially with the @unused decorator to leave code in your
     model that is not yet TorchScript compatible.
+    .. testcode::
 
-    @torch.jit.unused
-    def unsupported_linear_op(x):
-        return x
+        import torch
 
-    def linear(x):
-       if not torch.jit.is_scripting():
-          return torch.linear(x)
-       else:
-          return unsupported_linear_op(x)
+        @torch.jit.unused
+        def unsupported_linear_op(x):
+            return x
+
+        def linear(x):
+           if not torch.jit.is_scripting():
+              return torch.linear(x)
+           else:
+              return unsupported_linear_op(x)
     """
     return False
 

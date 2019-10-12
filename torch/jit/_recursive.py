@@ -218,7 +218,7 @@ class ConcreteTypeStore(object):
         """
         assert isinstance(nn_module, Module)
         if isinstance(nn_module, torch.jit.ScriptModule) and \
-                not getattr(nn_module, "_initializing", True):
+                hasattr(nn_module, "_concrete_type"):
             return nn_module._concrete_type
 
         if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):

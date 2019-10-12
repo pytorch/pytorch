@@ -161,6 +161,51 @@ struct VISIBILITY_HIDDEN ConstantTupleMethod : public SugaredValue {
   const std::string name_;
 };
 
+struct VISIBILITY_HIDDEN OverloadedMethodValue : public SugaredValue {
+  OverloadedMethodValue(Value* module, std::vector<std::string> method_names)
+      : module_(module), method_names_(std::move(method_names)) {}
+
+  std::string kind() const override {
+    return "overloaded function";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+ private:
+  Value* module_;
+  std::vector<std::string> method_names_;
+};
+
+struct VISIBILITY_HIDDEN OverloadedFunctionValue : public SugaredValue {
+  OverloadedFunctionValue(std::vector<StrongFunctionPtr> compiled_overloads)
+      : compiled_overloads_(std::move(compiled_overloads)) {}
+
+  std::string kind() const override {
+    return "overloaded function";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+ private:
+  std::vector<StrongFunctionPtr> compiled_overloads_;
+};
+
+// defines how modules/methods behave inside the script subset.
+// for now this does not have any interaction with python.
+// in the future, we will add the ability to resolve `self.foo` to python
+// {functions, modules, contants} so this SugaredValue is defined here
+// anticipating we will eventually need to replace Module with a py::object
+// holding the actual nn.Module class.
 
 struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   ModuleValue(Value* self, std::shared_ptr<ConcreteModuleType> concreteType)
