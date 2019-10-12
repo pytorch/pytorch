@@ -37,7 +37,7 @@ void UnfoldImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Unfold(kernel_size=" << options.kernel_size()
          << ", dilation=" << options.dilation()
          << ", padding=" << options.padding()
-	 << ", stride=" << options.stride()
+         << ", stride=" << options.stride()
          << ")";
 }
 
