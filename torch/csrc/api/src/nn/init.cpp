@@ -87,6 +87,16 @@ double calculate_kaiming_std(
     double a,
     FanModeType mode,
     NonlinearityType nonlinearity) {
+  // Support for `torch::nn::init::FanMode` is deprecated and will be removed in 1.5.
+  if (c10::get_if<FanMode>(&mode)) {
+    return calculate_kaiming_std(
+      tensor,
+      a,
+      _compute_fanmode_type(c10::get<FanMode>(mode)),
+      nonlinearity
+    );
+  }
+
   NoGradGuard guard;
   Fan fan(tensor);
   const auto gain = calculate_gain(nonlinearity, a);
@@ -101,16 +111,19 @@ double calculate_kaiming_std(
 } // namespace
 
 double calculate_gain(NonlinearityType nonlinearity, double param) {
+  // Support for `torch::nn::init::Nonlinearity` is deprecated and will be removed in 1.5.
+  if (c10::get_if<Nonlinearity>(&nonlinearity)) {
+    return calculate_gain(
+      _compute_nonlinearity_type(c10::get<Nonlinearity>(nonlinearity)),
+      param);
+  }
+
   if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
     return 5.0 / 3.0;  // NOLINT
   } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {
     return std::sqrt(2.0);  // NOLINT
   } else if (c10::get_if<enumtype::kLeakyReLU>(&nonlinearity)) {
     return std::sqrt(2.0 / (1 + pow(param, 2)));  // NOLINT
-  } else if (c10::get_if<Nonlinearity>(&nonlinearity)) {
-    return calculate_gain(
-      _compute_nonlinearity_type(c10::get<Nonlinearity>(nonlinearity)),
-      param);
   }
 
   return 1.0;
