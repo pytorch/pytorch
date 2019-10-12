@@ -189,8 +189,16 @@ jobs:
       - name: Checkout PR tip
         run: |
           set -eux
-          git checkout ${GITHUB_HEAD_REF}
-          echo ::set-output name=commit_sha::$(git rev-parse ${GITHUB_HEAD_REF})
+          if [ -z "${GITHUB_HEAD_REF}" ]; then
+            # We are on master, just set the SHA from our current location
+            echo ::set-output name=commit_sha::${GITHUB_SHA}
+          else
+            # We are on a PR, so actions/checkout leaves us on merge commit.
+            # Check out the actual tip of the branch.
+            PR_TIP=$(git rev-parse HEAD^2)
+            git checkout ${PR_TIP}
+            echo ::set-output name=commit_sha::${PR_TIP}
+          fi
         id: get_pr_tip
       - name: Install dependencies
         run: |
