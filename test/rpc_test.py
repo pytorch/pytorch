@@ -829,7 +829,7 @@ class RpcTest(object):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     def test_sender_exceptions(self):
-        dist.init_process_group(backend="gloo", init_method=self.init_method, timeout=timedelta(seconds=5))
+        dist.init_process_group(backend="gloo", init_method=self.init_method, timeout=timedelta(seconds=10))
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
             backend=TEST_CONFIG.backend,
@@ -839,7 +839,7 @@ class RpcTest(object):
 
         if self.rank == 0:
             # allow worker 1 to exit without joining
-            time.sleep(0.5)
+            time.sleep(3)
             fut = rpc.rpc_async("worker1", torch.add, args=(torch.ones(1), 3))
             with self.assertRaises(RuntimeError):
                 fut.wait()
