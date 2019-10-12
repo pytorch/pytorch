@@ -316,8 +316,8 @@ class ModuleDict(Module):
             for key, module in modules.items():
                 self[key] = module
         elif isinstance(modules, container_abcs.Mapping):
-                for key, module in sorted(modules.items()):
-                    self[key] = module
+            for key, module in sorted(modules.items()):
+                self[key] = module
         else:
             for j, m in enumerate(modules):
                 if not isinstance(m, container_abcs.Iterable):
