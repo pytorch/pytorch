@@ -66,7 +66,7 @@ NonlinearityType _compute_nonlinearity_type(Nonlinearity nonlinearity) {
       TORCH_INTERNAL_ASSERT(
         false,
         "The enum class `torch::nn::init::Nonlinearity` is deprecated. ",
-        "Please don't add new enum values to it.")
+        "Please don't add any new enum value to it.")
   }
 }
 
@@ -78,7 +78,7 @@ FanModeType _compute_fanmode_type(FanMode fanmode) {
       TORCH_INTERNAL_ASSERT(
         false,
         "The enum class `torch::nn::init::FanMode` is deprecated. ",
-        "Please don't add new enum values to it.")
+        "Please don't add any new enum value to it.")
   }
 }
 
