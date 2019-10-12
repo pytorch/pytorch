@@ -34,6 +34,7 @@ class Conf:
     is_namedtensor: bool = False
     is_libtorch: bool = False
     is_important: bool = False
+    parallel_backend: Optional[str] = None
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
@@ -50,6 +51,8 @@ class Conf:
             leading.append("namedtensor")
         if self.is_libtorch and not for_docker:
             leading.append("libtorch")
+        if self.parallel_backend is not None and not for_docker:
+            leading.append(self.parallel_backend)
 
         cuda_parms = []
         if self.cuda_version:
@@ -228,6 +231,7 @@ def instantiate_configs():
         is_namedtensor = fc.find_prop("is_namedtensor") or False
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
+        parallel_backend = fc.find_prop("parallel_backend") or None
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -245,6 +249,7 @@ def instantiate_configs():
             is_namedtensor=is_namedtensor,
             is_libtorch=is_libtorch,
             is_important=is_important,
+            parallel_backend=parallel_backend,
         )
 
         if cuda_version == "9" and python_version == "3.6" and not is_libtorch:
@@ -253,7 +258,8 @@ def instantiate_configs():
         if (compiler_name == "gcc"
                 and compiler_version == "5.4"
                 and not is_namedtensor
-                and not is_libtorch):
+                and not is_libtorch
+                and parallel_backend is None):
             bc_breaking_check = Conf(
                 "backward-compatibility-check",
                 [],
