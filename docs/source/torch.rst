@@ -212,6 +212,7 @@ Pointwise Ops
 .. autofunction:: frac
 .. autofunction:: imag
 .. autofunction:: lerp
+.. autofunction:: lgamma
 .. autofunction:: log
 .. autofunction:: log10
 .. autofunction:: log1p

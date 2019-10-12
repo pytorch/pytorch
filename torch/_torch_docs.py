@@ -2537,6 +2537,26 @@ Example::
     tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
 """.format(**common_args))
 
+add_docstr(torch.lgamma,
+           r"""
+lgamma(input, out=None) -> Tensor
+
+Computes the logarithm of the gamma function on :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \log \Gamma(\text{input}_{i})
+""" + """
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.arange(0.5, 2, 0.5)
+    >>> torch.lgamma(a)
+    tensor([ 0.5724,  0.0000, -0.1208])
+""".format(**common_args))
+
 add_docstr(torch.linspace,
            r"""
 linspace(start, end, steps=100, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor

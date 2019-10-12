@@ -1497,6 +1497,19 @@ lerp_(end, weight) -> Tensor
 In-place version of :meth:`~Tensor.lerp`
 """)
 
+add_docstr_all('lgamma',
+               r"""
+lgamma() -> Tensor
+
+See :func:`torch.lgamma`
+""")
+
+add_docstr_all('lgamma_', r"""
+lgamma_() -> Tensor
+
+In-place version of :meth:`~Tensor.lgamma`
+""")
+
 add_docstr_all('log',
                r"""
 log() -> Tensor
