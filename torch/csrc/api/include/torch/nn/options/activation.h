@@ -159,5 +159,15 @@ struct TORCH_API SoftplusOptions {
   TORCH_ARG(double, threshold) = 20.0;
 };
 
+// ============================================================================
+
+/// Options for Softshrink functional and module.
+struct TORCH_API SoftshrinkOptions {
+  /* implicit */ SoftshrinkOptions(double lambda = 0.5);
+
+  /// the `lambda` value for the Softshrink formulation. Default: 0.5
+  TORCH_ARG(double, lambda);
+};
+
 } // namespace nn
 } // namespace torch
