@@ -241,7 +241,7 @@ class RpcTest(object):
         "PROCESS_GROUP rpc backend specific test, skip",
     )
     def test_duplicate_name(self):
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             rpc.init_model_parallel(
                 self_name="duplicate_name",
@@ -252,7 +252,7 @@ class RpcTest(object):
         rpc.join_rpc()
 
     def test_reinit(self):
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
         rpc.init_model_parallel(
             self_name="worker{}".format(self.rank),
             backend=TEST_CONFIG.backend,
@@ -279,7 +279,7 @@ class RpcTest(object):
 
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
             rpc.init_model_parallel(self_name="abc*")
