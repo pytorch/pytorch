@@ -186,10 +186,10 @@ struct AbsMaxOps {
 
 template <typename acc_t>
 struct NormOps {
-  acc_t norm;
+  acc_t norm_;
 
   inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return acc + compat_pow(std::abs(data), norm);
+    return acc + compat_pow(std::abs(data), norm_);
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -197,7 +197,7 @@ struct NormOps {
   }
 
   inline C10_DEVICE acc_t project(acc_t a) const {
-    return compat_pow(a, acc_t(1.0)/norm);
+    return compat_pow(a, acc_t(1.0)/norm_);
   }
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -206,7 +206,7 @@ struct NormOps {
   }
 #endif
 
-  NormOps(acc_t norm): norm(norm) {
+  NormOps(acc_t norm_): norm_(norm_) {
   }
 };
 
