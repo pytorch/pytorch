@@ -42,9 +42,6 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
 
   RpcCommandBase& wrappedRpc();
 
-  // Retrieve ther worker id from which the RPC originated.
-  rpc::worker_id_t fromWorkerId() const;
-
   // Message type of the wrapped RPC.
   rpc::MessageType wrappedMessageType() const;
 
