@@ -72,7 +72,7 @@ class BasePruningMethod(ABC):
 
         Args:
             module (nn.Module): module containing the tensor to prune
-            name (string): parameter name within `module` on which pruning
+            name (str): parameter name within `module` on which pruning
                 will act.
             args: arguments passed on to a subclass of `BasePruningMethod`
             kwargs: keyword arguments passed on to a subclass of a 
@@ -362,7 +362,7 @@ class IdentityPruningMethod(BasePruningMethod):
 
         Args:
             module (nn.Module): module containing the tensor to prune
-            name (string): parameter name within `module` on which pruning
+            name (str): parameter name within `module` on which pruning
                 will act.
         """
         return super(IdentityPruningMethod, cls).apply(module, name)
@@ -370,20 +370,19 @@ class IdentityPruningMethod(BasePruningMethod):
 
 class RandomPruningMethod(BasePruningMethod):
     r"""Prune units in a tensor at random.
+
+    Args:
+        name (str): parameter name within `module` on which pruning
+            will act.
+        amount (int or float): quantity of parameters to prune.
+            If float, should be between 0.0 and 1.0 and represent the
+            fraction of parameters to prune. If int, it represents the 
+            absolute number of parameters to prune.
     """
 
     PRUNING_TYPE = "unstructured"
 
     def __init__(self, amount):
-        r"""
-        Args:
-            name (string): parameter name within `module` on which pruning
-                will act.
-            amount (int or float): quantity of parameters to prune.
-                If float, should be between 0.0 and 1.0 and represent the
-                fraction of parameters to prune. If int, it represents the 
-                absolute number of parameters to prune.
-        """
         # Check range of validity of pruning amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -416,7 +415,7 @@ class RandomPruningMethod(BasePruningMethod):
 
         Args:
             module (nn.Module): module containing the tensor to prune
-            name (string): parameter name within `module` on which pruning
+            name (str): parameter name within `module` on which pruning
                 will act.
             amount (int or float): quantity of parameters to prune.
                 If float, should be between 0.0 and 1.0 and represent the
@@ -430,18 +429,17 @@ class RandomPruningMethod(BasePruningMethod):
 
 class L1PruningMethod(BasePruningMethod):
     r"""Prune units in a tensor by zeroing out the ones with the lowest L1-norm.
+
+    Args:
+        amount (int or float): quantity of parameters to prune.
+            If float, should be between 0.0 and 1.0 and represent the
+            fraction of parameters to prune. If int, it represents the 
+            absolute number of parameters to prune.
     """
 
     PRUNING_TYPE = "unstructured"
 
     def __init__(self, amount):
-        r"""
-        Args:
-            amount (int or float): quantity of parameters to prune.
-                If float, should be between 0.0 and 1.0 and represent the
-                fraction of parameters to prune. If int, it represents the 
-                absolute number of parameters to prune.
-        """
         # Check range of validity of pruning amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -478,7 +476,7 @@ class L1PruningMethod(BasePruningMethod):
 
         Args:
             module (nn.Module): module containing the tensor to prune
-            name (string): parameter name within `module` on which pruning
+            name (str): parameter name within `module` on which pruning
                 will act.
             amount (int or float): quantity of parameters to prune.
                 If float, should be between 0.0 and 1.0 and represent the
@@ -490,20 +488,19 @@ class L1PruningMethod(BasePruningMethod):
 
 class RandomStructuredPruningMethod(BasePruningMethod):
     r"""Prune entire channels in a tensor at random.
+
+    Args:
+        amount (int or float): quantity of parameters to prune.
+            If float, should be between 0.0 and 1.0 and represent the
+            fraction of parameters to prune. If int, it represents the 
+            absolute number of parameters to prune.
+        dim (int, optional): index of the dim along which we define
+            channels to prune. Default: -1.
     """
 
     PRUNING_TYPE = "structured"
 
     def __init__(self, amount, dim=-1):
-        r"""
-        Args:
-            amount (int or float): quantity of parameters to prune.
-                If float, should be between 0.0 and 1.0 and represent the
-                fraction of parameters to prune. If int, it represents the 
-                absolute number of parameters to prune.
-            dim (int, optional): index of the dim along which we define
-                channels to prune. Default: -1.
-        """
         # Check range of validity of amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -580,7 +577,7 @@ class RandomStructuredPruningMethod(BasePruningMethod):
 
         Args:
             module (nn.Module): module containing the tensor to prune
-            name (string): parameter name within `module` on which pruning
+            name (str): parameter name within `module` on which pruning
                 will act.
             amount (int or float): quantity of parameters to prune.
                 If float, should be between 0.0 and 1.0 and represent the
@@ -596,22 +593,21 @@ class RandomStructuredPruningMethod(BasePruningMethod):
 
 class LnStructuredPruningMethod(BasePruningMethod):
     r"""Prune entire channels in a tensor based on their Ln-norm.
+
+    Args:
+        amount (int or float): quantity of channels to prune.
+            If float, should be between 0.0 and 1.0 and represent the
+            fraction of parameters to prune. If int, it represents the 
+            absolute number of parameters to prune.
+        n (int, float, inf, -inf, 'fro', 'nuc'): See documentation of valid
+            entries for argument p in torch.norm
+        dim (int, optional): index of the dim along which we define
+            channels to prune. Default: -1.
     """
 
     PRUNING_TYPE = "structured"
 
     def __init__(self, amount, n, dim=-1):
-        r"""
-        Args:
-            amount (int or float): quantity of channels to prune.
-                If float, should be between 0.0 and 1.0 and represent the
-                fraction of parameters to prune. If int, it represents the 
-                absolute number of parameters to prune.
-            n (int, float, inf, -inf, 'fro', 'nuc'): See documentation of valid
-                entries for argument p in torch.norm
-            dim (int, optional): index of the dim along which we define
-                channels to prune. Default: -1.
-        """
         # Check range of validity of amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -699,7 +695,7 @@ class LnStructuredPruningMethod(BasePruningMethod):
 
         Args:
             module (nn.Module): module containing the tensor to prune
-            name (string): parameter name within `module` on which pruning
+            name (str): parameter name within `module` on which pruning
                 will act.
             amount (int or float): quantity of parameters to prune.
                 If float, should be between 0.0 and 1.0 and represent the
@@ -734,7 +730,7 @@ class CustomFromMaskPruningMethod(BasePruningMethod):
         and the pruning mask.
         Args:
             module (nn.Module): module containing the tensor to prune
-            name (string): parameter name within `module` on which pruning
+            name (str): parameter name within `module` on which pruning
                 will act.
         """
         return super(CustomFromMaskPruningMethod, cls).apply(
@@ -758,7 +754,7 @@ def identity(module, name):
 
     Args:
         module (nn.Module): module containing the tensor to prune
-        name (string): parameter name within `module` on which pruning
+        name (str): parameter name within `module` on which pruning
                 will act.
 
     Returns:
@@ -787,7 +783,7 @@ def random_unstructured(module, name, amount):
 
     Args:
         module (nn.Module): module containing the tensor to prune
-        name (string): parameter name within `module` on which pruning
+        name (str): parameter name within `module` on which pruning
                 will act.
         amount (int or float): quantity of parameters to prune.
             If float, should be between 0.0 and 1.0 and represent the
@@ -821,7 +817,7 @@ def l1_unstructured(module, name, amount):
 
     Args:
         module (nn.Module): module containing the tensor to prune
-        name (string): parameter name within `module` on which pruning
+        name (str): parameter name within `module` on which pruning
                 will act.
         amount (int or float): quantity of parameters to prune.
             If float, should be between 0.0 and 1.0 and represent the
@@ -855,7 +851,7 @@ def random_structured(module, name, amount, dim):
 
     Args:
         module (nn.Module): module containing the tensor to prune
-        name (string): parameter name within `module` on which pruning
+        name (str): parameter name within `module` on which pruning
                 will act.
         amount (int or float): quantity of parameters to prune.
             If float, should be between 0.0 and 1.0 and represent the
@@ -892,7 +888,7 @@ def ln_structured(module, name, amount, n, dim):
 
     Args:
         module (nn.Module): module containing the tensor to prune
-        name (string): parameter name within `module` on which pruning
+        name (str): parameter name within `module` on which pruning
                 will act.
         amount (int or float): quantity of parameters to prune.
             If float, should be between 0.0 and 1.0 and represent the
@@ -936,10 +932,10 @@ def global_unstructured(parameters, pruning_method, **kwargs):
             implementation guidelines and has `PRUNING_TYPE='unstructured'`.
         kwargs: other keyword arguments such as:
             amount (int or float): quantity of parameters to prune across the 
-                specified parameters.
-                If float, should be between 0.0 and 1.0 and represent the
-                fraction of parameters to prune. If int, it represents the 
-                absolute number of parameters to prune.
+            specified parameters.
+            If float, should be between 0.0 and 1.0 and represent the
+            fraction of parameters to prune. If int, it represents the 
+            absolute number of parameters to prune.
 
     Raises:
         TypeError: if `PRUNING_TYPE != 'unstructured'`
@@ -1033,7 +1029,7 @@ def custom_from_mask(module, name, mask):
 
     Args:
         module (nn.Module): module containing the tensor to prune
-        name (string): parameter name within `module` on which pruning
+        name (str): parameter name within `module` on which pruning
             will act.
         mask (Tensor): binary mask to be applied to the parameter.
 
@@ -1065,7 +1061,7 @@ def remove(module, name):
 
     Args:
         module (nn.Module): module containing the tensor to prune
-        name (string): parameter name within `module` on which pruning
+        name (str): parameter name within `module` on which pruning
             will act.
 
     Examples:

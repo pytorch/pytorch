@@ -830,6 +830,103 @@ Utilities
 
 .. autofunction:: torch.nn.utils.vector_to_parameters
 
+
+.. currentmodule:: torch.nn.utils.prune
+
+:hidden:`PruningContainer`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.PruningContainer
+    :inherited-members:
+    :members:
+
+:hidden:`IdentityPruningMethod`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.IdentityPruningMethod
+    :inherited-members:
+    :members:
+
+:hidden:`RandomPruningMethod`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.RandomPruningMethod
+    :inherited-members:
+    :members:
+
+:hidden:`L1PruningMethod`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.L1PruningMethod
+    :inherited-members:
+    :members:
+
+:hidden:`RandomStructuredPruningMethod`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.RandomStructuredPruningMethod
+    :inherited-members:
+    :members:
+
+:hidden:`LnStructuredPruningMethod`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.LnStructuredPruningMethod
+    :inherited-members:
+    :members:
+
+:hidden:`CustomFromMaskPruningMethod`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.CustomFromMaskPruningMethod
+    :inherited-members:
+    :members:
+
+:hidden:`identity`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.identity
+
+:hidden:`random_unstructured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.random_unstructured
+
+:hidden:`l1_unstructured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.l1_unstructured
+
+:hidden:`random_structured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.random_structured
+
+:hidden:`ln_structured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.ln_structured
+
+:hidden:`global_unstructured`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.global_unstructured
+
+:hidden:`custom_from_mask`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.custom_from_mask
+
+:hidden:`remove`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.remove
+
+:hidden:`is_pruned`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction :: torch.nn.utils.prune.is_pruned
+
 :hidden:`weight_norm`
 ~~~~~~~~~~~~~~~~~~~~~
 
