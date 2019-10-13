@@ -1026,6 +1026,20 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
   ASSERT_EQ(input2.sizes(), input2.grad().sizes());
 }
 
+TEST_F(ModulesTest, TripletMarginLoss) {
+  TripletMarginLoss loss(TripletMarginLossOptions().margin(1.0));
+  auto anchor = torch::tensor({{3., 3.}}, torch::requires_grad());
+  auto positive = torch::tensor({{2., 2.}}, torch::requires_grad());
+  auto negative = torch::tensor({{0., 0.}}, torch::requires_grad());
+  auto output = loss->forward(anchor, positive, negative);
+  auto expected = torch::tensor({0.}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
@@ -1213,6 +1227,24 @@ TEST_F(ModulesTest, LogSoftmax) {
   for (int i = 0; i < 2; i++) {
     auto expected = torch::log(torch::exp(input[i]) / sum[i]);
     ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
+TEST_F(ModulesTest, Softmax2d) {
+  Softmax2d m;
+  auto input = torch::arange(24, torch::kFloat).reshape({1, 2, 3, 4});
+  auto output = m(input);
+  auto sum = torch::sum(torch::exp(input), 1);
+
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < 2; j++) {
+      for (int k = 0; k < 3; k++) {
+        for (int l = 0; l < 4; l++) {
+          auto expected = torch::exp(input[i][j][k][l]) / sum[i][k][l];
+          ASSERT_TRUE(torch::allclose(output[i][j][k][l], expected));
+        }
+      }
+    }
   }
 }
 
@@ -1604,6 +1636,12 @@ TEST_F(ModulesTest, PrettyPrintCosineEmbeddingLoss) {
       "torch::nn::CosineEmbeddingLoss(margin=0.25)");
 }
 
+TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
+  ASSERT_EQ(
+      c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
+      "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
+}
+
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
   ASSERT_EQ(
       c10::str(CosineSimilarity()),
@@ -1707,6 +1745,10 @@ TEST_F(ModulesTest, PrettyPrintSoftmin) {
 TEST_F(ModulesTest, PrettyPrintLogSoftmax) {
   ASSERT_EQ(c10::str(LogSoftmax(LogSoftmaxOptions(1))),
             "torch::nn::LogSoftmax(dim=1)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftmax2d) {
+  ASSERT_EQ(c10::str(Softmax2d()), "torch::nn::Softmax2d()");
 }
 
 TEST_F(ModulesTest, PrettyPrintPReLU) {
