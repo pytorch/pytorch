@@ -189,7 +189,7 @@ struct ThresholdOptions {
 // ============================================================================
 
 /// Options for MultiheadAttention functional and module.
-struct MultiheadAttentionOptions {
+struct TORCH_API MultiheadAttentionOptions {
   MultiheadAttentionOptions(int64_t embed_dim, int64_t num_heads)
     : embed_dim_(embed_dim), num_heads_(num_heads) {
     if (!kdim_) {
@@ -228,7 +228,7 @@ struct MultiheadAttentionOptions {
 // ============================================================================
 
 /// Options for `torch::nn::functional::multi_head_attention_forward()`
-struct MultiheadAttentionForwardOptions {
+struct TORCH_API MultiheadAttentionForwardOptions {
 
   MultiheadAttentionForwardOptions(
     Tensor query, Tensor key, Tensor value,
