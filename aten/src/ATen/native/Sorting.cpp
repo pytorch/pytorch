@@ -285,6 +285,9 @@ std::tuple<Tensor, Tensor> kthvalue(
 
 // this does not reduce to median with dim beause we don't want to copy twice
 Tensor median_cpu(const Tensor& self) {
+#ifdef BUILD_NAMEDTENSOR
+  NoNamesGuard guard;
+#endif
   TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
   if (self.dim() == 0 && self.numel() == 1) {
     return self.clone();
