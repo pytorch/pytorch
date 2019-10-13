@@ -42,6 +42,10 @@ if [[ "$COMMIT_SOURCE" == master ]]; then
     python update_commit_hash.py new_cpu_runtime.json ${MASTER_COMMIT_ID}
 fi
 
+popd
+python setup.py install
+pushd .jenkins/pytorch/perf_test
+
 # Include tests
 . ./test_cpu_speed_mini_sequence_labeler.sh
 # test_gpu_speed_mnist.sh and test_cpu_speed_mnist.sh run

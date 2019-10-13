@@ -41,6 +41,10 @@ if [[ "$COMMIT_SOURCE" == master ]]; then
     python update_commit_hash.py new_gpu_runtime.json ${MASTER_COMMIT_ID}
 fi
 
+popd
+python setup.py install
+pushd .jenkins/pytorch/perf_test
+
 # Include tests
 # test_gpu_speed_mnist.sh and test_cpu_speed_mnist.sh run
 # "conda install -c pytorch torchvision", which would install pytorch-1.3 libs.
