@@ -17,8 +17,10 @@ namespace nn {
 
 /// Creates a criterion that measures the mean absolute error (MAE) between each
 /// element in the input : math :`x` and target : `y`.
-struct TORCH_API L1LossImpl : Module {
+struct TORCH_API L1LossImpl : public Cloneable<L1LossImpl> {
   explicit L1LossImpl(const L1LossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `L1Loss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -42,9 +44,11 @@ TORCH_MODULE(L1Loss);
 /// measuring whether two inputs are similar or dissimilar, e.g. using the L1
 /// pairwise distance as :math:`x`, and is typically used for learning nonlinear
 /// embeddings or semi-supervised learning.
-struct TORCH_API HingeEmbeddingLossImpl : Module {
+struct TORCH_API HingeEmbeddingLossImpl : public Cloneable<HingeEmbeddingLossImpl> {
   explicit HingeEmbeddingLossImpl(
       const HingeEmbeddingLossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `HingeEmbeddingLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -67,11 +71,11 @@ TORCH_MODULE(HingeEmbeddingLoss);
 /// loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`) and
 /// output :math:`y` (which is a 1D tensor of target class indices,
 /// :math:`0 \leq y \leq \text{x.size}(1)-1`):
-struct TORCH_API MultiMarginLossImpl : Module {
+struct TORCH_API MultiMarginLossImpl : public Cloneable<MultiMarginLossImpl> {
   explicit MultiMarginLossImpl(
       const MultiMarginLossOptions& options_ = {});
 
-  void reset();
+  void reset() override;
 
   /// Pretty prints the `MultiMarginLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -95,9 +99,11 @@ TORCH_MODULE(MultiMarginLoss);
 /// -1. This is used for measuring whether two inputs are similar or
 /// dissimilar, using the cosine distance, and is typically used for learning
 /// nonlinear embeddings or semi-supervised learning.
-struct TORCH_API CosineEmbeddingLossImpl : Module {
+struct TORCH_API CosineEmbeddingLossImpl : public Cloneable<CosineEmbeddingLossImpl> {
   explicit CosineEmbeddingLossImpl(
       const CosineEmbeddingLossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `CosineEmbeddingLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;

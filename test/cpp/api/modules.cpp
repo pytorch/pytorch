@@ -1649,10 +1649,10 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
   ASSERT_EQ(
       c10::str(TestModule{}),
       "TestModule(\n"
-      "  (fc): torch::nn::Linear(in=4, out=5, with_bias=true)\n"
+      "  (fc): torch::nn::Linear(in_features=4, out_features=5, bias=true)\n"
       "  (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2)\n"
       "  (inner): InnerTestModule(\n"
-      "    (fc): torch::nn::Linear(in=3, out=4, with_bias=true)\n"
+      "    (fc): torch::nn::Linear(in_features=3, out_features=4, bias=true)\n"
       "    (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2)\n"
       "  )\n"
       ")");
