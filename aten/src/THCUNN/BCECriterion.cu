@@ -25,9 +25,9 @@ template <typename T>
 inline __host__ __device__ T safe_log(T a) {
   if (a == 0.)
   {
-    return THCNumerics<T>::log(eps<T>());
+    return std::log(eps<T>());
   }
-  return THCNumerics<T>::log(a);
+  return std::log(a);
 }
 
 template <typename Dtype, typename Acctype>

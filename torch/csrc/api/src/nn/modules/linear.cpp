@@ -9,7 +9,19 @@
 namespace torch {
 namespace nn {
 
-LinearImpl::LinearImpl(LinearOptions options) : options(options) {
+void IdentityImpl::reset() {}
+
+void IdentityImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Identity()";
+}
+
+Tensor IdentityImpl::forward(const Tensor& input) {
+  return input;
+}
+
+// ============================================================================
+
+LinearImpl::LinearImpl(const LinearOptions& options_) : options(options_) {
   reset();
 }
 

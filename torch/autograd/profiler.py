@@ -613,6 +613,9 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.count += 1
         return self
 
+    def __iadd__(self, other):
+        return self.add(other)
+
     def __repr__(self):
         return (
             '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '

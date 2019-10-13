@@ -905,7 +905,7 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](const Node* node) {
+          [](const Node* node) -> Operation {
             return [](Stack& stack) {
               push(stack, IValue());
               return 0;
@@ -914,7 +914,7 @@ void testNoneSchemaMatch() {
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](const Node* node) {
+          [](const Node* node) -> Operation {
             return [](Stack& stack) {
               IValue a = pop(stack);
               if (a.isNone()) {
@@ -1049,7 +1049,7 @@ void testInsertAndEliminateRedundantGuards() {
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
-  ASSERT_EQ(num_guards, 11);
+  ASSERT_EQ(num_guards, 12);
   // now eliminate as many guards as possible
   // we should be left with two guards on x and y's defs
   EliminateRedundantGuards(copy);
