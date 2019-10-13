@@ -1368,6 +1368,15 @@ TEST_F(ModulesTest, Softsign) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, Tanh) {
+  Tanh model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = (x.exp() - (-x).exp()) / (x.exp() + (-x).exp());
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1725,4 +1734,8 @@ TEST_F(ModulesTest, PrettyPrintSoftshrink) {
 
 TEST_F(ModulesTest, PrettyPrintSoftsign) {
   ASSERT_EQ(c10::str(Softsign()), "torch::nn::Softsign()");
+}
+
+TEST_F(ModulesTest, PrettyPrintTanh) {
+  ASSERT_EQ(c10::str(Tanh()), "torch::nn::Tanh()");
 }

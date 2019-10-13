@@ -307,5 +307,17 @@ void SoftsignImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Softsign()";
 }
 
+// ============================================================================
+
+Tensor TanhImpl::forward(const Tensor& input) {
+  return torch::tanh(input);
+}
+
+void TanhImpl::reset() {}
+
+void TanhImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Tanh()";
+}
+
 } // namespace nn
 } // namespace torch
