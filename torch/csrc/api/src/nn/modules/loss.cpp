@@ -96,5 +96,12 @@ void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
             ", swap=" << options.swap() << ")";
 }
 
+Tensor TripletMarginLossImpl::forward(
+    const Tensor& anchor,
+    const Tensor& positive,
+    const Tensor& negative) {
+  return F::triplet_margin_loss(anchor, positive, negative, options);
+}
+
 } // namespace nn
 } // namespace torch
