@@ -64,7 +64,7 @@ void BilinearImpl::reset() {
   weight =
       register_parameter("weight", torch::empty({options.out_features(), options.in1_features(), options.in2_features()}));
   if (options.bias()) {
-    bias = register_parameter("bias", torch::empty(options.out_features())));
+    bias = register_parameter("bias", torch::empty(options.out_features()));
   } else {
     bias = register_parameter("bias", torch::Tensor());
   }
