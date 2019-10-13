@@ -138,6 +138,10 @@ inline Tensor softsign(const Tensor& input) {
   return input / (input.abs() + 1);
 }
 
+inline Tensor tanhshrink(const Tensor& input) {
+  return input - input.tanh();
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
