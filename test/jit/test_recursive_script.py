@@ -9,10 +9,10 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.testing import FileCheck
 
+# Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from jit_utils import JitTestCase, _tmp_donotuse_dont_inline_everything
-from common_utils import run_tests
 
 class TestRecursiveScript(JitTestCase):
     def test_inferred_nonetype(self):
