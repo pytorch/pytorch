@@ -94,11 +94,17 @@ class TorchBenchmarkBase(object):
         """ this is a globally unique name which can be used to 
             label a specific test 
         """
+
+        # This is a list of attributes which will not be included
+        # in the test name. 
+        skip_key_list = ['device']
+
         test_name_str = []
         for key in kargs:
             value = kargs[key]
             test_name_str.append(
-                key + str(value if type(value) != bool else int(value)))
+                ('' if key in skip_key_list else key)
+                + str(value if type(value) != bool else int(value)))
         name = (self.module_name() + '_' +
                 '_'.join(test_name_str)).replace(" ", "")
         return name

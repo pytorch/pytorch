@@ -676,5 +676,40 @@ class TorchIntegration(hu.HypothesisTestCase):
         reference = fused_rowwise_8bit_quantize_dequantize_reference(input_data)
         np.testing.assert_array_almost_equal(dequantized_data.numpy(), reference)
 
+    @given(binary_input=st.booleans())
+    def test_piecewise_linear_op(self, binary_input):
+        if binary_input:
+            num_dims = 1
+        else:
+            num_dims = 3
+        data = np.random.rand(1024, num_dims).astype(np.float32)
+        slopes = np.zeros(4 * num_dims).astype(np.float32)
+        bounds = np.sort(np.random.rand(5, num_dims).astype(np.float32), axis=0).flatten('F')
+        intercepts = np.random.rand(4 * num_dims).astype(np.float32)
+
+        def _piecewise_linear_ref(X):
+            ref_op = core.CreateOperator(
+                "PiecewiseLinearTransform",
+                ["data",
+                    "bounds",
+                    "slopes",
+                    "intercepts"],
+                ["calibrated"],
+                binary=binary_input,
+            )
+            workspace.FeedBlob("data", X)
+            workspace.FeedBlob("bounds", bounds)
+            workspace.FeedBlob("slopes", slopes)
+            workspace.FeedBlob("intercepts", intercepts)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("calibrated")
+
+        expected_output = _piecewise_linear_ref(data)
+        actual_output = torch.ops._caffe2.PiecewiseLinearTransform(
+            torch.tensor(data), bounds.tolist(), slopes.tolist(), intercepts.tolist(), binary_input)
+
+        torch.testing.assert_allclose(torch.tensor(expected_output), actual_output)
+
+
 if __name__ == '__main__':
     unittest.main()
