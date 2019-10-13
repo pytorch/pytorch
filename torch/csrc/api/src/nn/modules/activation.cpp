@@ -162,6 +162,19 @@ Tensor LogSoftmaxImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
+void Softmax2dImpl::reset() {}
+
+void Softmax2dImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softmax2d()";
+}
+
+Tensor Softmax2dImpl::forward(const Tensor& input) {
+  TORCH_CHECK(input.dim() == 4, "Softmax2d requires a 4D tensor as input");
+  return F::softmax(input, SoftmaxOptions(/*dim=*/1));
+}
+
+// ============================================================================
+
 PReLUImpl::PReLUImpl(const PReLUOptions& options_) : options(options_) {
   reset();
 }
@@ -359,7 +372,7 @@ MultiheadAttentionImpl::MultiheadAttentionImpl(const MultiheadAttentionOptions& 
   reset();
 }
 
-Tensor MultiheadAttentionImpl::forward(
+std::tuple<Tensor, Tensor> MultiheadAttentionImpl::forward(
   const Tensor& query, const Tensor& key,
   const Tensor& value, const Tensor& key_padding_mask,
   bool need_weights, const Tensor& attn_mask) {

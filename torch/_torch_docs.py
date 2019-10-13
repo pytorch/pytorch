@@ -6167,7 +6167,7 @@ Calculates determinant of a square matrix or batches of square matrices.
     :meth:`~torch.svd` for details.
 
 Arguments:
-    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
                 batch dimensions.
 
 Example::
@@ -6254,7 +6254,7 @@ Calculates log determinant of a square matrix or batches of square matrices.
     :meth:`~torch.svd` for details.
 
 Arguments:
-    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
                 batch dimensions.
 
 Example::
@@ -6295,7 +6295,7 @@ Calculates the sign and log absolute value of the determinant(s) of a square mat
     See :meth:`~torch.svd` for details.
 
 Arguments:
-    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
                 batch dimensions.
 
 Returns:

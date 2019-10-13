@@ -4,6 +4,7 @@
 #include <torch/nn/options/linear.h>
 #include <torch/types.h>
 #include <torch/nn/functional/linear.h>
+#include <limits>
 
 namespace torch {
 namespace nn{
@@ -152,7 +153,7 @@ inline Tensor threshold(Tensor& input, const ThresholdOptions& options) {
   }
 }
 
-inline Tensor multi_head_attention_forward(
+inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
   const Tensor& query,
   const Tensor& key,
   const Tensor& value,
@@ -284,7 +285,7 @@ inline Tensor multi_head_attention_forward(
     TORCH_CHECK(len1 == embed_dim && len2 == value.size(-1));
 
     if (in_proj_bias.defined()) {
-      q = F::linear(query, q_proj_weight_non_opt, in_proj_bias.slice(0, 0,embed_dim));
+      q = F::linear(query, q_proj_weight_non_opt, in_proj_bias.slice(0, 0, embed_dim));
       k = F::linear(key, k_proj_weight_non_opt, in_proj_bias.slice(0, embed_dim, (embed_dim * 2)));
       v = F::linear(value, v_proj_weight_non_opt, in_proj_bias.slice(0, (embed_dim * 2)));
     } else {
@@ -294,28 +295,29 @@ inline Tensor multi_head_attention_forward(
     }
   }
   q = q * scaling;
-  Tensor attn_mask_, key_padding_mask_;
+  Tensor attn_mask_ = attn_mask;
+  Tensor key_padding_mask_ = key_padding_mask;
   if (bias_k.defined() && bias_v.defined()) {
     if (!static_k.defined() && !static_v.defined()) {
       k = torch::cat({k, bias_k.repeat({1, bsz, 1})});
       v = torch::cat({v, bias_v.repeat({1, bsz, 1})});
-      if (attn_mask.defined()) {
+      if (attn_mask_.defined()) {
         attn_mask_ = torch::cat({
-          attn_mask,
+          attn_mask_,
           torch::zeros(
-            {attn_mask.size(0), 1},
-            at::TensorOptions(attn_mask.dtype())
-              .device(attn_mask.device())
+            {attn_mask_.size(0), 1},
+            at::TensorOptions(attn_mask_.dtype())
+              .device(attn_mask_.device())
           )}, /*dim=*/1
         );
       }
-      if (key_padding_mask.defined()) {
+      if (key_padding_mask_.defined()) {
         key_padding_mask_ = torch::cat({
-          key_padding_mask,
+          key_padding_mask_,
           torch::zeros(
-            {key_padding_mask.size(0), 1},
-            at::TensorOptions(key_padding_mask.dtype())
-              .device(key_padding_mask.device())
+            {key_padding_mask_.size(0), 1},
+            at::TensorOptions(key_padding_mask_.dtype())
+              .device(key_padding_mask_.device())
           )}, /*dim=*/1);
       }
     } else {
@@ -344,28 +346,77 @@ inline Tensor multi_head_attention_forward(
     v = static_v;
   }
   auto src_len = k.size(1);
-  if (key_padding_mask.defined()) {
-    TORCH_CHECK(key_padding_mask.size(0) == bsz);
-    TORCH_CHECK(key_padding_mask.size(1) == src_len);
+  if (key_padding_mask_.defined()) {
+    TORCH_CHECK(key_padding_mask_.size(0) == bsz);
+    TORCH_CHECK(key_padding_mask_.size(1) == src_len);
   }
-  // if (add_zero_attn) {
-  //   src_len += 1;
-  //   k = torch::cat({k, torch::zeros((k.size(0), 1) + k.size()[2:], dtype=k.dtype, device=k.device)], dim=1)
-  //   v = torch::cat({v, torch::zeros((v.size(0), 1) + v.size()[2:], dtype=v.dtype, device=v.device)], dim=1)
-  //   if attn_mask is not None:
-  //       attn_mask = torch.cat([attn_mask, torch.zeros((attn_mask.size(0), 1),
-  //                                                     dtype=attn_mask.dtype,
-  //                                                     device=attn_mask.device)], dim=1)
-  //   if key_padding_mask is not None:
-  //       key_padding_mask = torch.cat(
-  //           [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
-  //                                           dtype=key_padding_mask.dtype,
-  //                                           device=key_padding_mask.device)], dim=1)
-  // }
-  return {};
+  if (add_zero_attn) {
+    src_len += 1;
+    auto k_sizes = k.sizes().vec();
+    k_sizes[1] = 1;
+    k = torch::cat(
+      {
+        k,
+        torch::zeros(k_sizes, at::TensorOptions(k.dtype()).device(k.device()))
+      }, /*dim=*/1);
+    auto v_sizes = v.sizes().vec();
+    v_sizes[1] = 1;
+    v = torch::cat(
+      {
+        v,
+        torch::zeros(v_sizes, at::TensorOptions(v.dtype()).device(v.device()))
+      }, /*dim=*/1);
+    if (attn_mask_.defined()) {
+      attn_mask_ = torch::cat(
+        {
+          attn_mask_,
+          torch::zeros(
+            {attn_mask_.size(0), 1},
+            at::TensorOptions(attn_mask_.dtype())
+              .device(attn_mask_.device()))
+        }, /*dim=*/1);
+    }
+    if (key_padding_mask_.defined()) {
+      key_padding_mask_ = torch::cat(
+        {
+          key_padding_mask_,
+          torch::zeros(
+            {key_padding_mask_.size(0), 1},
+            at::TensorOptions(key_padding_mask_.dtype())
+              .device(key_padding_mask_.device()))
+        }, /*dim=*/1);
+    }
+  }
+  auto attn_output_weights = torch::bmm(q, k.transpose(1, 2));
+  TORCH_CHECK(attn_output_weights.sizes() == IntArrayRef({bsz * num_heads, tgt_len, src_len}));
+  if (attn_mask_.defined()) {
+    attn_mask_ = attn_mask_.unsqueeze(0);
+    attn_output_weights += attn_mask;
+  }
+  if (key_padding_mask_.defined()) {
+    attn_output_weights = attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
+    attn_output_weights = attn_output_weights.masked_fill(
+      key_padding_mask_.unsqueeze(1).unsqueeze(2),
+      -std::numeric_limits<float>::infinity()
+    );
+    attn_output_weights = attn_output_weights.view({bsz * num_heads, tgt_len, src_len});
+  }
+  attn_output_weights = softmax(attn_output_weights, /*dim=*/1);
+  attn_output_weights = dropout(attn_output_weights, /*p=*/dropout_p, /*training=*/training);
+  auto attn_output = torch::bmm(attn_output_weights, v);
+  TORCH_CHECK(attn_output.sizes() == IntArrayRef({bsz * num_heads, tgt_len, head_dim}));
+  attn_output = attn_output.transpose(0, 1).contiguous().view({tgt_len, bsz, embed_dim});
+  attn_output = F::linear(attn_output, out_proj_weight, out_proj_bias);
+  if (need_weights) {
+    // average attention weights over heads
+    attn_output_weights = attn_output_weights.view({bsz, num_heads, tgt_len, src_len});
+    return {attn_output, attn_output_weights.sum(/*dim=*/1) / num_heads};
+  } else {
+    return {attn_output, {}};
+  }
 }
 
-inline Tensor multi_head_attention_forward(const MultiheadAttentionForwardOptions& options) {
+inline std::tuple<Tensor, Tensor> multi_head_attention_forward(const MultiheadAttentionForwardOptions& options) {
   return multi_head_attention_forward(
     options.query(),
     options.key(),
