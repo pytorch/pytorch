@@ -2679,7 +2679,7 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
 
 
 def padding1d_circular(input, pad):
-    r"""input: torch.Tensor([[[0., 1., 2.],
+    r"""input: torch.tensor([[[0., 1., 2.],
                               [3., 4., 5.]]])
         pad: (1, 2)
         output: tensor([[[2., 0., 1., 2., 0., 1.],
@@ -2693,7 +2693,7 @@ def padding1d_circular(input, pad):
 
 
 def padding2d_circular(input, pad):
-    r"""input: torch.Tensor([[[[0., 1., 2],
+    r"""input: torch.tensor([[[[0., 1., 2],
                                [3., 4., 5.]]]])
         pad: (1, 2, 2, 1)
         output: tensor([[[[2., 0., 1., 2., 0., 1.],
@@ -2716,7 +2716,7 @@ def padding2d_circular(input, pad):
 
 
 def padding3d_circular(input, pad):
-    r"""input: torch.Tensor([[[[[ 0.,  1.,  2.],
+    r"""input: torch.tensor([[[[[ 0.,  1.,  2.],
                                 [ 3.,  4.,  5.]],
                                [[ 6.,  7.,  8.],
                                 [ 9., 10., 11.]]]]])
