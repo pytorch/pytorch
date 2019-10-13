@@ -48,4 +48,3 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   send_function->setGrads({in1, torch::autograd::Variable()});
   EXPECT_THROW(send_function->apply({}), c10::Error);
 }
-
