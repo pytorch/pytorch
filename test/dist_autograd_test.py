@@ -217,6 +217,7 @@ class DistAutogradTest(object):
             ctx = dist_autograd._current_context()
             worker_ids = ctx._known_worker_ids()
             self.assertEqual(len(worker_ids), 1)
+            dst_rank = (self.rank + 1) % self.world_size
             self.assertEqual(worker_ids[0], dst_rank)
 
     @dist_init
