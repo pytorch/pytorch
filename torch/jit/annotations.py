@@ -7,8 +7,9 @@ from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType, OptionalType, ClassType
+    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType
 from textwrap import dedent
+from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 
 
@@ -55,6 +56,7 @@ class EvalEnv(object):
             return self.env[name]
         if self.rcb is not None:
             return self.rcb(name)
+        return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
@@ -99,10 +101,7 @@ def get_num_params(fn, loc):
     elif hasattr(py_def.args, 'kwonlyargs') and len(py_def.args.kwonlyargs) > 0:
         return None
     else:
-        num_params = len(py_def.args.args)
-        if inspect.ismethod(fn):
-            num_params = num_params - 1
-        return num_params
+        return len(py_def.args.args)
 
 
 def parse_type_line(type_line, rcb, loc):
@@ -247,6 +246,8 @@ def ann_to_type(ann, resolver=None):
         return BoolType.get()
     elif hasattr(ann, "__torch_script_class__"):
         return ClassType(_qualified_name(ann))
+    elif hasattr(ann, "__torch_script_interface__"):
+        return InterfaceType(_qualified_name(ann))
     elif resolver is not None:
         # Maybe resolve a NamedTuple to a Tuple Type
         rcb, loc = resolver

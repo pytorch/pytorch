@@ -109,7 +109,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
       .def("_jit_pass_onnx", ToONNX)
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
-      .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
+      .def(
+          "_jit_pass_onnx_peephole",
+          [](std::shared_ptr<Graph>& graph,
+             int opset_version,
+             bool fixed_batch_size) {
+            return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
+          })
       .def(
           "_jit_pass_onnx_cast_all_constant_to_floating",
           CastAllConstantToFloating)
@@ -148,9 +154,6 @@ void initJITBindings(PyObject* module) {
             return EliminateCommonSubexpression(g); // overload resolution
           })
       .def(
-          "_jit_pass_propagate_qinfo",
-          [](std::shared_ptr<Graph>& g) { return PropagateQuantInfo(g); })
-      .def(
           "_jit_pass_insert_observers",
           [](script::Module& module,
              const std::string& method_name,
@@ -176,17 +179,22 @@ void initJITBindings(PyObject* module) {
           py::arg("method_name"),
           py::arg("inplace") = false)
       .def(
+          "_jit_pass_insert_prepack_unpack",
+          [](std::shared_ptr<Graph>& g) { return InsertPrepackUnpack(g); })
+      .def(
+          "_jit_pass_insert_prepack_unpack",
+          [](script::Module& module) { return InsertPrepackUnpack(module); })
+      .def(
           "_jit_pass_quant_fusion",
           [](std::shared_ptr<Graph>& g) { return QuantFusion(g); })
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm2d)
       .def("_jit_pass_fuse_linear", &FuseLinear)
-      .def("_jit_pass_fold_quantize",
-           [](script::Module& module, const std::string& method_name) {
-             FoldQuantizeCallIntoBuffer(module, method_name);
-           })
       .def(
-          "_jit_pass_quantlint",
-          [](std::shared_ptr<Graph>& g) { return QuantLinting(g); })
+          "_jit_pass_fold_quantize",
+          [](script::Module& module, const std::string& method_name) {
+            FoldQuantizeCallIntoBuffer(module, method_name);
+          })
+      .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })

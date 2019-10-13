@@ -751,6 +751,22 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   return grad_input.add(grad_input.transpose(-1, -2)).mul_(0.5);  // Symmetrizing the gradient
 }
 
+Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {
+  Tensor grad_L;
+  if (grad.defined()) {
+    Tensor common_term = grad + grad.transpose(-2, -1);
+    common_term = at::matmul(inverse, at::matmul(common_term, inverse));
+    if (upper) {
+      grad_L = -at::matmul(L, common_term);
+    } else {
+      grad_L = -at::matmul(common_term, L);
+    }
+  } else {
+    grad_L = at::zeros({1}, L.options()).expand_as(L);
+  }
+  return grad_L;
+}
+
 Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
                                  IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
@@ -884,6 +900,42 @@ Tensor softmax_double_backward(const Tensor & grad, const Tensor & grad_output, 
 Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_output, int dim, const Tensor & output) {
   auto z = output.exp();
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
+}
+
+Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Tensor & grad, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
+  auto eps = 1e-12;
+  auto inp_pl_eps = input + eps;
+  auto one_m_inp_pl_eps = 1 - input + eps;
+  // gradient wrt input
+  auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
+  gI *= (grad * grad_output);
+
+  if (weight.defined()) {
+    gI *= weight;
+  }
+  if (reduction == Reduction::Mean) {
+    return gI / input.numel();
+  } else if (reduction == Reduction::Sum) {
+    return gI.sum();
+  }
+  return gI;
+}
+
+Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, const Tensor& weight, int64_t reduction) {
+  auto eps = 1e-12;
+  // gradient wrt grad_output
+  auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
+  ggO *= grad;
+
+  if (weight.defined()) {
+    ggO *= weight;
+  }
+  if (reduction == Reduction::Mean) {
+    return ggO / input.numel();
+  } else if (reduction == Reduction::Sum) {
+    return ggO.sum();
+  }
+  return ggO;
 }
 
 Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {

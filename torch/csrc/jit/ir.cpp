@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
@@ -18,8 +19,6 @@
 
 namespace torch {
 namespace jit {
-
-void printQuotedString(std::ostream& stmt, const std::string& str);
 
 // Constants relating to maintaining the topological index of nodes.
 //
@@ -116,7 +115,20 @@ static void printStrList(
   for (auto& item : items) {
     if (i++ > 0)
       out << ", ";
-    printQuotedString(out, item);
+    c10::printQuotedString(out, item);
+  }
+  out << "]";
+}
+
+static void printTypeList(
+    std::ostream& out,
+    const std::vector<TypePtr>& items) {
+  out << "[";
+  int i = 0;
+  for (auto& item : items) {
+    if (i++ > 0)
+      out << ", ";
+    out << *item;
   }
   out << "]";
 }
@@ -136,7 +148,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      printQuotedString(out, s(name));
+      c10::printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
       printStrList(out, ss(name));
@@ -175,11 +187,17 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
     case AttributeKind::gs:
       out << "[<Graphs>]";
       break;
+    case AttributeKind::ty:
+      out << *ty(name);
+      break;
+    case AttributeKind::tys:
+      printTypeList(out, tys(name));
+      break;
   }
 }
 
-void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
-    const {
+void Node::printAttributes(std::ostream &out,
+                           bool ignore_subgraph = false) const {
   out << "[";
   auto names = attributeNames();
   int i = 0;
@@ -215,11 +233,10 @@ static std::ostream& indent(std::ostream& out, size_t level) {
   return out;
 }
 
-std::ostream& Node::print(
-    std::ostream& out,
-    size_t level,
-    std::vector<const Node*>* groups,
-    bool print_source_locations) const {
+std::ostream &Node::print(std::ostream &out, size_t level,
+                          std::vector<const Node *> *groups,
+                          bool print_source_locations, bool print_attributes,
+                          bool print_scopes, bool print_body) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -227,7 +244,7 @@ std::ostream& Node::print(
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
     pyOp->writeScalars(out);
-  } else {
+  } else if (print_attributes) {
     if (hasAttribute(attr::Subgraph) && groups) {
       out << kind().toQualString() << "_" << groups->size();
       if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
@@ -244,20 +261,33 @@ std::ostream& Node::print(
   }
 
   out << "(" << inputs() << ")";
-  std::string scName = scopeName();
-  if (!scName.empty()) {
-    out << ", ";
-    out << "scope: " << scName;
+
+  if (print_scopes) {
+    std::string scName = scopeName();
+    if (!scName.empty()) {
+      out << ", ";
+      out << "scope: " << scName;
+    }
   }
 
   // In debug print, append file:line:col as a comment after each node
   if (print_source_locations) {
-    if (auto file_line_col = sourceRange().file_line_col()) {
+    SourceRange r = sourceRange();
+    if (sourceRange().source()) {
+      if (auto orig = sourceRange().source()->findSourceRangeThatGenerated(r)) {
+        r = *orig;
+      }
+    }
+    if (auto file_line_col = r.file_line_col()) {
       std::string filename;
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
     }
+  }
+
+  if (!print_body) {
+    return out;
   }
 
   out << "\n";
@@ -810,10 +840,15 @@ bool Node::matches(
 }
 
 bool Node::mustBeNone() const {
-  return kind_ == prim::AutogradZero ||
+  // We can statically deduce this Node has returning None if:
+  return
+      // It's an AutogradZero node, or ...
+      kind_ == prim::AutogradZero ||
+      // It has only one output and that output is NoneType, or ...
+      (outputs().size() == 1 && output()->type() == NoneType::get()) ||
+      // It's a constant optional with no value in the attributes.
       (kind_ == prim::Constant && !this->hasAttributes() &&
-       (output()->type()->cast<OptionalType>() ||
-        output()->type() == NoneType::get()));
+       output()->type()->cast<OptionalType>());
 }
 
 void Node::dump() const {
@@ -904,6 +939,7 @@ bool Node::hasSideEffects() const {
     case prim::CallFunction:
     case prim::CallMethod:
     case prim::BailoutTemplate:
+    case prim::profile:
       return true;
   }
 
@@ -1492,6 +1528,25 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   return n;
 }
 
+Node* Graph::createIsInstance(
+    Value* v,
+    at::ArrayRef<TypePtr> types,
+    bool is_list,
+    bool is_tuple) {
+  auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
+  std::vector<std::string> kinds;
+  if (is_list) {
+    kinds.push_back("list");
+  }
+  if (is_tuple) {
+    kinds.push_back("tuple");
+  }
+  n->ss_(attr::kinds, std::move(kinds));
+  n->tys_(attr::types, types.vec());
+  n->output()->setType(BoolType::get());
+  return n;
+}
+
 Value* Graph::insertFunctionCall(
     Function* callee,
     const script::MatchedSchema& matched) {
@@ -1665,6 +1720,14 @@ void ProfileOp::cloneFrom(Node* other_) {
 }
 Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
+}
+
+TypePtr NamedValue::type() const {
+  if (value_) {
+    return value_->type();
+  } else {
+    return ivalue_.type();
+  }
 }
 
 constexpr Symbol ProfileOp::Kind;

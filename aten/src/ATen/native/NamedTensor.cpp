@@ -4,6 +4,8 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/EnableNamedTensor.h>
 
+#include <bitset>
+
 #ifdef BUILD_NAMEDTENSOR
 namespace at { namespace native {
 
@@ -105,12 +107,12 @@ Tensor refine_names(const Tensor& self, DimnameList names) {
     }
     if (out_name.isWildcard()) {
       TORCH_CHECK(false,
-          "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
+          "refine_names: cannot coerce Tensor", self_names, " to Tensor", names,
           " because ", self_name, " is more specific than ", out_name, " at index ",
           idx);
     }
     TORCH_CHECK(false,
-        "refine_names: cannot coerse Tensor", self_names, " to Tensor", names,
+        "refine_names: cannot coerce Tensor", self_names, " to Tensor", names,
         " because ", self_name, " is different from ", out_name, " at index ",
         idx);
     TORCH_INTERNAL_ASSERT(false); // done handling errors
@@ -141,6 +143,117 @@ static Tensor align(const Tensor& tensor, DimnameList names, bool is_aligning_tw
   return result;
 }
 
+static int64_t countUnset(std::bitset<kMaxNamedTensorDim> set, int64_t up_to_idx) {
+  int64_t result = 0;
+  for (auto i = 0; i < up_to_idx; ++i) {
+    if (!set.test(i)) result++;
+  }
+  return result;
+}
+
+// Handles `tensor.align_to(*order)` in the case where there is an ellipsis.
+//
+// Let tensor: Tensor[N, C, H, W]. Consider `tensor.align_to('W', ..., 'N')`
+// We expand the `...` to "all unmentioned dimensions, in the order which they
+// appear in the original tensor."
+//
+// `order` is passed in **without** the ellipsis name. This is because ellipsis
+// is not a valid name in cpp right now. Future work should be done on making
+// ellipsis a valid name.
+//
+// `ellipsis_idx` is where the ellipsis occurs in the Python call.
+// In our example, `tensor.align_to('W', ..., 'N')`, order = ['W', 'N'] and
+// ellipsis_idx = 1.
+Tensor align_to(const Tensor& tensor, DimnameList order, int64_t ellipsis_idx) {
+  const auto tensor_names = tensor.names();
+  const auto tensor_sizes = tensor.sizes();
+  const auto tensor_strides = tensor.strides();
+  const auto tensor_dim = tensor.sizes().size();
+  constexpr int64_t not_found = -1;
+
+  // General strategy.
+  //
+  // Step 1: We compute the following 3 things:
+  // 1. How many names the ellipsis should expand to
+  // 2. Which names in `tensor.names` are not mentioned in `order`.
+  // 3. Where names in `order` occur in tensor, if at all.
+  //
+  // Step 2: Compute the new sizes/strides/names.
+  // First, determine the ndim of the output tensor (this is not obvious)
+  // by counting the number of names in `tensor` that are not in `order`.
+  // Next, fill in output sizes/strides/names by using `order` and knowledge
+  // of which dimensions in `tensor` are unmentioned in `order`.
+
+  std::bitset<kMaxNamedTensorDim> order_has_tensor_name;
+
+  // tensor_idx_for[i] = j means that the ith name in `order`
+  // appears in the jth element of tensor.
+  std::vector<int64_t> tensor_idx_for(order.size(), not_found);
+
+  for (auto order_idx = 0; order_idx < order.size(); ++order_idx) {
+    const auto name = order[order_idx];
+    TORCH_CHECK(name.isBasic(),
+        "align_to: the desired order of dimensions cannot contain a None name, got ",
+        order);
+    auto it = std::find(tensor_names.begin(), tensor_names.end(), name);
+    if (it == tensor_names.end()) {
+      continue;
+    }
+    auto idx_in_tensor = std::distance(tensor_names.begin(), it);
+    tensor_idx_for[order_idx] = idx_in_tensor;
+    order_has_tensor_name.set(idx_in_tensor);
+  }
+
+  const auto num_ellipsis_names = countUnset(order_has_tensor_name, tensor_dim);
+  const auto out_dim = num_ellipsis_names + order.size();
+
+  // Step 2: Now that we know the size of the output tensor, we can use the
+  // metadata obtained from Step 1 to fill in the new sizes/strides/names
+  std::vector<int64_t> new_sizes(out_dim, 1);
+  std::vector<int64_t> new_strides(out_dim, 0);
+  std::vector<Dimname> new_names(out_dim, Dimname::wildcard());
+
+  auto setNewSizesStridesNamesFor = [&](int64_t out_dim, int64_t tensor_dim) {
+    new_sizes[out_dim] = tensor_sizes[tensor_dim];
+    new_strides[out_dim] = tensor_strides[tensor_dim];
+    new_names[out_dim] = tensor_names[tensor_dim];
+  };
+
+  // Fill in the non-ellipsis dimensions
+  for (auto order_idx = 0; order_idx < order.size(); ++order_idx) {
+    auto out_idx = order_idx;
+    if (order_idx >= ellipsis_idx) {
+      out_idx = order_idx + num_ellipsis_names;
+    }
+    const auto tensor_idx = tensor_idx_for[order_idx];
+    if (tensor_idx == not_found) {
+      // We are adding a new size-one dimension
+      new_names[out_idx] = order[order_idx];
+      continue;
+    }
+    setNewSizesStridesNamesFor(out_idx, tensor_idx);
+  }
+
+  // Fill in the ellipsis dimensions
+  for (auto tensor_idx = 0; tensor_idx < tensor_dim; ++tensor_idx) {
+    if (order_has_tensor_name.test(tensor_idx)) {
+      continue;
+    }
+    setNewSizesStridesNamesFor(ellipsis_idx, tensor_idx);
+    ellipsis_idx++;
+  }
+
+  check_names_valid_for(out_dim, new_names);
+
+  Tensor result;
+  {
+    NoNamesGuard guard;
+    result = tensor.as_strided(new_sizes, new_strides);
+  }
+  internal_set_names_inplace(result, std::move(new_names), /*validate_names=*/false);
+  return result;
+}
+
 Tensor align_to(const Tensor& tensor, DimnameList names) {
   auto tensor_names = tensor.names();
   auto tensor_sizes = tensor.sizes();
@@ -152,7 +265,7 @@ Tensor align_to(const Tensor& tensor, DimnameList names) {
     const auto& dim = tensor_names[idx];
     TORCH_CHECK(dim.isBasic(),
         "align_to: All input dims must be named. Found unnamed dim at index ",
-        dim, " of Tensor", tensor_names);
+        idx, " of Tensor", tensor_names);
     auto it = std::find(names.begin(), names.end(), dim);
     TORCH_CHECK(it != names.end(),
         "align_to: Cannot find dim ", dim, " from Tensor", names,
@@ -231,6 +344,78 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, DimnameList
 Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
   return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
 }
+
+#ifdef BUILD_NAMEDTENSOR
+// Misc. Dimname overloads that don't have homes. Maybe we should move
+// all of them here or autogenerate them because they look so similar.
+Tensor gather(const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
+  reportNYIDimnameOverload("gather");
+}
+Tensor& gather_out(Tensor& result, const Tensor& self, Dimname dim, const Tensor& index, bool sparse_grad) {
+  reportNYIDimnameOverload("gather");
+}
+Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("index_add");
+}
+Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("index_add");
+}
+Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+  return at::index_fill(self, dimname_to_position(self, dim), index, source);
+}
+Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+  return self.index_fill_(dimname_to_position(self, dim), index, source);
+}
+Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  return at::index_fill(self, dimname_to_position(self, dim), index, source);
+}
+Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  return self.index_fill_(dimname_to_position(self, dim), index, source);
+}
+Tensor index_copy(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("index_copy");
+}
+Tensor& index_copy_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("index_copy");
+}
+Tensor& index_select_out(Tensor& out, const Tensor& self, Dimname dim, const Tensor& index) {
+  reportNYIDimnameOverload("index_select");
+}
+Tensor index_select(const Tensor& self, Dimname dim, const Tensor& index) {
+  reportNYIDimnameOverload("index_select");
+}
+Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("scatter");
+}
+Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("scatter");
+}
+Tensor scatter(const Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+  reportNYIDimnameOverload("scatter");
+}
+Tensor& scatter_(Tensor& self, Dimname dim, const Tensor& index, Scalar source) {
+  reportNYIDimnameOverload("scatter");
+}
+Tensor scatter_add(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("scatter_add");
+}
+Tensor& scatter_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("scatter_add");
+}
+std::tuple<Tensor&, Tensor&> sort_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("sort");
+}
+std::tuple<Tensor, Tensor> sort(const Tensor& self, Dimname dim, bool keepdim) {
+  reportNYIDimnameOverload("sort");
+}
+Tensor& squeeze_(Tensor& self, Dimname dim) {
+  reportNYIDimnameOverload("squeeze");
+}
+Tensor squeeze(const Tensor& self, Dimname dim) {
+  return at::squeeze(self, dimname_to_position(self, dim));
+}
+
+#endif
 
 }}  // namespace at::native
 #endif
