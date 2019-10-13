@@ -31,8 +31,7 @@ from torch.quantization._quantize_script import PackedParams
 import jit_utils
 from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    default_floating_dtype
+    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, enable_profiling_mode, do_input_map, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -7995,7 +7994,6 @@ a")
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 0)
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 3)
 
-    @default_floating_dtype(torch.float)
     def test_wrapped_number(self):
         # Scalar's get converted to 'wrapped' tensors of default tensor type.
         # Wrapped tensors behave differently in certain promotion operations:
@@ -8007,6 +8005,7 @@ a")
             x = -10000.0
             result = x * torch.ones(1, dtype=torch.float)
             return result
+
         scripted = torch.jit.trace(foobar, (), check_trace=True)
 
     def test_no_dtype_shape(self):
