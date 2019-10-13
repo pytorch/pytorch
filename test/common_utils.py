@@ -32,7 +32,6 @@ import __main__
 import errno
 
 import expecttest
-import hashlib
 
 import torch
 import torch.cuda
