@@ -25,8 +25,6 @@ enum class TensorTypeId : uint8_t {
   // the hierarchy for convenience and performance
   CPUTensorId, // PyTorch/Caffe2 supported
   CUDATensorId, // PyTorch/Caffe2 supported
-  SparseCPUTensorId, // PyTorch only
-  SparseCUDATensorId, // PyTorch only
   MKLDNNTensorId, // Caffe2 only
   OpenGLTensorId, // Caffe2 only
   OpenCLTensorId, // Caffe2 only
@@ -40,12 +38,29 @@ enum class TensorTypeId : uint8_t {
   ComplexCPUTensorId, // PyTorch only
   ComplexCUDATensorId, // PyTorch only
 
+  // Sparse has multi-dispatch with dense; handle it first
+  SparseCPUTensorId, // PyTorch only
+  SparseCUDATensorId, // PyTorch only
+
   // WARNING! If you add more "wrapper" style tensor ids (tensor
   // ids which don't get kernels directly defined in native_functions.yaml;
   // examples are tracing or profiling) here, you need to also adjust
   // legacyExtractTypeId in c10/core/TensorTypeId.h to mask them out.
 
   VariableTensorId,
+
+  // TESTING: This is intended to be a generic testing tensor type id.
+  // Don't use it for anything real; its only acceptible use is within a single
+  // process test.  Use it by creating a TensorImpl with this TensorTypeId, and
+  // then registering operators to operate on this type id.
+  TESTING_ONLY_GenericWrapperTensorId,
+
+  // TESTING: This is intended to be a generic testing tensor type id.
+  // Don't use it for anything real; its only acceptible use is within a ingle
+  // process test.  Use it by toggling the mode on and off via
+  // TESTING_ONLY_tls_generic_mode_set_enabled and then registering operators
+  // to operate on this type id.
+  TESTING_ONLY_GenericModeTensorId,
 
   NumTensorIds, // Sentinel
 };

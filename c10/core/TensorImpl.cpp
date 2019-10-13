@@ -130,6 +130,35 @@ bool TensorImpl::compute_strides_like_channels_last() const {
   return false;
 }
 
+bool TensorImpl::compute_non_overlapping_and_dense() const {
+  if (dim() == 1) {
+    return size(0) < 2 || stride(0) == 1;
+  }
+  SmallVector<int64_t,5> perm;
+  perm.resize(dim());
+  for (int64_t i = 0; i < dim(); i ++) {
+    perm[i] = i;
+  }
+  // Sort by strides, leaving 0 and 1 sized dims at the end of the array
+  std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
+      if (sizes_[a] < 2) {
+        return false;
+      }
+      return strides_[a] < strides_[b];
+  });
+  auto require_stride = 1;
+  for (int64_t i = 0; i < dim(); i ++) {
+    if (sizes_[perm[i]] < 2) {
+      return true;
+    }
+    if (strides_[perm[i]] != require_stride) {
+      return false;
+    }
+    require_stride *= sizes_[perm[i]];
+  }
+  return true;
+}
+
 void TensorImpl::release_resources() {
   autograd_meta_.reset();
   if (storage_) {
@@ -194,13 +223,5 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 }
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
-
-bool NonVariableTypeMode::is_enabled() {
-  return !impl::tls_variable_is_enabled();
-}
-
-void NonVariableTypeMode::set_enabled(bool enabled) {
-  impl::tls_variable_set_enabled(!enabled);
-}
 
 } // namespace c10

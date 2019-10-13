@@ -1,15 +1,18 @@
+#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/import_export_helpers.h>
+#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/source_range_serialization_impl.h>
+
 #include <c10/util/Exception.h>
 
 #include <algorithm>
 
 namespace torch {
 namespace jit {
-namespace ImportExportHelpers {
 
 static const std::string kExportSuffix = "py";
 
-std::string qualifierToPath(
+std::string qualifierToArchivePath(
     const std::string& qualifier,
     const std::string& export_prefix) {
   std::string path = qualifier;
@@ -18,29 +21,34 @@ std::string qualifierToPath(
   return export_prefix + path + "." + kExportSuffix;
 }
 
-std::string pathToQualifier(
-    const std::string& classPath,
-    const std::string& export_prefix) {
-  // strip input suffix
-  const auto end = classPath.rfind(kExportSuffix);
-  AT_ASSERT(end != std::string::npos);
+std::shared_ptr<Source> findSourceInArchiveFromQualifier(
+    caffe2::serialize::PyTorchStreamReader& reader,
+    const std::string& export_prefix,
+    const std::string& qualifier) {
+  const std::string path = qualifierToArchivePath(qualifier, export_prefix);
+  if (!reader.hasRecord(path)) {
+    return nullptr;
+  }
+  at::DataPtr data;
+  size_t size;
+  std::tie(data, size) = reader.getRecord(path);
 
-  // strip input suffix
-  size_t libs_idx = classPath.find(export_prefix);
-  AT_ASSERT(libs_idx == 0);
+  std::shared_ptr<ConcreteSourceRangeUnpickler> gen_ranges = nullptr;
 
-  AT_ASSERT(classPath.size() > export_prefix.size());
-  const auto start = export_prefix.size();
-
-  std::string class_qualifier = classPath.substr(start, end - start);
-  std::replace_if(
-      class_qualifier.begin(),
-      class_qualifier.end(),
-      [](char c) { return c == '/'; },
-      '.');
-
-  return class_qualifier;
+  std::string debug_file = path + ".debug_pkl";
+  if (reader.hasRecord(debug_file)) {
+    at::DataPtr debug_data;
+    size_t debug_size;
+    std::tie(debug_data, debug_size) = reader.getRecord(debug_file);
+    gen_ranges = std::make_shared<ConcreteSourceRangeUnpickler>(
+        std::move(debug_data), debug_size);
+  }
+  return std::make_shared<Source>(
+      std::string(static_cast<const char*>(data.get()), size),
+      path,
+      1,
+      gen_ranges);
 }
-} // namespace ImportExportHelpers
+
 } // namespace jit
 } // namespace torch

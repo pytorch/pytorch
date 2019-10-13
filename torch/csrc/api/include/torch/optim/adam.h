@@ -31,9 +31,9 @@ struct TORCH_API AdamOptions {
 class TORCH_API Adam : public Optimizer {
  public:
   template <typename ParameterContainer>
-  explicit Adam(ParameterContainer&& parameters, const AdamOptions& options)
+  explicit Adam(ParameterContainer&& parameters, const AdamOptions& options_)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options(options) {}
+        options(options_) {}
 
   void step() override;
 
