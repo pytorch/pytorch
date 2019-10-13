@@ -62,6 +62,20 @@ inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
   return ret;
 }
 
+inline Tensor softmin(const Tensor& input, const SoftminOptions& options,
+                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
+  int64_t dim = options.dim();
+  Tensor ret;
+
+  if (dtype == c10::nullopt) {
+    ret = (-input).softmax(dim);
+  } else {
+    ret = (-input).softmax(dim, dtype);
+  }
+
+  return ret;
+}
+
 inline Tensor log_softmax(const Tensor& input, const LogSoftmaxOptions& options,
                           c10::optional<torch::Dtype> dtype = c10::nullopt) {
   int64_t dim = options.dim();
@@ -108,6 +122,20 @@ inline Tensor celu(Tensor& input, const CELUOptions& options = {}) {
   } else {
     return torch::celu(input, options.alpha());
   }
+}
+
+inline Tensor softplus(const Tensor& input,
+                       const SoftplusOptions& options = {}) {
+  return torch::softplus(input, options.beta(), options.threshold());
+}
+
+inline Tensor softshrink(const Tensor& input,
+                         const SoftshrinkOptions& options = {}) {
+  return torch::softshrink(input, options.lambda());
+}
+
+inline Tensor softsign(const Tensor& input) {
+  return input / (input.abs() + 1);
 }
 
 } // namespace functional

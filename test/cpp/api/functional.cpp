@@ -521,6 +521,17 @@ TEST_F(FunctionalTest, Softmax) {
   }
 }
 
+TEST_F(FunctionalTest, Softmin) {
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = F::softmin(input, /*dim=*/1);
+  auto sum = torch::sum(torch::exp(-input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::exp(-input[i]) / sum[i];
+    ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
 TEST_F(FunctionalTest, LogSoftmax) {
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
   auto output = F::log_softmax(input, /*dim=*/1);
@@ -688,5 +699,82 @@ TEST_F(FunctionalTest, CELUDefaultOptions) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Softplus) {
+  const auto size = 3;
+  for (const auto beta : {0.5, 1.0, 2.0}) {
+    for (const auto threshold : {1.0, 3.0, 5.0}) {
+      auto x = torch::linspace(-3.0, 3.0, 61);
+      x.resize_({size, size, size});
+      auto y_exp =
+        (x <= threshold) * torch::log(1 + torch::exp(x * beta)) / beta +
+        (x > threshold) * x;
+      auto y = F::softplus(x,
+        SoftplusOptions().beta(beta).threshold(threshold));
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+    }
+  }
+}
+
+TEST_F(FunctionalTest, SoftplusDefaultOptions) {
+  const auto size = 3;
+  const auto beta = 1.0;
+  const auto threshold = 20.0;
+  auto x = torch::linspace(-3.0, 3.0, 61);
+  x.resize_({size, size, size});
+  auto y_exp =
+    (x <= threshold) * torch::log(1 + torch::exp(x * beta)) / beta +
+    (x > threshold) * x;
+  auto y = F::softplus(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Softshrink) {
+  const auto size = 3;
+  for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = F::softshrink(x, /*lambda=*/lambda);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
+TEST_F(FunctionalTest, SoftshrinkDefaultOptions) {
+  const auto size = 3;
+  const auto lambda = 0.5;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size}).set_requires_grad(true);
+  auto y = F::softshrink(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+}
+
+TEST_F(FunctionalTest, Softsign) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x / (1 + x.abs());
+  auto y = F::softsign(x);
+
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
