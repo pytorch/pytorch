@@ -23,7 +23,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
   // Used when receiving an RPC over the wire.
   RpcWithAutograd(
       rpc::worker_id_t fromWorkerId,
-      MessageType messageType,
+      rpc:: MessageType messageType,
       const AutogradMetadata& autogradMetadata,
       std::unique_ptr<rpc::RpcCommandBase> wrappedRpc,
       rpc::MessageType wrappedMessageType,

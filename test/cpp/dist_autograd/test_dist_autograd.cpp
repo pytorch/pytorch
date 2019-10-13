@@ -20,44 +20,6 @@ class DistAutogradTest : public ::testing::Test {
 
 DistAutogradContainer* DistAutogradTest::autogradContainer_ = nullptr;
 
-TEST_F(DistAutogradTest, TestSendFunction) {
-  // Initialize input tensors requiring grad.
-  auto options = at::TensorOptions().requires_grad(true);
-  auto in1 = torch::ones({3, 3}, options);
-  auto in2 = torch::ones({3, 3}, options);
-  ASSERT_FALSE(in1.grad().defined());
-  ASSERT_FALSE(in2.grad().defined());
-
-  autogradContainer_->newContext();
-  DistAutogradContext& autogradContext = autogradContainer_->currentContext();
-  // Attach the send autograd function to tensors.
-  std::vector<torch::Tensor> tensors = {in1, in2};
-  worker_id_t worker_id = 1;
-  addSendRpcBackward(
-      autogradContext, AutogradMetadata(1, 1), tensors, worker_id);
-  auto send_function = autogradContext.sendFunctions()[1];
-  ASSERT_NE(send_function, nullptr);
-  // Ensure that worker id is recorded.
-  auto knownWorkerIds = autogradContext.getKnownWorkerIds();
-  ASSERT_EQ(knownWorkerIds.size(), 1);
-  ASSERT_TRUE(knownWorkerIds.find(worker_id) != knownWorkerIds.end());
-
-  // Build loss and attach it as input to send autograd function.
-  auto o1 = torch::autograd::Variable(torch::ones({3, 3}));
-  auto edge = torch::autograd::Edge(send_function, 0);
-  o1.set_gradient_edge(edge);
-  auto o2 = torch::autograd::Variable(torch::ones({3, 3}));
-  edge = torch::autograd::Edge(send_function, 1);
-  o2.set_gradient_edge(edge);
-  auto loss = torch::add(o1, o2);
-
-  // Run backwards pass and verify gradients accumulated.
-  auto gradient = torch::autograd::Variable(torch::rand({3, 3}));
-  loss.backward(gradient, false, false);
-  ASSERT_TRUE(in1.grad().defined());
-  ASSERT_TRUE(in2.grad().defined());
-}
-
 TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
   auto options = at::TensorOptions().requires_grad(true);
   auto in1 = torch::ones({3, 3}, options);
