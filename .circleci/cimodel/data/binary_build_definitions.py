@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from collections import OrderedDict
 
 import cimodel.data.binary_build_data as binary_build_data
@@ -62,6 +60,7 @@ class Conf(object):
         job_def["name"] = self.gen_build_name(phase)
         job_def["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
         job_def["requires"] = ["setup"]
+        job_def["filters"] = {"branches": {"only": "nightly"}}
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
@@ -121,18 +120,6 @@ def predicate_exclude_nonlinux_and_libtorch(config):
     return config.os == "linux"
 
 
-def gen_schedule_tree(cron_timing):
-    return [{
-        "schedule": {
-            "cron": miniutils.quote(cron_timing),
-            "filters": {
-                "branches": {
-                    "only": ["master"],
-                },
-            },
-        },
-    }]
-
 def get_nightly_uploads():
     configs = gen_build_env_list(False)
     mylist = []
@@ -165,7 +152,6 @@ def add_jobs_and_render(jobs_dict, toplevel_key, smoke, cron_schedule):
         jobs_list.append(build_config.gen_workflow_job(phase))
 
     jobs_dict[toplevel_key] = OrderedDict(
-        triggers=gen_schedule_tree(cron_schedule),
         jobs=jobs_list,
     )
 

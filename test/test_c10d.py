@@ -26,10 +26,9 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
 from common_distributed import MultiProcessTestCase, \
-    requires_gloo, requires_nccl, \
-    skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout
-from common_utils import TestCase, load_tests, run_tests
-from common_utils import retry_on_address_already_in_use_error
+    requires_gloo, requires_nccl, requires_nccl_version, \
+    skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout, skip_if_rocm
+from common_utils import TestCase, load_tests, run_tests, retry_on_address_already_in_use_error
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -561,6 +560,10 @@ class TimeoutTest(TestCase):
 
 @requires_gloo()
 class ProcessGroupGlooTest(MultiProcessTestCase):
+    def setUp(self):
+        super(ProcessGroupGlooTest, self).setUp()
+        self._fork_processes()
+
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
         opts.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
@@ -569,7 +572,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         return opts
 
     def test_multi_device_constructor(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         opts = c10d.ProcessGroupGloo.Options()
         opts.timeout = 5.0
         opts.devices = [
@@ -583,7 +586,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work.wait()
 
     def test_empty_tensors(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         xs = [torch.FloatTensor([])]
@@ -591,7 +594,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertEqual(0, xs[0].numel())
 
     def test_broadcast_checks(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
@@ -641,7 +644,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.broadcast([t1, t3], opts)
 
     def _test_broadcast_basics(self, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         def broadcast(xs, rootRank, rootTensor):
@@ -680,11 +683,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_broadcast_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_broadcast_basics_cuda(self):
         self._test_broadcast_basics(lambda t: t.clone().cuda())
 
     def _test_broadcast_stress(self, inputs):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
         work_handles = [
             pg.broadcast(inputs[i], root=(i % self.world_size))
@@ -705,12 +709,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_broadcast_stress(inputs)
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_broadcast_stress_cuda(self):
         inputs = [torch.Tensor([i * self.world_size + self.rank]).cuda() for i in range(1000)]
         self._test_broadcast_stress(inputs)
 
     def test_allreduce_checks(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
@@ -730,7 +735,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.allreduce([t1, t3], opts)
 
     def _test_allreduce_basics(self, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         # Single input tests
@@ -764,11 +769,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allreduce_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_allreduce_basics_cuda(self):
         self._test_allreduce_basics(lambda t: t.clone().cuda())
 
     def _test_allreduce_stress(self, inputs):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
         work_handles = [pg.allreduce(inputs[i]) for i in range(len(inputs))]
         for i, work_handle in enumerate(work_handles):
@@ -787,12 +793,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allreduce_stress(inputs)
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_allreduce_stress_cuda(self):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allreduce_stress(inputs)
 
     def test_allreduce_coalesced_checks(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros(1, dtype=torch.float32)
@@ -817,7 +824,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(1)
     def test_allreduce_coalesced_checks_cuda(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros(1, dtype=torch.float32)
@@ -827,7 +834,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.allreduce_coalesced([t1.cuda(), t1.cuda()], opts)
 
     def _test_allreduce_coalesced_basics(self, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         test_cases = simple_coalesced_reduce_tests(self.rank, self.world_size)
@@ -844,7 +851,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allreduce_coalesced_basics(lambda t: t.clone())
 
     def _test_allreduce_coalesced_stress(self, inputs):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
         work_handles = [pg.allreduce_coalesced(input) for input in inputs]
         for i, work_handle in enumerate(work_handles):
@@ -860,7 +867,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allreduce_coalesced_stress(inputs)
 
     def test_sparse_allreduce_checks(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1])
@@ -887,7 +894,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 pg.allreduce([t3], opts)
 
     def _test_sparse_allreduce_basics(self, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         for num_inputs_per_rank in [1, 2]:
@@ -904,11 +911,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_sparse_allreduce_basics(lambda t: t)
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_sparse_allreduce_basics_cuda(self):
         self._test_sparse_allreduce_basics(lambda t: t.clone().cuda())
 
     def test_scatter_checks(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
@@ -976,7 +984,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.scatter([t1], [[t1] * self.world_size], opts)
 
     def _test_scatter_basics(self, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         # Preallocate tensors for input/output
@@ -1002,11 +1010,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_scatter_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_scatter_basics_cuda(self):
         self._test_scatter_basics(lambda t: t.clone().cuda())
 
     def _test_scatter_stress(self, inputs, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
         outputs = [
             [fn(torch.Tensor([-1])) for _ in range(self.world_size)]
@@ -1051,7 +1060,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_scatter_stress(inputs, lambda t: t.clone().cuda())
 
     def test_gather_checks(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
@@ -1088,15 +1097,19 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootRank = self.rank
             pg.gather([[t1] * self.world_size, [t1] * self.world_size], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element output list"):
+        desired_list_size = self.world_size
+        incorrect_list_size = self.world_size - 1
+        err_str = "Incorrect output list size {}. Output list size should be {}"
+        with self.assertRaisesRegex(ValueError, err_str.format(incorrect_list_size, desired_list_size)):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
-            pg.gather([[t1] * (self.world_size - 1)], [t1], opts)
+            pg.gather([[t1] * incorrect_list_size], [t1], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element output list"):
+        incorrect_list_size = self.world_size + 1
+        with self.assertRaisesRegex(ValueError, err_str.format(incorrect_list_size, desired_list_size)):
             opts = c10d.GatherOptions()
             opts.rootRank = self.rank
-            pg.gather([[t1] * (self.world_size + 1)], [t1], opts)
+            pg.gather([[t1] * incorrect_list_size], [t1], opts)
 
         with self.assertRaisesRegex(ValueError, "invalid tensor type"):
             opts = c10d.GatherOptions()
@@ -1114,7 +1127,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.gather([[t1] * self.world_size], [t1], opts)
 
     def _test_gather_basics(self, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         # Preallocate tensors for input/output
@@ -1142,11 +1155,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_gather_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_gather_basics_cuda(self):
         self._test_gather_basics(lambda t: t.clone().cuda())
 
     def _test_gather_stress(self, inputs, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
         work_handles = []
         outputs = [
@@ -1185,12 +1199,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_gather_stress(inputs, lambda t: t.clone())
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_gather_stress_cuda(self):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_gather_stress(inputs, lambda t: t.clone().cuda())
 
     def test_allgather_checks(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
@@ -1225,7 +1240,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.allgather([([t1, t3] * (self.world_size))[:self.world_size]], [t1])
 
     def _test_allgather_basics(self, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         # Run with N input tensor per rank
@@ -1251,11 +1266,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allgather_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_allgather_basics_cuda(self):
         self._test_allgather_basics(lambda t: t.clone().cuda())
 
     def _test_allgather_stress(self, inputs, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
         work_handles = []
         outputs = [
@@ -1285,12 +1301,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allgather_stress(inputs, lambda t: t.clone())
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_allgather_stress_cuda(self):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allgather_stress(inputs, lambda t: t.clone().cuda())
 
     def test_reduce_checks(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
@@ -1320,7 +1337,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.reduce([t1, t1], opts)
 
     def _test_reduce_basics(self, fn):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
         for (op, input, output) in simple_reduce_tests(self.rank, self.world_size):
             for root in range(self.world_size):
@@ -1337,11 +1354,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_reduce_basics(lambda t: t.clone())
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_reduce_basics_cuda(self):
         self._test_reduce_basics(lambda t: t.clone().cuda())
 
     def _test_reduce_stress(self, inputs):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts(threads=8))
         work_handles = []
         outputs = []
@@ -1373,12 +1391,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_reduce_stress(inputs)
 
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_reduce_stress_cuda(self):
         inputs = [torch.Tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_reduce_stress(inputs)
 
     def test_send_recv_all_to_all(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         # Preallocate tensors for input/output
@@ -1417,7 +1436,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     @unittest.skipIf(platform == 'darwin', 'ProcessGroup timeout not yet supported on macOS')
     def test_timeout_kwarg(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(
             store,
             self.rank,
@@ -1436,7 +1455,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.barrier().wait()
 
     def test_barrier_implies_wait(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
         # Kick off allreduce operations
@@ -1781,13 +1800,16 @@ class QuadraGpuNet(nn.Module):
 
 
 class DistributedDataParallelTest(MultiProcessTestCase):
+    def setUp(self):
+        super(DistributedDataParallelTest, self).setUp()
+        self._fork_processes()
 
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
         # Use this hack to remove files for that test
         try:
-            os.remove(self.file.name)
+            os.remove(self.file_name)
         except OSError:
             pass
 
@@ -1883,7 +1905,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             input = input[torch.randperm(global_batch_size)]
 
     def _test_gloo_backend(self, devices, device_ids, multi_device=False):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
@@ -1922,7 +1944,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         self._test_gloo_backend(devices, [], multi_device=True)
 
     def _test_nccl_backend(self, devices, device_ids, multi_device=False):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         self._test_ddp_with_process_group(process_group, devices, device_ids, multi_device)
 
@@ -1942,6 +1964,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
+    @skip_if_rocm
     def test_nccl_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
@@ -1949,6 +1972,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(8)
+    @skip_if_rocm
     def test_nccl_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
@@ -1961,7 +1985,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         self.assertTrue(len(gpus) >= 2, "expecting at least 2 gpus per process")
 
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         gpus = gpus[:2]
@@ -1988,7 +2012,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_not_multigpu
     @skip_for_known_issues
     def test_dist_broadcast_coalesced_nccl(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         device = torch.device('cuda')
@@ -2024,8 +2048,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_dist_broadcast_coalesced_gloo(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
@@ -2063,17 +2088,17 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
-    def test_sync_params_no_buffers(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+    def test_sync_params_no_buffers(self, dtype=torch.double):
+        store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         # Use all available devices on every process here (data is small, so should be fine).
         devices = gpus_for_rank(self.world_size)[self.rank]
-        target = torch.arange(10, dtype=torch.float64, device='cuda:{}'.format(devices[0])).chunk(5)
+        target = torch.arange(10, dtype=dtype, device='cuda:{}'.format(devices[0])).chunk(5)
         parameter_data = [target]
-        parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+        parameter_data += [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
         buffer_data = [[]] * len(parameter_data)
 
         c10d._sync_params(
@@ -2090,25 +2115,25 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
-    def test_sync_params_with_buffers(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+    def test_sync_params_with_buffers(self, dtype=torch.double):
+        store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         devices = gpus_for_rank(self.world_size)[self.rank]
-        target = torch.arange(10, dtype=torch.float64, device='cuda:{}'.format(devices[0])).chunk(5)
+        target = torch.arange(10, dtype=dtype, device='cuda:{}'.format(devices[0])).chunk(5)
         parameter_data = [target]
-        parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+        parameter_data += [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
 
         # sync_params should do a dist_broadcast for buffers, so we only populate the master buffers and
         # then check that other processes' tensors end up matching.
 
         if self.is_master:
             buffer_data = [target]
-            buffer_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+            buffer_data += [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
         else:
-            buffer_data = [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices]
+            buffer_data = [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices]
 
         c10d._sync_params(
             process_group,
@@ -2128,8 +2153,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_fp16(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         gpus = gpus_for_rank(self.world_size)[self.rank]
@@ -2159,9 +2185,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_queue_reduction(self):
         # Set up process group.
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # Get this process' split of devices.
@@ -2187,9 +2214,10 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_sync_reduction(self):
         # Set up process group.
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # Get this process' split of devices.
@@ -2206,12 +2234,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_arbitrary_forward_return_value(self):
         """
         Note: this test can be sped up by only running it on a CPU module
         once DistributedDataParallel supports them.
         """
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         class ForwardReturnValueModule(nn.Module):
@@ -2296,12 +2325,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_find_unused_parameters_kwarg(self):
         """
         Note: this test can be sped up by only running it on a CPU module
         once DistributedDataParallel supports them.
         """
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         class FindUnusedParametersModule(nn.Module):
@@ -2372,12 +2402,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_multiple_outputs_multiple_backward(self):
         """
         Note: this test can be sped up by only running it on a CPU module
         once DistributedDataParallel supports them.
         """
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         class MultipleOutputModule(nn.Module):
@@ -2422,12 +2453,13 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_no_grad(self):
         """
         Note: this test can be sped up by only running it on a CPU module
         once DistributedDataParallel supports them.
         """
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         class NoGradModule(nn.Module):
@@ -2474,7 +2506,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # This is the recommended way to implement accumulate grads
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         global_batch_size = self.world_size
         local_batch_size = len(devices)
@@ -2529,7 +2561,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # module.
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         global_batch_size = self.world_size
 
@@ -2579,7 +2611,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         Test that the output of a model can be ignored and that there is no
         implicit requirement that `backward` gets called.
         """
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
         class IgnoredOutput(nn.Module):
@@ -2621,7 +2653,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         implicit requirement that `backward` gets called, if not all model
         parameters participated in computing the model output.
         """
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
         class IgnoredOutputWithUnusedParameters(nn.Module):
@@ -2661,13 +2693,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_failure_recovery(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # need to create a separate file for the recovered FileStore, because
         # the original one will be deleted when destructing the first FileStore.
-        recovery_filename = self.file.name + "_recovery"
+        recovery_filename = self.file_name + "_recovery"
 
         if self.rank == 0:
             # the file will be deleted by the recovered FileStore
@@ -2707,7 +2740,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         del ddp
         del process_group
-        del store  # this will delete self.file
+        del store  # this will delete self.file_name
 
         store = c10d.FileStore(recovery_filename, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -2726,7 +2759,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     def test_sparse_gradients(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
         class SparseGradientModule(nn.Module):
@@ -2945,11 +2978,9 @@ class ComputeBucketAssignmentTest(TestCase):
         result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
 
-
-class CommTest(MultiProcessTestCase):
-
+class NcclErrorHandlingTest(MultiProcessTestCase):
     def setUp(self):
-        super(CommTest, self).setUp()
+        super(NcclErrorHandlingTest, self).setUp()
         # Need to skip return code checking for these tests since the child
         # processes don't exit cleanly.
         self.skip_return_code_checks = [
@@ -2958,6 +2989,22 @@ class CommTest(MultiProcessTestCase):
             self._get_wrapped_func(self.test_nccl_errors_blocking_sigterm),
             self._get_wrapped_func(self.test_nccl_errors_blocking_nonzero_exit),
         ]
+        self._fork_processes()
+
+    def tearDown(self):
+        super(NcclErrorHandlingTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def op_timeout_sec(self):
+        return 1
+
+    @property
+    def world_size(self):
+        return 2
 
     def _get_wrapped_func(self, func):
         # Get the original function which was wrapped in the decorator.
@@ -2968,10 +3015,130 @@ class CommTest(MultiProcessTestCase):
             # py2 way.
             return func.func_closure[0].cell_contents
 
+    def _run_all_reduce(self, pg):
+        pg.allreduce(torch.rand(10).cuda(self.rank))
+
+    @requires_nccl()
+    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @skip_if_not_multigpu
+    @skip_if_rocm
+    def test_nccl_errors_nonblocking(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        process_group.allreduce(torch.rand(10).cuda(self.rank))
+        if self.rank == 0:
+            # This allreduce does not block Python thread as allreduce enqueues
+            # the cuda operation, and then wait only blocks the current cuda
+            # stream.
+            work = process_group.allreduce(torch.rand(10).cuda(self.rank))
+            work.wait()
+
+            # Now the work scheduled next should hang forever since the previous
+            # allreduce will never complete.
+            t = threading.Thread(target=self._run_all_reduce, args=(process_group,))
+            t.daemon = True
+            t.start()
+            t.join(int(get_timeout(self.id()) / 5))
+            self.assertTrue(t.is_alive())
+
+    def _test_nccl_errors_blocking(self, func):
+        os.environ["NCCL_BLOCKING_WAIT"] = "1"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=self.op_timeout_sec))
+        process_group.allreduce(torch.rand(10).cuda(self.rank))
+        if self.rank == 0:
+            work = process_group.allreduce(torch.rand(10).cuda(self.rank))
+            with self.assertRaises(RuntimeError):
+                # Operation would time out in blocking mode.
+                work.wait()
+        else:
+            func()
+
+    @requires_nccl()
+    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @skip_if_not_multigpu
+    def test_nccl_errors_blocking_clean_exit(self):
+        self._test_nccl_errors_blocking(lambda : sys.exit(0))
+
+    @requires_nccl()
+    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @skip_if_not_multigpu
+    def test_nccl_errors_blocking_nonzero_exit(self):
+        self._test_nccl_errors_blocking(lambda : sys.exit(1))
+
+    @requires_nccl()
+    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @skip_if_not_multigpu
+    def test_nccl_errors_blocking_abort(self):
+        self._test_nccl_errors_blocking(lambda : os.abort())
+
+    @requires_nccl()
+    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @skip_if_not_multigpu
+    def test_nccl_errors_blocking_sigkill(self):
+        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGKILL))
+
+    @requires_nccl()
+    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @skip_if_not_multigpu
+    def test_nccl_errors_blocking_sigterm(self):
+        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGTERM))
+
+    def _run_invalid_nccl_blocking_wait_env(self, val):
+        os.environ["NCCL_BLOCKING_WAIT"] = val
+        store = c10d.FileStore(self.file_name, self.world_size)
+        with self.assertRaises(RuntimeError):
+            process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_invalid_nccl_blocking_wait_env(self):
+        self._run_invalid_nccl_blocking_wait_env('abc')
+        self._run_invalid_nccl_blocking_wait_env('-1')
+        self._run_invalid_nccl_blocking_wait_env('2147483647')
+        self._run_invalid_nccl_blocking_wait_env('4294967295')
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    @skip_if_rocm
+    def test_nccl_timeout(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        os.environ["NCCL_BLOCKING_WAIT"] = "1"
+
+        # Initialize process_group.
+        timeout = 1
+        c10d.distributed_c10d.init_process_group(
+            backend=dist.Backend.NCCL, store=store, world_size=2, rank=self.rank,
+            timeout=timedelta(seconds=timeout))
+        c10d.distributed_c10d.all_reduce(torch.rand(10).cuda(self.rank))
+
+        if self.rank == 0:
+            # This should timeout in about 1 second.
+            start = time.time()
+            with self.assertRaises(RuntimeError):
+                c10d.distributed_c10d.all_reduce(torch.rand(10).cuda(self.rank))
+
+            total_time = time.time() - start
+
+            self.assertLess(abs(total_time - timeout), 0.5)
+        else:
+            # Ensure the other rank sleeps to trigger timeout.
+            time.sleep(2 * timeout)
+
+
+class CommTest(MultiProcessTestCase):
+    def setUp(self):
+        super(CommTest, self).setUp()
+        self._fork_processes()
+
     def tearDown(self):
         super(CommTest, self).tearDown()
         try:
-            os.remove(self.file.name)
+            os.remove(self.file_name)
         except OSError:
             pass
 
@@ -3011,90 +3178,10 @@ class CommTest(MultiProcessTestCase):
 
         self.assertEqual(tensors, target)
 
-    def _run_all_reduce(self, pg):
-        pg.allreduce(torch.rand(10).cuda(self.rank))
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_nonblocking(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        process_group.allreduce(torch.rand(10).cuda(self.rank))
-        if self.rank == 0:
-            # This allreduce does not block Python thread as allreduce enqueues
-            # the cuda operation, and then wait only blocks the current cuda
-            # stream.
-            work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            work.wait()
-
-            # Now the work scheduled next should hang forever since the previous
-            # allreduce will never complete.
-            t = threading.Thread(target=self._run_all_reduce, args=(process_group,))
-            t.daemon = True
-            t.start()
-            t.join(int(get_timeout(self.id()) / 5))
-            self.assertTrue(t.is_alive())
-
-    def _test_nccl_errors_blocking(self, func):
-        os.environ["NCCL_BLOCKING_WAIT"] = "1"
-        store = c10d.FileStore(self.file.name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(
-            store,
-            self.rank,
-            self.world_size,
-            timeout=timedelta(seconds=self.op_timeout_sec))
-        process_group.allreduce(torch.rand(10).cuda(self.rank))
-        if self.rank == 0:
-            work = process_group.allreduce(torch.rand(10).cuda(self.rank))
-            with self.assertRaises(RuntimeError):
-                # Operation would time out in blocking mode.
-                work.wait()
-        else:
-            func()
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_clean_exit(self):
-        self._test_nccl_errors_blocking(lambda : sys.exit(0))
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_nonzero_exit(self):
-        self._test_nccl_errors_blocking(lambda : sys.exit(1))
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_abort(self):
-        self._test_nccl_errors_blocking(lambda : os.abort())
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_sigkill(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGKILL))
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_nccl_errors_blocking_sigterm(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGTERM))
-
-    def _run_invalid_nccl_blocking_wait_env(self, val):
-        os.environ["NCCL_BLOCKING_WAIT"] = val
-        store = c10d.FileStore(self.file.name, self.world_size)
-        with self.assertRaises(RuntimeError):
-            process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_invalid_nccl_blocking_wait_env(self):
-        self._run_invalid_nccl_blocking_wait_env('abc')
-        self._run_invalid_nccl_blocking_wait_env('-1')
-        self._run_invalid_nccl_blocking_wait_env('2147483647')
-        self._run_invalid_nccl_blocking_wait_env('4294967295')
-
     @requires_nccl()
     @skip_if_not_multigpu
     def test_broadcast_coalesced_nccl(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         device = torch.device('cuda:%d' % self.rank)
         self._test_broadcast_coalesced(process_group, device)
@@ -3102,7 +3189,7 @@ class CommTest(MultiProcessTestCase):
     @requires_gloo()
     @skip_if_not_multigpu
     def test_broadcast_coalesced_gloo_cuda(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
@@ -3111,7 +3198,7 @@ class CommTest(MultiProcessTestCase):
 
     @requires_gloo()
     def test_broadcast_coalesced_gloo_cpu(self):
-        store = c10d.FileStore(self.file.name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
