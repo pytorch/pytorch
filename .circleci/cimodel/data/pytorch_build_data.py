@@ -52,7 +52,10 @@ CONFIG_TREE_DATA = [
             ]),
             ("9.2", [X("3.6")]),
             ("10", [X("3.6")]),
-            ("10.1", [X("3.6")]),
+            ("10.1", [
+                X("3.6"),
+                ("3.6", [("cuda_memcheck", [XImportant(True)])]),
+            ]),
         ]),
         ("android", [
             ("r19c", [
@@ -134,6 +137,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "android_abi": AndroidAbiConfigNode,
+            "cuda_memcheck": CudaMemcheckConfigNode,
         }
         return next_nodes[experimental_feature]
 
@@ -158,6 +162,18 @@ class NamedTensorConfigNode(TreeConfigNode):
 
     def child_constructor(self):
         return ImportantConfigNode
+
+
+class CudaMemcheckConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "CUDA_MEMCHECK=" + str(label)
+
+    def init2(self, node_name):
+        self.props["cuda_memcheck"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
 
 class LibTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):

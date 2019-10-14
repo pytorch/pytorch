@@ -225,9 +225,6 @@ def instantiate_configs():
             # TODO The gcc version is orthogonal to CUDA version?
             parms_list.append("gcc7")
 
-        if cuda_version in ["10.1"]:
-            parms_list.append("cuda_memcheck")
-
         is_namedtensor = fc.find_prop("is_namedtensor") or False
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
