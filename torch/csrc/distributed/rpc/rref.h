@@ -250,7 +250,8 @@ class UserRRef final : public RRef {
 
   // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
   // yet, this call will block.
-  T toHere();
+  std::shared_ptr<FutureMessage> toHere();
+  T getToHereValue(const std::shared_ptr<FutureMessage>& fm);
 
   // Upon destruction, this ``UserRRef`` will tell the owner to deref.
   ~UserRRef() override;

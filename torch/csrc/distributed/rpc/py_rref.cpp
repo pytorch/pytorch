@@ -60,10 +60,13 @@ py::object PyRRef::toHere() {
     if (rref_->isPyObj()) {
       // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires
       // GIL.
-      return std::static_pointer_cast<UserRRef<py::object>>(rref_)->toHere();
+      auto userRRef = std::static_pointer_cast<UserRRef<py::object>>(rref_);
+      auto fm = userRRef->toHere();
+      return userRRef->getToHereValue(fm);
     } else {
-      IValue value =
-          std::static_pointer_cast<UserRRef<IValue>>(rref_)->toHere();
+      auto userRRef = std::static_pointer_cast<UserRRef<IValue>>(rref_);
+      auto fm = userRRef->toHere();
+      IValue value = userRRef->getToHereValue(fm);
 
       {
         // acquiring GIL as torch::jit::toPyObject creates new py::object

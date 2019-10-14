@@ -131,14 +131,27 @@ const ForkId& UserRRef<T>::forkId() const {
 }
 
 template <>
-IValue UserRRef<IValue>::toHere() {
+std::shared_ptr<FutureMessage> UserRRef<IValue>::toHere() {
   auto agent = RpcAgent::getDefaultRpcAgent();
-  std::shared_ptr<FutureMessage> fm = agent->send(
+  return agent->send(
       agent->getWorkerInfo(ownerId_),
       ScriptRRefFetchCall(rrefId()).toMessage());
+}
+
+template <>
+std::shared_ptr<FutureMessage> UserRRef<py::object>::toHere() {
+  auto agent = RpcAgent::getDefaultRpcAgent();
+  return agent->send(
+      agent->getWorkerInfo(ownerId_),
+      PythonRRefFetchCall(rrefId()).toMessage());
+}
+
+template <>
+IValue UserRRef<IValue>::getToHereValue(
+    const std::shared_ptr<FutureMessage>& fm) {
   const Message& message = fm->wait();
   RRefContext::handleException(message);
-  auto rfr = RRefFetchRet::fromMessage(message);
+  auto rfr = ScriptRRefFetchRet::fromMessage(message);
   TORCH_INTERNAL_ASSERT(
       rfr->values().size() == 1,
       "RRef of IValue should contain a single IValue, but got ",
@@ -147,14 +160,11 @@ IValue UserRRef<IValue>::toHere() {
 }
 
 template <>
-py::object UserRRef<py::object>::toHere() {
-  auto agent = RpcAgent::getDefaultRpcAgent();
-  std::shared_ptr<FutureMessage> fm = agent->send(
-      agent->getWorkerInfo(ownerId_),
-      PythonRRefFetchCall(rrefId()).toMessage());
+py::object UserRRef<py::object>::getToHereValue(
+    const std::shared_ptr<FutureMessage>& fm) {
   const Message& message = fm->wait();
   RRefContext::handleException(message);
-  auto rfr = RRefFetchRet::fromMessage(message);
+  auto rfr = PythonRRefFetchRet::fromMessage(message);
   return PythonRpcHandler::getInstance().deserialize(
       SerializedPyObj::fromIValues(rfr->values()));
 }

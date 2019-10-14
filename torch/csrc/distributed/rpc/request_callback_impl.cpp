@@ -101,8 +101,8 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return c10::guts::make_unique<RRefFetchRet>(
-          RRefFetchRet({rref->getValue()}));
+      std::vector<IValue> ivalues = {rref->getValue()};
+      return c10::guts::make_unique<ScriptRRefFetchRet>(std::move(ivalues));
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
@@ -112,8 +112,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
           ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
       SerializedPyObj result =
           PythonRpcHandler::getInstance().serialize(rref->getValue());
-      return c10::guts::make_unique<RRefFetchRet>(
-          RRefFetchRet(result.toIValues()));
+      return c10::guts::make_unique<PythonRRefFetchRet>(result.toIValues());
     }
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);

@@ -72,6 +72,13 @@ py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
       py::bytes(serializedObj.payload_), serializedObj.tensors_);
 }
 
+void PythonRpcHandler::cleanUp() {
+  AutoGIL ag;
+  pyRunFunction_ = py::none();
+  pyLoadReturnValue_ = py::none();
+  pySerialize_ = py::none();
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
