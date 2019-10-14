@@ -1205,4 +1205,3 @@ def foo(x):
 
 } // namespace jit
 } // namespace torch
-} // namespace torch
