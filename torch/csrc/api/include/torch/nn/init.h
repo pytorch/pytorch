@@ -26,22 +26,6 @@ enum class FanMode { FanIn, FanOut };
 } // namespace init
 } // nn
 
-// TODO: Remove the declarations here in https://github.com/pytorch/pytorch/pull/26837.
-TORCH_API extern const nn::init::Nonlinearity kLinear;
-TORCH_API extern const nn::init::Nonlinearity kConv1D;
-TORCH_API extern const nn::init::Nonlinearity kConv2D;
-TORCH_API extern const nn::init::Nonlinearity kConv3D;
-TORCH_API extern const nn::init::Nonlinearity kConvTranspose1D;
-TORCH_API extern const nn::init::Nonlinearity kConvTranspose2D;
-TORCH_API extern const nn::init::Nonlinearity kConvTranspose3D;
-TORCH_API extern const nn::init::Nonlinearity kSigmoid;
-TORCH_API extern const nn::init::Nonlinearity kTanh;
-TORCH_API extern const nn::init::Nonlinearity kReLU;
-TORCH_API extern const nn::init::Nonlinearity kLeakyReLU;
-
-TORCH_API extern const nn::init::FanMode kFanIn;
-TORCH_API extern const nn::init::FanMode kFanOut;
-
 namespace nn {
 namespace init {
 
@@ -99,8 +83,8 @@ TORCH_API Tensor uniform_(Tensor tensor, double low = 0, double high = 1);
 TORCH_API Tensor kaiming_normal_(
     Tensor tensor,
     double a = 0,
-    FanMode mode = torch::kFanIn,
-    Nonlinearity nonlinearity = torch::kLeakyReLU);
+    FanMode mode = torch::nn::init::FanMode::FanIn,
+    Nonlinearity nonlinearity = torch::nn::init::Nonlinearity::LeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Delving deep into rectifiers: Surpassing human-level
@@ -110,8 +94,8 @@ TORCH_API Tensor kaiming_normal_(
 TORCH_API Tensor kaiming_uniform_(
     Tensor tensor,
     double a = 0,
-    FanMode mode = torch::kFanIn,
-    Nonlinearity nonlinearity = torch::kLeakyReLU);
+    FanMode mode = torch::nn::init::FanMode::FanIn,
+    Nonlinearity nonlinearity = torch::nn::init::Nonlinearity::LeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Understanding the difficulty of training deep feedforward
