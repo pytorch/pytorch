@@ -65,7 +65,7 @@ void finishAcceptUserRRef(const Message& message) {
   RRefContext::handleException(message);
   auto rr = RemoteRet::fromMessage(message);
   auto& ctx = RRefContext::getInstance();
-  ctx->delPendingUser(rr->forkId());
+  ctx.delPendingUser(rr->forkId());
 }
 
 } // namespace
@@ -92,12 +92,14 @@ py::object toPyObjInternal(RpcCommandBase& rpc, MessageType messageType) {
       return PythonRpcHandler::getInstance().loadPythonUDFResult(
           resp.pickledPayload(), resp.tensors());
     }
-    case MessageType::MESSAGE_WITH_AUTOGRAD_RESP: {
+    case MessageType::FORWARD_AUTOGRAD_RESP: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
       // Attach 'recv' autograd function.
       addRecvRpcBackward(
-          rpcWithAutograd.autogradMetadata(), rpcWithAutograd.tensors());
+          rpcWithAutograd.autogradMetadata(),
+          rpcWithAutograd.tensors(),
+          rpcWithAutograd.fromWorkerId());
 
       // Handle the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
@@ -129,15 +131,16 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
 
     // Wrap the original rpc with autograd information.
     AutogradMetadata autogradMetadata(
-        autogradContext.context_id(), autogradContainer.newAutogradMessageId());
+        autogradContext.contextId(), autogradContainer.newAutogradMessageId());
     RpcWithAutograd rpcWithAutograd(
-        MessageType::MESSAGE_WITH_AUTOGRAD_REQ,
+        agent.getWorkerInfo().id_,
+        MessageType::FORWARD_AUTOGRAD_REQ,
         autogradMetadata,
         std::move(scriptCall));
 
     // Record autograd information for 'send'.
     addSendRpcBackward(
-        autogradContext, autogradMetadata, rpcWithAutograd.tensors());
+        autogradContext, autogradMetadata, rpcWithAutograd.tensors(), dst.id_);
 
     return agent.send(dst, std::move(rpcWithAutograd).toMessage());
   } else {
@@ -157,16 +160,16 @@ PyRRef pyRemoteBuiltin(
   auto& ctx = RRefContext::getInstance();
   // TODO: support creating RRefs on a local object.
   TORCH_INTERNAL_ASSERT(
-      ctx->getWorkerId() != dst.id_,
+      ctx.getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
-  auto userRRef = ctx->createUserRRef<IValue>(dst.id_);
+  auto userRRef = ctx.createUserRRef<IValue>(dst.id_);
   auto fm = agent.send(
       dst,
       ScriptRemoteCall(
           op, std::move(stack), userRRef->rrefId(), userRRef->forkId())
           .toMessage());
 
-  ctx->addPendingUser(userRRef->forkId(), userRRef);
+  ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
   return PyRRef(userRRef);
 }
@@ -192,9 +195,9 @@ PyRRef pyRemotePythonUdf(
   auto& ctx = RRefContext::getInstance();
   // TODO: support creating RRefs on a local object.
   TORCH_INTERNAL_ASSERT(
-      ctx->getWorkerId() != dst.id_,
+      ctx.getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
-  auto userRRef = ctx->createUserRRef<py::object>(dst.id_);
+  auto userRRef = ctx.createUserRRef<py::object>(dst.id_);
   auto fm = agent.send(
       dst,
       PythonRemoteCall(
@@ -203,7 +206,7 @@ PyRRef pyRemotePythonUdf(
           userRRef->forkId().toIValue())
           .toMessage());
 
-  ctx->addPendingUser(userRRef->forkId(), userRRef);
+  ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
   return PyRRef(userRRef);
 }

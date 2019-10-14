@@ -284,6 +284,17 @@ TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-4));
 }
 
+TEST_F(FunctionalTest, TripletMarginLoss) {
+  auto anchor = torch::tensor({{3., 3.}}, torch::kFloat);
+  auto positive = torch::tensor({{2., 2.}}, torch::kFloat);
+  auto negative = torch::tensor({{0., 0.}}, torch::kFloat);
+  auto output = F::triplet_margin_loss(
+      anchor, positive, negative, TripletMarginLossOptions().margin(1.0));
+  auto expected = torch::tensor({0.}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+}
+
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
@@ -521,6 +532,17 @@ TEST_F(FunctionalTest, Softmax) {
   }
 }
 
+TEST_F(FunctionalTest, Softmin) {
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = F::softmin(input, /*dim=*/1);
+  auto sum = torch::sum(torch::exp(-input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::exp(-input[i]) / sum[i];
+    ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
 TEST_F(FunctionalTest, LogSoftmax) {
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
   auto output = F::log_softmax(input, /*dim=*/1);
@@ -539,6 +561,43 @@ TEST_F(FunctionalTest, PReLU) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({42, 24}));
   const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
   ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Normalize) {
+  const auto expected = torch::tensor(
+    {{{0.00000000, 0.10000000, 0.2000, 0.30000000, 0.40000000},
+      {0.14285715, 0.17142858, 0.2000, 0.22857143, 0.25714287}}}, torch::requires_grad().dtype(torch::kFloat));
+  { // Test #1 
+    auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat).requires_grad(true));
+    auto norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
+    
+    // reduce to scalar to call .backward()
+    torch::Tensor s = norm.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(input.grad().numel(), 10);
+    ASSERT_TRUE(torch::allclose(norm, expected));
+  }
+
+  { // Test #2 Check variations of optional arguments
+    auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat));
+    auto output = torch::randn({1,2,5}, torch::dtype(torch::kFloat));
+    // non-null output argument
+    F::normalize(input, NormalizeOptions().p(1).dim(-1), output);
+    // default options
+    F::normalize(input);
+
+    ASSERT_TRUE(torch::allclose(output, expected));
+  }
+  
+  { // Test #3 Base case of scalar tensor
+    auto input = torch::randn({}, torch::requires_grad());
+    torch::Tensor norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
+    norm.backward();
+
+    ASSERT_EQ(input.grad().numel(), 1);
+  }
 }
 
 TEST_F(FunctionalTest, ReLU) {
@@ -690,3 +749,111 @@ TEST_F(FunctionalTest, CELUDefaultOptions) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
+
+TEST_F(FunctionalTest, Softplus) {
+  const auto size = 3;
+  for (const auto beta : {0.5, 1.0, 2.0}) {
+    for (const auto threshold : {1.0, 3.0, 5.0}) {
+      auto x = torch::linspace(-3.0, 3.0, 61);
+      x.resize_({size, size, size});
+      auto y_exp =
+        (x <= threshold) * torch::log(1 + torch::exp(x * beta)) / beta +
+        (x > threshold) * x;
+      auto y = F::softplus(x,
+        SoftplusOptions().beta(beta).threshold(threshold));
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+    }
+  }
+}
+
+TEST_F(FunctionalTest, SoftplusDefaultOptions) {
+  const auto size = 3;
+  const auto beta = 1.0;
+  const auto threshold = 20.0;
+  auto x = torch::linspace(-3.0, 3.0, 61);
+  x.resize_({size, size, size});
+  auto y_exp =
+    (x <= threshold) * torch::log(1 + torch::exp(x * beta)) / beta +
+    (x > threshold) * x;
+  auto y = F::softplus(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Softshrink) {
+  const auto size = 3;
+  for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = F::softshrink(x, /*lambda=*/lambda);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
+TEST_F(FunctionalTest, SoftshrinkDefaultOptions) {
+  const auto size = 3;
+  const auto lambda = 0.5;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size}).set_requires_grad(true);
+  auto y = F::softshrink(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+}
+
+TEST_F(FunctionalTest, Softsign) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x / (1 + x.abs());
+  auto y = F::softsign(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Tanhshrink) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x - x.tanh();
+  auto y = F::tanhshrink(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Threshold) {
+  const auto size = 3;
+  for (const auto threshold : {0.5, 1.0, 2.0}) {
+    for (const auto value : {0.5, 1.0, 2.0}) {
+      for (const auto inplace : {false, true}) {
+        auto x = torch::linspace(-3.0, 3.0, 61);
+        x.resize_({size, size, size});
+        auto y_exp = (x <= threshold) * value + (x > threshold) * x;
+        auto y = F::threshold(x,
+          ThresholdOptions(threshold, value).inplace(inplace));
+
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+        if (inplace) {
+          ASSERT_TRUE(torch::allclose(x, y_exp));
+        }
+      }
+    }
+  }
+}
+
