@@ -1,7 +1,7 @@
 #pragma once
 
 // Complex number math operations that act as no-ops for other dtypes.
-#include <complex.h>
+#include <complex>
 
 namespace at { namespace native {
 namespace {
