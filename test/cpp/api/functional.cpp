@@ -785,6 +785,14 @@ TEST_F(FunctionalTest, SoftplusDefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, Unfold) {
+  auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
+  auto output = F::unfold(input, UnfoldOptions({2, 4}).padding(1).stride(2));
+  auto expected_sizes = std::vector<int64_t>({2, 16, 6});
+
+  ASSERT_EQ(output.sizes(), expected_sizes);
+}
+
 TEST_F(FunctionalTest, Softshrink) {
   const auto size = 3;
   for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
@@ -856,4 +864,3 @@ TEST_F(FunctionalTest, Threshold) {
     }
   }
 }
-
