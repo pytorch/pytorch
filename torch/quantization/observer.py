@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch._jit_internal import List, Optional
 
 def _with_args(cls_or_self, **kwargs):
-    """Wrapper that allows creation of class factories.
+    r"""Wrapper that allows creation of class factories.
 
     This can be useful when there is a need to create classes with the same
     constructor arguments, but different instances.
@@ -105,7 +105,7 @@ class _ObserverBase(Observer):
 
     def _calculate_per_channel_qparams(self, min_vals, max_vals):
         # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
-        """Calculates the per channel quantization parameters, given min and max
+        r"""Calculates the per channel quantization parameters, given min and max
         value tensors.
 
         Args:
@@ -142,7 +142,7 @@ class _ObserverBase(Observer):
 
     def _calculate_qparams(self, min_val, max_val):
         # type: (Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor]
-        """Calculates the per tensor quantization parameters, given the min/max.
+        r"""Calculates the per tensor quantization parameters, given the min/max.
 
         Args:
             min_val: Per tensor minimum value
@@ -241,7 +241,7 @@ class MinMaxObserver(_ObserverBase):
                                        quantization for quint8")
 
     def forward(self, x_orig):
-        """Records the running minimum and maximum of ``x``."""
+        r"""Records the running minimum and maximum of ``x``."""
         x = x_orig.detach()
         min_val = self.min_val
         max_val = self.max_val
@@ -429,7 +429,7 @@ class HistogramObserver(_ObserverBase):
 
     @staticmethod
     def _get_norm(delta_begin, delta_end, density, norm_type):
-        """
+        r"""
         Compute the norm of the values uniformaly distributed between
         delta_begin and delta_end.
 
@@ -446,7 +446,7 @@ class HistogramObserver(_ObserverBase):
         return density * norm
 
     def _compute_quantization_error(self, next_start_bin, next_end_bin, norm_type):
-        """
+        r"""
         Compute the quantization error if we use start_bin to end_bin as the
         min and max to do the quantization.
         """
@@ -499,7 +499,7 @@ class HistogramObserver(_ObserverBase):
         return norm
 
     def _non_linear_param_search(self):
-        """
+        r"""
         An approximation for L2 error minimization for selecting min/max.
         By selecting new min/max, we filter out outliers in input distribution.
         This follows the implementation of NormMinimization::NonlinearQuantizationParamsSearch in
