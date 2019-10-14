@@ -166,7 +166,8 @@ class Conv2d(torch.nn.Module):
             w,
             b,
             self.scale,
-            self.zero_point
+            self.zero_point,
+            self.training
         )
 
     # ===== Deserialization methods =====
@@ -190,7 +191,6 @@ class Conv2d(torch.nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
-        # type: (Tuple[int, int, Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int], bool, int, int, str, Tensor, Optional[Tensor], float, int])  # noqa
         self.in_channels = state[0]
         self.out_channels = state[1]
         self.kernel_size = state[2]
@@ -204,6 +204,7 @@ class Conv2d(torch.nn.Module):
         self.set_weight_bias(state[10], state[11])
         self.scale = state[12]
         self.zero_point = state[13]
+        self.training = state[14]
 
     @classmethod
     def from_float(cls, mod):

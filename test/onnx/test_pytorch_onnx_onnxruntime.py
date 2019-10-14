@@ -10,6 +10,7 @@ import torch
 import numpy as np
 import io
 import itertools
+import copy
 
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
@@ -57,13 +58,17 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
     with torch.no_grad():
         if isinstance(input, torch.Tensor):
             input = (input,)
-        output = model(*input)
+        # In-place operators will update input tensor data as well.
+        # Thus inputs are replicated before every forward call.
+        input_copy = copy.deepcopy(input)
+        output = model(*input_copy)
         if isinstance(output, torch.Tensor):
             output = (output,)
 
         # export the model to ONNX
         f = io.BytesIO()
-        torch.onnx._export(model, input, f,
+        input_copy = copy.deepcopy(input)
+        torch.onnx._export(model, input_copy, f,
                            opset_version=self.opset_version,
                            example_outputs=output,
                            do_constant_folding=do_constant_folding,
@@ -74,7 +79,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
 
         # compute onnxruntime output prediction
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        ort_test_with_input(ort_sess, input, output, rtol, atol)
+        input_copy = copy.deepcopy(input)
+        ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
 
         # if addiional test inputs are provided run the onnx
         # model with these inputs and check the outputs
@@ -82,7 +88,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
             for test_input in test_with_inputs:
                 if isinstance(test_input, torch.Tensor):
                     test_input = (test_input,)
-                output = model(*test_input)
+                test_input_copy = copy.deepcopy(test_input)
+                output = model(*test_input_copy)
                 if isinstance(output, torch.Tensor):
                     output = (output,)
                 ort_test_with_input(ort_sess, test_input, output, rtol, atol)
@@ -168,6 +175,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = {"test_key_in": torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x,))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_cste_script(self):
+        class MyModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.zeros(x.size(0)), torch.ones((x.size(1), x.size(0)), dtype=torch.int64)
+
+        x = torch.randn(3, 4)
+        self.run_test(MyModel(), x)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
@@ -249,6 +266,23 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+
+    def test_squeeze(self):
+        class Squeeze(torch.nn.Module):
+            def forward(self, x):
+                return torch.torch.squeeze(x, dim=-2)
+
+        x = torch.randn(2, 1, 4)
+        self.run_test(Squeeze(), x)
+
+    def test_unsqueeze(self):
+        class Unsqueeze(torch.nn.Module):
+            def forward(self, x):
+                return torch.unsqueeze(x, dim=-2)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Unsqueeze(), x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_adaptive(self):
         model = torch.nn.AdaptiveMaxPool1d((5), return_indices=False)
@@ -287,21 +321,29 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    # enable when supported in ORT for opset 11
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool(self):
         model = torch.nn.AvgPool1d(2, stride=1)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    # enable when supported in ORT for opset 11
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_1d_ceil(self):
         model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
+    # enable when supported in ORT for opset 11
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_2d_ceil(self):
         model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
+    # enable when supported in ORT for opset 11
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
@@ -527,7 +569,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(NarrowModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_index_fill(self):
         class IndexFillModel(torch.nn.Module):
             def forward(self, input):
@@ -538,7 +579,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IndexFillModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_index_copy(self):
         class IndexCopyModel(torch.nn.Module):
             def forward(self, input):
@@ -958,6 +998,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (1, 2, 3, 4))
         self.run_test(FlattenModel(), x)
 
+    def test_unbind(self):
+        class UnbindModel(torch.nn.Module):
+            def forward(self, input):
+                return input.unbind()
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel(), x)
+
+        class UnbindModel2(torch.nn.Module):
+            def forward(self, input):
+                _, out, _, _ = input.unbind(1)
+                return out
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel2(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):
@@ -1107,6 +1163,50 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    def test_unfold(self):
+        class UnfoldModel(torch.nn.Module):
+            def forward(self, x):
+                return x.unfold(dimension=2, size=2, step=2)
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(UnfoldModel(), x)
+
+    def test_remainder(self):
+        class RemainderModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.remainder(input, other)
+
+        x = torch.randn(4, 2, 3)
+        y = torch.randn(1, 2, 1)
+        self.run_test(RemainderModel(), (x, y))
+
+    def test_remainder_scalar(self):
+        class RemainderModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.remainder(input, 2.55)
+
+        x = torch.randint(10, (2, 3))
+        self.run_test(RemainderModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fmod(self):
+        class FModModel(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.fmod(input, other)
+
+        x = torch.randn(4, 2, 3)
+        y = torch.randn(1, 2, 1)
+        self.run_test(FModModel(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_fmod_scalar(self):
+        class FModModel(torch.nn.Module):
+            def forward(self, input):
+                return torch.fmod(input, 2.55)
+
+        x = torch.randint(10, (2, 3))
+        self.run_test(FModModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gelu(self):
         class GeluModel(torch.nn.Module):
@@ -1116,23 +1216,30 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 4, 5, 6, requires_grad=True)
         self.run_test(GeluModel(), x)
 
+    def test_add_inplace(self):
+        class InplaceAddModel(torch.nn.Module):
+            def forward(self, x):
+                x += 12
+                return x
+
+        x = torch.randn(4, 2, 3, requires_grad=True)
+        self.run_test(InplaceAddModel(), x)
+
     def test_rsqrt(self):
         class RsqrtModel(torch.nn.Module):
             def forward(self, x):
                 return x.rsqrt()
 
-        x = torch.randn(4, 2, 3, requires_grad=True).to(dtype=torch.float64)
+        x = torch.randn(4, 2, 3, requires_grad=True, dtype=torch.float64)
         self.run_test(RsqrtModel(), x)
 
     def test_rsqrt_zeros(self):
         class RsqrtModel(torch.nn.Module):
             def forward(self, x):
                 return x.rsqrt()
-        x = torch.zeros(4, 2, 3, requires_grad=True).to(dtype=torch.float64)
+        x = torch.zeros(4, 2, 3, requires_grad=True, dtype=torch.float64)
         self.run_test(RsqrtModel(), x)
 
-    # TODO: enable opset 11 test once ORT support for unique is in
-    @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_unique(self):
         class UniqueModel(torch.nn.Module):
@@ -1142,8 +1249,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
         self.run_test(UniqueModel(), x)
 
-    # TODO: enable opset 11 test once ORT support for unique is in
-    @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_unique_along_dim(self):
         class UniqueModel(torch.nn.Module):
@@ -1153,8 +1258,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
         self.run_test(UniqueModel(), x)
 
-    # TODO: enable opset 11 test once ORT support for cumsum is in
-    @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_cumsum(self):
         class CumSum(torch.nn.Module):
@@ -1202,9 +1305,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = Log1p()
         self.run_test(model, x)
 
-    # TODO: remove the skip tag once ORT implementation is in place
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_round(self):
         class Round(torch.nn.Module):
             def forward(self, x):
