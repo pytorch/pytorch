@@ -308,7 +308,7 @@ jobs:
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
           # TODO We may want to move the rebase logic to a separate step after checkout
           # Rebase to master only if in xenial_py3_6_gcc5_4 case
@@ -400,9 +400,9 @@ jobs:
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           gunzip --stdout ~/workspace/built_image.tgz | time docker load
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${NAMED_FLAG}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -453,7 +453,7 @@ jobs:
 
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -533,9 +533,9 @@ jobs:
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           gunzip --stdout ~/workspace/built_image.tgz | time docker load
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
           docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
 
@@ -943,7 +943,7 @@ jobs:
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           gunzip --stdout ~/workspace/built_image.tgz | time docker load
-          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           # master branch docs push
           if [[ "${CIRCLE_BRANCH}" == "master" ]]; then
@@ -991,7 +991,7 @@ jobs:
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           gunzip --stdout ~/workspace/built_image.tgz | time docker load
-          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           # master branch docs push
           if [[ "${CIRCLE_BRANCH}" == "master" ]]; then
@@ -1163,14 +1163,14 @@ jobs:
 
           # x86_32
           gunzip --stdout ~/workspace/built_image_x86_32.tgz | time docker load
-          export id_x86_32=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
+          export id_x86_32=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           # arm-v7a
           gunzip --stdout ~/workspace/built_image_arm_v7a.tgz | time docker load
-          export id_arm_v7a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v7a})
+          export id_arm_v7a=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v7a})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v7a" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1180,7 +1180,7 @@ jobs:
 
           # x86_64
           gunzip --stdout ~/workspace/built_image_x86_64.tgz | time docker load
-          export id_x86_64=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_64})
+          export id_x86_64=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_64})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_64" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1190,7 +1190,7 @@ jobs:
 
           # arm-v8a
           gunzip --stdout ~/workspace/built_image_arm_v8a.tgz | time docker load
-          export id_arm_v8a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v8a})
+          export id_arm_v8a=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v8a})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v8a" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1249,7 +1249,7 @@ jobs:
 
           # x86_32
           gunzip --stdout ~/workspace/built_image_x86_32_gradle.tgz | time docker load
-          export id_x86_32=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32_gradle})
+          export id_x86_32=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32_gradle})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export SONATYPE_NEXUS_USERNAME=${SONATYPE_NEXUS_USERNAME}" && echo "export SONATYPE_NEXUS_PASSWORD=${SONATYPE_NEXUS_PASSWORD}" && echo "export ANDROID_SIGN_KEY=${ANDROID_SIGN_KEY}" && echo "export ANDROID_SIGN_PASS=${ANDROID_SIGN_PASS}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/publish_android_snapshot.sh") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1293,7 +1293,7 @@ jobs:
 
           # x86
           gunzip --stdout ~/workspace/built_image_x86_32.tgz | time docker load
-          export id=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
 
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1596,30 +1596,6 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-pynightly-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:347"
-          resource_class: large
-      - pytorch_linux_build:
-          name: pytorch_linux_xenial_py3_6_gcc4_8_build
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "pytorch-linux-xenial-py3.6-gcc4.8-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc4.8:347"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_6_gcc4_8_test
-          requires:
-            - setup
-            - pytorch_linux_xenial_py3_6_gcc4_8_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "pytorch-linux-xenial-py3.6-gcc4.8-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc4.8:347"
           resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
@@ -1990,30 +1966,6 @@ workflows:
           ios_platform: "OS"
           requires:
             - setup
-      - caffe2_linux_build:
-          name: caffe2_py2_gcc4_8_ubuntu14_04_build
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "caffe2-py2-gcc4.8-ubuntu14.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:325"
-      - caffe2_linux_test:
-          name: caffe2_py2_gcc4_8_ubuntu14_04_test
-          requires:
-            - setup
-            - caffe2_py2_gcc4_8_ubuntu14_04_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "caffe2-py2-gcc4.8-ubuntu14.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:325"
-          resource_class: large
       - caffe2_linux_build:
           name: caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
           requires:

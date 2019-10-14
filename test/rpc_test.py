@@ -228,7 +228,7 @@ class RpcTest(object):
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_init_rpc_agent")
     def test_register_rpc_backend_and_init_rpc_backend(
-        self, mock_init_rref_context, mock_dist_autograd_init
+        self, mock_rpc_agent, mock_dist_autograd_init
     ):
         backend_name = "stub_backend"
         rpc.register_backend(

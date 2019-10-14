@@ -73,6 +73,34 @@ TEST_F(FunctionalTest, CosineSimilarity) {
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
+TEST_F(FunctionalTest, MultiLabelSoftMarginLossDefaultOptions) {
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
+  auto output =
+      F::multilabel_soft_margin_loss(input, target);
+  auto expected = torch::tensor({0.7608436}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
+  auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
+  auto options = MultiLabelSoftMarginLossOptions().reduction(Reduction::None).weight(weight);
+  auto output =
+      F::multilabel_soft_margin_loss(input, target, options);
+  auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, PairwiseDistance) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
@@ -563,6 +591,43 @@ TEST_F(FunctionalTest, PReLU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, Normalize) {
+  const auto expected = torch::tensor(
+    {{{0.00000000, 0.10000000, 0.2000, 0.30000000, 0.40000000},
+      {0.14285715, 0.17142858, 0.2000, 0.22857143, 0.25714287}}}, torch::requires_grad().dtype(torch::kFloat));
+  { // Test #1 
+    auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat).requires_grad(true));
+    auto norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
+    
+    // reduce to scalar to call .backward()
+    torch::Tensor s = norm.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(input.grad().numel(), 10);
+    ASSERT_TRUE(torch::allclose(norm, expected));
+  }
+
+  { // Test #2 Check variations of optional arguments
+    auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat));
+    auto output = torch::randn({1,2,5}, torch::dtype(torch::kFloat));
+    // non-null output argument
+    F::normalize(input, NormalizeOptions().p(1).dim(-1), output);
+    // default options
+    F::normalize(input);
+
+    ASSERT_TRUE(torch::allclose(output, expected));
+  }
+  
+  { // Test #3 Base case of scalar tensor
+    auto input = torch::randn({}, torch::requires_grad());
+    torch::Tensor norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
+    norm.backward();
+
+    ASSERT_EQ(input.grad().numel(), 1);
+  }
+}
+
 TEST_F(FunctionalTest, ReLU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
@@ -748,6 +813,14 @@ TEST_F(FunctionalTest, SoftplusDefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, Unfold) {
+  auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
+  auto output = F::unfold(input, UnfoldOptions({2, 4}).padding(1).stride(2));
+  auto expected_sizes = std::vector<int64_t>({2, 16, 6});
+
+  ASSERT_EQ(output.sizes(), expected_sizes);
+}
+
 TEST_F(FunctionalTest, Softshrink) {
   const auto size = 3;
   for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
@@ -819,4 +892,3 @@ TEST_F(FunctionalTest, Threshold) {
     }
   }
 }
-
