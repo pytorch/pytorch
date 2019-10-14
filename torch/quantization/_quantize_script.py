@@ -41,7 +41,8 @@ class ConvPackedParams(torch.nn.Module):
                 self.stride,
                 self.padding,
                 self.dilation,
-                self.groups)
+                self.groups,
+                self.training)
 
     @torch.jit.export
     def __setstate__(self, state):
@@ -51,6 +52,7 @@ class ConvPackedParams(torch.nn.Module):
         self.groups = state[5]
         self.set_weight_bias(state[0],
                              state[1])
+        self.training = state[6]
 
 class LinearPackedParams(torch.nn.Module):
     def __init__(self):
@@ -72,13 +74,14 @@ class LinearPackedParams(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        return self._weight_bias(), self.training
+        qweight, bias = self._weight_bias()
+        return qweight, bias, self.training
 
     @torch.jit.export
     def __setstate__(self, state):
-        # type: (Tuple[Tuple[Tensor, Optional[Tensor]], bool]) -> None
-        self.set_weight_bias(state[0][0], state[0][1])
-        self.training = state[1]
+        # type: (Tuple[Tensor, Optional[Tensor], bool]) -> None
+        self.set_weight_bias(state[0], state[1])
+        self.training = state[2]
 
 
 linear_packed_params = None
