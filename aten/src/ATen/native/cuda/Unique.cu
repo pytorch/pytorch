@@ -2,6 +2,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
+#include <ATen/MemoryFormatUtils.h>
 #include <thrust/execution_policy.h>
 
 #include <tuple>
@@ -84,7 +85,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cuda_template(
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto options = self.options().dtype(kLong);
-  Tensor output = self.clone().reshape(-1);
+  Tensor output = clone_if_possible_with_memory_format(self).reshape(-1);
   int64_t num_inp = output.numel();
   scalar_t* output_data = output.data_ptr<scalar_t>();
 
