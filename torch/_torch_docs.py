@@ -1695,18 +1695,24 @@ add_docstr(torch.div,
            r"""
 .. function:: div(input, other, out=None) -> Tensor
 
-Divides each element of the input :attr:`input` with the scalar :attr:`other`
-and returns a new resulting tensor.
+Divides each element of the input ``input`` with the scalar ``other`` and
+returns a new resulting tensor.
 
 .. math::
-    \text{out}_i = \frac{\text{input}_i}{\text{other}}
+    \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}}}
 
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`other`
-should be a real number, otherwise it should be an integer
+If the :class:`torch.dtype` of ``input`` and ``other`` differ, the
+:class:`torch.dtype` of the result tensor is determined following rules
+described in the type promotion :ref:`documentation <type-promotion-doc>`. If
+``out`` is specified, the result must be :ref:`castable <type-promotion-doc>`
+to the :class:`torch.dtype` of the specified output tensor. Integral division
+by zero leads to undefined behavior.
 
 Args:
     {input}
-    other (Number): the number to be divided to each element of :attr:`input`
+    other (Number): the number to be divided to each element of ``input``
+
+Keyword args:
     {out}
 
 Example::
@@ -1719,17 +1725,25 @@ Example::
 
 .. function:: div(input, other, out=None) -> Tensor
 
-Each element of the tensor :attr:`input` is divided by each element
-of the tensor :attr:`other`. The resulting tensor is returned. The shapes of
-:attr:`input` and :attr:`other` must be
-:ref:`broadcastable <broadcasting-semantics>`.
+Each element of the tensor ``input`` is divided by each element of the tensor
+``other``. The resulting tensor is returned.
 
 .. math::
-    \text{out}_i = \frac{\text{input}_i}{\text{other}_i}
-""" + r"""
+    \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}_i}}
+
+The shapes of ``input`` and ``other`` must be :ref:`broadcastable
+<broadcasting-semantics>`. If the :class:`torch.dtype` of ``input`` and
+``other`` differ, the :class:`torch.dtype` of the result tensor is determined
+following rules described in the type promotion :ref:`documentation
+<type-promotion-doc>`. If ``out`` is specified, the result must be
+:ref:`castable <type-promotion-doc>` to the :class:`torch.dtype` of the
+specified output tensor. Integral division by zero leads to undefined behavior.
+
 Args:
     input (Tensor): the numerator tensor
     other (Tensor): the denominator tensor
+
+Keyword args:
     {out}
 
 Example::
@@ -6153,7 +6167,7 @@ Calculates determinant of a square matrix or batches of square matrices.
     :meth:`~torch.svd` for details.
 
 Arguments:
-    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
                 batch dimensions.
 
 Example::
@@ -6240,7 +6254,7 @@ Calculates log determinant of a square matrix or batches of square matrices.
     :meth:`~torch.svd` for details.
 
 Arguments:
-    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
                 batch dimensions.
 
 Example::
@@ -6281,7 +6295,7 @@ Calculates the sign and log absolute value of the determinant(s) of a square mat
     See :meth:`~torch.svd` for details.
 
 Arguments:
-    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+    input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
                 batch dimensions.
 
 Returns:
