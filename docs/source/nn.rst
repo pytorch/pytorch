@@ -833,6 +833,12 @@ Utilities
 
 .. currentmodule:: torch.nn.utils.prune
 
+:hidden:`BasePruningMethod`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass :: torch.nn.utils.prune.BasePruningMethod
+    :members:
+
 :hidden:`PruningContainer`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
