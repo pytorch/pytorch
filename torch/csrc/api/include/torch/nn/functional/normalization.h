@@ -8,7 +8,7 @@ namespace functional {
 
 inline Tensor normalize(
     const Tensor& input,
-    const NormalizeOptions& options,
+    const NormalizeOptions& options = {},
     c10::optional<Tensor> out = c10::nullopt) {
   
     if (out == c10::nullopt) {

@@ -569,11 +569,14 @@ TEST_F(FunctionalTest, Normalize) {
     ASSERT_TRUE(torch::allclose(norm, expected));
   }
 
-  { // Test #2 Check with non-null output parameter
+  { // Test #2 Check variations of optional arguments
     auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat));
     auto output = torch::randn({1,2,5}, torch::dtype(torch::kFloat));
+    // non-null output argument
     F::normalize(input, NormalizeOptions().p(1).dim(-1), output);
-    
+    // default options
+    F::normalize(input);
+
     ASSERT_TRUE(torch::allclose(output, expected));
   }
   
