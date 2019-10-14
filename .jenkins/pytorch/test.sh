@@ -105,16 +105,32 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda-memcheck* ]]; then
-  export CUDA_MEMCHECK_EXEC=cuda-memcheck
+  export CUDA_MEMCHECK=1
 fi
 
 test_python_nn() {
-  time $CUDA_MEMCHECK_EXEC python test/run_test.py --include nn --verbose
+  time python test/run_test.py --include nn --verbose
   assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
-  time $CUDA_MEMCHECK_EXEC python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
+  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
+  assert_git_not_dirty
+}
+
+test_python_nn_cuda_memcheck() {
+  time cuda-memcheck --error-exitcode 1 --tool memcheck python test/run_test.py --include nn --verbose
+  time cuda-memcheck --error-exitcode 1 --tool racecheck python test/run_test.py --include nn --verbose
+  time cuda-memcheck --error-exitcode 1 --tool synccheck python test/run_test.py --include nn --verbose
+  time cuda-memcheck --error-exitcode 1 --tool initcheck python test/run_test.py --include nn --verbose
+  assert_git_not_dirty
+}
+
+test_python_all_except_nn_cuda_memcheck() {
+  time cuda-memcheck --error-exitcode 1 --tool memcheck python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
+  time cuda-memcheck --error-exitcode 1 --tool racecheck python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
+  time cuda-memcheck --error-exitcode 1 --tool synccheck python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
+  time cuda-memcheck --error-exitcode 1 --tool initcheck python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
   assert_git_not_dirty
 }
 
@@ -235,9 +251,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_libtorch
   test_custom_script_ops
 elif [[ "$BUILD_ENVIRONMENT" == *cuda-memcheck* ]]; then
-  test_python_nn
-  test_python_all_except_nn
-  test_aten
+  test_python_nn_cuda_memcheck
+  test_python_all_except_nn_cuda_memcheck
 else
   test_torchvision
   test_python_nn
