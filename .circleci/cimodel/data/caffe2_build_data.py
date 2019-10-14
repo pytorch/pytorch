@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 from cimodel.lib.conf_tree import Ver
 
@@ -13,7 +11,7 @@ CONFIG_TREE_DATA = [
             X("py2"),
             XImportant("cmake"),
         ]),
-        (Ver("cuda", "9.1"), [XImportant("py2")]),
+        (Ver("cuda", "10.1"), [XImportant("py3.5")]),  # TensorRT 6 build
         (Ver("mkl"), [XImportant("py2")]),
         (Ver("gcc", "5"), [XImportant("onnx_py2")]),
         (Ver("clang", "3.8"), [X("py2")]),
