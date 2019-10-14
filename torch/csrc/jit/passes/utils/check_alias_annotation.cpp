@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
 #include <torch/csrc/jit/operator.h>
+#include <ATen/MemoryFormatUtils.h>
 
 namespace torch {
 namespace jit {
@@ -13,12 +14,13 @@ IValue deepCopy(const IValue& self) {
 
   // Tensors need special handling, since copy assignment creates an alias
   if (self.isTensor()) {
-    return IValue(self.toTensor().clone());
+    auto tensor = self.toTensor();
+    return IValue(clone_if_possible_with_memory_format(tensor));
   }
   if (self.isTensorList()) {
     c10::List<at::Tensor> newList;
     for (const at::Tensor& oldTensor : self.toTensorListRef()) {
-      newList.push_back(oldTensor.clone());
+      newList.push_back(clone_if_possible_with_memory_format(oldTensor));
     }
     return newList;
   }
