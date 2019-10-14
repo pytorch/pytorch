@@ -115,13 +115,7 @@
 #include <THNN/generic/SoftShrink.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/IndexLinear.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/Tanh.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/FeatureLPPooling.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/unfold.c>
