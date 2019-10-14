@@ -2820,145 +2820,57 @@ workflows:
   binarybuilds:
     jobs:
       - setup
-      - binary_linux_build:
-          name: binary_linux_conda_2_7_cu101_devtoolset7_build
-          build_environment: "conda 2.7 cu101 devtoolset7"
+      - binary_mac_build:
+          name: binary_macos_wheel_2_7_cpu_build
+          build_environment: "wheel 2.7 cpu"
           requires:
             - setup
-          docker_image: "soumith/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_5_cu101_devtoolset7_build
-          build_environment: "conda 3.5 cu101 devtoolset7"
+      - binary_mac_build:
+          name: binary_macos_wheel_3_5_cpu_build
+          build_environment: "wheel 3.5 cpu"
           requires:
             - setup
-          docker_image: "soumith/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_6_cu101_devtoolset7_build
-          build_environment: "conda 3.6 cu101 devtoolset7"
+      - binary_mac_build:
+          name: binary_macos_wheel_3_6_cpu_build
+          build_environment: "wheel 3.6 cpu"
           requires:
             - setup
-          docker_image: "soumith/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_7_cu101_devtoolset7_build
-          build_environment: "conda 3.7 cu101 devtoolset7"
+      - binary_mac_build:
+          name: binary_macos_wheel_3_7_cpu_build
+          build_environment: "wheel 3.7 cpu"
           requires:
             - setup
-          docker_image: "soumith/conda-cuda"
-      # - binary_mac_build:
-      #     name: binary_macos_wheel_2_7_cpu_build
-      #     build_environment: "wheel 2.7 cpu"
-      #     requires:
-      #       - setup
-      # - binary_mac_build:
-      #     name: binary_macos_wheel_3_5_cpu_build
-      #     build_environment: "wheel 3.5 cpu"
-      #     requires:
-      #       - setup
-      # - binary_mac_build:
-      #     name: binary_macos_wheel_3_6_cpu_build
-      #     build_environment: "wheel 3.6 cpu"
-      #     requires:
-      #       - setup
-      # - binary_mac_build:
-      #     name: binary_macos_wheel_3_7_cpu_build
-      #     build_environment: "wheel 3.7 cpu"
-      #     requires:
-      #       - setup
 ##############################################################################
 # Nightly tests
 ##############################################################################
-      - binary_linux_test:
-          name: binary_linux_conda_2_7_cu101_devtoolset7_test
-          build_environment: "conda 2.7 cu101 devtoolset7"
+      - binary_mac_upload:
+          name: binary_macos_conda_2_7_cpu_upload
+          build_environment: "conda 2.7 cpu"
           requires:
             - setup
-            - binary_linux_conda_2_7_cu101_devtoolset7_build
-          docker_image: "soumith/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_conda_3_5_cu101_devtoolset7_test
-          build_environment: "conda 3.5 cu101 devtoolset7"
-          requires:
-            - setup
-            - binary_linux_conda_3_5_cu101_devtoolset7_build
-          docker_image: "soumith/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_conda_3_6_cu101_devtoolset7_test
-          build_environment: "conda 3.6 cu101 devtoolset7"
-          requires:
-            - setup
-            - binary_linux_conda_3_6_cu101_devtoolset7_build
-          docker_image: "soumith/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_conda_3_7_cu101_devtoolset7_test
-          build_environment: "conda 3.7 cu101 devtoolset7"
-          requires:
-            - setup
-            - binary_linux_conda_3_7_cu101_devtoolset7_build
-          docker_image: "soumith/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_upload:
-          name: binary_linux_conda_2_7_cu101_devtoolset7_upload
-          build_environment: "conda 2.7 cu101 devtoolset7"
-          requires:
-            - setup
-            - binary_linux_conda_2_7_cu101_devtoolset7_test
+            - binary_macos_conda_2_7_cpu_build
           context: org-member
-      - binary_linux_upload:
-          name: binary_linux_conda_3_5_cu101_devtoolset7_upload
-          build_environment: "conda 3.5 cu101 devtoolset7"
+      - binary_mac_upload:
+          name: binary_macos_conda_3_5_cpu_upload
+          build_environment: "conda 3.5 cpu"
           requires:
             - setup
-            - binary_linux_conda_3_5_cu101_devtoolset7_test
+            - binary_macos_conda_3_5_cpu_build
           context: org-member
-      - binary_linux_upload:
-          name: binary_linux_conda_3_6_cu101_devtoolset7_upload
-          build_environment: "conda 3.6 cu101 devtoolset7"
+      - binary_mac_upload:
+          name: binary_macos_conda_3_6_cpu_upload
+          build_environment: "conda 3.6 cpu"
           requires:
             - setup
-            - binary_linux_conda_3_6_cu101_devtoolset7_test
+            - binary_macos_conda_3_6_cpu_build
           context: org-member
-      - binary_linux_upload:
-          name: binary_linux_conda_3_7_cu101_devtoolset7_upload
-          build_environment: "conda 3.7 cu101 devtoolset7"
+      - binary_mac_upload:
+          name: binary_macos_conda_3_7_cpu_upload
+          build_environment: "conda 3.7 cpu"
           requires:
             - setup
-            - binary_linux_conda_3_7_cu101_devtoolset7_test
+            - binary_macos_conda_3_7_cpu_build
           context: org-member
-      # - binary_mac_upload:
-      #     name: binary_macos_conda_2_7_cpu_upload
-      #     build_environment: "conda 2.7 cpu"
-      #     requires:
-      #       - setup
-      #       - binary_macos_conda_2_7_cpu_build
-      #     context: org-member
-      # - binary_mac_upload:
-      #     name: binary_macos_conda_3_5_cpu_upload
-      #     build_environment: "conda 3.5 cpu"
-      #     requires:
-      #       - setup
-      #       - binary_macos_conda_3_5_cpu_build
-      #     context: org-member
-      # - binary_mac_upload:
-      #     name: binary_macos_conda_3_6_cpu_upload
-      #     build_environment: "conda 3.6 cpu"
-      #     requires:
-      #       - setup
-      #       - binary_macos_conda_3_6_cpu_build
-      #     context: org-member
-      # - binary_mac_upload:
-      #     name: binary_macos_conda_3_7_cpu_upload
-      #     build_environment: "conda 3.7 cpu"
-      #     requires:
-      #       - setup
-      #       - binary_macos_conda_3_7_cpu_build
-      #     context: org-member
 
   # Scheduled to run 4 hours after the binary jobs start
   # These jobs need to run after all the binary jobs run, regardless of if the

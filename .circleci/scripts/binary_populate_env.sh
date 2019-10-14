@@ -56,11 +56,11 @@ fi
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu101" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
-  export PYTORCH_BUILD_VERSION="1.3.0"
+    export PYTORCH_BUILD_VERSION="1.3.0"
 else
   export PYTORCH_BUILD_VERSION="1.3.0+$DESIRED_CUDA"
 fi
-export PYTORCH_BUILD_NUMBER=1
+export PYTORCH_BUILD_NUMBER=2
 
 cat >>"$envfile" <<EOL
 # =================== The following code will be executed inside Docker container ===================
