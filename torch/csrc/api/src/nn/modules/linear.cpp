@@ -77,8 +77,8 @@ void BilinearImpl::reset() {
 }
 
 void BilinearImpl::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha << "torch::nn::Bilinear(in1_features=" << options.in1_features())
-         << ", in2_features=" << options.in2_features()) << ", out_features=" << options.out_features()) << ", bias=" << options.bias())
+  stream << std::boolalpha << "torch::nn::Bilinear(in1_features=" << options.in1_features()
+         << ", in2_features=" << options.in2_features() << ", out_features=" << options.out_features() << ", bias=" << options.bias()
          << ")";
 }
 
