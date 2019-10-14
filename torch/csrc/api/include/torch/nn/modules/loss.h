@@ -135,7 +135,7 @@ struct TORCH_API MultiLabelSoftMarginLossImpl : public Cloneable<MultiLabelSoftM
   /// Pretty prints the `L1Loss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
-  void reset();
+  void reset() override;
 
   Tensor forward(const Tensor& input, const Tensor& target);
 
