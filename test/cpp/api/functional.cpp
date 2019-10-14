@@ -542,21 +542,21 @@ TEST_F(FunctionalTest, PReLU) {
 }
 
 TEST_F(FunctionalTest, Bilinear) {
-  auto input1 = torch::Tensor({{1, 2, 3}, {7, 6, 5}});
-  auto input2 = torch::Tensor({{7, 4}, {8 ,9}});
-  auto weight = torch::Tensor({{{2, 3}, {9, 7}, {8, 6}}});
-  auto bias = torch::Tensor({1});
+  auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
+  auto input2 = torch::tensor({{7, 4}, {8 ,9}});
+  auto weight = torch::tensor({{{2, 3}, {9, 7}, {8, 6}}});
+  auto bias = torch::tensor({1});
  
   auto y_with_bias = F::bilinear(input1, input2, weight, bias);
   ASSERT_EQ(y_with_bias.ndimension(), 2);
   ASSERT_EQ(y_with_bias.sizes(), torch::IntArrayRef({2, 1}));
-  auto y_with_bias_exp = torch::Tensor({{449, 1702}});
+  auto y_with_bias_exp = torch::tensor({{449, 1702}});
   ASSERT_TRUE(torch::allclose(y_with_bias, y_with_bias_exp, 1e-4, 1e-7));
 
   auto y_no_bias = F::bilinear(input1, input2, weight);
   ASSERT_EQ(y_no_bias.ndimension(), 2);
   ASSERT_EQ(y_no_bias.sizes(), torch::IntArrayRef({2, 1}));
-  auto y_no_bias_exp = torch::Tensor({{448, 1701}});
+  auto y_no_bias_exp = torch::tensor({{448, 1701}});
   ASSERT_TRUE(torch::allclose(y_no_bias, y_no_bias_exp, 1e-4, 1e-7));
 }
 
