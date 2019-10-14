@@ -399,6 +399,7 @@ Example::
     tensor([[False, True]], dtype=torch.bool)
     >>> a.any()
     tensor(True, dtype=torch.bool)
+
 .. function:: any(dim, keepdim=False, out=None) -> Tensor
 
 Returns True if any elements in each row of the tensor in the given
