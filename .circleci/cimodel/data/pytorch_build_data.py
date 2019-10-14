@@ -14,6 +14,8 @@ CONFIG_TREE_DATA = [
                 XImportant("3.6"),
                 ("3.6", [
                     ("namedtensor", [XImportant(True)]),
+                    ("parallel_tbb", [XImportant(True)]),
+                    ("parallel_native", [XImportant(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -24,6 +26,8 @@ CONFIG_TREE_DATA = [
                 XImportant("3.6"),  # This is actually the ASAN build
                 ("3.6", [
                     ("namedtensor", [XImportant(True)]),  # ASAN
+                    ("parallel_tbb", [XImportant(True)]),
+                    ("parallel_native", [XImportant(True)]),
                 ]),
             ]),
             ("7", [
@@ -131,6 +135,8 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         next_nodes = {
             "xla": XlaConfigNode,
             "namedtensor": NamedTensorConfigNode,
+            "parallel_tbb": ParallelTBBConfigNode,
+            "parallel_native": ParallelNativeConfigNode,
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "android_abi": AndroidAbiConfigNode,
@@ -155,6 +161,26 @@ class NamedTensorConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_namedtensor"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+class ParallelTBBConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PARALLELTBB=" + str(label)
+
+    def init2(self, node_name):
+        self.props["parallel_backend"] = "paralleltbb"
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+class ParallelNativeConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PARALLELNATIVE=" + str(label)
+
+    def init2(self, node_name):
+        self.props["parallel_backend"] = "parallelnative"
 
     def child_constructor(self):
         return ImportantConfigNode
