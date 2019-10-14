@@ -50,7 +50,7 @@ class Conf:
         if self.is_namedtensor and not for_docker:
             leading.append("namedtensor")
         if self.is_cuda_memcheck and not for_docker:
-            leading.append("cuda_memcheck")
+            leading.append("cuda-memcheck")
         if self.is_libtorch and not for_docker:
             leading.append("libtorch")
 

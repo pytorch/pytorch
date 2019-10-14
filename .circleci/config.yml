@@ -1846,14 +1846,14 @@ workflows:
           name: pytorch_cuda_memcheck_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
           requires:
             - setup
-          build_environment: "pytorch-cuda_memcheck-linux-xenial-cuda10.1-cudnn7-py3-gcc7-build"
+          build_environment: "pytorch-cuda-memcheck-linux-xenial-cuda10.1-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:347"
       - pytorch_linux_test:
           name: pytorch_cuda_memcheck_linux_xenial_cuda10_1_cudnn7_py3_gcc7_test
           requires:
             - setup
             - pytorch_cuda_memcheck_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
-          build_environment: "pytorch-cuda_memcheck-linux-xenial-cuda10.1-cudnn7-py3-gcc7-test"
+          build_environment: "pytorch-cuda-memcheck-linux-xenial-cuda10.1-cudnn7-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:347"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
