@@ -565,12 +565,18 @@ Tensor& normal_out(Tensor& result, double mean, double std,
   return result.normal_(mean, std, generator);
 }
 
-Tensor randn_like(const Tensor& self) {
-  return native::randn_like(self, self.options());
+Tensor randn_like(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::randn_like(self, self.options(), optional_memory_format);
 }
 
-Tensor randn_like(const Tensor& self, const TensorOptions& options) {
-  return native::randn(self.sizes(), nullptr, options);
+Tensor randn_like(
+    const Tensor& self,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.normal_(0, 1, nullptr);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randperm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

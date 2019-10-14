@@ -66,7 +66,8 @@ def process_function(decl, has_tensor_options, disable_autograd):
         SUPPORT_MEMORY_FORMAT = [
             'empty_like', 'full_like',
             'ones_like', 'rand_like',
-            'zeros_like', 'randint_like']
+            'zeros_like', 'randint_like',
+            'randn_like']
         if decl['name'] in SUPPORT_MEMORY_FORMAT:
             actuals.insert(-1, '{}.options().is_variable(false)'.format(actuals[0]))
         else:

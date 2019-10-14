@@ -909,8 +909,8 @@ bool Node::isNondeterministic() const {
       "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randn_like(Tensor self) -> Tensor",
-      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::randn_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
 
   if (nondeterministic_ops.find(this) == nullptr) {
