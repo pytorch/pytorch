@@ -14,6 +14,7 @@ torch/csrc/jit/generated/
 
 import argparse
 import copy
+import re
 from itertools import groupby
 from ..autograd.utils import CodeTemplate, write
 from ..autograd.gen_autograd import load_aten_declarations
@@ -144,7 +145,11 @@ const auto options = TensorOptions()
         .layout(${layout})
         .device(${device})
         .pinned_memory(${pin_memory});
-auto result_ = torch::${name}(${args_with_tensor_options});
+#ifdef USE_STATIC_DISPATCH
+    auto result_ = at::${name}(${args_with_tensor_options});
+#else
+    auto result_ = torch::${name}(${args_with_tensor_options});
+#endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
@@ -155,9 +160,15 @@ const auto options = TensorOptions()
 auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
+# Adding `AutoNonVariableTypeMode` guard for `USE_STATIC_DISPATCH` case is kinda
+# hack to address issue #26764. TODO: remove this hack after Variable/Tensor
+# unification (#23032) is done.
 CONSTRUCTOR = CodeTemplate("""\
 [](Stack & stack) {
     ${lvalues}
+#ifdef USE_STATIC_DISPATCH
+    at::AutoNonVariableTypeMode non_var_type_mode(true);
+#endif
     ${call}
     drop(stack, ${num_inputs});
     pack(stack, std::move(result_));
@@ -234,6 +245,19 @@ def is_out_variant(decl):
     return decl['name'].endswith('_out')
 
 
+# Copied from ..autograd.gen_python_functions.SKIP_PYTHON_BINDINGS
+BACKWARD_OP_PATTERNS = [
+    '.*_backward',
+    '.*_backward_(out|input|weight|bias)',
+]
+
+def is_backward_op(decl):
+    for pattern in BACKWARD_OP_PATTERNS:
+        if re.match('^' + pattern + '$', decl['name']):
+            return True
+    return False
+
+
 # for each argument in decl, the location it should appear in the
 # jit schema declaration. e.g.
 # arguments = [x, y, z] # the order in aten
@@ -244,7 +268,7 @@ def argument_order(decl):
     return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
 
 
-def gen_jit_dispatch(declarations, out, template_path):
+def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False):
     REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
 
     ops = []
@@ -318,6 +342,14 @@ def gen_jit_dispatch(declarations, out, template_path):
                                              lvalues=lvalues)
         return constructor
 
+    def filter_decls(jit_decls, disable_autograd):
+        result = []
+        for decl in jit_decls:
+            if disable_autograd and is_backward_op(decl):
+                continue
+            result.append(decl)
+        return result
+
     # This function declares an order on declarations. This is necessary because
     # there is some ambiguity in the choice of overload: if an argument is overloaded
     # to accept both Scalar and Tensor, the schema with the Tensor should come first
@@ -343,6 +375,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         return [sorted(g, key=declkey) for g in grouped_decls]
 
     # We need to add methods implemented manually in TensorImpl
+    # TODO: This seems to claim sizes() returns an int64_t.  Really?
     tensor_impl_methods = [{
         'name': name,
         'api_name': name,
@@ -350,7 +383,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         'method_of': ['Tensor'],
         'arguments': [{'name': 'self', 'simple_type': 'Tensor'}],
         'returns': [{'name': 'result', 'type': 'int64_t', 'dynamic_type': 'int64_t', 'simple_type': 'int64_t'}],
-    } for name in ['sizes', 'strides', 'dim']]
+    } for name in ['sizes', 'strides', 'dim', 'numel']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
     jit_decls = [d for d in aten_decls if is_jit_op(d)]
 
@@ -403,6 +436,7 @@ def gen_jit_dispatch(declarations, out, template_path):
                 additional_jit_decls.append(decl_copy)
 
     jit_decls.extend(additional_jit_decls)
+    jit_decls = filter_decls(jit_decls, disable_autograd)
 
     # Group and sort the generated snippets to ensure that the
     # generation is deterministic

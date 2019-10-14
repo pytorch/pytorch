@@ -60,7 +60,7 @@ TORCH_API c10::optional<size_t> findInputWithName(
     at::ArrayRef<NamedValue> kwargs);
 
 // applies implict conversion from value trying to turn it into type
-// concrete_type it succeeds if the return_value->isSubclassOf(concrete_type)
+// concrete_type it succeeds if the return_value->isSubtypeOf(concrete_type)
 TORCH_API Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,

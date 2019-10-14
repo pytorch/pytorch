@@ -131,10 +131,15 @@ void PyTorchStreamReader::init() {
       ". Your PyTorch installation may be too old.");
 }
 
-void PyTorchStreamReader::valid(const char* what) {
+void PyTorchStreamReader::valid(const char* what, const char* info) {
   auto err = mz_zip_get_last_error(ar_.get());
   if (err != MZ_ZIP_NO_ERROR) {
-    CAFFE_THROW("PytorchStreamReader failed ", what, ": ", mz_zip_get_error_string(err));
+    CAFFE_THROW(
+        "PytorchStreamReader failed ",
+        what,
+        info,
+        ": ",
+        mz_zip_get_error_string(err));
   }
 }
 
@@ -165,7 +170,7 @@ static std::string getPadding(size_t cursor, const std::string& filename, size_t
   return buf;
 }
 
-bool PyTorchStreamReader::hasFile(const std::string& name) {
+bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::stringstream ss;
   ss << archive_name_ << "/" << name;
   mz_zip_reader_locate_file(ar_.get(), ss.str().c_str(), nullptr, 0);
@@ -173,30 +178,30 @@ bool PyTorchStreamReader::hasFile(const std::string& name) {
   if (!result) {
     ar_->m_last_error = MZ_ZIP_NO_ERROR;
   }
-  valid("attempting to locate file");
+  valid("attempting to locate file ", name.c_str());
   return result;
 }
 
-size_t PyTorchStreamReader::getFileID(const std::string& name) {
+size_t PyTorchStreamReader::getRecordID(const std::string& name) {
   std::stringstream ss;
   ss << archive_name_ << "/" << name;
   size_t result = mz_zip_reader_locate_file(ar_.get(), ss.str().c_str(), nullptr, 0);
   if (ar_->m_last_error == MZ_ZIP_FILE_NOT_FOUND) {
     CAFFE_THROW("file not found: ", ss.str());
   }
-  valid("locating file");
+  valid("locating file ", name.c_str());
   return result;
 }
 
 // return dataptr, size
 std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string& name) {
-  size_t key = getFileID(name);
+  size_t key = getRecordID(name);
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
-  valid("retrieving file meta-data");
+  valid("retrieving file meta-data for ", name.c_str());
   void * ptr = malloc(stat.m_uncomp_size);
   mz_zip_reader_extract_to_mem(ar_.get(), key, ptr, stat.m_uncomp_size, 0);
-  valid("reading file");
+  valid("reading file ", name.c_str());
 
   at::DataPtr retval(ptr, ptr, free, at::kCPU);
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);
@@ -208,8 +213,8 @@ static int64_t read_le_16(uint8_t* buf) {
 
 size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
   mz_zip_archive_file_stat stat;
-  mz_zip_reader_file_stat(ar_.get(), getFileID(name), &stat);
-  valid("retriving file meta-data");
+  mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
+  valid("retrieving file meta-data for ", name.c_str());
   uint8_t local_header[MZ_ZIP_LOCAL_DIR_HEADER_SIZE];
   in_->read(
       stat.m_local_header_ofs,
@@ -224,7 +229,7 @@ size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
 
 PyTorchStreamReader::~PyTorchStreamReader() {
   mz_zip_reader_end(ar_.get());
-  valid("closing reader");
+  valid("closing reader for archive ", archive_name_.c_str());
 }
 
 size_t ostream_write_func(void *pOpaque, mz_uint64 file_ofs, const void *pBuf, size_t n) {
@@ -260,14 +265,14 @@ PyTorchStreamWriter::PyTorchStreamWriter(
   if (!out_) {
     file_stream_.open(file_name, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     out_ = &file_stream_;
-    valid("opening archive");
+    valid("opening archive ", file_name.c_str());
   }
 
   ar_->m_pIO_opaque = this;
   ar_->m_pWrite = ostream_write_func;
 
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
-  valid("initializing archive");
+  valid("initializing archive ", file_name.c_str());
 
   std::stringstream version;
   version << kMaxSupportedFileFormatVersion << "\n";
@@ -296,7 +301,7 @@ void PyTorchStreamWriter::writeRecord(const std::string& name, const void* data,
       padding.size(),
       nullptr,
       0);
-  valid("writing file");
+  valid("writing file ", name.c_str());
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
@@ -304,19 +309,23 @@ void PyTorchStreamWriter::writeEndOfFile() {
   finalized_ = true;
   mz_zip_writer_finalize_archive(ar_.get());
   mz_zip_writer_end(ar_.get());
-  valid("writing central directory");
+  valid("writing central directory for archive ", archive_name_.c_str());
   if (file_stream_.is_open())
     file_stream_.close();
 }
 
-
-void PyTorchStreamWriter::valid(const char* what) {
+void PyTorchStreamWriter::valid(const char* what, const char* info) {
   auto err = mz_zip_get_last_error(ar_.get());
   if (err != MZ_ZIP_NO_ERROR) {
-    CAFFE_THROW("PytorchStreamWriter failed ", what, ": ", mz_zip_get_error_string(err));
+    CAFFE_THROW(
+        "PytorchStreamWriter failed ",
+        what,
+        info,
+        ": ",
+        mz_zip_get_error_string(err));
   }
   if (!*out_) {
-    CAFFE_THROW("PytorchStreamWriter failed ", what, ".");
+    CAFFE_THROW("PytorchStreamWriter failed ", what, info, ".");
   }
 }
 

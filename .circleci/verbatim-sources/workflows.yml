@@ -7,6 +7,5 @@
 
 # PR jobs pr builds
 workflows:
-  version: 2
   build:
     jobs:

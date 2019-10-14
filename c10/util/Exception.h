@@ -137,6 +137,8 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // unsigned int (a.k.a uint32_t) and may cause a compile error with the message:
 // error C2397: conversion from 'long' to 'uint32_t' requires a narrowing conversion
 // Here the static cast is used to pass the build.
+// if this is used inside a lambda the __func__ macro expands to operator(),
+// which isn't very useful, but hard to fix in a macro so suppressing the warning.
 #define C10_THROW_ERROR(err_type, msg) \
   throw ::c10::err_type({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
@@ -284,6 +286,15 @@ inline std::string if_empty_then(std::string x, std::string y) {
 //
 #define TORCH_WARN(...) \
   ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__))
+
+// Report a warning to the user only once.  Accepts an arbitrary number of extra
+// arguments which are concatenated into the warning message using operator<<
+//
+#define TORCH_WARN_ONCE(...) \
+  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
+    ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__)); \
+    return true; \
+  }()
 
 
 // ----------------------------------------------------------------------------

@@ -37,7 +37,7 @@ TEST_F(ParallelTest, DifferentiableScatter_MultiCUDA) {
                   .allclose(input));
 
   torch::Tensor sum = output[0].to({torch::kCUDA, 1}) + output[1];
-  sum.backward();
+  sum.backward(torch::ones_like(sum));
 
   ASSERT_TRUE(input.grad().defined());
   ASSERT_TRUE(input.grad().device().is_cpu());
@@ -61,7 +61,7 @@ TEST_F(ParallelTest, DifferentiableGather_MultiCUDA) {
   ASSERT_TRUE(chunks[0].to({torch::kCUDA, 0}).allclose(a));
   ASSERT_TRUE(chunks[1].allclose(b));
 
-  output.backward();
+  output.backward(torch::ones_like(output));
 
   ASSERT_TRUE(a.grad().defined());
   ASSERT_EQ(a.grad().device(), torch::Device(torch::kCUDA, 0));
@@ -89,8 +89,8 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
   for (size_t i = 0; i < original_parameters.size(); ++i) {
     ASSERT_TRUE(replica1_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
-        replica1_parameters[i].data<float>() !=
-        original_parameters[i].data<float>());
+        replica1_parameters[i].data_ptr<float>() !=
+        original_parameters[i].data_ptr<float>());
   }
 
   auto replica2_parameters = replicas[1]->parameters();
@@ -102,8 +102,8 @@ TEST_F(ParallelTest, Replicate_MultiCUDA) {
   for (size_t i = 0; i < original_parameters.size(); ++i) {
     ASSERT_TRUE(replica2_parameters[i].allclose(original_parameters[i]));
     ASSERT_TRUE(
-        replica2_parameters[i].data<float>() !=
-        original_parameters[i].data<float>());
+        replica2_parameters[i].data_ptr<float>() !=
+        original_parameters[i].data_ptr<float>());
   }
 }
 

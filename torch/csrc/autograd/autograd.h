@@ -1,17 +1,26 @@
-#ifndef THP_AUTOGRAD_H
-#define THP_AUTOGRAD_H
+#pragma once
 
-PyObject * THPAutograd_initExtension(PyObject *_unused);
-void THPAutograd_initFunctions();
+#include <torch/csrc/autograd/variable.h>
 
-namespace torch { namespace autograd {
+#include <ATen/ATen.h>
 
-PyMethodDef* python_functions();
+namespace torch {
+namespace autograd {
+// Computes the gradient of current tensor w.r.t. graph leaves.
+TORCH_API void backward(
+    const variable_list& tensors,
+    const variable_list& grad_tensors = {},
+    c10::optional<bool> retain_graph = c10::nullopt,
+    bool create_graph = false);
 
-}}
+// Computes the gradient of current tensor w.r.t. inputs.
+TORCH_API variable_list grad(
+    const variable_list& outputs,
+    const variable_list& inputs,
+    const variable_list& grad_outputs = {},
+    c10::optional<bool> retain_graph = c10::nullopt,
+    bool create_graph = false,
+    bool allow_unused = false);
 
-#include <torch/csrc/autograd/python_function.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/autograd/python_engine.h>
-
-#endif
+} // namespace autograd
+} // namespace torch

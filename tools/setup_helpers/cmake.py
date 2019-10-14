@@ -11,10 +11,9 @@ import distutils
 import distutils.sysconfig
 from distutils.version import LooseVersion
 
-from . import escape_path, which
+from . import which
 from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag)
 from .cuda import USE_CUDA
-from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 
 
@@ -71,11 +70,21 @@ def get_cmake_cache_variables_from_file(cmake_cache_file):
             # Blank or comment line, skip
             continue
 
-        # Space can also be part of variable name and value
-        matched = re.match(r'(\S.*):\s*([a-zA-Z_-][a-zA-Z0-9_-]*)\s*=\s*(.*)', line)
+        # Almost any character can be part of variable name and value. As a practical matter, we assume the type must be
+        # valid if it were a C variable name. It should match the following kinds of strings:
+        #
+        #   USE_CUDA:BOOL=ON
+        #   "USE_CUDA":BOOL=ON
+        #   USE_CUDA=ON
+        #   USE_CUDA:=ON
+        #   Intel(R) MKL-DNN_SOURCE_DIR:STATIC=/path/to/pytorch/third_party/ideep/mkl-dnn
+        #   "OpenMP_COMPILE_RESULT_CXX_openmp:experimental":INTERNAL=FALSE
+        matched = re.match(r'("?)(.+?)\1(?::\s*([a-zA-Z_-][a-zA-Z0-9_-]*)?)?\s*=\s*(.*)', line)
         if matched is None:  # Illegal line
             raise ValueError('Unexpected line {} in {}: {}'.format(i, repr(cmake_cache_file), line))
-        variable, type_, value = matched.groups()
+        _, variable, type_, value = matched.groups()
+        if type_ is None:
+            type_ = ''
         if type_.upper() in ('INTERNAL', 'STATIC'):
             # CMake internal variable, do not touch
             continue
@@ -206,7 +215,9 @@ class CMake:
             # adding a new build option to this block: Consider making these two names identical and adding this option
             # in the block below.
             '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
-            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA'
+            'CUDNN_LIB_DIR': 'CUDNN_LIBRARY',
+            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA',
+            'USE_GLOO_IBVERBS': 'USE_IBVERBS'   # Backward compatibility. Will be removed in the future.
         }
         additional_options.update({
             # Build options that have the same environment variable name and CMake variable name and that do not start
@@ -215,6 +226,9 @@ class CMake:
             var: var for var in
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
+             'CUDA_NVCC_EXECUTABLE',
+             'CUDNN_LIBRARY',
+             'CUDNN_INCLUDE_DIR',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
              'MKL_THREADING',
@@ -225,6 +239,9 @@ class CMake:
              'ATEN_THREADING',
              'WERROR')
         })
+
+        if 'USE_GLOO_IBVERBS' in my_env:
+            print("WARNING: USE_GLOO_IBVERBS is deprecated. Use USE_IBVERBS instead.")
 
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
@@ -249,9 +266,7 @@ class CMake:
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
             'USE_CUDA': USE_CUDA,
-            'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_NUMPY': USE_NUMPY,
-            'USE_SYSTEM_EIGEN_INSTALL': 'OFF'
         })
 
         # Options starting with CMAKE_
@@ -269,22 +284,20 @@ class CMake:
         build_options.update(cmake__options)
 
         CMake.defines(args,
-                      PYTHON_EXECUTABLE=escape_path(sys.executable),
-                      PYTHON_LIBRARY=escape_path(cmake_python_library),
-                      PYTHON_INCLUDE_DIR=escape_path(distutils.sysconfig.get_python_inc()),
+                      PYTHON_EXECUTABLE=sys.executable,
+                      PYTHON_LIBRARY=cmake_python_library,
+                      PYTHON_INCLUDE_DIR=distutils.sysconfig.get_python_inc(),
                       TORCH_BUILD_VERSION=version,
-                      NUMPY_INCLUDE_DIR=escape_path(NUMPY_INCLUDE_DIR),
-                      CUDA_NVCC_EXECUTABLE=escape_path(os.getenv('CUDA_NVCC_EXECUTABLE')),
+                      NUMPY_INCLUDE_DIR=NUMPY_INCLUDE_DIR,
                       **build_options)
-
-        if USE_GLOO_IBVERBS:
-            CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
 
         expected_wrapper = '/usr/local/opt/ccache/libexec'
         if IS_DARWIN and os.path.exists(expected_wrapper):
-            CMake.defines(args,
-                          CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
-                          CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
+            if 'CMAKE_C_COMPILER' not in build_options and 'CC' not in os.environ:
+                CMake.defines(args, CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper))
+            if 'CMAKE_CXX_COMPILER' not in build_options and 'CXX' not in os.environ:
+                CMake.defines(args, CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
+
         for env_var_name in my_env:
             if env_var_name.startswith('gh'):
                 # github env vars use utf-8, on windows, non-ascii code may

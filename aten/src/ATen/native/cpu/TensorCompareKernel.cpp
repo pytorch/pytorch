@@ -19,9 +19,9 @@ struct Reduction {
       const Tensor& self,
       c10::optional<int64_t> dim,
       bool greater) {
-    auto out_ = res.data<scalar_t>();
-    auto indices_ = res_indices.data<index_t>();
-    auto data_ = self.data<scalar_t>();
+    auto out_ = res.data_ptr<scalar_t>();
+    auto indices_ = res_indices.data_ptr<index_t>();
+    auto data_ = self.data_ptr<scalar_t>();
     auto numel = self.numel();
 
     int64_t n = self.size(*dim);

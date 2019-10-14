@@ -3,6 +3,8 @@
 #include <array>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/core/EnableNamedTensor.h>
+#include <ATen/native/TypeProperties.h>
 
 namespace at {
 
@@ -35,7 +37,7 @@ void TensorIterator::reorder_dimensions() {
       }
       int64_t stride0 = operands_[arg].stride_bytes[dim0];
       int64_t stride1 = operands_[arg].stride_bytes[dim1];
-      if (operands_[arg].is_output) {
+      if (is_reduction_ && operands_[arg].is_output) {
         // move reduced dimensions to the front
         if ((stride0 == 0) != (stride1 == 0)) {
           return stride1 == 0 ? 1 : -1;
@@ -70,67 +72,107 @@ void TensorIterator::reorder_dimensions() {
   permute_dimensions(perm_);
 }
 
-template <typename F>
-static std::tuple<Device, ScalarType>
-compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
-  Device device = kCPU;
-  ScalarType dtype = ScalarType::Undefined;
+Device compute_device(at::ArrayRef<OperandInfo> operands) {
   for (auto& op : operands) {
     if (!op.tensor.defined()) continue;
-    if (!predicate(op.tensor)) continue;
-    auto tensor_dtype = op.tensor.scalar_type();
-    if (dtype == ScalarType::Undefined) {
-      dtype = tensor_dtype;
-      device = op.tensor.device();
-    } else {
-      dtype = promoteTypes(dtype, tensor_dtype);
-    }
+    if (op.tensor.dim() == 0) continue;
+    return op.tensor.device();
   }
-  return std::make_tuple(device, dtype);
+  for (auto& op : operands) {
+    if (!op.tensor.defined()) continue;
+    if (op.tensor.unsafeGetTensorImpl()->is_wrapped_number()) continue;
+    return op.tensor.device();
+  }
+  return kCPU;
 }
 
-template <typename F, typename... Preds>
-static std::tuple<Device, ScalarType>
-compute_result_type(at::ArrayRef<OperandInfo> operands,
-                    const F& first_predicate,
-                    Preds... predicates) {
-  auto result_type = compute_result_type(operands, first_predicate);
-  if (std::get<1>(result_type) != ScalarType::Undefined) {
-    return result_type;
-  }
-  return compute_result_type(operands, predicates...);
+static std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
+  // See [Result type computation] in TensorIterator.h
+  auto device = compute_device(operands);
+  std::vector<Tensor> tensors;
+  std::transform(std::begin(operands), std::end(operands), std::back_inserter(tensors),
+                  [](const OperandInfo& op) { return op.tensor; });
+  auto dtype = at::native::result_type(tensors);
+  auto result = std::make_tuple(device, dtype);
+  TORCH_INTERNAL_ASSERT(dtype != ScalarType::Undefined);
+  return result;
 }
 
 std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
-  // See [Result type computation] in TensorIterator.h
-  auto result_type =
-      compute_result_type(operands_,
-        [](const Tensor& t) { return t.dim() > 0; },
-        [](const Tensor& t) { return !t.unsafeGetTensorImpl()->is_wrapped_number(); },
-        [](const Tensor& t) { return true; });
+  return compute_common_type_(operands_);
+}
 
-  TORCH_INTERNAL_ASSERT(std::get<1>(result_type) != ScalarType::Undefined);
-  return result_type;
+static void validate_dtype(OperandInfo& op, ScalarType common_dtype, int ninputs) {
+  if (op.tensor.defined()) {
+    // For binary_ops, we follow casting rules. For unary/nullary types
+    // we require the type to match.
+    if (op.is_output) {
+      if (!canCast(common_dtype, op.tensor.scalar_type()))
+      {
+        AT_ERROR("result type ", common_dtype,
+          " can't be cast to the desired output type ",
+          op.tensor.scalar_type());
+      }
+    }
+    if (ninputs < 2 && op.dtype != op.tensor.scalar_type()) {
+      AT_ERROR("expected dtype ", op.dtype, " but got dtype ", op.tensor.scalar_type());
+    }
+  }
+}
+
+static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype) {
+  if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype)
+  {
+    op.dtype = common_dtype;
+    op.original_tensor = op.tensor;
+    if (!op.is_output) {
+      op.tensor = op.tensor.to(common_dtype);
+    } else {
+      op.tensor =
+          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype));
+    }
+    auto original_element_size = op.original_tensor.element_size();
+    auto new_element_size = op.tensor.element_size();
+
+    // stride size (in bytes) can change if we change the dtype.
+    for( size_t i=0; i < op.stride_bytes.size(); i++ ) {
+      auto stride = op.stride_bytes[i] / original_element_size;
+      op.stride_bytes[i] = stride * new_element_size;
+    }
+  }
 }
 
 void TensorIterator::compute_types() {
   bool missing_dtypes = false;
+  bool missing_output_dtypes = false;
+  ScalarType common_dtype = dtype();
   for (auto& op : operands_) {
     if (!op.tensor.defined() && !op.is_type_defined()) {
       missing_dtypes = true;
+      if (op.is_output) {
+        missing_output_dtypes = true;
+      }
     }
   }
 
-  if (missing_dtypes || compute_common_dtype_) {
-    auto common_type = compute_common_type();
+  if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_INPUTS) {
+    TORCH_CHECK(!missing_output_dtypes, "unable to compute and promote common dtype based only on inputs if there are missing dtypes for outputs");
+  }
+
+  bool compute_common_dtype = (compute_common_dtype_strategy_ != CommonDTypeStrategy::COMPUTE_NONE);
+  bool compute_common_dtype_only_for_inputs = (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_INPUTS);
+
+  if (missing_dtypes || compute_common_dtype) {
+    auto operands = compute_common_dtype_only_for_inputs ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
+    auto common_type = compute_common_type_(operands);
     auto common_device = std::get<0>(common_type);
-    auto common_dtype = std::get<1>(common_type);
+    common_dtype = std::get<1>(common_type);
     bool has_cpu_scalar = false;
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
         op.device = common_device;
         op.dtype = common_dtype;
-      } else if (compute_common_dtype_ &&
+      } else if (compute_common_dtype &&
                  (op.device != common_device || op.dtype != common_dtype)) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
             common_device.is_cuda() && op.tensor.device().is_cpu() &&
@@ -149,26 +191,31 @@ void TensorIterator::compute_types() {
           op.dtype = op.tensor.scalar_type();
         } else {
           op.device = common_device;
-          op.dtype = common_dtype;
+          if (compute_common_dtype_only_for_inputs && op.is_output) {
+            op.dtype = op.tensor.scalar_type();
+          } else {
+            op.dtype = common_dtype;
+          }
         }
       }
-    }
-  }
 
-  for (auto& op : operands_) {
-    auto& tensor = op.tensor;
-    if (!tensor.defined()) {
-      continue;
-    }
-    if (op.device != tensor.device() || op.dtype != tensor.scalar_type()) {
-      if (op.is_output) {
-        AT_ERROR("output with device ", tensor.device(), " and dtype ", tensor.scalar_type(),
-                 " doesn't match the desired device ", op.device, " and dtype ", op.dtype);
-      } else if (tensor.dim() == 0) {
-        tensor = tensor.to(op.options());
-      } else {
-        AT_ERROR("expected device ", op.device, " and dtype ", op.dtype,
-                 " but got device ", tensor.device(), " and dtype ", tensor.scalar_type());
+      if (!compute_common_dtype_only_for_inputs) {
+        validate_dtype(op, common_dtype, ninputs());
+      }
+      if (!compute_common_dtype_only_for_inputs || !op.is_output) {
+        maybe_promote_common_dtype(op, common_dtype);
+      }
+
+      if (op.tensor.defined() && op.device != op.tensor.device()) {
+        if (op.is_output) {
+          AT_ERROR("output with device ", op.tensor.device(),
+                   " doesn't match the desired device ", op.device);
+        } else if (op.tensor.dim() == 0) {
+          op.tensor = op.tensor.to(op.options());
+        } else {
+          AT_ERROR("expected device ", op.device,
+                   " but got device ", op.tensor.device());
+        }
       }
     }
   }
@@ -214,26 +261,36 @@ void TensorIterator::allocate_outputs() {
 }
 
 #ifdef BUILD_NAMEDTENSOR
-void TensorIterator::propagate_names_to_outputs() {
-  NameVector names;
+void TensorIterator::compute_names() {
+  bool should_infer_names = std::any_of(
+      operands_.begin(),
+      operands_.end(),
+      [](const OperandInfo& op) {
+        return op.tensor.defined() && op.tensor.has_names();
+      });
+  if (!should_infer_names) {
+    return;
+  }
 
-  // build names
   for (auto& op : operands_) {
     if (!op.tensor.defined()) continue;
     // don't include output tensors that are not also input tensors.
     if (resize_outputs_ && op.is_output && !op.is_read_write) continue;
     // perform name inference
-    if (!op.tensor.has_names()) {
-      continue;
-    }
-    auto tensor_names = *op.tensor.names();
-    if (names.empty()) {
-      names = tensor_names;
+    if (names_.empty()) {
+      names_ = op.tensor.names();
     } else {
-      names = NameVector(unify_from_right(names, tensor_names).value());
+      names_ = NameVector(unify_from_right(names_, op.tensor.names()));
     }
   }
-  if (names.empty()) {
+}
+
+void TensorIterator::propagate_names_to_outputs() {
+  // names_ can be empty for two reasons:
+  // 1. We were performing ops on scalar tensors. Then there should be no names.
+  // 2. All of the defined inputs/outputs had no names. Then we shouldn't
+  //    run name inference.
+  if (names_.empty()) {
     return;
   }
 
@@ -242,7 +299,11 @@ void TensorIterator::propagate_names_to_outputs() {
     auto& op = operands_[i];
     // must call propagate_names_to_outputs after outputs have been allocated.
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
-    at::internal_set_names_inplace(op.tensor, names);
+    if (names_.empty()) {
+      namedinference::propagate_names(op.tensor, nullopt);
+    } else {
+      namedinference::propagate_names(op.tensor, names_);
+    }
   }
 }
 #endif
@@ -385,27 +446,26 @@ int TensorIterator::num_reduce_dims() const {
   return count;
 }
 
-static inline loop2d_t loop_wrapper(int ntensor, const loop_t* loop) {
-  return [=](char** base, const int64_t* strides, int64_t size0, int64_t size1) {
-    auto data = PtrVector(base, base + ntensor);
-    const int64_t* outer_strides = &strides[ntensor];
+#define LOOP_WRAPPER(ntensor, loop) \
+  [=](char** base, const int64_t* strides, int64_t size0, int64_t size1) { \
+    auto data = PtrVector(base, base + ntensor);                          \
+    const int64_t* outer_strides = &strides[ntensor];                     \
+                                                                          \
+    for (int64_t i = 0; i < size1; i++) {                                 \
+      if (i > 0) {                                                        \
+        for (int arg = 0; arg < ntensor; arg++) {                         \
+          data[arg] += outer_strides[arg];                                \
+        }                                                                 \
+      }                                                                   \
+      loop(data.data(), strides, size0);                               \
+    }                                                                     \
+  }
 
-    for (int64_t i = 0; i < size1; i++) {
-      if (i > 0) {
-        for (int arg = 0; arg < ntensor; arg++) {
-          data[arg] += outer_strides[arg];
-        }
-      }
-      (*loop)(data.data(), strides, size0);
-    }
-  };
+void TensorIterator::for_each(loop_t loop) {
+  for_each(LOOP_WRAPPER(ntensors(), loop));
 }
 
-void TensorIterator::for_each(const loop_t& loop) {
-  for_each(loop_wrapper(ntensors(), &loop));
-}
-
-void TensorIterator::for_each(const loop2d_t& loop) {
+void TensorIterator::for_each(loop2d_t loop) {
   int64_t numel = this->numel();
   if (numel == 0) {
     return;
@@ -428,11 +488,11 @@ DimVector TensorIterator::get_strides() const {
   return strides;
 }
 
-void TensorIterator::serial_for_each(const loop_t& loop, Range range) const {
-  serial_for_each(loop_wrapper(ntensors(), &loop), range);
+void TensorIterator::serial_for_each(loop_t loop, Range range) const {
+  serial_for_each(LOOP_WRAPPER(ntensors(), loop), range);
 }
 
-void TensorIterator::serial_for_each(const loop2d_t& loop, Range range) const {
+void TensorIterator::serial_for_each(loop2d_t loop, Range range) const {
   if (range.size() == 0) {
     return;
   }
@@ -535,13 +595,10 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 }
 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
-    const Tensor& b, bool check_internal_overlap) {
+    const Tensor& b, bool check_mem_overlap) {
   auto iter = TensorIterator();
-  if (check_internal_overlap) {
-    iter.check_and_add_output(out);
-  } else {
-    iter.add_output(out);
-  }
+  iter.set_check_mem_overlap(check_mem_overlap);
+  iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
@@ -549,14 +606,24 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   return iter;
 }
 
-TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
-    bool check_internal_overlap) {
+TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
+    const Tensor& b, bool check_mem_overlap) {
   auto iter = TensorIterator();
-  if (check_internal_overlap) {
-    iter.check_and_add_output(out);
-  } else {
-    iter.add_output(out);
-  }
+  iter.set_check_mem_overlap(check_mem_overlap);
+  iter.add_output(out);
+  iter.add_input(a);
+  iter.add_input(b);
+  iter.allow_cpu_scalars_ = true;
+  iter.compute_common_dtype_only_for_inputs();
+  iter.build();
+  return iter;
+}
+
+TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
+    bool check_mem_overlap) {
+  auto iter = TensorIterator();
+  iter.set_check_mem_overlap(check_mem_overlap);
+  iter.add_output(out);
   iter.add_input(a);
   iter.num_outputs_ = 1;
   iter.build();
@@ -580,6 +647,8 @@ TensorIterator TensorIterator::reduce_op(Tensor& out, const Tensor& a) {
   iter.promote_gpu_output_dtypes_ = true;
   iter.resize_outputs_ = false;
   iter.is_reduction_ = true;
+  // TODO: This is only really necessary for arg{min,max}
+  iter.compute_common_dtype_only_for_inputs();
   iter.build();
   return iter;
 }
@@ -610,15 +679,30 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
 void TensorIterator::mark_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     operands_[i].is_output = true;
-    const auto &output = operands_[i].tensor;
+    const auto& output = operands_[i].tensor;
     if (!output.defined()) continue;
 
     // check if output is also an input
     for (int arg = num_outputs_; arg < ntensors(); arg++) {
-      const auto &input = operands_[arg].tensor;
+      const auto& input = operands_[arg].tensor;
       if (output.is_same(input)) {
         operands_[i].is_read_write = true;
       }
+    }
+  }
+}
+
+void TensorIterator::check_mem_overlaps() {
+  if (!check_mem_overlap_) {
+    return;
+  }
+  for (int i = 0; i < num_outputs_; i++) {
+    const auto& output = operands_[i].tensor;
+    if (!output.defined()) continue;
+    assert_no_internal_overlap(output);
+    for (int j = num_outputs_; j < ntensors(); j++) {
+      const auto& input = operands_[j].tensor;
+      assert_no_partial_overlap(output, input);
     }
   }
 }
@@ -734,6 +818,13 @@ int TensorIterator::get_dim_to_split() const {
 void TensorIterator::build() {
   // set is_output and is_read_write flags on appropriate tensors
   mark_outputs();
+  // Check that the outputs have no internal overlap
+  // and do not share memory with inputs.
+  check_mem_overlaps();
+#ifdef BUILD_NAMEDTENSOR
+  // Check that input dimensions are aligned correctly & compute outnames.
+  compute_names();
+#endif
   // compute the broadcasted shape
   compute_shape();
   // compute each tensor's stride after broadcasting
