@@ -250,6 +250,7 @@ struct TORCH_API Node {
   Block* owning_block_;
   c10::optional<SourceRange> source_range_;
   ScopePtr scope_;
+  c10::optional<CallStackPtr> callstack_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
@@ -316,6 +317,11 @@ struct TORCH_API Node {
     }
     return scope_->namesFromRoot();
   }
+  c10::optional<CallStackPtr> callstack() const {
+    return callstack_;
+  }
+  void insertCallStackEntry(Function* f, SourceRange sr);
+  void appendCallStackOf(Node* other);
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
   // We can't return a std::vector<Node*>& because there's no
@@ -1331,12 +1337,12 @@ TORCH_API std::vector<Value*> insertGraph(
     ArrayRef<Value*> inputs,
     std::unordered_map<Value*, Value*>& value_map);
 
-/** Insert graph \p CALLEE after node \p TO_REPLACE, remove the node and
- * replace all its uses with corresponding outputs of the inserted graph. The
- * function asserts that the number of outputs of the original node and the
+/** Insert function \p CALLEE after node \p TO_REPLACE, remove the node and
+ * replace all its uses with corresponding outputs of the inserted function.
+ * This asserts that the number of outputs of the original node and the
  * graph are the same.
  */
-TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Graph& callee);
+TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.

@@ -35,6 +35,7 @@
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
+#include "torch/csrc/jit/scope.h"
 #include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/hash.h"
@@ -1150,5 +1151,58 @@ void testProfiler() {
   checkShape(*tanh_n, eltwise);
 }
 
+void testCallStack() {
+  const auto text = R"(
+def ham(x):
+    return x/7
+
+def bar(x):
+    return x*3
+
+def baz(x):
+    return ham(x)*x
+
+def foo(x):
+    return bar(x)*baz(x)*11
+  )";
+  auto cu = compile(text);
+  const Function& foo = cu->get_function("foo");
+  for (Node* n : foo.graph()->nodes()) {
+    if (n->kind() == prim::Constant) {
+      int v = n->i(attr::value);
+      switch (v) {
+        case 3: {
+          // Const 3 comes from function 'bar', which gets inlined to 'foo'.
+          // The callstack for the correponding node should contain only the
+          // function 'bar'.
+          ASSERT_TRUE(n->callstack());
+          auto callstack_vector = (*n->callstack())->asVector();
+          ASSERT_EQ(callstack_vector.size(), 1);
+          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("bar"));
+          break;
+        }
+        case 7: {
+          // Const 7 comes from function 'ham', which gets inlined to 'baz',
+          // which is then inlined to 'foo'. The callstack for the correponding
+          // node should contain these two functions.
+          ASSERT_TRUE(n->callstack());
+          auto callstack_vector = (*n->callstack())->asVector();
+          ASSERT_EQ(callstack_vector.size(), 2);
+          ASSERT_EQ(callstack_vector[0].first, &cu->get_function("baz"));
+          ASSERT_EQ(callstack_vector[1].first, &cu->get_function("ham"));
+          break;
+        }
+        case 11: {
+          // Const 11 comes from function 'foo', which is not inlined anywhere
+          // and thus it should not have a callstack.
+          ASSERT_FALSE(n->callstack());
+          break;
+        }
+      }
+    }
+  }
+}
+
 } // namespace jit
+} // namespace torch
 } // namespace torch
