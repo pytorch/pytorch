@@ -352,16 +352,14 @@ class C10_API TypeMeta final {
   /**
    * Copy constructor.
    */
-  constexpr TypeMeta(const TypeMeta& src) noexcept = default;
+  TypeMeta(const TypeMeta& src) noexcept = default;
 
   /**
    * Assignment operator.
    */
-  AT_CPP14_CONSTEXPR TypeMeta& operator=(const TypeMeta& src) noexcept {
-    return operator=(TypeMeta(src));
-  }
+  TypeMeta& operator=(const TypeMeta& src) noexcept = default;
 
-  constexpr TypeMeta(TypeMeta&& rhs) noexcept = default;
+  TypeMeta(TypeMeta&& rhs) noexcept = default;
 
  private:
   // TypeMeta can only be created by Make, making sure that we do not
@@ -374,37 +372,37 @@ class C10_API TypeMeta final {
   /**
    * Returns the type id.
    */
-  constexpr TypeIdentifier id() const noexcept {
+  TypeIdentifier id() const noexcept {
     return data_->id_;
   }
   /**
    * Returns the size of the item.
    */
-  constexpr size_t itemsize() const noexcept {
+  size_t itemsize() const noexcept {
     return data_->itemsize_;
   }
-  constexpr New* newFn() const noexcept {
+  New* newFn() const noexcept {
     return data_->new_;
   }
   /**
    * Returns the placement new function pointer for individual items.
    */
-  constexpr PlacementNew* placementNew() const noexcept {
+  PlacementNew* placementNew() const noexcept {
     return data_->placementNew_;
   }
   /**
    * Returns the typed copy function pointer for individual iterms.
    */
-  constexpr Copy* copy() const noexcept {
+  Copy* copy() const noexcept {
     return data_->copy_;
   }
   /**
    * Returns the destructor function pointer for individual items.
    */
-  constexpr PlacementDelete* placementDelete() const noexcept {
+  PlacementDelete* placementDelete() const noexcept {
     return data_->placementDelete_;
   }
-  constexpr Delete* deleteFn() const noexcept {
+  Delete* deleteFn() const noexcept {
     return data_->delete_;
   }
   /**
@@ -426,7 +424,7 @@ class C10_API TypeMeta final {
   // Below are static functions that can be called by passing a specific type.
 
   template <class T>
-  static TypeIdentifier Id() noexcept {
+  static C10_HOST_CONSTEXPR TypeIdentifier Id() noexcept {
     return TypeIdentifier::Get<T>();
   }
 
