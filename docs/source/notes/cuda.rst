@@ -69,10 +69,25 @@ between CPU and GPU or between two GPUs.  Hence, computation will proceed as if
 every operation was executed synchronously.
 
 You can force synchronous computation by setting environment variable
-`CUDA_LAUNCH_BLOCKING=1`.  This can be handy when an error occurs on the GPU.
+``CUDA_LAUNCH_BLOCKING=1``.  This can be handy when an error occurs on the GPU.
 (With asynchronous execution, such an error isn't reported until after the
 operation is actually executed, so the stack trace does not show where it was
 requested.)
+
+A consequence of the asynchronous computation is that time measurements without
+synchronizations are not accurate. To get precise measurements, one should either
+call :func:`torch.cuda.synchronize()` before measuring, or use :class:`torch.cuda.Event`
+to record times as following::
+
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
+
+    # Run some things here
+
+    end_event.record()
+    torch.cuda.synchronize()  # Wait for the events to be recorded!
+    elapsed_time_ms = start_event.elapsed_time(end_event)
 
 As an exception, several functions such as :meth:`~torch.Tensor.to` and
 :meth:`~torch.Tensor.copy_` admit an explicit :attr:`non_blocking` argument,
@@ -116,12 +131,18 @@ allows fast memory deallocation without device synchronizations. However, the
 unused memory managed by the allocator will still show as if used in
 ``nvidia-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
-tensors, and use :meth:`~torch.cuda.memory_cached` and
-:meth:`~torch.cuda.max_memory_cached` to monitor memory managed by the caching
-allocator. Calling :meth:`~torch.cuda.empty_cache` releases all **unused**
-cached memory from PyTorch so that those can be used by other GPU applications.
-However, the occupied GPU memory by tensors will not be freed so it can not
-increase the amount of GPU memory available for PyTorch.
+tensors, and use :meth:`~torch.cuda.memory_reserved` and
+:meth:`~torch.cuda.max_memory_reserved` to monitor the total amount of memory
+managed by the caching allocator. Calling :meth:`~torch.cuda.empty_cache`
+releases all **unused** cached memory from PyTorch so that those can be used
+by other GPU applications. However, the occupied GPU memory by tensors will not
+be freed so it can not increase the amount of GPU memory available for PyTorch.
+
+For more advanced users, we offer more comprehensive memory benchmarking via
+:meth:`~torch.cuda.memory_stats`. We also offer the capability to capture a
+complete snapshot of the memory allocator state via
+:meth:`~torch.cuda.memory_snapshot`, which can help you understand the
+underlying allocation patterns produced by your code.
 
 .. _cufft-plan-cache:
 

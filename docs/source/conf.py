@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
 # PyTorch documentation build configuration file, created by
@@ -53,6 +52,8 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
     'sphinxcontrib.katex',
+    'sphinx.ext.autosectionlabel',
+    'javasphinx',
 ]
 
 # katex options
@@ -240,6 +241,17 @@ intersphinx_mapping = {
 from docutils import nodes
 from sphinx.util.docfields import TypedField
 from sphinx import addnodes
+import sphinx.ext.doctest
+
+# Without this, doctest adds any example with a `>>>` as a test
+doctest_test_doctest_blocks = ''
+doctest_default_flags = sphinx.ext.doctest.doctest.ELLIPSIS
+doctest_global_setup = '''
+try:
+    import torchvision
+except ImportError:
+    torchvision = None
+'''
 
 
 def patched_make_field(self, types, domain, items, **kw):

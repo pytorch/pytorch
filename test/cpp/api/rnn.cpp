@@ -1,11 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/nn/modules/linear.h>
-#include <torch/nn/modules/rnn.h>
-#include <torch/optim/adam.h>
-#include <torch/types.h>
-#include <torch/utils.h>
-#include <ATen/core/grad_mode.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 
@@ -375,8 +370,8 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
   // Copy weights and biases from CPU GRU to CUDA GRU
   {
     at::NoGradGuard guard;
-    const auto num_directions = gru_cpu->options.bidirectional_ ? 2 : 1;
-    for (int64_t layer = 0; layer < gru_cpu->options.layers_; layer++) {
+    const auto num_directions = gru_cpu->options.bidirectional() ? 2 : 1;
+    for (int64_t layer = 0; layer < gru_cpu->options.layers(); layer++) {
       for (auto direction = 0; direction < num_directions; direction++) {
         const auto layer_idx = (layer * num_directions) + direction;
         copyParameters(gru_cuda, layer_idx, gru_cpu, layer_idx);
@@ -430,8 +425,8 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
   // Copy weights and biases from CPU LSTM to CUDA LSTM
   {
     at::NoGradGuard guard;
-    const auto num_directions = lstm_cpu->options.bidirectional_ ? 2 : 1;
-    for (int64_t layer = 0; layer < lstm_cpu->options.layers_; layer++) {
+    const auto num_directions = lstm_cpu->options.bidirectional() ? 2 : 1;
+    for (int64_t layer = 0; layer < lstm_cpu->options.layers(); layer++) {
       for (auto direction = 0; direction < num_directions; direction++) {
         const auto layer_idx = (layer * num_directions) + direction;
         copyParameters(lstm_cuda, layer_idx, lstm_cpu, layer_idx);

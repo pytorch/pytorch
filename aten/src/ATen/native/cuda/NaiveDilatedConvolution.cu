@@ -229,12 +229,12 @@ void slow_conv_dilated_all_cuda_template(
       /*    m=*/output_vsize,                        \
       /*    n=*/nOutputPlane,                        \
       /*alpha=*/ScalarConvert<int, scalar_t>::to(1), \
-      /*    A=*/grad_output_n.data<scalar_t>(),      \
+      /*    A=*/grad_output_n.data_ptr<scalar_t>(),      \
       /*  lda=*/output_vsize,                        \
-      /*    x=*/ones.data<scalar_t>(),               \
+      /*    x=*/ones.data_ptr<scalar_t>(),               \
       /* incx=*/1,                                   \
       /* beta=*/ScalarConvert<int, scalar_t>::to(1), \
-      /*    y=*/grad_bias.data<scalar_t>(),          \
+      /*    y=*/grad_bias.data_ptr<scalar_t>(),          \
       /* incy=*/1)
 #else
 #define CALCULATE_GRAD_BIAS grad_bias += grad_output_n.sum(dims)
@@ -266,7 +266,7 @@ void slow_conv_dilated_all_cuda_template(
             // Extract columns:
             hvol2col<scalar_t, dim>(
                 stream,
-                input_n.data<scalar_t>(),
+                input_n.data_ptr<scalar_t>(),
                 nInputPlane,
                 input_size,
                 output_size,
@@ -274,7 +274,7 @@ void slow_conv_dilated_all_cuda_template(
                 stride_size,
                 pad_size,
                 dilation_size,
-                columns.data<scalar_t>());
+                columns.data_ptr<scalar_t>());
             /* For gemm argument derivation, see
                slow_conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
@@ -286,12 +286,12 @@ void slow_conv_dilated_all_cuda_template(
                 /*     n=*/nOutputPlane,
                 /*     k=*/columns.size(0),
                 /* alpha=*/ScalarConvert<int, scalar_t>::to(1),
-                /*     A=*/columns.data<scalar_t>(),
+                /*     A=*/columns.data_ptr<scalar_t>(),
                 /*   lda=*/columns.size(1),
-                /*     B=*/weight.data<scalar_t>(),
+                /*     B=*/weight.data_ptr<scalar_t>(),
                 /*   ldb=*/columns.size(0),
                 /*  beta=*/ScalarConvert<int, scalar_t>::to(1),
-                /*     C=*/output_n.data<scalar_t>(),
+                /*     C=*/output_n.data_ptr<scalar_t>(),
                 /*   ldc=*/columns.size(1));
 
           } else {
@@ -312,19 +312,19 @@ void slow_conv_dilated_all_cuda_template(
                 /*     n=*/columns.size(0),
                 /*     k=*/nOutputPlane,
                 /* alpha=*/ScalarConvert<int, scalar_t>::to(1),
-                /*     A=*/grad_output_n.data<scalar_t>(),
+                /*     A=*/grad_output_n.data_ptr<scalar_t>(),
                 /*   lda=*/columns.size(1),
-                /*     B=*/weight.data<scalar_t>(),
+                /*     B=*/weight.data_ptr<scalar_t>(),
                 /*   ldb=*/columns.size(0),
                 /*  beta=*/ScalarConvert<int, scalar_t>::to(0),
-                /*     C=*/columns.data<scalar_t>(),
+                /*     C=*/columns.data_ptr<scalar_t>(),
                 /*   ldc=*/columns.size(1));
             // Unpack columns back into input:
             Tensor grad_input_n = grad_input.select(0, elt);
 
             col2hvol<scalar_t, dim>(
                 stream,
-                columns.data<scalar_t>(),
+                columns.data_ptr<scalar_t>(),
                 nInputPlane,
                 input_size,
                 output_size,
@@ -332,7 +332,7 @@ void slow_conv_dilated_all_cuda_template(
                 stride_size,
                 pad_size,
                 dilation_size,
-                grad_input_n.data<scalar_t>());
+                grad_input_n.data_ptr<scalar_t>());
           }
 
           // Gradient of weight:
@@ -340,7 +340,7 @@ void slow_conv_dilated_all_cuda_template(
             // Extract columns:
             hvol2col<scalar_t, dim>(
                 stream,
-                input_n.data<scalar_t>(),
+                input_n.data_ptr<scalar_t>(),
                 nInputPlane,
                 input_size,
                 output_size,
@@ -348,7 +348,7 @@ void slow_conv_dilated_all_cuda_template(
                 stride_size,
                 pad_size,
                 dilation_size,
-                columns.data<scalar_t>());
+                columns.data_ptr<scalar_t>());
             scalar_t scale = ScalarConvert<int, scalar_t>::to(
                 1); // TODO: expose as argument?
             /* For gemm argument derivation, see
@@ -362,12 +362,12 @@ void slow_conv_dilated_all_cuda_template(
                 /*     n=*/nOutputPlane,
                 /*     k=*/columns.size(1),
                 /* alpha=*/scale,
-                /*     A=*/columns.data<scalar_t>(),
+                /*     A=*/columns.data_ptr<scalar_t>(),
                 /*   lda=*/columns.size(1),
-                /*     B=*/grad_output_n.data<scalar_t>(),
+                /*     B=*/grad_output_n.data_ptr<scalar_t>(),
                 /*   ldb=*/columns.size(1),
                 /*  beta=*/ScalarConvert<int, scalar_t>::to(1),
-                /*     C=*/grad_weight.data<scalar_t>(),
+                /*     C=*/grad_weight.data_ptr<scalar_t>(),
                 /*   ldc=*/columns.size(0));
           }
 

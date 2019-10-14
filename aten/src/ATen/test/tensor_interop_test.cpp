@@ -13,7 +13,7 @@ TEST(Caffe2ToPytorch, SimpleLegacy) {
   }
   at::Tensor at_tensor(c2_tensor);
 
-  auto it = at_tensor.data<int64_t>();
+  auto it = at_tensor.data_ptr<int64_t>();
   for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], i);
   }
@@ -27,7 +27,7 @@ TEST(Caffe2ToPytorch, Simple) {
   }
   at::Tensor at_tensor(c2_tensor);
 
-  auto it = at_tensor.data<int64_t>();
+  auto it = at_tensor.data_ptr<int64_t>();
   for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], i);
   }
@@ -44,7 +44,7 @@ TEST(Caffe2ToPytorch, ExternalData) {
   // If the buffer is allocated externally, we can still pass tensor around,
   // but we can't resize its storage using PT APIs
   at::Tensor at_tensor(c2_tensor);
-  auto it = at_tensor.data<int64_t>();
+  auto it = at_tensor.data_ptr<int64_t>();
   for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], i);
   }

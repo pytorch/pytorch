@@ -43,7 +43,7 @@ class TestDocCoverage(unittest.TestCase):
             # below are some jit functions
             'wait', 'fork', 'parse_type_comment', 'import_ir_module',
             'import_ir_module_from_buffer', 'merge_type_from_type_comment',
-            'parse_ir',
+            'parse_ir', 'parse_schema',
 
             # below are symbols mistakely binded to torch.*, but should
             # go to torch.nn.functional.* instead
@@ -75,8 +75,13 @@ class TestDocCoverage(unittest.TestCase):
 
     def test_tensor(self):
         in_rst = self.parse_rst('tensors.rst', r2)
+        whitelist = {
+            'names', 'unflatten', 'align_as', 'rename_', 'refine_names', 'align_to',
+            'has_names', 'rename',
+        }
         classes = [torch.FloatTensor, torch.LongTensor, torch.ByteTensor]
         has_docstring = set(x for c in classes for x in dir(c) if not x.startswith('_') and getattr(c, x).__doc__)
+        has_docstring -= whitelist
         self.assertEqual(
             has_docstring, in_rst,
             textwrap.dedent('''

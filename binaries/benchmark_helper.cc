@@ -18,6 +18,10 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
 
 #include <binaries/benchmark_helper.h>
 #include "caffe2/core/blob_serialization.h"
@@ -397,6 +401,11 @@ defined(TARGET_IPHONE_SIMULATOR)
     malloc_statistics_t stats = {0};
     malloc_zone_statistics(nullptr, &stats);
     return stats.size_allocated;
+#elif defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    GetProcessMemoryInfo(
+        GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc));
+    return pmc.PrivateUsage;
 #else
     struct mallinfo info = mallinfo();
     return info.uordblks;

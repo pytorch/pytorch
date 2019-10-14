@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/subgraph_matcher.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <stack>
 
 namespace torch {
@@ -36,6 +37,7 @@ class SubgraphMatcher {
  private:
   bool matchValues(const Value* v1, Value* v2);
   bool matchNodes(const Node* n1, Node* n2);
+  bool matchAttributes(const Node* n1, Node* n2);
 
   std::unordered_map<const Node*, Node*> nodes_map_;
   std::unordered_map<const Value*, Value*> values_map_;
@@ -76,7 +78,20 @@ bool patternGraphIsValid(const Graph& pattern) {
 bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   // Check if we've already visited these values.
   if (values_map_.count(v1)) {
-    return values_map_.at(v1) == v2;
+    if (values_map_.at(v1) != v2) {
+      GRAPH_DEBUG(
+          "Values %",
+          v1->debugName(),
+          " and %",
+          v2->debugName(),
+          " did not match because %",
+          v1->debugName(),
+          " has already been matched with %",
+          values_map_.at(v1)->debugName(),
+          ".\n");
+      return false;
+    }
+    return true;
   }
 
   // When V2 is ANCHOR, we're comparing exiting values, and when V1->node is
@@ -84,13 +99,102 @@ bool SubgraphMatcher::matchValues(const Value* v1, Value* v2) {
   // uses don't need to be the same.
   if (v1->uses().size() != v2->uses().size() && v2->node() != anchor_ &&
       v1->node()->kind() != prim::Param) {
+    GRAPH_DEBUG(
+        "Values %",
+        v1->debugName(),
+        " and %",
+        v2->debugName(),
+        " did not match because number of their uses is different.\n");
     return false;
   }
 
   // Add the values to the map before calling matchNodes to avoid infinite
   // recursion.
+  GRAPH_DEBUG(
+      "Values %", v1->debugName(), " and %", v2->debugName(), " matched.\n");
   values_map_[v1] = v2;
   return matchNodes(v1->node(), v2->node());
+}
+
+bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
+  if (n1->numAttributes() != n2->numAttributes()) {
+    GRAPH_DEBUG("Nodes did not match in number attributes:\n", *n1, *n2);
+    return false;
+  }
+  for (const Symbol& attr_name : n1->attributeNames()) {
+    if (n1->kindOf(attr_name) != n2->kindOf(attr_name)) {
+      GRAPH_DEBUG(
+          "Nodes did not match because type of attribute '",
+          attr_name.toQualString(),
+          "' did not match:\n",
+          *n1,
+          *n2);
+      return false;
+    }
+    switch (n1->kindOf(attr_name)) {
+      case AttributeKind::s:
+        if (n1->s(attr_name) != n2->s(attr_name)) {
+          GRAPH_DEBUG(
+              "Nodes did not match because attribute '",
+              attr_name.toQualString(),
+              "' did not match: ",
+              n1->s(attr_name),
+              " != ",
+              n2->s(attr_name),
+              " \n",
+              *n1,
+              *n2);
+          return false;
+        }
+        break;
+      case AttributeKind::f:
+        if (n1->f(attr_name) != n2->f(attr_name)) {
+          GRAPH_DEBUG(
+              "Nodes did not match because attribute '",
+              attr_name.toQualString(),
+              "' did not match:",
+              n1->f(attr_name),
+              " != ",
+              n2->f(attr_name),
+              " \n",
+              *n1,
+              *n2);
+          return false;
+        }
+        break;
+      case AttributeKind::i:
+        if (n1->i(attr_name) != n2->i(attr_name)) {
+          GRAPH_DEBUG(
+              "Nodes did not match because attribute '",
+              attr_name.toQualString(),
+              "' did not match:",
+              n1->i(attr_name),
+              " != ",
+              n2->i(attr_name),
+              " \n",
+              *n1,
+              *n2);
+          return false;
+        }
+        break;
+      default: {
+        // Other attributes types not supported yet
+        GRAPH_DEBUG(
+            "Nodes did not match because type of attribute '",
+            attr_name.toQualString(),
+            "' is not supported.\n",
+            *n1,
+            *n2);
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static bool endsWith(const std::string& str, const std::string& suffix) {
+  return str.size() >= suffix.size() &&
+      0 == str.compare(str.size() - suffix.size(), suffix.size(), suffix);
 }
 
 /**
@@ -112,20 +216,54 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
 
   // Param node in pattern graph matches everything.
   if (n1->kind() == prim::Param) {
+    GRAPH_DEBUG("Nodes matched:\n", *n1, *n2);
     return true;
   }
 
   // We don't allow matches to span across blocks, so check if N2 is in the same
   // block as the first (anchor) node.
   if (n2->owningBlock() != anchor_->owningBlock()) {
+    GRAPH_DEBUG(
+        "Nodes did not match because it is in the different block:\n",
+        *n1,
+        *n2);
     return false;
   }
 
-  if (n1->kind() != n2->kind() ||
-      n1->outputs().size() != n2->outputs().size() ||
-      n1->inputs().size() != n2->inputs().size() ||
-      n1->numAttributes() != n2->numAttributes()) {
-    return false;
+  // Special handling for matching modules
+  if (n1->kind() == Symbol::fromQualString("match::module")) {
+    if (n2->kind() == prim::GetAttr) {
+      if (!n1->hasAttributeS("name")) {
+        GRAPH_DEBUG(
+            "Nodes did not match because special node match::module does not have 'name' attribute:\n",
+            *n1,
+            *n2);
+        return false;
+      }
+      auto t = n2->output()->type()->expect<ClassType>();
+      auto real_typename = t->name()->qualifiedName();
+      auto pattern_typename = n1->s(attr::name);
+      if (!endsWith(real_typename, pattern_typename)) {
+        GRAPH_DEBUG("Nodes did not match because expected module type is different:\n");
+        GRAPH_DEBUG("  actualtype:    ", real_typename, "\n");
+        GRAPH_DEBUG("  expected type: ", pattern_typename, "\n");
+        GRAPH_DEBUG("Nodes:", *n1, *n2);
+        return false;
+      }
+    }
+  } else {
+    if (n1->kind() != n2->kind() ||
+        n1->outputs().size() != n2->outputs().size() ||
+        n1->inputs().size() != n2->inputs().size()) {
+      GRAPH_DEBUG(
+          "Nodes did not match in their kind or number of inputs/outputs:\n",
+          *n1,
+          *n2);
+      return false;
+    }
+    if (!matchAttributes(n1, n2)) {
+      return false;
+    }
   }
 
   // Add nodes to the map before calling matchValues to avoid infinite
@@ -141,32 +279,8 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
       return false;
     }
   }
-  for (const Symbol& attr_name : n1->attributeNames()) {
-    if (n1->kindOf(attr_name) != n2->kindOf(attr_name)) {
-      return false;
-    }
-    switch (n1->kindOf(attr_name)) {
-      case AttributeKind::s:
-        if (n1->s(attr_name) != n2->s(attr_name)) {
-          return false;
-        }
-        break;
-      case AttributeKind::f:
-        if (n1->f(attr_name) != n2->f(attr_name)) {
-          return false;
-        }
-        break;
-      case AttributeKind::i:
-        if (n1->i(attr_name) != n2->i(attr_name)) {
-          return false;
-        }
-        break;
-      default:
-        // Other attributes types not supported yet
-        return false;
-    }
-  }
 
+  GRAPH_DEBUG("Nodes matched:\n", *n1, *n2);
   return true;
 }
 
@@ -175,6 +289,7 @@ bool SubgraphMatcher::matchNodes(const Node* n1, Node* n2) {
  * exiting node in the pattern and anchor node in the actual graph.
  */
 bool SubgraphMatcher::matchesSubgraphFromAnchorNode(Node* anchor) {
+  GRAPH_UPDATE("Starting match from a new anchor: ", *anchor);
   nodes_map_.clear();
   values_map_.clear();
   anchor_ = anchor;
@@ -187,6 +302,7 @@ bool SubgraphMatcher::matchesSubgraphFromAnchorNode(Node* anchor) {
     return false;
   }
 
+  GRAPH_UPDATE("Pattern matched!\n");
   return true;
 }
 
@@ -195,6 +311,8 @@ bool SubgraphMatcher::matchesSubgraphFromAnchorNode(Node* anchor) {
 // Main entry point for the subgraph matching.
 std::vector<Match> findPatternMatches(const Graph& pattern, Graph& graph) {
   AT_ASSERT(patternGraphIsValid(pattern));
+  GRAPH_DUMP("Pattern graph: ", &pattern);
+  GRAPH_DUMP("Target graph: ", &graph);
 
   SubgraphMatcher m(pattern);
   std::vector<Match> matches;

@@ -1,4 +1,4 @@
-r""""Contains definitions of the methods used by the _DataLoaderIter to put
+r""""Contains definitions of the methods used by the _BaseDataLoaderIter to put
 fetched tensors into pinned memory.
 
 These **needs** to be in global scope since Py2 doesn't support serializing
@@ -12,6 +12,10 @@ from torch._utils import ExceptionWrapper
 
 
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event):
+    # This setting is thread local, and prevents the copy in pin_memory from
+    # consuming all CPU cores.
+    torch.set_num_threads(1)
+
     torch.cuda.set_device(device_id)
 
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the

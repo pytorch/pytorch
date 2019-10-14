@@ -27,5 +27,49 @@ Tensor empty_affine_quantized_cpu(
       optional_memory_format.value_or(MemoryFormat::Contiguous));
 }
 
+Tensor empty_per_channel_affine_quantized_cpu(
+    IntArrayRef size,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    int64_t axis,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      options.has_dtype(),
+      "Must provide data type for Tensor creation functions.");
+  TORCH_CHECK(
+      options.dtype() == kQInt8 || options.dtype() == kQUInt8,
+      "Supported data type for tensor creation is int8 or uint8");
+  return new_qtensor_cpu(
+      size,
+      options,
+      make_per_channel_affine_quantizer(
+          scales,
+          zero_points,
+          axis,
+          typeMetaToScalarType(options.dtype())),
+      optional_memory_format.value_or(MemoryFormat::Contiguous));
+}
+
+// Provide better error message if dtype is wrong
+Tensor empty_affine_quantized_other_backends_stub(
+    IntArrayRef,
+    const TensorOptions&,
+    double,
+    int64_t,
+    c10::optional<c10::MemoryFormat>) {
+  TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
+}
+
+Tensor empty_per_channel_affine_quantized_other_backends_stub(
+    IntArrayRef,
+    const Tensor&,
+    const Tensor&,
+    int64_t,
+    const TensorOptions&,
+    c10::optional<c10::MemoryFormat>) {
+  TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
+}
+
 } // namespace native
 } // namespace at

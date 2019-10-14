@@ -13,7 +13,6 @@
 namespace torch {
 namespace jit {
 
-using ::c10::ProfiledTensorTypePtr;
 using SparseBitVector = ::c10::SparseBitVector<256>;
 
 // BuildLivenessSets computes "bailout" liveness which is equivalent to

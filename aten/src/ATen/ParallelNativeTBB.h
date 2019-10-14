@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <exception>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include "tbb/tbb.h"
 
 #define INTRA_OP_PARALLEL

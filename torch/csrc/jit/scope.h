@@ -54,10 +54,10 @@ struct CallStack;
 /**
  * CallStack is a node of a trie that represents the callstack.
  * Each node in the trie is a pair [Function, SourceRange].
- * Each IR Node has a callstack field, which is basically a pointer to a trie node.
- * Initially the field is null, but if the node is created during an inlining
- * from a different function it gets filled with the function and source range
- * info. As inlining continues, the trie can grow.
+ * Each IR Node has a callstack field, which is basically a pointer to a trie
+ * node. Initially the field is null, but if the node is created during an
+ * inlining from a different function it gets filled with the function and
+ * source range info. As inlining continues, the trie can grow.
  */
 using CallStackPtr = c10::intrusive_ptr<CallStack>;
 using CallStackEntry = std::pair<Function*, SourceRange>;

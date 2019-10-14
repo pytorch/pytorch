@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from torch.nn import Conv2d as NNConv2d
+from torch.nn.intrinsic import ConvReLU2d
 
 class Conv2d(NNConv2d):
     r"""
@@ -18,7 +19,7 @@ class Conv2d(NNConv2d):
             to align with post training flow
         weight_fake_quant: fake quant module for weight
     """
-    __FLOAT_MODULE = NNConv2d
+    _FLOAT_MODULE = NNConv2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
@@ -42,12 +43,14 @@ class Conv2d(NNConv2d):
             Args: `mod` a float module, either produced by torch.quantization utilities
             or directly from user
         """
-        assert type(mod) == cls.__FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
-            cls.__FLOAT_MODULE.__name__
+        assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
+            cls._FLOAT_MODULE.__name__
         if not qconfig:
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             assert mod.qconfig, 'Input float module must have a valid qconfig'
-            qconfig = mod.qconfig
+        if type(mod) == ConvReLU2d:
+            mod = mod[0]
+        qconfig = mod.qconfig
         qat_conv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                        stride=mod.stride, padding=mod.padding, dilation=mod.dilation,
                        groups=mod.groups, bias=mod.bias is not None,

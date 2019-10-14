@@ -72,7 +72,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
       prelu_cuda_kernel_share_weights<scalar_t>(
         input,
         result,
-        weight.data<scalar_t>());
+        weight.data_ptr<scalar_t>());
     });
   }
   else { // case2: multiple weights, one for each channel
@@ -103,9 +103,9 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_cuda", [&] {
       prelu_cuda_kernel_multi_weights<scalar_t>
       <<<grid, block, 0, stream>>>(
-        result.data<scalar_t>(),
-        input.data<scalar_t>(),
-        weight.data<scalar_t>(),
+        result.data_ptr<scalar_t>(),
+        input.data_ptr<scalar_t>(),
+        weight.data_ptr<scalar_t>(),
         input_stride0,
         input_stride1,
         input_numel);
@@ -187,7 +187,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
         grad_out,
         input_grad,
         weight_grad_collector,
-        weight.data<scalar_t>());
+        weight.data_ptr<scalar_t>());
     });
     weight_grad.fill_(weight_grad_collector.sum());
   }
@@ -219,11 +219,11 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "prelu_backward_cuda", [&] {
       prelu_cuda_backward_kernel_multi_weights<scalar_t>
       <<<grid, block, 0, stream>>>(
-        input.data<scalar_t>(),
-        weight.data<scalar_t>(),
-        grad_out.data<scalar_t>(),
-        input_grad.data<scalar_t>(),
-        weight_grad_collector.data<scalar_t>(),
+        input.data_ptr<scalar_t>(),
+        weight.data_ptr<scalar_t>(),
+        grad_out.data_ptr<scalar_t>(),
+        input_grad.data_ptr<scalar_t>(),
+        weight_grad_collector.data_ptr<scalar_t>(),
         input_stride0,
         input_stride1,
         input_numel);

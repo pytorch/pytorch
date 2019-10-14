@@ -5,6 +5,7 @@
 #include <THC/THCDeviceTensor.cuh>
 #include <THC/THCDeviceTensorUtils.cuh>
 #include <THC/THCDeviceUtils.cuh>
+#include <ATen/cuda/detail/KernelUtils.h>
 
 #include <stdio.h>
 #include <assert.h>

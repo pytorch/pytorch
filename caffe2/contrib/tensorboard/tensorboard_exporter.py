@@ -11,9 +11,20 @@ import six
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
-import tensorflow as tf
-from tensorflow.core.framework import tensor_shape_pb2
-from tensorflow.core.framework import graph_pb2
+
+try:
+    # tensorboard>=1.14.0
+    from tensorboard.compat.proto import tensor_shape_pb2
+    from tensorboard.compat.proto.node_def_pb2 import NodeDef
+    from tensorboard.compat.proto.graph_pb2 import GraphDef
+except ImportError:
+    from tensorflow.core.framework import tensor_shape_pb2
+    try:
+        # tensorflow>=1.0.0
+        from tensorflow import NodeDef, GraphDef
+    except ImportError:
+        # tensorflow<=0.12.1
+        from tensorflow.core.framework.graph_pb2 import NodeDef, GraphDef
 
 
 def _make_unique_name(seen, name, min_version=0):
@@ -224,8 +235,7 @@ def _set_tf_attr(m, arg):
 
 def _operator_to_node(shapes, op):
     assert op.name, op
-    # Check for existance of __version__ for backwards compatibility
-    n = tf.NodeDef() if hasattr(tf, '__version__') else graph_pb2.NodeDef()
+    n = NodeDef()
     n.name = op.name
     n.input.extend(op.input)
     n.op = op.type
@@ -243,8 +253,7 @@ def _operator_to_node(shapes, op):
 
 def _blob_to_node(producing_ops, shapes, name):
     assert name
-    # Check for existance of __version__ for backwards compatibility
-    n = tf.NodeDef() if hasattr(tf, '__version__') else graph_pb2.NodeDef()
+    n = NodeDef()
     n.name = name
     inputs = producing_ops.get(name, [])
     if inputs:
@@ -279,8 +288,7 @@ def _operators_to_graph_def(
     if with_gradient_scope:
         _add_gradient_scope(shapes, track_blob_names, ops)
     _fill_missing_operator_names(ops)
-    # Check for existance of __version__ for backwards compatibility
-    g = tf.GraphDef() if hasattr(tf, '__version__') else graph_pb2.GraphDef()
+    g = GraphDef()
     producing_ops = {}
     blobs = set()
     for op in ops:

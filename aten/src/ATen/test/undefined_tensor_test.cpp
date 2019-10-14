@@ -27,19 +27,11 @@ TEST(TestUndefined, UndefinedTest) {
   ASSERT_ANY_THROW(und.add(5));
   ASSERT_ANY_THROW(und.mm(und));
 
-  und.toType(und.type());
-  ASSERT_ANY_THROW(und.toType(ft.type()));
-  ASSERT_ANY_THROW(ft.toType(und.type()));
-  und.toType(ScalarType::Undefined);
-  ASSERT_ANY_THROW(und.toType(ScalarType::Float));
-  ASSERT_ANY_THROW(ft.toType(ScalarType::Undefined));
-
   // copy_
   ASSERT_ANY_THROW(und.copy_(und));
   ASSERT_ANY_THROW(und.copy_(ft));
   ASSERT_ANY_THROW(ft.copy_(und));
 
-  und.toBackend(Backend::Undefined);
   ASSERT_ANY_THROW(und.toBackend(Backend::CPU));
   ASSERT_ANY_THROW(ft.toBackend(Backend::Undefined));
 

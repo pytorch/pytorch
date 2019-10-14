@@ -92,7 +92,11 @@ static inline  __device__ void atomicAdd(int16_t *address, int16_t val) {
 }
 
 static inline __device__ void atomicAdd(int64_t *address, int64_t val) {
+#ifdef __HIP_PLATFORM_HCC__
+  __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
+#else
   AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
+#endif
 }
 
 static inline __device__ void atomicAdd(bool *address, bool val) {

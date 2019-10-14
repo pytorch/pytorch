@@ -26,11 +26,11 @@ from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
-from .env import BUILD_NAMEDTENSOR
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward', 'set_data'
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
+    'set_data', 'data', 'is_leaf', 'output_nr', '_version'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -80,7 +80,7 @@ DONT_REQUIRE_DERIVATIVE = {
     # This is an unsafe method that is meant to be out of reach of autograd.
     '_coalesced_',
     # Quantize functions should not record gradients
-    'quantize_linear', 'quantize_linear_per_channel'
+    'quantize_per_tensor', 'quantize_per_channel'
 }
 
 # NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
@@ -144,17 +144,34 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}(${type_method_formals}) ;
+${return_type} ${api_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
   ${type_definition_body}
 }
 """)
 
+LEGACY_WRAPPER_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyATenKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+
+UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyC10Kernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+
 WRAPPER_REGISTRATION = CodeTemplate("""\
-.registerVariableOp<${return_type} (${formal_types})>("${schema_string}", &VariableType::${api_name})
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .kernel<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, &VariableType::${api_name})
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -282,11 +299,6 @@ def find_factory_functions(declarations):
 
 
 def should_trace(declaration):
-    if BUILD_NAMEDTENSOR:
-        # Short-term plan: Don't support tracing Dimname.
-        # Long-term plan: Add Dimname as a first-class type to the JIT.
-        if any('Dimname' in arg['simple_type'] for arg in declaration['arguments']):
-            return False
     # Operations involving Storage or Type are not traceable at the moment
     if any(arg['simple_type'] in {'Storage', 'Type', 'ConstQuantizerPtr'} for arg in declaration['arguments']):
         return False
@@ -465,8 +477,16 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
-        wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-            declaration, formal_types=formal_types))
+        if declaration['use_c10_dispatcher'] == 'full':
+            wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
+        elif declaration['use_c10_dispatcher'] == 'unboxed_only':
+            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
+        else:
+            assert declaration['use_c10_dispatcher'] == 'no'
+            wrapper_registrations.append(LEGACY_WRAPPER_REGISTRATION.substitute(
+                declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
@@ -662,7 +682,10 @@ def emit_body(declaration):
                     assert not is_output
                 if inplace and is_output:
                     var = 'self'
-                expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
+                    is_inplace_view = "as_variable_ref({}).is_view()".format(var)
+                    expr = 'SavedVariable({}, {}, {})'.format(var, str(is_output).lower(), is_inplace_view)
+                else:
+                    expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
             elif arg['type'] == 'TensorList':
                 name += '_'
                 expr = 'make_saved_variable_list({})'.format(arg['name'])

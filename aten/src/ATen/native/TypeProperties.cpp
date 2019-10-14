@@ -22,12 +22,7 @@ bool is_floating_point(const Tensor& self) {
 }
 
 bool is_signed(const Tensor &self) {
-  if (self.scalar_type() == ScalarType::Half) {
-    return true;
-  }
-  return AT_DISPATCH_ALL_TYPES(self.scalar_type(), "is_signed", [&]() -> bool {
-    return std::is_signed<scalar_t>();
-  });
+  return at::isSignedType(self.scalar_type());
 }
 
 bool is_sparse(const Tensor& self) {
@@ -42,11 +37,88 @@ bool is_quantized(const Tensor& self) {
 // TensorImpl can be copied to `self`.
 bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
   return self.unsafeGetTensorImpl()->has_compatible_shallow_copy_type(
-      from.type_id());
+      from.type_set());
 }
 
 Tensor type_as(const Tensor& self, const Tensor& other) {
-  return self.toType(other.type());
+  return self.to(other.options());
+}
+
+static inline ScalarType promote_skip_undefined(ScalarType a, ScalarType b) {
+  if (a == ScalarType::Undefined) {
+    return b;
+  }
+  if (b == ScalarType::Undefined) {
+    return a;
+  }
+  return promoteTypes(a, b);
+}
+
+
+static inline ScalarType combine_categories(ScalarType higher, ScalarType lower) {
+  if (isFloatingType(higher)) {
+    return higher;
+  }
+  if (higher == ScalarType::Bool || isFloatingType(lower)) {
+    return promote_skip_undefined(higher, lower);
+  }
+  if (higher != ScalarType::Undefined) {
+      return higher;
+  }
+  return lower;
+}
+
+ScalarType result_type(TensorList tensors) {
+  auto dimResult = ScalarType::Undefined;
+  auto zeroResult = ScalarType::Undefined;
+  auto wrappedResult = ScalarType::Undefined;
+  for (Tensor tensor : tensors) {
+    if (!tensor.defined()) {
+      continue;
+    }
+    ScalarType current = tensor.scalar_type();
+    if (tensor.unsafeGetTensorImpl()->is_wrapped_number() && isFloatingType(current)) {
+      current = typeMetaToScalarType(at::get_default_dtype());
+    }
+    if ( tensor.dim() > 0 ) {
+      dimResult = promote_skip_undefined(dimResult, current);
+    } else if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+      wrappedResult = promote_skip_undefined(wrappedResult, current);
+    } else {
+      zeroResult = promote_skip_undefined(zeroResult, current);
+    }
+  }
+  return combine_categories(dimResult, combine_categories(zeroResult, wrappedResult));
+}
+
+ScalarType result_type(const Tensor &tensor, const Tensor &other) {
+  std::vector<Tensor> tensors({tensor, other});
+  return native::result_type(tensors);
+}
+
+ScalarType result_type(const Tensor &tensor, const Scalar other) {
+  auto tensor2 = scalar_to_tensor(other);
+  tensor2.unsafeGetTensorImpl()->set_wrapped_number(true);
+  std::vector<Tensor> tensors({tensor, tensor2});
+  return native::result_type(tensors);
+}
+
+ScalarType result_type(const Scalar scalar, const Tensor &tensor) {
+  return at::result_type(tensor, scalar);
+}
+
+ScalarType result_type(const Scalar scalar1, const Scalar scalar2) {
+  auto tensor1 = scalar_to_tensor(scalar1);
+  tensor1.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return at::result_type(tensor1, scalar2);
+}
+
+bool can_cast(const at::ScalarType from, const at::ScalarType to) {
+  return at::canCast(from, to);
+}
+
+ScalarType promote_types(ScalarType type1, ScalarType type2) {
+  return promoteTypes(type1, type2);
 }
 
 }} // namespace at::native

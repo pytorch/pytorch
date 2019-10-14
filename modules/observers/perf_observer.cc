@@ -7,12 +7,25 @@
 
 #include <random>
 #include <time.h>
-#ifdef _WIN32
-#include <windows.h>
-#endif
 #include "caffe2/core/common.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
+
+#if defined(TARGET_OS_MAC) || \
+defined(TARGET_OS_IPHONE) || \
+defined(TARGET_IPHONE_SIMULATOR)
+#define _APPLE 1
+#endif
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+#ifdef _APPLE
+#include <mach/mach_time.h>
+#include <sys/time.h>
+#include <sys/resource.h>
+#endif
 
 #ifndef C10_MOBILE
 C10_DEFINE_int64(
@@ -78,7 +91,7 @@ double getTicksPerMillisecond() {
 
   return static_cast<double>(ticks_per_sec.QuadPart) / 1000.0;
 }
-#else
+#elif !defined _APPLE
 double getClockTimeMilliseconds(clockid_t clk_id) {
   int result;
   struct timespec tp;
@@ -102,6 +115,15 @@ double getWallClockTimeMilliseconds() {
   }
 
   return 0.0;
+#elif defined _APPLE
+  static mach_timebase_info_data_t info;
+  if (info.denom == 0) {
+    mach_timebase_info(&info);
+  }
+
+  uint64_t now = mach_absolute_time();
+  now = now * info.numer / info.denom; // convert to nanoseconds
+  return now / 1000000.0;
 #else
   return getClockTimeMilliseconds(CLOCK_MONOTONIC);
 #endif
@@ -130,6 +152,16 @@ double getCpuTimeMilliseconds() {
   }
 
   return 0.0;
+#elif defined _APPLE
+  struct rusage ru;
+  if (getrusage(RUSAGE_SELF, &ru)) {
+    return 0.0;
+  }
+
+  return ru.ru_utime.tv_sec * 1000.0
+      + ru.ru_utime.tv_usec / 1000.0
+      + ru.ru_stime.tv_sec * 1000.0
+      + ru.ru_stime.tv_usec / 1000.0;
 #else
   return getClockTimeMilliseconds(CLOCK_PROCESS_CPUTIME_ID);
 #endif

@@ -21,15 +21,13 @@ void inlineCalls(Block* block) {
             function_constant->output()->type()->expect<FunctionType>();
         cur->removeInput(0);
         inlineCallTo(cur, fun_type->function());
-        if (!function_constant->hasUses()) {
-          function_constant->destroy();
-        }
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
-        auto function =
-            cur->input(0)->type()->expect<ClassType>()->getMethod(name);
-        inlineCallTo(cur, function);
+        if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
+          auto function = class_type->getMethod(name);
+          inlineCallTo(cur, function);
+        }
       } break;
       default: {
         for (auto b : cur->blocks()) {
