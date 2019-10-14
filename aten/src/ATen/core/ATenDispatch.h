@@ -130,6 +130,7 @@ class CAFFE2_API ATenOpTable {
   C10_NORETURN void reportError(TensorTypeId tid) const;
 
   const FunctionSchema& function_schema() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!parsed_schema_.has_value()) {
       parsed_schema_ = torch::jit::parseSchema(schema_);
     }
@@ -140,6 +141,7 @@ class CAFFE2_API ATenOpTable {
 
   std::string schema_;
   mutable c10::optional<c10::FunctionSchema> parsed_schema_;
+  mutable std::mutex mutex_;
   void* function_table_[static_cast<int64_t>(TensorTypeId::NumTensorIds)] = {nullptr};
 };
 
@@ -149,9 +151,9 @@ class CAFFE2_API ATenDispatch {
   ATenDispatch& registerOp(TensorTypeId id, const char* schema, FuncType* fn) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (op_tables_.find(schema) == op_tables_.end()) {
-      op_tables_.insert(std::make_pair(schema, ATenOpTable(schema)));
+      op_tables_.insert(std::make_pair(schema, c10::guts::make_unique<ATenOpTable>(schema)));
     }
-    op_tables_.at(schema).registerOp(id, reinterpret_cast<void*>(fn));
+    op_tables_.at(schema)->registerOp(id, reinterpret_cast<void*>(fn));
     return *this;
   }
 
@@ -165,7 +167,7 @@ class CAFFE2_API ATenDispatch {
     auto iter = op_tables_.find(schema);
     TORCH_CHECK(iter != op_tables_.end(),
         "No functions are registered for schema ", schema);
-    return &iter->second;
+    return iter->second.get();
   }
 
   FallbackBoxedFunction* getFallbackBoxedOp(TensorTypeId tid) const {
@@ -173,7 +175,7 @@ class CAFFE2_API ATenDispatch {
   }
 
  private:
-  std::unordered_map<std::string, ATenOpTable> op_tables_;
+  std::unordered_map<std::string, std::unique_ptr<ATenOpTable>> op_tables_;
   FallbackBoxedFunction* boxed_fallback_table_[static_cast<int64_t>(TensorTypeId::NumTensorIds)] = {nullptr};
   std::mutex mutex_;
 };
