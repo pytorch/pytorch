@@ -29,6 +29,7 @@
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/flat_hash_map.h>
 
 /*
  * TypeIdentifier is a small type containing an id.
@@ -290,15 +291,41 @@ inline constexpr TypeMetaData::Delete* _PickDelete() noexcept {
 }
 
 template <class T>
+// CollisionChecker is a safeguard to make sure none of our types generate
+// the same type id. Since we use crc64 of the string type name, there's a
+// (very) slight possibility of collisions and we want to be sure that doesn't
+// happen.
+class CollisionChecker final {
+public:
+  // Check that there is no type registered with this id and a different name
+  void check(TypeIdentifier id, const std::string& name) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto find = typeids_.find(id);
+    if (find != typeids_.end()) {
+      AT_ASSERT(find->second == name, "Typeid collision detected for ", find->second, " and ", name, ".");
+    } else {
+      typeids_.emplace(id, name);
+    }
+  }
+private:
+  std::mutex mutex_;
+  ska::flat_hash_map<TypeIdentifier, std::string> typeids_;
+};
+C10_API CollisionChecker& collisionChecker_();
+
 inline constexpr TypeMetaData _makeTypeMetaDataInstance() {
+  constexpr auto typeId = TypeIdentifier::Get<T>();
+  constexpr auto typeName = c10::util::get_fully_qualified_type_name<T>();
+  collisionChecker_().check(typeId, typeName);
+
   return {sizeof(T),
           _PickNew<T>(),
           _PickPlacementNew<T>(),
           _PickCopy<T>(),
           _PickPlacementDelete<T>(),
           _PickDelete<T>(),
-          TypeIdentifier::Get<T>(),
-          c10::util::get_fully_qualified_type_name<T>()};
+          typeId,
+          typeName};
 }
 
 class _Uninitialized final {};
@@ -311,7 +338,7 @@ class _Uninitialized final {};
  * stores some additional data such as the item size and the name of the type
  * for run-time inspection.
  */
-class C10_API TypeMeta {
+class C10_API TypeMeta final {
  public:
   using New = detail::TypeMetaData::New;
   using PlacementNew = detail::TypeMetaData::PlacementNew;
@@ -332,16 +359,18 @@ class C10_API TypeMeta {
   /**
    * Assignment operator.
    */
-  AT_CPP14_CONSTEXPR TypeMeta& operator=(const TypeMeta& src) noexcept =
-      default;
+  AT_CPP14_CONSTEXPR TypeMeta& operator=(const TypeMeta& src) noexcept {
+    return operator=(TypeMeta(src));
+  }
 
   constexpr TypeMeta(TypeMeta&& rhs) noexcept = default;
 
  private:
   // TypeMeta can only be created by Make, making sure that we do not
   // create incorrectly mixed up TypeMeta objects.
-  explicit constexpr TypeMeta(const detail::TypeMetaData* data) noexcept
-      : data_(data) {}
+  explicit TypeMeta(const detail::TypeMetaData* data) noexcept
+  : data_(data) {
+  }
 
  public:
   /**
@@ -447,7 +476,8 @@ C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
     detail::_Uninitialized>() noexcept;
 
 inline TypeMeta::TypeMeta() noexcept
-    : data_(_typeMetaDataInstance<detail::_Uninitialized>()) {}
+    : data_(_typeMetaDataInstance<detail::_Uninitialized>()) {
+}
 
 inline constexpr bool operator==(
     const TypeMeta& lhs,
