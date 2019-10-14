@@ -79,7 +79,7 @@ Tensor CosineEmbeddingLossImpl::forward(
 // ============================================================================
 
 MultiLabelSoftMarginLossImpl::MultiLabelSoftMarginLossImpl(
-    const torch::nn::MultiLabelSoftMarginLossOptions& options_)
+    const torch::nn::MultiLabelSoftMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
   reset();
 }

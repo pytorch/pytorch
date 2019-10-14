@@ -122,7 +122,7 @@ TORCH_MODULE(CosineEmbeddingLoss);
 /// Creates a criterion that optimizes a multi-label one-versus-all
 /// loss based on max-entropy, between input :math:`x` and target :math:`y` of size
 /// :math:`(N, C)`.
-struct TORCH_API MultiLabelSoftMarginLossImpl : Module {
+struct TORCH_API MultiLabelSoftMarginLossImpl : public Cloneable<MultiLabelSoftMarginLossImpl> {
   explicit MultiLabelSoftMarginLossImpl(
     const MultiLabelSoftMarginLossOptions& options_ = {});
 
