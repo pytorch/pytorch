@@ -44,7 +44,7 @@ struct TORCH_API MultiMarginLossOptions {
   /// ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
   /// ``'mean'``: the sum of the output will be divided by the number of
   /// elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
 // ============================================================================
@@ -72,7 +72,7 @@ struct TORCH_API MultiLabelSoftMarginLossOptions {
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
 // ============================================================================
@@ -90,7 +90,7 @@ struct TORCH_API TripletMarginLossOptions {
   /// E. Riba et al. Default: False
   TORCH_ARG(bool, swap) = false;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
 } // namespace nn
