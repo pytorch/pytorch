@@ -98,10 +98,8 @@ class TORCH_API RpcAgent {
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
-  // Set the default rpc agent.
   static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
 
-  // Retrieve the default rpc agent.
   static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
 
  protected:
