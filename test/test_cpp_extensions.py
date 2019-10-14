@@ -9,7 +9,6 @@ import subprocess
 import glob
 
 import common_utils as common
-from common_utils import default_floating_dtype
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
@@ -66,26 +65,24 @@ class TestCppExtension(common.TestCase):
         z = cpp_extension.sigmoid_add(x, y)
         self.assertEqual(z, x.sigmoid() + y.sigmoid())
 
-    @default_floating_dtype(torch.double)
     def test_extension_module(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
-        weights = torch.rand(8, 4)
+        weights = torch.rand(8, 4, dtype=torch.double)
         expected = mm.get().mm(weights)
         result = mm.forward(weights)
         self.assertEqual(expected, result)
 
-    @default_floating_dtype(torch.double)
     def test_backward(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
-        weights = torch.rand(8, 4, requires_grad=True)
+        weights = torch.rand(8, 4, dtype=torch.double, requires_grad=True)
         result = mm.forward(weights)
         result.sum().backward()
         tensor = mm.get()
 
-        expected_weights_grad = tensor.t().mm(torch.ones([4, 4]))
+        expected_weights_grad = tensor.t().mm(torch.ones([4, 4], dtype=torch.double))
         self.assertEqual(weights.grad, expected_weights_grad)
 
-        expected_tensor_grad = torch.ones([4, 4]).mm(weights.t())
+        expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
     def test_jit_compile_extension(self):
@@ -477,18 +474,17 @@ class TestCppExtension(common.TestCase):
 
     @dont_wipe_extensions_build_folder
     @common.skipIfRocm
-    @default_floating_dtype(torch.double)
-    def test_cpp_frontend_module_has_same_output_as_python(self):
+    def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
             sources="cpp_extensions/cpp_frontend_extension.cpp",
             verbose=True,
         )
 
-        input = torch.randn(2, 5)
+        input = torch.randn(2, 5, dtype=dtype)
         cpp_linear = extension.Net(5, 2)
-        cpp_linear.to(torch.float64)
-        python_linear = torch.nn.Linear(5, 2)
+        cpp_linear.to(dtype)
+        python_linear = torch.nn.Linear(5, 2).to(dtype)
 
         # First make sure they have the same parameters
         cpp_parameters = dict(cpp_linear.named_parameters())
