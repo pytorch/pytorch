@@ -16,7 +16,8 @@ namespace autograd {
 TORCH_API void addSendRpcBackward(
     DistAutogradContext& autogradContext,
     const AutogradMetadata& autogradMetadata,
-    std::vector<torch::Tensor>& tensors);
+    std::vector<torch::Tensor>& tensors,
+    const rpc::worker_id_t dst);
 
 // This method is used to attach the 'recv' autograd function to the autograd
 // graph when we use RPC. This method creates a new 'recv' autograd function
