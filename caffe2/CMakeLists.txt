@@ -481,16 +481,21 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/engine/dist_engine.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/autograd_metadata.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_with_autograd.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
