@@ -133,25 +133,6 @@ THC_API void THNN_(LogSigmoid_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *buffer);
 
-THC_API void THNN_(LookupTable_accGradParameters)(
-                  THCState *state,
-                  THCIndexTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradWeight,
-                  THCIndexTensor *count,
-                  THCIndexTensor *sorted,       // [OPTIONAL]
-                  THCIndexTensor *indices,      // [OPTIONAL]
-                  bool scaleGradByFreq,
-                  int paddingValue,
-                  accreal scale);
-
-THC_API void THNN_(LookupTable_renorm)(
-                  THCState *state,
-                  THCIndexTensor *idx,
-                  THCTensor *weight,
-                  accreal maxNorm,
-                  accreal normType);
-
 THC_API void THNN_(MSECriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -309,34 +290,6 @@ THC_API void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
                   int padW, int padH,
                   int dilationW, int dilationH);
 
-THC_API void THNN_(SpatialSubSampling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCTensor *weight,
-                  THCTensor *bias,
-                  int kW, int kH,
-                  int dW, int dH);
-
-THC_API void THNN_(SpatialSubSampling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *weight,
-                  int kW, int kH,
-                  int dW, int dH);
-
-THC_API void THNN_(SpatialSubSampling_accGradParameters)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradWeight,
-                  THCTensor *gradBias,
-                  int kW, int kH,
-                  int dW, int dH,
-                  accreal scale);
-
 THC_API void THNN_(RReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -414,30 +367,6 @@ THC_API void THNN_(SoftShrink_updateGradInput)(
                   THCTensor *gradInput,
                   accreal lambda);
 
-THC_API void THNN_(Square_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output);
-
-THC_API void THNN_(Square_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput);
-
-THC_API void THNN_(Sqrt_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  accreal eps);
-
-THC_API void THNN_(Sqrt_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *output);
-
 THC_API void THNN_(Tanh_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -449,45 +378,4 @@ THC_API void THNN_(Tanh_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *output);
 
-THC_API void THNN_(TemporalConvolution_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCTensor *weight,
-                  THCTensor *bias,
-                  int kW, int dW,
-                  int inputFrameSize,
-                  int outputFrameSize);
-
-THC_API void THNN_(TemporalConvolution_updateGradInput)(
-                  THCState* state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCTensor *weight,
-                  int kW, int dW);
-
-THC_API void THNN_(TemporalConvolution_accGradParameters)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradWeight,
-                  THCTensor *gradBias,
-                  int kW, int dW,
-                  accreal scale);
-
-THC_API void THNN_(TemporalMaxPooling_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *output,
-                  THCIndexTensor *indices,
-                  int kW, int dW);
-
-THC_API void THNN_(TemporalMaxPooling_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  THCIndexTensor *indices,
-                  int kW, int dW);
 #endif
