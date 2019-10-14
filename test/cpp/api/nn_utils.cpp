@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
+#include <ATen/MemoryFormatUtils.h>
 
 using namespace torch::nn;
 using namespace torch::test;
@@ -55,8 +56,9 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   };
   for (auto norm_type : norm_types) {
     for (int i = 0; i < grads.size(); i++) {
+      auto cloned = clone_if_possible_with_memory_format(grads[i]);
       linear_layer->parameters()[i].grad() =
-          grads[i].clone().view_as(linear_layer->parameters()[i].data());
+        cloned.view_as(linear_layer->parameters()[i].data());
     }
     auto norm_before = compute_norm(norm_type);
     auto layer_params = linear_layer->parameters();
@@ -92,8 +94,8 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   auto p1 = torch::randn({10, 10});
   auto p2 = torch::randn({10, 10});
   auto g = torch::arange(1., 101).view({10, 10});
-  p1.grad() = g.clone();
-  p2.grad() = g.clone();
+  p1.grad() = clone_if_possible_with_memory_format(g);
+  p2.grad() = clone_if_possible_with_memory_format(g);
   for (const auto norm_type : norm_types) {
     utils::clip_grad_norm_(p1, max_norm, norm_type);
     std::vector<torch::Tensor> params = {p2};
