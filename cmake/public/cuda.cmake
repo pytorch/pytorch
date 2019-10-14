@@ -214,6 +214,10 @@ if(CAFFE2_USE_CUDNN)
   set_property(
       TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
       ${CUDNN_INCLUDE_PATH})
+  if(CAFFE2_STATIC_LINK_CUDA)
+    target_link_libraries(caffe2::cudnn INTERFACE
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
+  endif()
 endif()
 
 # curand
@@ -222,6 +226,8 @@ if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a")
+      target_link_libraries(caffe2::curand INTERFACE
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
 else()
     set_property(
         TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
@@ -238,6 +244,8 @@ if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a")
+      target_link_libraries(caffe2::cufft INTERFACE
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
 else()
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES

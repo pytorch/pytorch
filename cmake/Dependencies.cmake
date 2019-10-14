@@ -898,7 +898,8 @@ if(USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::curand)
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+      caffe2::cufft caffe2::curand caffe2::cublas)
     if(CAFFE2_USE_NVRTC)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
     else()
@@ -906,21 +907,11 @@ if(USE_CUDA)
     endif()
     if(CAFFE2_USE_CUDNN)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
-      IF(CUDNN_STATIC)
-        # Variables used in caffe2/CMakeLists.txt.  Can't add to
-        # Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS here, because list will cause
-        # variable expansion of "${CUDA_TOOLKIT_ROOT_DIR}".
-        set(CAFFE2_STATIC_LIBCULIBOS_USED 1)
-        set(CAFFE2_STATIC_DL_USED 1)
-      ENDIF()
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
-    if(CAFFE2_STATIC_LINK_CUDA)
-      set(CAFFE2_STATIC_LIBCULIBOS_USED 1)
-    endif()
     if(CAFFE2_USE_TENSORRT)
-      set(CAFFE2_TENSORRT_USED 1)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
     else()
       caffe2_update_option(USE_TENSORRT OFF)
     endif()

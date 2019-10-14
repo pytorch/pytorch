@@ -1065,20 +1065,8 @@ if(USE_CUDA)
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-
-  if(DEFINED CAFFE2_STATIC_LIBCULIBOS_USED)
-    set_property(TARGET torch PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
-  endif()
-  if(DEFINED CAFFE2_STATIC_DL_USED)
-    set_property(TARGET torch PROPERTY INTERFACE_LINK_LIBRARIES dl)
-  endif()
-  set_property(TARGET torch PROPERTY INTERFACE_LINK_LIBRARIES caffe2::cublas)
-  if(DEFINED CAFFE2_TENSORRT_USED)
-    set_property(TARGET torch PROPERTY INTERFACE_LINK_LIBRARIES caffe2::tensorrt)
-  endif()
-
+  target_link_libraries(
+      torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
 endif()
 
