@@ -71,7 +71,20 @@ TensorQuantizationParams GetInputTensorQuantizationParamsOf(
     float min, max;
     fbgemm::FindMinMax(
         tensor->template data<float>(), &min, &max, tensor->numel());
-
+    auto activation_quantization_kind = qfactory->GetActivationKind();
+    if (activation_quantization_kind !=
+        QuantizationFactory::QuantizationKind::MIN_MAX_QUANTIZATION) {
+      LOG(WARNING)
+          << "DNNLOWP dynamic int8 FC uses min_max as the only activation_quantization kind. Qparams will be assigned based on min_max regardless of activation_quantization_kind args.";
+    }
+    if (is_weight) {
+      auto weight_quantization_kind = qfactory->GetWeightKind();
+      if (weight_quantization_kind !=
+          QuantizationFactory::QuantizationKind::MIN_MAX_QUANTIZATION) {
+        LOG(WARNING)
+            << "DNNLOWP dynamic int8 FC weight is not constant, assigning qparams to weight based on min_max, regardless of weight_quantization_kind args.";
+      }
+    }
     return qfactory->ChooseQuantizationParams(min, max, is_weight);
   }
 }
