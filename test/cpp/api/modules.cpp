@@ -1496,7 +1496,7 @@ TEST_F(ModulesTest, PrettyPrintConv) {
 
 TEST_F(ModulesTest, PrettyPrintUnfold) {
   ASSERT_EQ(
-      c10::str(Unfold(std::vector<int64_t>({2, 4}))),
+      c10::str(Unfold(torch::IntArrayRef({2, 4}))),
       "torch::nn::Unfold(kernel_size=[2, 4], dilation=[1, 1], padding=[0, 0], stride=[1, 1])");
   ASSERT_EQ(
       c10::str(Unfold(UnfoldOptions({2, 4}).dilation(2).padding({2, 1}).stride(2))),
