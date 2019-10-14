@@ -14,6 +14,8 @@ default_set = set([
     'pytorch-linux-xenial-py2.7.9',
     # PyTorch CUDA
     'pytorch-linux-xenial-cuda9-cudnn7-py3',
+    # PyTorch CUDA Memcheck
+    'pytorch-cuda_memcheck-linux-xenial-cuda10.1-cudnn7-py3-gcc7-test'
     # PyTorch ASAN
     'pytorch-linux-xenial-py3-clang5-asan',
     # PyTorch DEBUG
