@@ -54,6 +54,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryFormatUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/core/EnableNamedTensor.h>
 
@@ -243,7 +244,7 @@ Tensor index(const Tensor & self, TensorList indices) {
 }
 
 Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
-  return self.clone().index_put_(indices, value, accumulate);
+  return clone_if_possible_with_memory_format(self).index_put_(indices, value, accumulate);
 }
 
 Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
@@ -311,37 +312,37 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
 }
 
 Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().index_copy_(dim, index, source);
+  return clone_if_possible_with_memory_format(self).index_copy_(dim, index, source);
 }
 
 Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().index_add_(dim, index, source);
+  return clone_if_possible_with_memory_format(self).index_add_(dim, index, source);
 }
 
 Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
-  return self.clone().index_fill_(dim, index, source);
+  return clone_if_possible_with_memory_format(self).index_fill_(dim, index, source);
 }
 
 Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().index_fill_(dim, index, source);
+  return clone_if_possible_with_memory_format(self).index_fill_(dim, index, source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().scatter_(dim, index, source);
+  return clone_if_possible_with_memory_format(self).scatter_(dim, index, source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
-  return self.clone().scatter_(dim, index, source);
+  return clone_if_possible_with_memory_format(self).scatter_(dim, index, source);
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone().scatter_add_(dim, index, source);
+  return clone_if_possible_with_memory_format(self).scatter_add_(dim, index, source);
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
-  return _self.clone().masked_scatter_(_mask, source);
+  return clone_if_possible_with_memory_format(_self).masked_scatter_(_mask, source);
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
@@ -353,7 +354,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
 #endif
     Tensor _mask, _self;
     std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = _self.clone();
+    result = clone_if_possible_with_memory_format(_self);
     result.masked_fill_(mask, source);
 #ifdef BUILD_NAMEDTENSOR
   }
@@ -371,7 +372,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
 #endif
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
-  result = _self.clone();
+  result = clone_if_possible_with_memory_format(_self);
   result.masked_fill_(mask, source);
 #ifdef BUILD_NAMEDTENSOR
   }
