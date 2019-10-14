@@ -9,8 +9,10 @@ constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
 constexpr int kMaxWorkerId = 65535;
 
+constexpr int64_t kInvalidContextId = -1;
+
 // Each thread has a single autograd_context_id valid at any point in time.
-static thread_local int64_t current_context_id_ = -1;
+static thread_local int64_t current_context_id_ = kInvalidContextId;
 
 // Lock to ensure DistAutogradContainer is initialized only once.
 static std::mutex dist_container_init_lock_;
@@ -83,7 +85,15 @@ DistAutogradContext& DistAutogradContainer::getOrCreateContext(
   return context;
 }
 
+rpc::worker_id_t DistAutogradContainer::getWorkerId() const {
+  return worker_id_;
+}
+
 const DistAutogradContext& DistAutogradContainer::newContext() {
+  TORCH_CHECK(
+      current_context_id_ == kInvalidContextId,
+      "Already have an autograd context id for this thread.");
+
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   // Check for overflow into workerId_ section.
   TORCH_INTERNAL_ASSERT(next_context_id_ < max_id_);
@@ -100,7 +110,7 @@ const DistAutogradContext& DistAutogradContainer::newContext() {
 }
 
 bool DistAutogradContainer::hasValidContext() const {
-  return current_context_id_ != -1;
+  return current_context_id_ != kInvalidContextId;
 }
 
 DistAutogradContext& DistAutogradContainer::currentContext() {
@@ -128,7 +138,7 @@ void DistAutogradContainer::releaseContext(int64_t context_id) {
 
   if (current_context_id_ == context_id) {
     // Reset the thread_local current context id, since it is no longer valid.
-    current_context_id_ = -1;
+    current_context_id_ = kInvalidContextId;
   }
 }
 
