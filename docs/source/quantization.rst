@@ -373,7 +373,7 @@ Top-level quantization APIs
 .. autofunction:: convert
 .. autoclass:: QConfig
 .. autoclass:: QConfigDynamic
-.. autoattr:: default_qconfig
+.. autoattribute:: default_qconfig
 
 Preparing model for quantization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

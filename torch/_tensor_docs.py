@@ -399,6 +399,7 @@ Example::
     tensor([[False, True]], dtype=torch.bool)
     >>> a.any()
     tensor(True, dtype=torch.bool)
+
 .. function:: any(dim, keepdim=False, out=None) -> Tensor
 
 Returns True if any elements in each row of the tensor in the given
@@ -1495,6 +1496,19 @@ add_docstr_all('lerp_',
 lerp_(end, weight) -> Tensor
 
 In-place version of :meth:`~Tensor.lerp`
+""")
+
+add_docstr_all('lgamma',
+               r"""
+lgamma() -> Tensor
+
+See :func:`torch.lgamma`
+""")
+
+add_docstr_all('lgamma_', r"""
+lgamma_() -> Tensor
+
+In-place version of :meth:`~Tensor.lgamma`
 """)
 
 add_docstr_all('log',
