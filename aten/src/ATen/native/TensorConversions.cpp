@@ -19,9 +19,16 @@ static inline Device ensure_has_index(Device device) {
   return impl->getDevice();
 }
 
-static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Contiguous);
+
+  if (self.options() == options && !copy &&
+      (memory_format == MemoryFormat::Preserve ||
+       self.suggest_memory_format() == memory_format)) {
+    return self;
+  }
+
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       // Copy all strides
@@ -53,12 +60,6 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
     device_opt = ensure_has_index(device_opt.value());
   }
   const auto & dtype_opt = options.dtype_opt();
-  if ((!device_opt || self.device() == device_opt.value()) &&
-      (!dtype_opt || self.dtype() == dtype_opt.value()) && !copy &&
-      optional_memory_format.value_or(MemoryFormat::Preserve) ==
-          MemoryFormat::Preserve) {
-    return self;
-  }
   auto specified_options = self.options();
   if (device_opt) {
     specified_options = specified_options.device(device_opt.value());
@@ -66,44 +67,27 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
   if (dtype_opt) {
     specified_options = specified_options.dtype(dtype_opt.value());
   }
-  return to_impl(self, specified_options, non_blocking, optional_memory_format);
+  return to_impl(self, specified_options, non_blocking, copy, optional_memory_format);
 }
 
 Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   device = ensure_has_index(device);
-  if (self.device() == device && self.dtype() == dtype && !copy &&
-      optional_memory_format.value_or(MemoryFormat::Preserve) ==
-          MemoryFormat::Preserve) {
-    return self;
-  }
   return to_impl(
       self,
       self.options().device(device).dtype(dtype),
       non_blocking,
+      copy,
       optional_memory_format);
 }
 
 Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  if (self.dtype() == dtype && !copy &&
-      optional_memory_format.value_or(MemoryFormat::Preserve) ==
-          MemoryFormat::Preserve) {
-    return self;
-  }
   return to_impl(
-      self, self.options().dtype(dtype), non_blocking, optional_memory_format);
+      self, self.options().dtype(dtype), copy, non_blocking, optional_memory_format);
 }
 
 Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto self_options = self.options();
   auto options = other.options();
-  // Tensor.options() always have everything filled so we are happy and don't
-  // even need to fill in device index.
-  if (self_options == options && !copy &&
-      optional_memory_format.value_or(MemoryFormat::Preserve) ==
-          MemoryFormat::Preserve) {
-    return self;
-  }
-  return to_impl(self, options, non_blocking, optional_memory_format);
+  return to_impl(self, options, non_blocking, copy, optional_memory_format);
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
