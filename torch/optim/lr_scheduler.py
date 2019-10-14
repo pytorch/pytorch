@@ -595,12 +595,9 @@ class CyclicLR(_LRScheduler):
     `step` should be called after a batch has been used for training.
 
     This class has three built-in policies, as put forth in the paper:
-    "triangular":
-        A basic triangular cycle w/ no amplitude scaling.
-    "triangular2":
-        A basic triangular cycle that scales initial amplitude by half each cycle.
-    "exp_range":
-        A cycle that scales initial amplitude by gamma**(cycle iterations) at each
+    * "triangular": A basic triangular cycle w/ no amplitude scaling.
+    * "triangular2": A basic triangular cycle that scales initial amplitude by half each cycle.
+    * "exp_range": A cycle that scales initial amplitude by gamma**(cycle iterations) at each
         cycle iteration.
 
     This implementation was adapted from the github repo: `bckenstler/CLR`_
@@ -941,16 +938,10 @@ class OneCycleLR(_LRScheduler):
 
     This scheduler is not chainable.
 
-    This class has two built-in annealing strategies:
-    "cos":
-        Cosine annealing
-    "linear":
-        Linear annealing
-
     Note also that the total number of steps in the cycle can be determined in one
     of two ways (listed in order of precedence):
-    1) A value for total_steps is explicitly provided.
-    2) A number of epochs (epochs) and a number of steps per epoch
+    1. A value for total_steps is explicitly provided.
+    2. A number of epochs (epochs) and a number of steps per epoch
        (steps_per_epoch) are provided.
        In this case, the number of total steps is inferred by
        total_steps = epochs * steps_per_epoch
@@ -977,7 +968,8 @@ class OneCycleLR(_LRScheduler):
             increasing the learning rate.
             Default: 0.3
         anneal_strategy (str): {'cos', 'linear'}
-            Specifies the annealing strategy.
+            Specifies the annealing strategy: "cos" for cosine annealing, "linear" for
+            linear annealing.
             Default: 'cos'
         cycle_momentum (bool): If ``True``, momentum is cycled inversely
             to learning rate between 'base_momentum' and 'max_momentum'.
