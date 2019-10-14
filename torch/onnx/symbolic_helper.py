@@ -54,6 +54,8 @@ def _parse_arg(value, desc):
         return value
     if desc == 'v' or not _is_value(value):
         return value
+    if value.node().mustBeNone():
+        return None
     if value.node().kind() == 'onnx::Constant':
         tval = value.node()['value']
         if desc == 'i':
@@ -194,6 +196,11 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
         return _slice(g, input, axes, starts, ends, steps, dynamic_slice)
 
 
+def _is_fp(value):
+    type = value.type().scalarType()
+    return (type == 'Float') or (type == 'Double') or (type == 'Half')
+
+
 def _sort_helper(g, input, dim, decending=True, out=None):
     if out is not None:
         _unimplemented("Sort", "Out parameter is not supported")
@@ -237,6 +244,7 @@ def _interpolate_warning(interpolate_mode):
                   "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
                   "We recommend using opset 11 and above for models using this operator. ")
 
+
 def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, 'is')
     if _is_value(output_size):
@@ -261,6 +269,35 @@ def _scatter_helper(g, self, dim, index, src):
     else:
         from torch.onnx.symbolic_opset11 import scatter
     return scatter(g, self, dim, index, src)
+
+
+def _size_helper(g, self, dim):
+    full_shape = g.op("Shape", self)
+    from torch.onnx.symbolic_opset9 import select
+    return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
+
+
+def _index_fill_reshape_helper(g, self, dim, index):
+    # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
+    # 2. expand index => [..., dim, ...], same shape as self except for dim.
+    # 3. expand value as well.
+    # 4. apply onnx::scatter.
+
+    from torch.onnx.symbolic_opset9 import expand
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import scatter
+    else:
+        from torch.onnx.symbolic_opset11 import scatter
+
+    if self.type().dim() is None:
+        return _unimplemented("index_fill", "input rank not accesible")
+    self_dim = self.type().dim()
+    dim_value = _parse_arg(dim, 'i')
+    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    expanded_index_shape = scatter(g, g.op("Shape", self), 0,
+                                   g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index))
+    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
+    return expanded_index_shape, expanded_index
 
 # ---------------------------------------------------------------------
 # ONNX operator version
