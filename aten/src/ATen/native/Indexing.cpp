@@ -244,7 +244,7 @@ Tensor index(const Tensor & self, TensorList indices) {
 }
 
 Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
-  return clone_if_possible_with_memory_format(self).index_put_(indices, value, accumulate);
+  return try_clone_as_contiguous(self).index_put_(indices, value, accumulate);
 }
 
 Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
@@ -312,37 +312,37 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
 }
 
 Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return clone_if_possible_with_memory_format(self).index_copy_(dim, index, source);
+  return try_clone_as_contiguous(self).index_copy_(dim, index, source);
 }
 
 Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return clone_if_possible_with_memory_format(self).index_add_(dim, index, source);
+  return try_clone_as_contiguous(self).index_add_(dim, index, source);
 }
 
 Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
-  return clone_if_possible_with_memory_format(self).index_fill_(dim, index, source);
+  return try_clone_as_contiguous(self).index_fill_(dim, index, source);
 }
 
 Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return clone_if_possible_with_memory_format(self).index_fill_(dim, index, source);
+  return try_clone_as_contiguous(self).index_fill_(dim, index, source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return clone_if_possible_with_memory_format(self).scatter_(dim, index, source);
+  return try_clone_as_contiguous(self).scatter_(dim, index, source);
 }
 
 Tensor scatter(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
-  return clone_if_possible_with_memory_format(self).scatter_(dim, index, source);
+  return try_clone_as_contiguous(self).scatter_(dim, index, source);
 }
 
 Tensor scatter_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return clone_if_possible_with_memory_format(self).scatter_add_(dim, index, source);
+  return try_clone_as_contiguous(self).scatter_add_(dim, index, source);
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
-  return clone_if_possible_with_memory_format(_self).masked_scatter_(_mask, source);
+  return try_clone_as_contiguous(_self).masked_scatter_(_mask, source);
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
@@ -354,7 +354,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
 #endif
     Tensor _mask, _self;
     std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = clone_if_possible_with_memory_format(_self);
+    result = try_clone_as_contiguous(_self);
     result.masked_fill_(mask, source);
 #ifdef BUILD_NAMEDTENSOR
   }
