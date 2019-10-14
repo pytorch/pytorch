@@ -11,7 +11,6 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from common_utils import load_tests
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
-from torch.distributed import ProcessGroupAgent
 from torch.distributed.rpc import RpcBackend
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 
@@ -19,7 +18,7 @@ from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
-            TEST_CONFIG.backend == RpcBackend.PROCESS_GROUP,
+            TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP,
             message,
         )(old_func)
     return decorator
@@ -226,9 +225,9 @@ class RpcTest(object):
             rpc.rpc_sync(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
     @mock.patch.object(torch.distributed.autograd, "_init")
-    @mock.patch.object(torch.distributed.rpc.api, "_init_rref_context")
+    @mock.patch.object(torch.distributed.rpc.api, "_init_rpc_agent")
     def test_register_rpc_backend_and_init_rpc_backend(
-        self, mock_init_rref_context, mock_dist_autograd_init
+        self, mock_rpc_agent, mock_dist_autograd_init
     ):
         backend_name = "stub_backend"
         rpc.register_backend(
@@ -238,28 +237,28 @@ class RpcTest(object):
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_duplicate_name(self):
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             rpc.init_model_parallel(
                 self_name="duplicate_name",
-                backend=TEST_CONFIG.backend,
+                backend=TEST_CONFIG.rpc_backend,
                 self_rank=self.rank,
                 init_method=self.init_method,
             )
         rpc.join_rpc()
 
     def test_reinit(self):
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
         rpc.init_model_parallel(
             self_name="worker{}".format(self.rank),
-            backend=TEST_CONFIG.backend,
+            backend=TEST_CONFIG.rpc_backend,
             self_rank=self.rank,
             init_method=self.init_method,
         )
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
             rpc.init_model_parallel(
                 self_name="worker{}".format(self.rank),
-                backend=TEST_CONFIG.backend,
+                backend=TEST_CONFIG.rpc_backend,
                 self_rank=self.rank,
                 init_method=self.init_method,
             )
@@ -276,7 +275,7 @@ class RpcTest(object):
 
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
             rpc.init_model_parallel(self_name="abc*")
@@ -292,7 +291,7 @@ class RpcTest(object):
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             rpc.init_model_parallel(
                 self_name="".join(["a" for _ in range(500)]),
-                backend=TEST_CONFIG.backend,
+                backend=TEST_CONFIG.rpc_backend,
                 self_rank=self.rank,
                 init_method=self.init_method,
             )
