@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/MemoryFormatUtils.h>
+#include <ATen/Config.h>
 
 using namespace at;
 
@@ -11,12 +12,16 @@ TEST(MemoryFormatUtilsTest, CheckSpareMemoryFormat) {
   ASSERT_TRUE(spare_clone.is_sparse());
 }
 
+#if AT_MKLDNN_ENABLED()
+
 TEST(MemoryFormatUtilsTest, CheckMkldnnMemoryFormat) {
   auto mkldnn_tensor = at::empty({2, 2}, at::dtype<float>().layout(at::kMkldnn));
   ASSERT_TRUE(mkldnn_tensor.is_mkldnn());
   auto mkldnn_clone = clone_if_possible_with_memory_format(mkldnn_tensor);
   ASSERT_TRUE(mkldnn_clone.is_mkldnn());
 }
+
+#endif
 
 TEST(MemoryFormatUtilsTest, CheckContiguousMemoryFormat) {
   auto tensor_contiguous = at::empty({2, 2});
