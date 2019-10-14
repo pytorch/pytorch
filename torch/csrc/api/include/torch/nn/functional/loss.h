@@ -58,15 +58,15 @@ inline Tensor multilabel_soft_margin_loss(
 
   Tensor ret;
 
-  if (options.reduction() == Reduction::None) {
-      ret = loss;
-  } else if (options.reduction() == Reduction::Mean) {
-      ret = loss.mean();
-  } else if (options.reduction() == Reduction::Sum) {
-      ret = loss.sum();
+  if (c10::get_if<enumtype::kNone>(&options.reduction())) {
+    ret = loss;
+  } else if (c10::get_if<enumtype::kMean>(&options.reduction())) {
+    ret = loss.mean();
+  } else if (c10::get_if<enumtype::kSum>(&options.reduction())) {
+    ret = loss.sum();
   } else {
-      ret = input;
-      TORCH_INTERNAL_ASSERT(true, options.reduction(), " is not valid");
+    ret = input;
+    TORCH_INTERNAL_ASSERT(true, options.reduction(), " is not valid");
   }
   return ret;
 }

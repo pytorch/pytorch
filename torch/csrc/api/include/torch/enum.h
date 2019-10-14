@@ -43,6 +43,9 @@ TORCH_ENUM_DECLARE(ReLU)
 TORCH_ENUM_DECLARE(LeakyReLU)
 TORCH_ENUM_DECLARE(FanIn)
 TORCH_ENUM_DECLARE(FanOut)
+TORCH_ENUM_DECLARE(None)
+TORCH_ENUM_DECLARE(Mean)
+TORCH_ENUM_DECLARE(Sum)
 
 namespace torch {
 namespace enumtype {
@@ -60,6 +63,9 @@ struct enum_name {
   TORCH_ENUM_PRETTY_PRINT(LeakyReLU)
   TORCH_ENUM_PRETTY_PRINT(FanIn)
   TORCH_ENUM_PRETTY_PRINT(FanOut)
+  TORCH_ENUM_PRETTY_PRINT(None)
+  TORCH_ENUM_PRETTY_PRINT(Mean)
+  TORCH_ENUM_PRETTY_PRINT(Sum)
 };
 } // namespace enumtype
 } // namespace torch

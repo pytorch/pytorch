@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/arg.h>
+#include <torch/enum.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
 
@@ -9,11 +10,12 @@ namespace nn {
 
 /// Options for a L1 loss module.
 struct TORCH_API L1LossOptions {
-  L1LossOptions(Reduction::Reduction reduction = Reduction::Mean)
+  L1LossOptions(
+    c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction = torch::kMean)
       : reduction_(reduction) {}
 
   /// Specifies the reduction to apply to the output.
-  TORCH_ARG(Reduction::Reduction, reduction);
+  TORCH_ARG(c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum>, reduction);
 };
 
 // ============================================================================
@@ -24,7 +26,7 @@ struct TORCH_API HingeEmbeddingLossOptions {
   /// reach in order to incur zero loss. Default: 1
   TORCH_ARG(double, margin) = 1.0;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum>, reduction) = torch::kMean;
 };
 
 // ============================================================================
@@ -44,7 +46,7 @@ struct TORCH_API MultiMarginLossOptions {
   /// ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
   /// ``'mean'``: the sum of the output will be divided by the number of
   /// elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum>, reduction) = torch::kMean;
 };
 
 // ============================================================================
@@ -56,7 +58,7 @@ struct TORCH_API CosineEmbeddingLossOptions {
   /// to 0.5 is suggested. Default: 0.0
   TORCH_ARG(double, margin) = 0.0;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum>, reduction) = torch::kMean;
 };
 
 // ============================================================================
@@ -72,7 +74,7 @@ struct TORCH_API MultiLabelSoftMarginLossOptions {
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum>, reduction) = torch::kMean;
 };
 
 // ============================================================================
@@ -90,7 +92,7 @@ struct TORCH_API TripletMarginLossOptions {
   /// E. Riba et al. Default: False
   TORCH_ARG(bool, swap) = false;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum>, reduction) = torch::kMean;
 };
 
 } // namespace nn
