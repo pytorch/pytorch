@@ -44,10 +44,10 @@ THC_API int THCTensor_getDevice(THCState* state, const THCTensor* tensor);
 THC_API bool THCTensor_allSameDevice(THCState* state, THCTensor ** inputs, int numInputs);
 
 #ifdef __HIP_PLATFORM_HCC__
-/* Can we use 24 bit math for indexing? */
-THC_API bool THCTensor_canUse32BitIndexMath(THCState* state, const THCTensor* t, ptrdiff_t max_elem=INT24_MAX);
-/* Are all tensors 24-bit indexable? */
-THC_API bool THCTensor_all32BitIndexable(THCState* state, THCTensor** inputs, int numInputs);
+/* Can we use singed 24 bit math for indexing? */
+THC_API bool THCTensor_canUse24BitIndexMath(THCState* state, const THCTensor* t, ptrdiff_t max_elem=8388607);
+/* Are all tensors signed 24-bit indexable? */
+THC_API bool THCTensor_all24BitIndexable(THCState* state, THCTensor** inputs, int numInputs);
 #endif
 
 /* Can we use 32 bit math for indexing? */
