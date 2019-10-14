@@ -18,7 +18,6 @@
 #include <exception>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/BFloat16.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
@@ -29,6 +28,7 @@
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
 #include <c10/util/quint8.h>
+#include <c10/util/BFloat16.h>
 
 /*
  * TypeIdentifier is a small type containing an id.
