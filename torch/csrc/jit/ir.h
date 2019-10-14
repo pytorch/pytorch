@@ -1331,12 +1331,12 @@ TORCH_API std::vector<Value*> insertGraph(
     ArrayRef<Value*> inputs,
     std::unordered_map<Value*, Value*>& value_map);
 
-/** Insert graph \p CALLEE after node \p TO_REPLACE, remove the node and
- * replace all its uses with corresponding outputs of the inserted graph. The
- * function asserts that the number of outputs of the original node and the
+/** Insert function \p CALLEE after node \p TO_REPLACE, remove the node and
+ * replace all its uses with corresponding outputs of the inserted function.
+ * This asserts that the number of outputs of the original node and the
  * graph are the same.
  */
-TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Graph& callee);
+TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.
