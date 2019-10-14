@@ -16,7 +16,7 @@ jobs:
           set -ex
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          docker pull ${DOCKER_IMAGE} >/dev/null
+          time docker pull ${DOCKER_IMAGE} >/dev/null
           export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
           # TODO We may want to move the rebase logic to a separate step after checkout
