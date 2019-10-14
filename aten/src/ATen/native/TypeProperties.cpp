@@ -118,7 +118,9 @@ bool can_cast(const at::ScalarType from, const at::ScalarType to) {
 }
 
 ScalarType promote_types(ScalarType type1, ScalarType type2) {
-  return promoteTypes(type1, type2);
+  ScalarType ret = promoteTypes(type1, type2);
+  TORCH_CHECK(ret != ScalarType::Undefined, "Promotion from ", type1, " and ", type2, " is unsupported.");
+  return ret;
 }
 
 }} // namespace at::native
