@@ -12472,33 +12472,6 @@ class TestTorchDeviceType(TestCase):
         torch.sum(x, (2, 1), out=res2)
         self.assertEqual(res1, res2)
 
-    def test_memory_format_empty_like_strides(self, device):
-        def input_generator_fn(device):
-            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
-
-        def transformation_fn(tensor, **kwargs):
-            return torch.empty_like(tensor, **kwargs)
-
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
-
-    def test_memory_format_full_like_strides(self, device):
-        def input_generator_fn(device):
-            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
-
-        def transformation_fn(tensor, **kwargs):
-            return torch.full_like(tensor, 7, **kwargs)
-
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
-
-    def test_memory_format_rand_like_strides(self, device):
-        def input_generator_fn(device):
-            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
-
-        def transformation_fn(tensor, **kwargs):
-            return torch.rand_like(tensor, **kwargs)
-
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
-
     def test_memory_format_factory_like_functions_preserve_strides(self, device):
         def input_generator_fn(device):
             return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
@@ -12508,7 +12481,10 @@ class TestTorchDeviceType(TestCase):
             lambda t, **kwargs: torch.ones_like(t, **kwargs),
             lambda t, **kwargs: torch.randint_like(t, 10, 100, **kwargs),
             lambda t, **kwargs: torch.randint_like(t, 100, **kwargs),
-            lambda t, **kwargs: torch.randn_like(t, **kwargs)]
+            lambda t, **kwargs: torch.randn_like(t, **kwargs),
+            lambda t, **kwargs: torch.rand_like(t, **kwargs),
+            lambda t, **kwargs: torch.full_like(t, 7, **kwargs),
+            lambda t, **kwargs: torch.empty_like(t, **kwargs)]
 
         for transformation_fn in transformation_fns:
             self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
