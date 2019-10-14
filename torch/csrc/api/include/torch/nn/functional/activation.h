@@ -138,6 +138,18 @@ inline Tensor softsign(const Tensor& input) {
   return input / (input.abs() + 1);
 }
 
+inline Tensor tanhshrink(const Tensor& input) {
+  return input - input.tanh();
+}
+
+inline Tensor threshold(Tensor& input, const ThresholdOptions& options) {
+  if (options.inplace()) {
+    return torch::threshold_(input, options.threshold(), options.value());
+  } else {
+    return torch::threshold(input, options.threshold(), options.value());
+  }
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

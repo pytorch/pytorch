@@ -284,6 +284,17 @@ TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-4));
 }
 
+TEST_F(FunctionalTest, TripletMarginLoss) {
+  auto anchor = torch::tensor({{3., 3.}}, torch::kFloat);
+  auto positive = torch::tensor({{2., 2.}}, torch::kFloat);
+  auto negative = torch::tensor({{0., 0.}}, torch::kFloat);
+  auto output = F::triplet_margin_loss(
+      anchor, positive, negative, TripletMarginLossOptions().margin(1.0));
+  auto expected = torch::tensor({0.}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+}
+
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
@@ -778,3 +789,34 @@ TEST_F(FunctionalTest, Softsign) {
 
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
+
+TEST_F(FunctionalTest, Tanhshrink) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x - x.tanh();
+  auto y = F::tanhshrink(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Threshold) {
+  const auto size = 3;
+  for (const auto threshold : {0.5, 1.0, 2.0}) {
+    for (const auto value : {0.5, 1.0, 2.0}) {
+      for (const auto inplace : {false, true}) {
+        auto x = torch::linspace(-3.0, 3.0, 61);
+        x.resize_({size, size, size});
+        auto y_exp = (x <= threshold) * value + (x > threshold) * x;
+        auto y = F::threshold(x,
+          ThresholdOptions(threshold, value).inplace(inplace));
+
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+        if (inplace) {
+          ASSERT_TRUE(torch::allclose(x, y_exp));
+        }
+      }
+    }
+  }
+}
+
