@@ -496,18 +496,30 @@ Tensor& randint_out(
   return result.random_(low, high, generator);
 }
 
-Tensor randint_like(const Tensor& self, int64_t high) {
-  return native::randint_like(self, high, self.options());
+Tensor randint_like(
+    const Tensor& self,
+    int64_t high,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::randint_like(
+      self, high, self.options(), optional_memory_format);
 }
 
-Tensor randint_like(const Tensor& self, int64_t low, int64_t high) {
-  return native::randint_like(self, low, high, self.options());
+Tensor randint_like(
+    const Tensor& self,
+    int64_t low,
+    int64_t high,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::randint_like(
+      self, low, high, self.options(), optional_memory_format);
 }
 
 Tensor randint_like(
     const Tensor& self,
     int64_t high,
-    const TensorOptions& options) {
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.random_(0, high, nullptr);
   return native::randint(high, self.sizes(), nullptr, options);
 }
 
@@ -515,8 +527,10 @@ Tensor randint_like(
     const Tensor& self,
     int64_t low,
     int64_t high,
-    const TensorOptions& options) {
-  return native::randint(low, high, self.sizes(), nullptr, options);
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.random_(low, high, nullptr);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randn ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
