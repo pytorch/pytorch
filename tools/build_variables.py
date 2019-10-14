@@ -221,6 +221,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/options/conv.cpp",
         "torch/csrc/api/src/nn/options/dropout.cpp",
         "torch/csrc/api/src/nn/options/linear.cpp",
+        "torch/csrc/api/src/nn/options/normalization.cpp",
         "torch/csrc/api/src/nn/options/pooling.cpp",
         "torch/csrc/api/src/nn/options/rnn.cpp",
         "torch/csrc/api/src/optim/adagrad.cpp",
