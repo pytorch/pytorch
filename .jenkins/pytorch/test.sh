@@ -154,7 +154,7 @@ test_aten() {
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
 
     ls build/bin
-    $CUDA_MEMCHECK_EXEC aten/tools/run_tests.sh build/bin
+    aten/tools/run_tests.sh build/bin
     assert_git_not_dirty
   fi
 }
