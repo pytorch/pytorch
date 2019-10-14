@@ -34,6 +34,7 @@ class Conf:
     is_namedtensor: bool = False
     is_libtorch: bool = False
     is_important: bool = False
+    is_cuda_memcheck: bool = False
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
@@ -48,6 +49,8 @@ class Conf:
             leading.append("xla")
         if self.is_namedtensor and not for_docker:
             leading.append("namedtensor")
+        if self.is_cuda_memcheck and not for_docker:
+            leading.append("cuda_memcheck")
         if self.is_libtorch and not for_docker:
             leading.append("libtorch")
 
@@ -228,6 +231,7 @@ def instantiate_configs():
         is_namedtensor = fc.find_prop("is_namedtensor") or False
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
+        is_cuda_memcheck = fc.find_prop("cuda_memcheck") or False
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -245,6 +249,7 @@ def instantiate_configs():
             is_namedtensor=is_namedtensor,
             is_libtorch=is_libtorch,
             is_important=is_important,
+            is_cuda_memcheck=is_cuda_memcheck,
         )
 
         if cuda_version == "9" and python_version == "3.6" and not is_libtorch:
