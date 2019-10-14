@@ -204,6 +204,9 @@ class MinMaxObserver(_ObserverBase):
             )
 
     def forward(self, x_orig):
+        return self._forward(x_orig)
+
+    def _forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
         min_val = self.min_val
         max_val = self.max_val
@@ -437,6 +440,7 @@ class HistogramObserver(_ObserverBase):
                 norm = norm + self._get_norm(delta_begin, delta_end, density, norm_type)
         return norm
 
+    @torch.jit.ignore
     def _non_linear_param_search(self):
         """
         An approximation for L2 error minimization for selecting min/max.
@@ -495,6 +499,7 @@ class HistogramObserver(_ObserverBase):
         new_max = self.min_val + bin_width * (end_bin + 1)
         return new_min, new_max
 
+    @torch.jit.ignore
     def _combine_histograms(
         self, dst_histogram, dst_min, dst_max, src_histogram, src_min, src_max
     ):
@@ -546,7 +551,12 @@ class HistogramObserver(_ObserverBase):
             if dst_bin_cnt < src_bin_count:
                 dst_histogram[dst_bin2] += src_bin_count - dst_bin_cnt
 
+
     def forward(self, x):
+        return self._forward(x)
+
+    @torch.jit.ignore
+    def _forward(self, x):
         with torch.no_grad():
             min_val = self.min_val
             max_val = self.max_val
@@ -585,6 +595,7 @@ class HistogramObserver(_ObserverBase):
                 self.max_val = combined_max
         return x
 
+    @torch.jit.export
     def calculate_qparams(self):
         if self.min_val is None or self.max_val is None:
             warnings.warn(
@@ -599,7 +610,7 @@ class HistogramObserver(_ObserverBase):
 
         new_min, new_max = self._non_linear_param_search()
 
-        return self._calculate_qparams(new_min.item(), new_max.item())
+        return self._calculate_qparams(new_min, new_max)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(HistogramObserver, self)._save_to_state_dict(destination, prefix, keep_vars)

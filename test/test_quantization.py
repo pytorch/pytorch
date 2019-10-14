@@ -13,7 +13,7 @@ from torch.quantization import \
     default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver,\
     RecordingObserver, MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver, \
     QuantWrapper
-
+from torch.quantization import default_histogram_observer
 from torch.quantization._quantize_script import quantize_script
 
 from common_utils import run_tests
@@ -687,6 +687,40 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             '': QConfig(
                 activation=default_observer,
                 weight=default_weight_observer)
+        }
+        model_script = quantize_script(
+            torch.jit.script(linear_model),
+            qconfig_dict,
+            test_only_eval_fn,
+            [self.calib_data],
+            inplace=False)
+        print(model_script._c._get_module('fc1')._get_method('forward').graph)
+        result_eager = model_eager(self.calib_data[0][0])
+        torch._C._jit_pass_quant_fusion(model_script._c._get_module('fc1')._get_method('forward').graph)
+        result_script = model_script._c._get_method('forward')(self.calib_data[0][0])
+        self.assertEqual(result_eager, result_script)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_observer_with_nonscripted_function(self):
+        r"""Test observers with non-scriptable forward and make sure it works in
+        graph mode
+        """
+        # eager mode
+        annotated_linear_model = AnnotatedSingleLayerLinearModel()
+        qconfig = QConfig(
+            activation=default_histogram_observer,
+            weight=default_weight_observer)
+        annotated_linear_model.qconfig = qconfig
+        linear_model = SingleLayerLinearModel()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+        linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+        model_eager = quantize(annotated_linear_model, test_only_eval_fn,
+                               self.calib_data)
+
+        qconfig_dict = {
+            '': qconfig
         }
         model_script = quantize_script(
             torch.jit.script(linear_model),
