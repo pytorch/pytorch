@@ -12,6 +12,22 @@
 #include <tuple>
 
 namespace torch {
+
+const nn::init::Nonlinearity kLinear = nn::init::Nonlinearity::Linear;
+const nn::init::Nonlinearity kConv1D = nn::init::Nonlinearity::Conv1D;
+const nn::init::Nonlinearity kConv2D = nn::init::Nonlinearity::Conv2D;
+const nn::init::Nonlinearity kConv3D = nn::init::Nonlinearity::Conv3D;
+const nn::init::Nonlinearity kConvTranspose1D = nn::init::Nonlinearity::ConvTranspose1D;
+const nn::init::Nonlinearity kConvTranspose2D = nn::init::Nonlinearity::ConvTranspose2D;
+const nn::init::Nonlinearity kConvTranspose3D = nn::init::Nonlinearity::ConvTranspose3D;
+const nn::init::Nonlinearity kSigmoid = nn::init::Nonlinearity::Sigmoid;
+const nn::init::Nonlinearity kTanh = nn::init::Nonlinearity::Tanh;
+const nn::init::Nonlinearity kReLU = nn::init::Nonlinearity::ReLU;
+const nn::init::Nonlinearity kLeakyReLU = nn::init::Nonlinearity::LeakyReLU;
+
+const nn::init::FanMode kFanIn = nn::init::FanMode::FanIn;
+const nn::init::FanMode kFanOut = nn::init::FanMode::FanOut;
+
 namespace nn {
 namespace init {
 namespace {
@@ -35,68 +51,16 @@ struct Fan {
   int64_t out;
 };
 
-#define COMPUTE_NONLINEARITY_ENUM(name) /* NOLINT(cppcoreguidelines-macro-usage) */ \
-case Nonlinearity::name: \
-  TORCH_WARN( \
-    "The enum value `torch::nn::init::Nonlinearity::", #name, "` is deprecated and will be removed in 1.5. ", \
-    "Please use `torch::k", #name, "` instead."); \
-  return torch::k##name;
-
-#define COMPUTE_FANMODE_ENUM(name) /* NOLINT(cppcoreguidelines-macro-usage) */ \
-case FanMode::name: \
-  TORCH_WARN( \
-    "The enum value `torch::nn::init::FanMode::", #name, "` is deprecated and will be removed in 1.5. ", \
-    "Please use `torch::k", #name, "` instead."); \
-  return torch::k##name;
-
-NonlinearityType _compute_nonlinearity_type(Nonlinearity nonlinearity) {
-  switch (nonlinearity) {
-    COMPUTE_NONLINEARITY_ENUM(Linear)
-    COMPUTE_NONLINEARITY_ENUM(Conv1D)
-    COMPUTE_NONLINEARITY_ENUM(Conv2D)
-    COMPUTE_NONLINEARITY_ENUM(Conv3D)
-    COMPUTE_NONLINEARITY_ENUM(ConvTranspose1D)
-    COMPUTE_NONLINEARITY_ENUM(ConvTranspose2D)
-    COMPUTE_NONLINEARITY_ENUM(ConvTranspose3D)
-    COMPUTE_NONLINEARITY_ENUM(Sigmoid)
-    COMPUTE_NONLINEARITY_ENUM(Tanh)
-    COMPUTE_NONLINEARITY_ENUM(ReLU)
-    COMPUTE_NONLINEARITY_ENUM(LeakyReLU)
-    default:
-      TORCH_INTERNAL_ASSERT(
-        false,
-        "The enum class `torch::nn::init::Nonlinearity` is deprecated. ",
-        "Please don't add any new enum value to it.")
-  }
-}
-
-FanModeType _compute_fanmode_type(FanMode fanmode) {
-  switch (fanmode) {
-    COMPUTE_FANMODE_ENUM(FanIn);
-    COMPUTE_FANMODE_ENUM(FanOut);
-    default:
-      TORCH_INTERNAL_ASSERT(
-        false,
-        "The enum class `torch::nn::init::FanMode` is deprecated. ",
-        "Please don't add any new enum value to it.")
-  }
-}
-
 double calculate_kaiming_std(
     Tensor tensor,
     double a,
-    FanModeType mode,
-    NonlinearityType nonlinearity) {
+    FanMode mode,
+    Nonlinearity nonlinearity) {
   NoGradGuard guard;
   Fan fan(tensor);
   const auto gain = calculate_gain(nonlinearity, a);
   double std = 0.0;
-
-  // Support for `torch::nn::init::FanMode` is deprecated and will be removed in 1.5.
-  if (c10::get_if<FanMode>(&mode)) {
-    mode = _compute_fanmode_type(c10::get<FanMode>(mode));
-  }
-  if (c10::get_if<enumtype::kFanIn>(&mode)) {
+  if (mode == torch::kFanIn) {
     std = gain / std::sqrt(fan.in);
   } else {
     std = gain / std::sqrt(fan.out);
@@ -105,16 +69,12 @@ double calculate_kaiming_std(
 }
 } // namespace
 
-double calculate_gain(NonlinearityType nonlinearity, double param) {
-  // Support for `torch::nn::init::Nonlinearity` is deprecated and will be removed in 1.5.
-  if (c10::get_if<Nonlinearity>(&nonlinearity)) {
-    nonlinearity = _compute_nonlinearity_type(c10::get<Nonlinearity>(nonlinearity));
-  }
-  if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
+double calculate_gain(Nonlinearity nonlinearity, double param) {
+  if (nonlinearity == torch::kTanh) {
     return 5.0 / 3.0;  // NOLINT
-  } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {
+  } else if (nonlinearity == torch::kReLU) {
     return std::sqrt(2.0);  // NOLINT
-  } else if (c10::get_if<enumtype::kLeakyReLU>(&nonlinearity)) {
+  } else if (nonlinearity == torch::kLeakyReLU) {
     return std::sqrt(2.0 / (1 + pow(param, 2)));  // NOLINT
   }
 
@@ -234,8 +194,8 @@ Tensor uniform_(Tensor tensor, double low, double high) {
 Tensor kaiming_uniform_(
     Tensor tensor,
     double a,
-    FanModeType mode,
-    NonlinearityType nonlinearity) {
+    FanMode mode,
+    Nonlinearity nonlinearity) {
   NoGradGuard guard;
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
   // Calculate uniform bounds from standard deviation
@@ -246,8 +206,8 @@ Tensor kaiming_uniform_(
 Tensor kaiming_normal_(
     Tensor tensor,
     double a,
-    FanModeType mode,
-    NonlinearityType nonlinearity) {
+    FanMode mode,
+    Nonlinearity nonlinearity) {
   NoGradGuard guard;
 
   auto std = calculate_kaiming_std(tensor, a, mode, nonlinearity);
