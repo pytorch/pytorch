@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
+#include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -28,7 +29,7 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
       shared_ptr_class_<DistAutogradContext>(module, "DistAutogradContext")
           .def(
               "_context_id",
-              &DistAutogradContext::context_id,
+              &DistAutogradContext::contextId,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_recv_functions",
@@ -61,9 +62,12 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
       },
       py::return_value_policy::reference);
 
-  module.def("_release_context", [](int64_t context_id) {
-    return DistAutogradContainer::getInstance().releaseContext(context_id);
-  });
+  module.def(
+      "_release_context",
+      [](int64_t context_id) {
+        return DistAutogradContainer::getInstance().releaseContext(context_id);
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def("_get_max_id", []() {
     return DistAutogradContainer::getInstance().getMaxId();
@@ -83,8 +87,26 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
       },
       py::return_value_policy::reference);
 
-  module.def("_init", [](int64_t worker_id) {
-    DistAutogradContainer::init(worker_id);
+  module.def(
+      "_init",
+      [](int64_t worker_id) { DistAutogradContainer::init(worker_id); },
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_backward",
+      [](const std::vector<torch::Tensor>& roots) {
+        torch::autograd::variable_list variables;
+        for (const auto& root : roots) {
+          variables.emplace_back(root);
+        }
+        DistEngine::getInstance().execute(variables);
+      },
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def("get_gradients", [](int64_t contextId) {
+    const auto& autogradContext =
+        DistAutogradContainer::getInstance().retrieveContext(contextId);
+    return torch::jit::toPyObject(IValue(autogradContext.getGradients()));
   });
 
   Py_RETURN_TRUE;
