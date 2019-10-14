@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 namespace torch {
 namespace distributed {
@@ -12,8 +13,9 @@ using torch::distributed::rpc::Message;
 
 void addSendRpcBackward(
     DistAutogradContext& autogradContext,
-    const torch::distributed::rpc::AutogradMetadata& autogradMetadata,
-    std::vector<torch::Tensor>& tensors) {
+    const AutogradMetadata& autogradMetadata,
+    std::vector<torch::Tensor>& tensors,
+    const rpc::worker_id_t dst) {
   // Attach the appropriate autograd edges.
   if (torch::autograd::compute_requires_grad(tensors)) {
     auto grad_fn = std::make_shared<SendRpcBackward>();
@@ -27,24 +29,29 @@ void addSendRpcBackward(
     // Record the send autograd function in our current context.
     autogradContext.addSendFunction(
         grad_fn, autogradMetadata.autogradMessageId);
+    // Record the workerID
+    autogradContext.addKnownWorkerId(dst);
   }
 }
 
 DistAutogradContext* addRecvRpcBackward(
-    const torch::distributed::rpc::AutogradMetadata& autogradMetadata,
-    std::vector<torch::Tensor>& tensors) {
+    const AutogradMetadata& autogradMetadata,
+    std::vector<torch::Tensor>& tensors,
+    rpc::worker_id_t fromWorkerId) {
   if (torch::autograd::compute_requires_grad(tensors)) {
+    // Initialize autograd context if necessary.
+    auto& autogradContainer = DistAutogradContainer::getInstance();
+    DistAutogradContext& autogradContext = autogradContainer.getOrCreateContext(
+        autogradMetadata.autogradContextId);
+
     // Attach the tensors as inputs to the autograd function.
-    auto grad_fn = std::make_shared<RecvRpcBackward>();
+    auto grad_fn = std::make_shared<RecvRpcBackward>(
+        autogradMetadata, autogradContext, fromWorkerId);
     for (auto& tensor : tensors) {
       torch::autograd::set_history(tensor, grad_fn);
     }
 
     // Now update the autograd context with the necessary information.
-    auto& autogradContainer = DistAutogradContainer::getInstance();
-    // Initialize autograd context if necessary.
-    DistAutogradContext& autogradContext = autogradContainer.getOrCreateContext(
-        autogradMetadata.autogradContextId);
     autogradContext.addRecvFunction(
         grad_fn, autogradMetadata.autogradMessageId);
     return &autogradContext;

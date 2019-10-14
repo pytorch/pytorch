@@ -1,3 +1,6 @@
+:orphan:
+.. _multiprocessing-doc:
+
 Multiprocessing package - torch.multiprocessing
 ===============================================
 
