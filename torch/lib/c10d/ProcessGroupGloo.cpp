@@ -2086,7 +2086,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     if (inputs.size() != 1) {
       std::stringstream ss;
       ss << "requires a single-element input list containing a list with "
-         << getSize() << "tensors";
+         << getSize() << " tensors";
       invalidArgument(ss.str());
     } else if (inputs[0].size() != static_cast<size_t>(getSize())) {
       std::stringstream ss;
