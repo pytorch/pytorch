@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/native/Pow.h>
+#include <ATen/MemoryFormatUtils.h>
 
 #include <torch/types.h>
 #include <torch/utils.h>
@@ -113,7 +114,7 @@ void tensor_pow_scalar(const Vals vals, const Pows pows) {
   for (const auto pow : pows) {
     auto actual_pow = tensor.pow(pow);
 
-    auto actual_pow_ = tensor.clone();
+    auto actual_pow_ = clone_if_possible_with_memory_format(tensor);
     actual_pow_.pow_(pow);
 
     auto actual_pow_out = torch::empty_like(tensor);
@@ -187,7 +188,7 @@ void tensor_pow_tensor(const Vals vals, Pows pows) {
 
     const auto actual_pow = vals_tensor.pow(pows_tensor);
 
-    auto actual_pow_ = vals_tensor.clone();
+    auto actual_pow_ = clone_if_possible_with_memory_format(vals_tensor);
     actual_pow_.pow_(pows_tensor);
 
     auto actual_pow_out = torch::empty_like(vals_tensor);
