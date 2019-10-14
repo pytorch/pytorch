@@ -12,6 +12,7 @@ import torch
 # needs to be imported after torch
 import cpp_extension # noqa
 
+import cpp_extension # noqa
 import benchmark_utils
 from collections import namedtuple
 
