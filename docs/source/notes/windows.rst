@@ -261,7 +261,7 @@ can debug your code by reducing the ``num_worker`` of
 Multiprocessing error "driver shut down"
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. code-block::
+::
 
     Couldn’t open shared file mapping: <torch_14808_1591070686>, error code: <1455> at torch\lib\TH\THAllocator.c:154
 

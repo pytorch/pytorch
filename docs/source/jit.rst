@@ -245,7 +245,6 @@ Functions don't change much, they can be decorated with :func:`@torch.jit.ignore
     def some_fn4():
         return 2
 
-
 TorchScript Classes
 ~~~~~~~~~~~~~~~~~~~
 Everything in a user defined `TorchScript Class`_ is exported by default, functions
