@@ -2093,7 +2093,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
       ss << "Incorrect input list size " << inputs[0].size()
          << ". Input list size should be " << getSize()
          << ", same as size of the process group.";
-      invalidArgument(ss.str()); // todo
+      invalidArgument(ss.str());
     }
     const auto& type = outputs[0].type();
     const auto& sizes = outputs[0].sizes();
