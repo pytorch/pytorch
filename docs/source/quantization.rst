@@ -26,6 +26,20 @@ perform all or part of the computation in lower precision. Higher-level APIs are
 provided that incorporate typical workflows of converting FP32 model to lower
 precision with minimal accuracy loss.
 
+Today, PyTorch supports the following backends for running quantized operators efficiently:
+
+* x86 CPUs with AVX2 support or higher (without AVX2 some operations have inefficient implementations)
+* ARM CPUs (typically found in mobile/embedded devices)
+
+The corresponding implementation is chosen automatically based on the PyTorch build mode.
+
+.. note::
+
+  PyTorch 1.3 doesn't provide quantized operator implementations on CUDA yet - this is direction of future work.
+  Move the model to CPU in order to test the quantized functionality.
+
+  Quantization-aware training (through :class:`~torch.quantization.FakeQuantize`) supports both CPU and CUDA.
+
 Quantized Tensors
 ---------------------------------------
 
