@@ -163,8 +163,12 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
 
       // Attach the 'send' autograd function if needed.
       if (autogradContext != nullptr) {
+        rpc::worker_id_t fromWorkerId = rpcWithAutograd.fromWorkerId();
         addSendRpcBackward(
-            *autogradContext, responseAutogradMetadata, response->tensors());
+            *autogradContext,
+            responseAutogradMetadata,
+            response->tensors(),
+            fromWorkerId);
       }
       return std::move(response);
     }
