@@ -12,6 +12,7 @@ namespace jit {
   _(ADFormulas)                        \
   _(Attributes)                        \
   _(Blocks)                            \
+  _(CallStack)                         \
   _(CodeTemplate)                      \
   _(ControlFlow)                       \
   _(CreateAutodiffSubgraphs)           \

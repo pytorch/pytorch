@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/scope.h>
+#include <torch/csrc/jit/function.h>
 
 namespace torch {
 namespace jit {
@@ -77,5 +78,50 @@ std::string Scope::namesFromRoot(const std::string& separator) const {
   return out;
 }
 
+CallStackPtr CallStack::intrusive_from_this() {
+  c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
+                                         // from a raw `this` pointer
+                                         // so we need to bump the refcount
+                                         // to account for this ownership
+  return c10::intrusive_ptr<CallStack>::reclaim(this);
+}
+
+CallStack::CallStack(Function* fn, SourceRange source_range)
+    : fn_(fn), source_range_(source_range) {}
+
+CallStack::CallStack(
+    CallStackPtr caller,
+    Function* fn,
+    SourceRange source_range)
+    : fn_(fn), source_range_(source_range) {
+  caller_ = std::move(caller);
+}
+
+CallStackPtr CallStack::insertCallStackEntry(
+    Function* fn,
+    SourceRange source_range) {
+  auto ent = std::make_pair(fn, source_range);
+  if (callees_.count(ent)) {
+    return callees_.at(ent);
+  }
+  auto subscope =
+      c10::make_intrusive<CallStack>(intrusive_from_this(), fn, source_range);
+  callees_[ent] = subscope;
+  return subscope;
+}
+
+c10::optional<CallStackPtr> CallStack::caller() const {
+  return caller_;
+}
+
+std::vector<CallStackEntry> CallStack::asVector() {
+  std::vector<CallStackEntry> r;
+  c10::optional<CallStackPtr> current = intrusive_from_this();
+  while (current) {
+    r.push_back(std::make_pair((*current)->fn_, (*current)->source_range_));
+    current = (*current)->caller_;
+  }
+  return std::vector<CallStackEntry>(r.rbegin(), r.rend());
+}
 } // namespace jit
 } // namespace torch
