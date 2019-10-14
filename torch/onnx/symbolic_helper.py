@@ -262,6 +262,7 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
         scales = g.op("Constant", value_t=torch.tensor(scales_constant))
     return scales
 
+
 def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter
@@ -292,6 +293,35 @@ def _prepare_onnx_paddings(g, dim, pad):
         pad_reshaped = g.op("Reshape", pad, [2, dim/2])
         paddings = g.op("ConcatFromSequence", axis_i=1, new_axis_i=1)
         return paddings
+
+
+def _size_helper(g, self, dim):
+    full_shape = g.op("Shape", self)
+    from torch.onnx.symbolic_opset9 import select
+    return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
+
+
+def _index_fill_reshape_helper(g, self, dim, index):
+    # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
+    # 2. expand index => [..., dim, ...], same shape as self except for dim.
+    # 3. expand value as well.
+    # 4. apply onnx::scatter.
+
+    from torch.onnx.symbolic_opset9 import expand
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import scatter
+    else:
+        from torch.onnx.symbolic_opset11 import scatter
+
+    if self.type().dim() is None:
+        return _unimplemented("index_fill", "input rank not accesible")
+    self_dim = self.type().dim()
+    dim_value = _parse_arg(dim, 'i')
+    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    expanded_index_shape = scatter(g, g.op("Shape", self), 0,
+                                   g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index))
+    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
+    return expanded_index_shape, expanded_index
 
 # ---------------------------------------------------------------------
 # ONNX operator version
