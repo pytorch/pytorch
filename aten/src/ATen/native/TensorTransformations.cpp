@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
+#include <ATen/MemoryFormatUtils.h>
 
 #include <algorithm>
 #include <vector>
@@ -80,7 +81,7 @@ Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   }
   // avoid a div zero error below.
   if (self.numel() == 0) {
-    return self.clone();
+    return clone_if_possible_with_memory_format(self);
   }
   int64_t dim = dims[0];
   int64_t size = self.size(dim);
@@ -135,7 +136,7 @@ Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
     case 3:
       return self.flip({dims[0]}).transpose_(dims[0], dims[1]);
     default:
-      return self.clone();
+      return clone_if_possible_with_memory_format(self);
   }
 }
 
