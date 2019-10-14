@@ -103,12 +103,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("_init_rref_context", [](std::shared_ptr<RpcAgent> agent) {
-    RRefContext::initInstance(std::move(agent));
+  module.def("_init_rpc_agent", [](std::shared_ptr<RpcAgent> agent) {
+    RpcAgent::setDefaultRpcAgent(std::move(agent));
   });
 
   module.def("_destroy_rref_context", []() {
-    RRefContext::getInstance()->destroyInstance();
+    RRefContext::getInstance().destroyInstance();
   });
 
   module.def(
