@@ -202,6 +202,7 @@ class MinMaxObserver(_ObserverBase):
             raise NotImplementedError(
                 "Cannot reduce range for symmetric quantization for quint8"
             )
+
     @torch.no_grad()
     def forward(self, x):
         min_val = self.min_val
@@ -545,43 +546,43 @@ class HistogramObserver(_ObserverBase):
             if dst_bin_cnt < src_bin_count:
                 dst_histogram[dst_bin2] += src_bin_count - dst_bin_cnt
 
+    @torch.no_grad()
     def forward(self, x):
-        with torch.no_grad():
-            min_val = self.min_val
-            max_val = self.max_val
-            if min_val is None or max_val is None:
-                min_val = torch.min(x)
-                max_val = torch.max(x)
-                self.min_val = min_val
-                self.max_val = max_val
-                self.histogram = torch.histc(x, self.bins, min=min_val, max=max_val)
-            else:
-                new_min = torch.min(x)
-                new_max = torch.max(x)
-                new_histogram = torch.histc(x, self.bins, min=new_min, max=new_max)
-                # combine the existing histogram and new histogram into 1 histogram
-                combined_histogram = torch.zeros_like(self.histogram)
-                combined_min = torch.min(new_min, self.min_val)
-                combined_max = torch.max(new_max, self.max_val)
-                self._combine_histograms(
-                    combined_histogram,
-                    combined_min.item(),
-                    combined_max.item(),
-                    self.histogram,
-                    self.min_val.item(),
-                    self.max_val.item(),
-                )
-                self._combine_histograms(
-                    combined_histogram,
-                    combined_min.item(),
-                    combined_max.item(),
-                    new_histogram,
-                    new_min.item(),
-                    new_max.item(),
-                )
-                self.histogram = combined_histogram
-                self.min_val = combined_min
-                self.max_val = combined_max
+        min_val = self.min_val
+        max_val = self.max_val
+        if min_val is None or max_val is None:
+            min_val = torch.min(x)
+            max_val = torch.max(x)
+            self.min_val = min_val
+            self.max_val = max_val
+            self.histogram = torch.histc(x, self.bins, min=min_val, max=max_val)
+        else:
+            new_min = torch.min(x)
+            new_max = torch.max(x)
+            new_histogram = torch.histc(x, self.bins, min=new_min, max=new_max)
+            # combine the existing histogram and new histogram into 1 histogram
+            combined_histogram = torch.zeros_like(self.histogram)
+            combined_min = torch.min(new_min, self.min_val)
+            combined_max = torch.max(new_max, self.max_val)
+            self._combine_histograms(
+                combined_histogram,
+                combined_min.item(),
+                combined_max.item(),
+                self.histogram,
+                self.min_val.item(),
+                self.max_val.item(),
+            )
+            self._combine_histograms(
+                combined_histogram,
+                combined_min.item(),
+                combined_max.item(),
+                new_histogram,
+                new_min.item(),
+                new_max.item(),
+            )
+            self.histogram = combined_histogram
+            self.min_val = combined_min
+            self.max_val = combined_max
         return x
 
     def calculate_qparams(self):
