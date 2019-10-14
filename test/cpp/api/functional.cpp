@@ -563,6 +563,43 @@ TEST_F(FunctionalTest, PReLU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, Normalize) {
+  const auto expected = torch::tensor(
+    {{{0.00000000, 0.10000000, 0.2000, 0.30000000, 0.40000000},
+      {0.14285715, 0.17142858, 0.2000, 0.22857143, 0.25714287}}}, torch::requires_grad().dtype(torch::kFloat));
+  { // Test #1 
+    auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat).requires_grad(true));
+    auto norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
+    
+    // reduce to scalar to call .backward()
+    torch::Tensor s = norm.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(input.grad().numel(), 10);
+    ASSERT_TRUE(torch::allclose(norm, expected));
+  }
+
+  { // Test #2 Check variations of optional arguments
+    auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat));
+    auto output = torch::randn({1,2,5}, torch::dtype(torch::kFloat));
+    // non-null output argument
+    F::normalize(input, NormalizeOptions().p(1).dim(-1), output);
+    // default options
+    F::normalize(input);
+
+    ASSERT_TRUE(torch::allclose(output, expected));
+  }
+  
+  { // Test #3 Base case of scalar tensor
+    auto input = torch::randn({}, torch::requires_grad());
+    torch::Tensor norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
+    norm.backward();
+
+    ASSERT_EQ(input.grad().numel(), 1);
+  }
+}
+
 TEST_F(FunctionalTest, ReLU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
