@@ -182,7 +182,6 @@ class Linear(torch.nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
-        # type: (Tuple[int, int, Optional[torch.Tensor], torch.Tensor, float, int, bool]) -> None
         self.in_features = state[0]
         self.out_features = state[1]
         self.set_weight_bias(state[3], state[2])
@@ -217,7 +216,7 @@ class Linear(torch.nn.Module):
         """
         if hasattr(mod, 'weight_fake_quant'):
             # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
-            weight_observer = mod.weight_fake_quant
+            weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
             assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
@@ -228,11 +227,11 @@ class Linear(torch.nn.Module):
                 mod = mod[0]
             else:
                 activation_post_process = mod.activation_post_process
-            weight_observer = mod.qconfig.weight()
-            weight_observer(mod.weight)
+            weight_post_process = mod.qconfig.weight()
+            weight_post_process(mod.weight)
         act_scale, act_zp = activation_post_process.calculate_qparams()
-        assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
-        qweight = _quantize_weight(mod.weight.float(), weight_observer)
+        assert weight_post_process.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
+        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qlinear = cls(mod.in_features, mod.out_features)
         qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)

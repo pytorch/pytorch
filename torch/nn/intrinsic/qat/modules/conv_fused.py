@@ -231,8 +231,7 @@ class ConvReLU2d(nnqat.Conv2d):
     :class:`~torch.nn.BatchNorm2d`.
 
     Attributes:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
+        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
 
     """
