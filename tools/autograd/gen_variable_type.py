@@ -102,7 +102,7 @@ if (${tensor_name}_storage_saved.has_value())
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
-for (Tensor tensor : ${tensorlist_name})
+for (const Tensor& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
     tensor.has_storage() ? c10::optional<Storage>(tensor.storage()) : c10::nullopt);
 """)
