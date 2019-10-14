@@ -379,6 +379,13 @@ allclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 See :func:`torch.allclose`
 """)
 
+add_docstr_all('angle',
+               r"""
+angle() -> Tensor
+
+See :func:`torch.angle`
+""")
+
 add_docstr_all('any',
                r"""
 .. function:: any() -> bool
@@ -392,6 +399,7 @@ Example::
     tensor([[False, True]], dtype=torch.bool)
     >>> a.any()
     tensor(True, dtype=torch.bool)
+
 .. function:: any(dim, keepdim=False, out=None) -> Tensor
 
 Returns True if any elements in each row of the tensor in the given
@@ -682,6 +690,13 @@ Args:
     non_blocking (bool): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
         cases, this argument has no effect.
+""")
+
+add_docstr_all('conj',
+               r"""
+conj() -> Tensor
+
+See :func:`torch.conj`
 """)
 
 add_docstr_all('cos',
@@ -1046,6 +1061,13 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
+add_docstr_all('real',
+               r"""
+real() -> Tensor
+
+See :func:`torch.real`
+""")
+
 add_docstr_all('roll',
                r"""
 roll(shifts, dims) -> Tensor
@@ -1140,6 +1162,13 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
+""")
+
+add_docstr_all('imag',
+               r"""
+imag() -> Tensor
+
+See :func:`torch.imag`
 """)
 
 add_docstr_all('indices',
@@ -1467,6 +1496,19 @@ add_docstr_all('lerp_',
 lerp_(end, weight) -> Tensor
 
 In-place version of :meth:`~Tensor.lerp`
+""")
+
+add_docstr_all('lgamma',
+               r"""
+lgamma() -> Tensor
+
+See :func:`torch.lgamma`
+""")
+
+add_docstr_all('lgamma_', r"""
+lgamma_() -> Tensor
+
+In-place version of :meth:`~Tensor.lgamma`
 """)
 
 add_docstr_all('log',
