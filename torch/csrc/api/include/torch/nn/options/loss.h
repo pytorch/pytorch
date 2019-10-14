@@ -59,5 +59,39 @@ struct TORCH_API CosineEmbeddingLossOptions {
   TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
 };
 
+// ============================================================================
+
+/// Options for a multi-label soft margin loss functional and module.
+struct TORCH_API MultiLabelSoftMarginLossOptions {
+  /// A manual rescaling weight given to each
+  /// class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+  /// treated as if having all ones.
+  TORCH_ARG(Tensor, weight) = Tensor();
+
+  /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+  /// 'none': no reduction will be applied, 'mean': the sum of the output will
+  /// be divided by the number of elements in the output, 'sum': the output will
+  /// be summed. Default: 'mean'
+  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+};
+
+// ============================================================================
+
+/// Options for a triplet-margin-Loss functional and module.
+struct TORCH_API TripletMarginLossOptions {
+  /// Specifies the threshold for which the distance of a negative sample must
+  /// reach in order to incur zero loss. Default: 1
+  TORCH_ARG(double, margin) = 1.0;
+  /// Specifies the norm degree for pairwise distance. Default: 2
+  TORCH_ARG(double, p) = 2.0;
+  TORCH_ARG(double, eps) = 1e-6;
+  /// The distance swap is described in detail in the paper Learning shallow
+  /// convolutional feature descriptors with triplet losses by V. Balntas,
+  /// E. Riba et al. Default: False
+  TORCH_ARG(bool, swap) = false;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+};
+
 } // namespace nn
 } // namespace torch
