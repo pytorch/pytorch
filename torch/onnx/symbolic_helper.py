@@ -269,6 +269,30 @@ def _scatter_helper(g, self, dim, index, src):
         from torch.onnx.symbolic_opset11 import scatter
     return scatter(g, self, dim, index, src)
 
+
+# Generate paddings in ONNX order based on pad in pytorch.
+# Arguments:
+#     dim: the dimension of the tensor.
+#     pad: the paddings in pytorch.
+#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
+def _prepare_onnx_paddings(g, dim, pad):    
+    assert isinstance(dim, int)
+    # The desired order of paddings is
+    # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
+    # n is the dimension of input.
+    if _export_onnx_opset_version <= 10:
+        # assume zero-dimensions in the beginning
+        paddings = list(pad[:]) + [0] * (dim * 2 - len(pad))
+        # reverse order and collate first beginnings and then ends
+        paddings = paddings[-2::-2] + paddings[-1::-2]
+        return paddings
+    else:
+        pad_len = pad.type.sizes()[0]
+        pad_ext = g.op("Pad", pad, [0, (2*dim - pad_len)])
+        pad_reshaped = g.op("Reshape", pad, [2, dim/2])
+        paddings = g.op("ConcatFromSequence", axis_i=1, new_axis_i=1)
+        return paddings
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------

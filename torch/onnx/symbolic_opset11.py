@@ -129,3 +129,30 @@ def sort(g, self, dim, decending, out=None):
 
 def round(g, self):
     return g.op("Round", self)
+
+
+@parse_args('v', 'v', 'f')
+def constant_pad_nd(g, input, padding, value):
+    mode = "constant"
+    paddings = sym_help._prepare_onnx_paddings(input.type().dim(), padding)
+    return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
+
+
+def reflection_pad(g, input, padding):
+    mode = "reflect"
+    paddings = sym_help._prepare_onnx_paddings(input.type().dim(), padding)
+    return g.op("Pad", input, pads_i=paddings, mode_s=mode)
+
+
+def replication_pad(g, input, padding):
+    mode = "edge"
+    paddings = sym_help._prepare_onnx_paddings(input.type().dim(), padding)
+    return g.op("Pad", input, pads_i=paddings, mode_s=mode)
+
+
+reflection_pad1d = reflection_pad
+reflection_pad2d = reflection_pad
+reflection_pad3d = reflection_pad
+replication_pad1d = replication_pad
+replication_pad2d = replication_pad
+replication_pad3d = replication_pad
