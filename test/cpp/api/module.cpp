@@ -144,7 +144,7 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
   struct TestModel : public torch::nn::Module {};
   {
     TestModel model;
-    model.register_parameter("undefined_tensor", Tensor(), /*requires_grad=*/false);
+    model.register_parameter("undefined_tensor", torch::Tensor(), /*requires_grad=*/false);
     ASSERT_FALSE(model.named_parameters()["undefined_tensor"].defined());
   }
   {
@@ -152,7 +152,7 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
     CerrRedirect cerr_redirect(buffer.rdbuf());
 
     TestModel model;
-    model.register_parameter("undefined_tensor", Tensor());
+    model.register_parameter("undefined_tensor", torch::Tensor());
     ASSERT_FALSE(model.named_parameters()["undefined_tensor"].defined());
 
     ASSERT_EQ(
