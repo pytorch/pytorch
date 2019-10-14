@@ -4,6 +4,7 @@
 
 #include <test/cpp/api/optim_baseline.h>
 #include <test/cpp/api/support.h>
+#include <ATen/MemoryFormatUtils.h>
 
 #include <cmath>
 #include <cstdlib>
@@ -298,7 +299,7 @@ TEST(OptimTest, ExternalVectorOfParameters) {
   std::vector<torch::Tensor> parameters = {
       torch::randn({2, 2}), torch::randn({3, 3}), torch::randn({4, 4})};
   std::vector<torch::Tensor> original_parameters = {
-      parameters[0].clone(), parameters[1].clone(), parameters[2].clone()};
+      clone_if_possible_with_memory_format(parameters[0]), clone_if_possible_with_memory_format(parameters[1]), clone_if_possible_with_memory_format(parameters[2])};
 
   // Set all gradients to one
   for (auto& parameter : parameters) {
@@ -318,7 +319,7 @@ TEST(OptimTest, AddParameter_LBFGS) {
   torch::manual_seed(0);
 
   std::vector<torch::Tensor> parameters = {torch::randn({5, 5})};
-  std::vector<torch::Tensor> original_parameters = {parameters[0].clone()};
+  std::vector<torch::Tensor> original_parameters = {clone_if_possible_with_memory_format(parameters[0])};
 
   // Set all gradients to one
   for (auto& parameter : parameters) {
