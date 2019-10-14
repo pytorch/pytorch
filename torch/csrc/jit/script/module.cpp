@@ -38,6 +38,13 @@ Module::Module(c10::QualifiedName class_name)
           std::make_shared<CompilationUnit>())) {}
 
 Module::Module(
+    std::shared_ptr<CompilationUnit> cu,
+    const c10::ClassTypePtr& type)
+    : module_value_(c10::ivalue::Object::create(
+          c10::StrongTypePtr(std::move(cu), type),
+          type->numAttributes())) {}
+
+Module::Module(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle)
@@ -200,6 +207,9 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       }
       e.n->removeInput(e.offset);
       continue;
+    }
+    if (e.n->kind() == prim::PythonOp) {
+      throw ErrorReport(e.n->sourceRange()) << "Couldn't export Python method.";
     }
     if (e.n->kind() != prim::GetAttr) {
       throw ErrorReport(e.n->sourceRange())
