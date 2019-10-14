@@ -1080,6 +1080,34 @@ TEST_F(ModulesTest, CosineSimilarity) {
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
 }
 
+TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
+  MultiLabelSoftMarginLoss loss;
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({0.7608436}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
+  auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
+  auto options = MultiLabelSoftMarginLossOptions().reduction(Reduction::None).weight(weight);
+  MultiLabelSoftMarginLoss loss = MultiLabelSoftMarginLoss(options);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, PairwiseDistance) {
   PairwiseDistance dist(PairwiseDistanceOptions(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
@@ -1676,6 +1704,10 @@ TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
   ASSERT_EQ(
       c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
       "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintMultiLabelSoftMarginLoss) {
+  ASSERT_EQ(c10::str(MultiLabelSoftMarginLoss()), "torch::nn::MultiLabelSoftMarginLoss()");
 }
 
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
