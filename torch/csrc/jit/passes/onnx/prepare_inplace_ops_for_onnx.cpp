@@ -79,6 +79,9 @@ std::vector<Node*> FetchSliceAndSelect(const Node* index_put_node) {
 }
 
 struct ConvertedIndex {
+  ConvertedIndex(Value* index, c10::Symbol orig_node_kind)
+      : index(index), orig_node_kind(orig_node_kind) {}
+
   Value* index;
   c10::Symbol orig_node_kind;
 };
