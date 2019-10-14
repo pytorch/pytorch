@@ -396,6 +396,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: repeat
    .. automethod:: repeat_interleave
    .. autoattribute:: requires_grad
+      :noindex:
    .. automethod:: requires_grad_
    .. automethod:: reshape
    .. automethod:: reshape_as

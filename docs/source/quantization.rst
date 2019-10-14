@@ -1,3 +1,5 @@
+.. _quantization-doc:
+
 Quantization
 ===========================
 
@@ -186,7 +188,7 @@ Layers for the quantization-aware training
 Observers for computing the quantization parameters
 
 * :class:`~torch.quantization.MinMaxObserver` — Derives the quantization parameters from the running minimum and maximum of the observed tensor inputs (per tensor variant)
-* :class:`~torch.quantization.MovingAverageObserver` — Derives the quantization parameters from the running averages of the minimums and maximums of the observed tensor inputs (per tensor variant)
+* ``MovingAverageObserver`` — Derives the quantization parameters from the running averages of the minimums and maximums of the observed tensor inputs (per tensor variant)
 * :class:`~torch.quantization.PerChannelMinMaxObserver`— Derives the quantization parameters from the running minimum and maximum of the observed tensor inputs (per channel variant)
 * :class:`~torch.quantization.MovingAveragePerChannelMinMaxObserver` — Derives the quantization parameters from the running averages of the minimums and maximums of the observed tensor inputs (per channel variant)
 * :class:`~torch.quantization.HistogramObserver` — Derives the quantization parameters by creating a histogram of running minimums and maximums.
@@ -253,6 +255,9 @@ Quantization Workflows
 
 PyTorch provides three approaches to quantize models.
 
+.. _quantization tutorials:
+   https://pytorch.org/tutorials/#quantization-experimental
+
 1. Post Training Dynamic Quantization: This is the simplest to apply form of
    quantization where the weights are quantized ahead of time but the
    activations are dynamically quantized  during inference. This is used
@@ -261,7 +266,7 @@ PyTorch provides three approaches to quantize models.
    This is true for for LSTM and Transformer type models with small
    batch size. Applying dynamic quantization to a whole model can be
    done with a single call to :func:`torch.quantization.quantize_dynamic()`.
-   See the `quantization tutorials <https://pytorch.org/tutorials/#quantization-experimental>`_
+   See the `quantization tutorials`_
 2. Post Training Static Quantization: This is the most commonly used form of
    quantization where the weights are quantized ahead of time and the
    scale factor and bias for the activation tensors is pre-computed
@@ -291,7 +296,7 @@ PyTorch provides three approaches to quantize models.
       value to be used each activation tensor, and replaces key
       operators quantized implementations.
 
-   See the `quantization tutorials <https://pytorch.org/tutorials/#quantization_experimental>`_
+   See the `quantization tutorials`_
 
 
 3. Quantization Aware Training: In the rare cases where post training
@@ -312,7 +317,7 @@ PyTorch provides three approaches to quantize models.
    5. Train or fine tune the model.
    6. Identical to step (6) for post training quantization
 
-   See the `quantization tutorials <https://pytorch.org/tutorials/#quantization_experimental>`_
+   See the `quantization tutorials`_
 
 
 While default implementations of observers to select the scale factor and bias
@@ -395,7 +400,8 @@ Observers
 .. autoclass:: Observer
     :members:
 .. autoclass:: MinMaxObserver
-.. autoclass:: MovingAverageObserver
+.. The following doesn't exist. https://github.com/pytorch/pytorch/issues/27849.
+   .. autoclass:: MovingAverageObserver
 .. autoclass:: PerChannelMinMaxObserver
 .. autoclass:: MovingAveragePerChannelMinMaxObserver
 .. autoclass:: HistogramObserver
