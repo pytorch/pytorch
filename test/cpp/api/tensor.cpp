@@ -1,9 +1,7 @@
 #include <gtest/gtest.h>
 #include <test/cpp/api/support.h>
 
-#include <torch/types.h>
-
-#include <ATen/ATen.h>
+#include <torch/torch.h>
 
 #include <cmath>
 #include <cstddef>
@@ -472,6 +470,13 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
   x.backward();
   ASSERT_TRUE(torch::equal(x.grad(),
               torch::ones_like(x)));
+}
+
+TEST(TensorTest, BackwardNonScalarOutputs) {
+  auto x = torch::randn({5, 5}, torch::requires_grad());
+  auto y = x * x;
+  ASSERT_THROWS_WITH(y.backward(),
+    "grad can be implicitly created only for scalar outputs");
 }
 
 TEST(TensorTest, IsLeaf) {
