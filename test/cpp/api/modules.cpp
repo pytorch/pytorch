@@ -105,7 +105,7 @@ TEST_F(ModulesTest, MaxPool1d) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool1dReturnIndices) {
@@ -116,10 +116,10 @@ TEST_F(ModulesTest, MaxPool1dReturnIndices) {
 
   ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1 ,2})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 
   ASSERT_TRUE(torch::allclose(indices, torch::tensor({{{0, 2}}}, torch::kLong)));
-  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool2dEven) {
@@ -132,7 +132,7 @@ TEST_F(ModulesTest, MaxPool2dEven) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool2dUneven) {
@@ -145,7 +145,7 @@ TEST_F(ModulesTest, MaxPool2dUneven) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool2dReturnIndices) {
@@ -156,14 +156,14 @@ TEST_F(ModulesTest, MaxPool2dReturnIndices) {
 
   ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2 ,2})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
   ASSERT_TRUE(torch::allclose(
     indices,
     torch::tensor({{{ 0,  2},
                     {10, 12}},
                    {{ 0,  2},
                     {10, 12}}}, torch::kLong)));
-  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool3d) {
@@ -176,7 +176,7 @@ TEST_F(ModulesTest, MaxPool3d) {
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
 TEST_F(ModulesTest, MaxPool3dReturnIndices) {
@@ -187,7 +187,7 @@ TEST_F(ModulesTest, MaxPool3dReturnIndices) {
 
   ASSERT_EQ(y.dim(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 
   ASSERT_TRUE(torch::allclose(
     indices,
@@ -199,7 +199,7 @@ TEST_F(ModulesTest, MaxPool3dReturnIndices) {
                      {10, 12}},
                     {{50, 52},
                      {60, 62}}}}, torch::kLong)));
-  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
 TEST_F(ModulesTest, AvgPool1d) {
@@ -212,7 +212,7 @@ TEST_F(ModulesTest, AvgPool1d) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1, 2})));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
 TEST_F(ModulesTest, AvgPool2dEven) {
@@ -225,7 +225,7 @@ TEST_F(ModulesTest, AvgPool2dEven) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
 TEST_F(ModulesTest, AvgPool2dUneven) {
@@ -238,7 +238,7 @@ TEST_F(ModulesTest, AvgPool2dUneven) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
 TEST_F(ModulesTest, AvgPool3d) {
@@ -251,7 +251,7 @@ TEST_F(ModulesTest, AvgPool3d) {
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
 TEST_F(ModulesTest, Identity) {
@@ -276,7 +276,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool1d) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::tensor({{{2, 4, 5}}}, torch::kFloat)));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
 TEST_F(ModulesTest, AdaptiveMaxPool1dReturnIndices) {
@@ -287,9 +287,9 @@ TEST_F(ModulesTest, AdaptiveMaxPool1dReturnIndices) {
 
   ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::tensor({{{2, 4, 5}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
   ASSERT_TRUE(torch::allclose(indices, torch::tensor({{{1, 3, 4}}}, torch::kLong)));
-  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({1, 1, 3}));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
 TEST_F(ModulesTest, AdaptiveMaxPool2dEven) {
@@ -310,7 +310,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dEven) {
      {46, 48, 49}},
   }, torch::kFloat)));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
 TEST_F(ModulesTest, AdaptiveMaxPool2dUneven) {
@@ -331,7 +331,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dUneven) {
      {37, 39}},
   }, torch::kFloat)));
   ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 2}));
 }
 
 TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesEven) {
@@ -354,7 +354,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesEven) {
      {41, 43, 44},
      {46, 48, 49}},
   }, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 
   ASSERT_EQ(indices.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(indices, torch::tensor({
@@ -365,7 +365,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesEven) {
      {16, 18, 19},
      {21, 23, 24}},
   }, torch::kLong)));
-  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({2, 3, 3}));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
 TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesUneven) {
@@ -388,7 +388,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesUneven) {
      {33, 35},
      {37, 39}},
   }, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 2}));
 
   ASSERT_EQ(indices.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(indices, torch::tensor({
@@ -399,7 +399,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool2dReturnIndicesUneven) {
      {13, 15},
      {17, 19}},
   }, torch::kLong)));
-  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({2, 3, 2}));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({2, 3, 2}));
 }
 
 TEST_F(ModulesTest, AdaptiveMaxPool3d) {
@@ -424,7 +424,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool3d) {
      {57, 58, 59},
      {61, 62, 63}},
   }, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 3, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 }
 
 TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
@@ -450,7 +450,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
      {57, 58, 59},
      {61, 62, 63}},
   }, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 3, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 
   ASSERT_EQ(indices.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(indices, torch::tensor({
@@ -464,7 +464,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
      {57, 58, 59},
      {61, 62, 63}},
   }, torch::kLong)));
-  ASSERT_EQ(indices.sizes(), torch::IntArrayRef({1, 3, 3, 3}));
+  ASSERT_EQ(indices.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 }
 
 TEST_F(ModulesTest, AdaptiveAvgPool1d) {
@@ -478,7 +478,7 @@ TEST_F(ModulesTest, AdaptiveAvgPool1d) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::tensor({{{1.5, 3.0, 4.5}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
 TEST_F(ModulesTest, AdaptiveAvgPool2dEven) {
@@ -500,7 +500,7 @@ TEST_F(ModulesTest, AdaptiveAvgPool2dEven) {
      {35.5, 37.0, 38.5},
      {43.0, 44.5, 46.0}},
   }, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
 TEST_F(ModulesTest, AdaptiveAvgPool2dUneven) {
@@ -522,7 +522,7 @@ TEST_F(ModulesTest, AdaptiveAvgPool2dUneven) {
      {28.5, 30.5},
      {34.5, 36.5}},
   }, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 2}));
 }
 
 TEST_F(ModulesTest, AdaptiveAvgPool3d) {
@@ -547,7 +547,7 @@ TEST_F(ModulesTest, AdaptiveAvgPool3d) {
      {46.5, 47.5, 48.5},
      {50.5, 51.5, 52.5}},
   }, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 3, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 3, 3, 3}));
 }
 
 TEST_F(ModulesTest, MaxUnpool1d) {
@@ -559,17 +559,17 @@ TEST_F(ModulesTest, MaxUnpool1d) {
   ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y,
     torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 9}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   model = MaxUnpool1d{MaxUnpool1dOptions(3).stride(2).padding(1)};
-  y = model->forward(x, indices, c10::IntArrayRef({1, 1, 5}));
+  y = model->forward(x, indices, std::vector<int64_t>({1, 1, 5}));
 
   ASSERT_EQ(y.dim(), 3);
   ASSERT_TRUE(torch::allclose(y,
     torch::tensor({{{0, 2, 0, 4, 5}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 5}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 5}));
 }
 
 TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
@@ -623,7 +623,7 @@ TEST_F(ModulesTest, MaxUnpool2d) {
       { 0,  0,  0,  0,  0},
       { 0, 41,  0, 43, 44},
       { 0, 46,  0, 48, 49}}}} , torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 1, 5, 5}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 5, 5}));
 }
 
 TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
@@ -643,7 +643,7 @@ TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
                      { 0, 14, 0, 16}}}} , torch::kFloat)));
 
   ASSERT_TRUE(torch::allclose(
-    unpool(output, indices, torch::IntArrayRef{1, 1, 5, 5}),
+    unpool(output, indices, std::vector<int64_t>{1, 1, 5, 5}),
     torch::tensor({{{{ 0, 0, 0,  0, 0},
                      { 6, 0, 8,  0, 0},
                      { 0, 0, 0, 14, 0},
@@ -668,7 +668,7 @@ TEST_F(ModulesTest, MaxUnpool3d) {
       {{ 0,  0,  0},
        { 0,  0,  0},
        { 0,  0, 26}}}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 3, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3, 3, 3}));
 }
 
 TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
@@ -683,7 +683,7 @@ TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
        {{53, 55},
         {61, 63}}}}}, torch::requires_grad());
   auto model = MaxUnpool3d{MaxUnpool3dOptions(3).stride(2).padding(1)};
-  auto y = model->forward(x, indices, torch::IntArrayRef({1, 1, 4, 4, 4}));
+  auto y = model->forward(x, indices, std::vector<int64_t>({1, 1, 4, 4, 4}));
 
   ASSERT_EQ(y.dim(), 5);
   ASSERT_TRUE(torch::allclose(y, torch::tensor(
@@ -703,7 +703,7 @@ TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
        { 0, 53,  0, 55},
        { 0,  0,  0,  0},
        { 0, 61,  0, 63}}}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4, 4}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 4, 4, 4}));
 }
 
 TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
@@ -713,7 +713,7 @@ TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
   torch::Tensor output, indices;
   std::tie(output, indices) = pool->forward_with_indices(input);
   auto unpooled_output = unpool(output, indices);
-  ASSERT_EQ(unpooled_output.sizes(), torch::IntArrayRef({20, 16, 51, 33, 15}));
+  ASSERT_EQ(unpooled_output.sizes(), std::vector<int64_t>({20, 16, 51, 33, 15}));
 }
 
 TEST_F(ModulesTest, Linear) {
@@ -977,7 +977,7 @@ TEST_F(ModulesTest, L1Loss) {
   auto s = output.sum();
   s.backward();
 
-  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(output.sizes(), std::vector<int64_t>());
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
@@ -1076,7 +1076,7 @@ TEST_F(ModulesTest, ELU) {
     ASSERT_EQ(s.ndimension(), 0);
 
     ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     auto y_exp = torch::max(torch::zeros_like(x), x) +
                  torch::min(torch::zeros_like(x), alpha * (torch::exp(x) - 1.0));
     ASSERT_TRUE(torch::allclose(y, y_exp));
@@ -1113,7 +1113,7 @@ TEST_F(ModulesTest, Hardshrink) {
     ASSERT_EQ(s.ndimension(), 0);
 
     ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     auto y_exp = (x.abs() > lambda) * x;
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
@@ -1133,7 +1133,7 @@ TEST_F(ModulesTest, Hardtanh) {
       ASSERT_EQ(s.ndimension(), 0);
 
       ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       auto y_exp = (x < min_val) * min_val +
                    ((x >= min_val) * (x <= max_val)) * x +
                    (x > max_val) * max_val;
@@ -1168,7 +1168,7 @@ TEST_F(ModulesTest, LeakyReLU) {
     ASSERT_EQ(s.ndimension(), 0);
 
     ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     auto y_exp = (x < 0) * x * negative_slope + (x >= 0) * x;
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
@@ -1186,7 +1186,7 @@ TEST_F(ModulesTest, LogSigmoid) {
   ASSERT_EQ(s.ndimension(), 0);
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
   auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
@@ -1251,7 +1251,7 @@ TEST_F(ModulesTest, PReLU) {
 
   PReLU model {PReLUOptions().num_parameters(num_parameters).init(init)};
 
-  ASSERT_EQ(model->weight.sizes(), torch::IntArrayRef({num_parameters}));
+  ASSERT_EQ(model->weight.sizes(), std::vector<int64_t>({num_parameters}));
   ASSERT_TRUE(torch::allclose(model->weight,
               torch::full(num_parameters, init)));
 
@@ -1280,7 +1280,7 @@ TEST_F(ModulesTest, ReLU) {
   ASSERT_EQ(s.ndimension(), 0);
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
   auto y_exp = (x < 0) * 0 + (x >= 0) * x;
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
@@ -1297,7 +1297,7 @@ TEST_F(ModulesTest, ReLU6) {
   ASSERT_EQ(s.ndimension(), 0);
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
   auto y_exp = (x < 0) * 0 + ((x >= 0) * (x <= 6)) * x + (x > 6) * 6;
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
@@ -1316,7 +1316,7 @@ TEST_F(ModulesTest, RReLU) {
       ASSERT_EQ(s.ndimension(), 0);
 
       ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       auto z = ((x >= 0) * (x == y) +
         (x < 0) * (y >= x * upper) * (y <= lower * x)) * 1.0;
       ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
@@ -1337,7 +1337,7 @@ TEST_F(ModulesTest, CELU) {
     ASSERT_EQ(s.ndimension(), 0);
 
     ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     auto y_exp = torch::max(torch::zeros_like(x), x) +
         torch::min(torch::zeros_like(x), alpha * (torch::exp(x / alpha) - 1.0));
     ASSERT_TRUE(torch::allclose(y, y_exp));
@@ -1366,7 +1366,7 @@ TEST_F(ModulesTest, Softplus) {
       auto y = model(x);
 
       ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       ASSERT_TRUE(torch::allclose(y, y_exp));
     }
   }
@@ -1385,7 +1385,7 @@ TEST_F(ModulesTest, Softshrink) {
     ASSERT_EQ(s.ndimension(), 0);
 
     ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
@@ -1430,7 +1430,7 @@ TEST_F(ModulesTest, Threshold) {
         auto y = model(x);
 
         ASSERT_EQ(y.ndimension(), 3);
-        ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
         ASSERT_TRUE(torch::allclose(y, y_exp));
       }
     }
@@ -1458,7 +1458,7 @@ TEST_F(ModulesTest, PrettyPrintConv) {
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 5], stride=[2, 2])");
 
   const auto options =
-      Conv2dOptions(3, 4, torch::IntArrayRef{5, 6}).stride({1, 2});
+      Conv2dOptions(3, 4, std::vector<int64_t>{5, 6}).stride({1, 2});
   ASSERT_EQ(
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
@@ -1482,7 +1482,7 @@ TEST_F(ModulesTest, PrettyPrintMaxPool) {
       "torch::nn::MaxPool3d(kernel_size=[5, 5, 5], stride=[2, 2, 2], padding=[0, 0, 0], dilation=[1, 1, 1], ceil_mode=false)");
 
   const auto options =
-      MaxPool2dOptions(torch::IntArrayRef{5, 6}).stride({1, 2});
+      MaxPool2dOptions(std::vector<int64_t>{5, 6}).stride({1, 2});
   ASSERT_EQ(
       c10::str(MaxPool2d(options)),
       "torch::nn::MaxPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=false)");
@@ -1506,7 +1506,7 @@ TEST_F(ModulesTest, PrettyPrintAvgPool) {
       "torch::nn::AvgPool3d(kernel_size=[5, 5, 5], stride=[2, 2, 2], padding=[0, 0, 0])");
 
   const auto options =
-      AvgPool2dOptions(torch::IntArrayRef{5, 6}).stride({1, 2});
+      AvgPool2dOptions(std::vector<int64_t>{5, 6}).stride({1, 2});
   ASSERT_EQ(
       c10::str(AvgPool2d(options)),
       "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0])");
@@ -1526,14 +1526,14 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
       c10::str(AdaptiveMaxPool2d(5)),
       "torch::nn::AdaptiveMaxPool2d(output_size=[5, 5])");
   ASSERT_EQ(
-      c10::str(AdaptiveMaxPool2d(torch::IntArrayRef{5, 6})),
+      c10::str(AdaptiveMaxPool2d(std::vector<int64_t>{5, 6})),
       "torch::nn::AdaptiveMaxPool2d(output_size=[5, 6])");
 
   ASSERT_EQ(
       c10::str(AdaptiveMaxPool3d(5)),
       "torch::nn::AdaptiveMaxPool3d(output_size=[5, 5, 5])");
   ASSERT_EQ(
-      c10::str(AdaptiveMaxPool3d(torch::IntArrayRef{5, 6, 7})),
+      c10::str(AdaptiveMaxPool3d(std::vector<int64_t>{5, 6, 7})),
       "torch::nn::AdaptiveMaxPool3d(output_size=[5, 6, 7])");
 }
 
@@ -1546,14 +1546,14 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveAvgPool) {
       c10::str(AdaptiveAvgPool2d(5)),
       "torch::nn::AdaptiveAvgPool2d(output_size=[5, 5])");
   ASSERT_EQ(
-      c10::str(AdaptiveAvgPool2d(torch::IntArrayRef{5, 6})),
+      c10::str(AdaptiveAvgPool2d(std::vector<int64_t>{5, 6})),
       "torch::nn::AdaptiveAvgPool2d(output_size=[5, 6])");
 
   ASSERT_EQ(
       c10::str(AdaptiveAvgPool3d(5)),
       "torch::nn::AdaptiveAvgPool3d(output_size=[5, 5, 5])");
   ASSERT_EQ(
-      c10::str(AdaptiveAvgPool3d(torch::IntArrayRef{5, 6, 7})),
+      c10::str(AdaptiveAvgPool3d(std::vector<int64_t>{5, 6, 7})),
       "torch::nn::AdaptiveAvgPool3d(output_size=[5, 6, 7])");
 }
 
@@ -1569,10 +1569,10 @@ TEST_F(ModulesTest, PrettyPrintMaxUnpool) {
       c10::str(MaxUnpool2d(5)),
       "torch::nn::MaxUnpool2d(kernel_size=[5, 5], stride=[5, 5], padding=[0, 0])");
   ASSERT_EQ(
-      c10::str(MaxUnpool2d(torch::IntArrayRef{5, 6})),
+      c10::str(MaxUnpool2d(std::vector<int64_t>{5, 6})),
       "torch::nn::MaxUnpool2d(kernel_size=[5, 6], stride=[5, 6], padding=[0, 0])");
   ASSERT_EQ(
-      c10::str(MaxUnpool2d(MaxUnpool2dOptions(torch::IntArrayRef{5, 6}).stride({3, 4}).padding({1, 2}))),
+      c10::str(MaxUnpool2d(MaxUnpool2dOptions(std::vector<int64_t>{5, 6}).stride({3, 4}).padding({1, 2}))),
       "torch::nn::MaxUnpool2d(kernel_size=[5, 6], stride=[3, 4], padding=[1, 2])");
 }
 
