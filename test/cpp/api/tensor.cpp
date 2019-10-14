@@ -169,7 +169,7 @@ TEST(TensorTest, ContainsCorrectValuesForManyValues) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
-  tensor = at::tensor(at::ArrayRef<int>({1, 2, 3}));
+  tensor = at::tensor(std::vector<int>({1, 2, 3}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kInt);
   ASSERT_TRUE(exactly_equal(tensor[0], 1));
@@ -183,7 +183,7 @@ TEST(TensorTest, ContainsCorrectValuesForManyValues) {
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
-  tensor = at::tensor(at::ArrayRef<double>({1.5, 2.25, 3.125}));
+  tensor = at::tensor(std::vector<double>({1.5, 2.25, 3.125}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
@@ -200,7 +200,7 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
-  tensor = torch::tensor(at::ArrayRef<int>({1, 2, 3}));
+  tensor = torch::tensor(std::vector<int>({1, 2, 3}));
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kInt);
@@ -216,7 +216,7 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
-  tensor = torch::tensor(at::ArrayRef<double>({1.5, 2.25, 3.125}));
+  tensor = torch::tensor(std::vector<double>({1.5, 2.25, 3.125}));
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
