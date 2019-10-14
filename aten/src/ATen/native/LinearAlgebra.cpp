@@ -6,6 +6,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
+#include <ATen/MemoryFormatUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <functional>
 #include <numeric>
@@ -480,13 +481,13 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
            "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
            "of floating types with dim at least 2");
   if (n == 0) {
-    return a.clone().copy_(at::eye(a.size(-2), a.options()).expand_as(a));
+    return clone_if_possible_with_memory_format(a).copy_(at::eye(a.size(-2), a.options()).expand_as(a));
   } else if (n < 0) {
     Tensor a_ = at::inverse(a);
     n *= -1;
     return at::native::matrix_power(a_, n);
   } else if (n == 1) {
-    return a.clone();
+    return clone_if_possible_with_memory_format(a);
   } else if (n == 2) {
     return at::native::matmul(a, a);
   } else if (n == 3) {
@@ -503,11 +504,11 @@ Tensor matrix_power(const Tensor& a, int64_t n) {
   Tensor result, z;
   int64_t r;
   while (n > 0) {
-    z = (!z.defined()) ? a.clone() : at::native::matmul(z, z);
+    z = (!z.defined()) ? clone_if_possible_with_memory_format(a) : at::native::matmul(z, z);
     r = n % 2;
     n = n / 2;
     if (r == 1) {
-      result = (!result.defined()) ? z.clone() : at::native::matmul(result, z);
+      result = (!result.defined()) ? clone_if_possible_with_memory_format(z) : at::native::matmul(result, z);
     }
   }
   return result;
