@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 
@@ -12,7 +10,6 @@ CONFIG_TREE_DATA = [
             X("nightly"),
         ]),
         ("gcc", [
-            ("4.8", [X("3.6")]),
             ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
                 ("3.6", [

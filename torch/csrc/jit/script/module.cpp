@@ -38,6 +38,13 @@ Module::Module(c10::QualifiedName class_name)
           std::make_shared<CompilationUnit>())) {}
 
 Module::Module(
+    std::shared_ptr<CompilationUnit> cu,
+    const c10::ClassTypePtr& type)
+    : module_value_(c10::ivalue::Object::create(
+          c10::StrongTypePtr(std::move(cu), type),
+          type->numAttributes())) {}
+
+Module::Module(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle)
@@ -200,6 +207,9 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       }
       e.n->removeInput(e.offset);
       continue;
+    }
+    if (e.n->kind() == prim::PythonOp) {
+      throw ErrorReport(e.n->sourceRange()) << "Couldn't export Python method.";
     }
     if (e.n->kind() != prim::GetAttr) {
       throw ErrorReport(e.n->sourceRange())
@@ -417,11 +427,11 @@ void Module::apply(const std::function<void(Module&)>& fn) {
   fn(*this);
 }
 
-std::string Module::_dump_to_string(
+std::string Module::dump_to_str(
     bool print_method_bodies,
     bool print_attr_values,
     bool print_param_values,
-    int level) const {
+    int level = 0) const {
   std::stringstream ss;
   std::stringstream parameters_ss;
   std::stringstream attributes_ss;
@@ -470,7 +480,7 @@ std::string Module::_dump_to_string(
   for (const Module& submodule : get_modules()) {
     // We do level + 2, because one level of indentation comes from 'submodules'
     // scope and the other one goes from a specific submodule we're printing.
-    ss << submodule._dump_to_string(
+    ss << submodule.dump_to_str(
         print_method_bodies, print_attr_values, print_param_values, level + 2);
   }
   ss << "  }" << std::endl;
@@ -484,11 +494,10 @@ void Module::dump(
     bool print_method_bodies = true,
     bool print_attr_values = true,
     bool print_param_values = true) const {
-  std::cout << _dump_to_string(
+  std::cout << dump_to_str(
                    print_method_bodies,
                    print_attr_values,
-                   print_param_values,
-                   0)
+                   print_param_values)
             << std::endl;
 }
 
