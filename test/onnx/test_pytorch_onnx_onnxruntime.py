@@ -656,7 +656,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # enable test for opset 11 when ScatterElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_scatter(self):
         class ScatterModel(torch.nn.Module):
             def forward(self, input, indices, values):
