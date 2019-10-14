@@ -16037,7 +16037,7 @@ class MnistNet(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
-class TestEndToEndHybridFrontendModels(JitTestCase):
+class TestModels(JitTestCase):
     @staticmethod
     def _test_dcgan_models(self, device, check_export_import=True):
         class DCGANGenerator(nn.Module):
