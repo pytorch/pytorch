@@ -237,23 +237,23 @@ class MinMaxObserver(_ObserverBase):
         if self.qscheme == torch.per_tensor_symmetric and \
            self.reduce_range and \
            self.dtype == torch.quint8:
-                raise NotImplementedError("Cannot reduce range for symmetric \
-                                           quantization for quint8")
+            raise NotImplementedError("Cannot reduce range for symmetric \
+                                       quantization for quint8")
 
-    def forward(self, x):
+    def forward(self, x_orig):
         """Records the running minimum and maximum of ``x``."""
-        with torch.no_grad():
-            min_val = self.min_val
-            max_val = self.max_val
-            if min_val is None or max_val is None:
-                min_val = torch.min(x)
-                max_val = torch.max(x)
-            else:
-                min_val = torch.min(torch.min(x), min_val)
-                max_val = torch.max(torch.max(x), max_val)
-            self.min_val = min_val
-            self.max_val = max_val
-        return x
+        x = x_orig.detach()
+        min_val = self.min_val
+        max_val = self.max_val
+        if min_val is None or max_val is None:
+            min_val = torch.min(x)
+            max_val = torch.max(x)
+        else:
+            min_val = torch.min(torch.min(x), min_val)
+            max_val = torch.max(torch.max(x), max_val)
+        self.min_val = min_val
+        self.max_val = max_val
+        return x_orig
 
     @torch.jit.export
     def calculate_qparams(self):
@@ -700,7 +700,7 @@ class RecordingObserver(_ObserverBase):
 class NoopObserver(Observer):
     r"""
     Observer that doesn't do anything and just passes its configuration to the
-    quantized module's ``.from_float()`.
+    quantized module's ``.from_float()``.
 
     Primarily used for quantization to float16 which doesn't require determining
     ranges.
