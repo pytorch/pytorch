@@ -71,6 +71,22 @@ inline Tensor multilabel_soft_margin_loss(
   return ret;
 }
 
+inline Tensor triplet_margin_loss(
+    const Tensor& anchor,
+    const Tensor& positive,
+    const Tensor& negative,
+    const TripletMarginLossOptions& options = {}) {
+  return torch::triplet_margin_loss(
+      anchor,
+      positive,
+      negative,
+      options.margin(),
+      options.p(),
+      options.eps(),
+      options.swap(),
+      options.reduction());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

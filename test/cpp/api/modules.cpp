@@ -1023,6 +1023,20 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
   ASSERT_EQ(input2.sizes(), input2.grad().sizes());
 }
 
+TEST_F(ModulesTest, TripletMarginLoss) {
+  TripletMarginLoss loss(TripletMarginLossOptions().margin(1.0));
+  auto anchor = torch::tensor({{3., 3.}}, torch::requires_grad());
+  auto positive = torch::tensor({{2., 2.}}, torch::requires_grad());
+  auto negative = torch::tensor({{0., 0.}}, torch::requires_grad());
+  auto output = loss->forward(anchor, positive, negative);
+  auto expected = torch::tensor({0.}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
@@ -1217,6 +1231,18 @@ TEST_F(ModulesTest, Softmax) {
   }
 }
 
+TEST_F(ModulesTest, Softmin) {
+  Softmin m(/*dim=*/1);
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = m(input);
+  auto sum = torch::sum(torch::exp(-input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::exp(-input[i]) / sum[i];
+    ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
 TEST_F(ModulesTest, LogSoftmax) {
   LogSoftmax m(/*dim=*/1);
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
@@ -1226,6 +1252,24 @@ TEST_F(ModulesTest, LogSoftmax) {
   for (int i = 0; i < 2; i++) {
     auto expected = torch::log(torch::exp(input[i]) / sum[i]);
     ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
+TEST_F(ModulesTest, Softmax2d) {
+  Softmax2d m;
+  auto input = torch::arange(24, torch::kFloat).reshape({1, 2, 3, 4});
+  auto output = m(input);
+  auto sum = torch::sum(torch::exp(input), 1);
+
+  for (int i = 0; i < 1; i++) {
+    for (int j = 0; j < 2; j++) {
+      for (int k = 0; k < 3; k++) {
+        for (int l = 0; l < 4; l++) {
+          auto expected = torch::exp(input[i][j][k][l]) / sum[i][k][l];
+          ASSERT_TRUE(torch::allclose(output[i][j][k][l], expected));
+        }
+      }
+    }
   }
 }
 
@@ -1352,6 +1396,71 @@ TEST_F(ModulesTest, Softplus) {
       ASSERT_EQ(y.ndimension(), 3);
       ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
       ASSERT_TRUE(torch::allclose(y, y_exp));
+    }
+  }
+}
+
+TEST_F(ModulesTest, Softshrink) {
+  const auto size = 3;
+  for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
+    Softshrink model {/*lambda=*/lambda};
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
+TEST_F(ModulesTest, Softsign) {
+  Softsign model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x / (1 + x.abs());
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, Tanh) {
+  Tanh model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = (x.exp() - (-x).exp()) / (x.exp() + (-x).exp());
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, Tanhshrink) {
+  Tanhshrink model;
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x - x.tanh();
+  auto y = model(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(ModulesTest, Threshold) {
+  const auto size = 3;
+  for (const auto threshold : {0.5, 1.0, 2.0}) {
+    for (const auto value : {0.5, 1.0, 2.0}) {
+      for (const auto inplace : {false, true}) {
+        Threshold model {ThresholdOptions(threshold, value).inplace(inplace)};
+        auto x = torch::linspace(-3.0, 3.0, 61);
+        x.resize_({size, size, size});
+        auto y_exp = (x <= threshold) * value + (x > threshold) * x;
+        auto y = model(x);
+
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+      }
     }
   }
 }
@@ -1552,6 +1661,12 @@ TEST_F(ModulesTest, PrettyPrintCosineEmbeddingLoss) {
       "torch::nn::CosineEmbeddingLoss(margin=0.25)");
 }
 
+TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
+  ASSERT_EQ(
+      c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
+      "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
+}
+
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
   ASSERT_EQ(
       c10::str(CosineSimilarity()),
@@ -1648,9 +1763,17 @@ TEST_F(ModulesTest, PrettyPrintSoftmax) {
   ASSERT_EQ(c10::str(Softmax(SoftmaxOptions(1))), "torch::nn::Softmax(dim=1)");
 }
 
+TEST_F(ModulesTest, PrettyPrintSoftmin) {
+  ASSERT_EQ(c10::str(Softmin(SoftminOptions(1))), "torch::nn::Softmin(dim=1)");
+}
+
 TEST_F(ModulesTest, PrettyPrintLogSoftmax) {
   ASSERT_EQ(c10::str(LogSoftmax(LogSoftmaxOptions(1))),
             "torch::nn::LogSoftmax(dim=1)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftmax2d) {
+  ASSERT_EQ(c10::str(Softmax2d()), "torch::nn::Softmax2d()");
 }
 
 TEST_F(ModulesTest, PrettyPrintPReLU) {
@@ -1699,4 +1822,30 @@ TEST_F(ModulesTest, PrettyPrintSoftplus) {
   ASSERT_EQ(c10::str(Softplus(
       SoftplusOptions().beta(0.24).threshold(42.42))),
     "torch::nn::Softplus(beta=0.24, threshold=42.42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftshrink) {
+  ASSERT_EQ(c10::str(Softshrink()), "torch::nn::Softshrink(0.5)");
+  ASSERT_EQ(c10::str(Softshrink(SoftshrinkOptions(42.42))),
+            "torch::nn::Softshrink(42.42)");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftsign) {
+  ASSERT_EQ(c10::str(Softsign()), "torch::nn::Softsign()");
+}
+
+TEST_F(ModulesTest, PrettyPrintTanh) {
+  ASSERT_EQ(c10::str(Tanh()), "torch::nn::Tanh()");
+}
+
+TEST_F(ModulesTest, PrettyPrintTanhshrink) {
+  ASSERT_EQ(c10::str(Tanhshrink()), "torch::nn::Tanhshrink()");
+}
+
+TEST_F(ModulesTest, PrettyPrintThreshold) {
+  ASSERT_EQ(c10::str(Threshold(24.24, 42.42)),
+    "torch::nn::Threshold(threshold=24.24, value=42.42)");
+  ASSERT_EQ(c10::str(Threshold(
+      ThresholdOptions(42.42, 24.24).inplace(true))),
+    "torch::nn::Threshold(threshold=42.42, value=24.24, inplace=true)");
 }

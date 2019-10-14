@@ -8,6 +8,8 @@ namespace nn {
 L1LossImpl::L1LossImpl(const torch::nn::L1LossOptions& options_)
     : options(options_) {}
 
+void L1LossImpl::reset() {}
+
 void L1LossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::L1Loss";
 }
@@ -21,6 +23,8 @@ Tensor L1LossImpl::forward(const Tensor& input, const Tensor& target) {
 HingeEmbeddingLossImpl::HingeEmbeddingLossImpl(
     const HingeEmbeddingLossOptions& options_)
     : options(options_) {}
+
+void HingeEmbeddingLossImpl::reset() {}
 
 void HingeEmbeddingLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::HingeEmbeddingLoss(margin=" << options.margin() << ")";
@@ -38,7 +42,7 @@ MultiMarginLossImpl::MultiMarginLossImpl(
     const MultiMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
       reset();
-    }
+}
 
 void MultiMarginLossImpl::reset() {
   TORCH_CHECK((options.p() == 1) || (options.p() == 2), "only p == 1 and p == 2 supported");
@@ -65,6 +69,8 @@ Tensor MultiMarginLossImpl::forward(
 CosineEmbeddingLossImpl::CosineEmbeddingLossImpl(
     const CosineEmbeddingLossOptions& options_)
     : options(options_) {}
+
+void CosineEmbeddingLossImpl::reset() {}
 
 void CosineEmbeddingLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::CosineEmbeddingLoss(margin=" << options.margin() << ")";
@@ -96,6 +102,26 @@ Tensor MultiLabelSoftMarginLossImpl::forward(const Tensor& input, const Tensor& 
   return F::multilabel_soft_margin_loss(input,
     target,
     options);
+}
+
+// ============================================================================
+
+TripletMarginLossImpl::TripletMarginLossImpl(
+    const TripletMarginLossOptions& options_)
+    : options(options_) {}
+
+void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::TripletMarginLoss(margin=" << options.margin() << 
+            ", p=" << options.p() <<
+            ", eps=" << options.eps() << std::boolalpha <<
+            ", swap=" << options.swap() << ")";
+}
+
+Tensor TripletMarginLossImpl::forward(
+    const Tensor& anchor,
+    const Tensor& positive,
+    const Tensor& negative) {
+  return F::triplet_margin_loss(anchor, positive, negative, options);
 }
 
 } // namespace nn
