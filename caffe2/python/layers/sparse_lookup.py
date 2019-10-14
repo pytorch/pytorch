@@ -550,6 +550,6 @@ class SparseLookup(ModelLayer):
         if not self.support_8bit() and version in {'uint8rowwise',
                                                    'fused_uint8rowwise',
                                                    'fused_uint4rowwise'}:
-            version = 'fp16'
+            version = 'fp32'
 
         self._add_ops(net, version)

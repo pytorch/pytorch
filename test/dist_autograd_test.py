@@ -124,11 +124,6 @@ class DistAutogradTest(object):
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
 
-            # Ensure that the destination workerId is recorded on this context.
-            worker_ids = ctx._known_worker_ids()
-            self.assertEqual(len(worker_ids), 1)
-            self.assertEqual(dst_rank, worker_ids[0])
-
             # Retrieve the next functions in the graph.
             next_funcs = list(send_functions.values())[0].next_functions
             self.assertEqual(2, len(next_funcs))
@@ -178,7 +173,6 @@ class DistAutogradTest(object):
             )
             self.assertEqual(next_funcs[0][0], next_funcs[1][0])
 
-
         # autograd context should be cleaned up by now.
         with self.assertRaises(RuntimeError):
             ctx = dist_autograd._retrieve_context(context_id)
@@ -212,44 +206,6 @@ class DistAutogradTest(object):
                     self.assertEqual(tensors[i], next_funcs[i][0].variable)
                 else:
                     self.assertIsNone(next_funcs[i][0])
-
-            # Verify that the worker id has been recorded in the context
-            ctx = dist_autograd._current_context()
-            worker_ids = ctx._known_worker_ids()
-            self.assertEqual(len(worker_ids), 1)
-            dst_rank = (self.rank + 1) % self.world_size
-            self.assertEqual(worker_ids[0], dst_rank)
-
-    @dist_init
-    def test_worker_ids_recorded(self):
-        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
-        with dist_autograd.context() as context_id:
-            # if no tensors require grad, we do not add the send functions, so
-            # no worker ids should be recorded.
-            t1 = torch.ones(3, 3, requires_grad=False)
-            t2 = torch.zeros(3, 3, requires_grad=False)
-            for dst_rank in dst_ranks:
-                ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
-                rpc.rpc_sync(
-                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
-                )
-            # no worker ids should be recorded.
-            ctx = dist_autograd._current_context()
-            worker_ids = ctx._known_worker_ids()
-            self.assertEqual(len(worker_ids), 0)
-
-            # worker_ids should be recorded when tensors do require grad
-            t1.requires_grad = True
-            t2.requires_grad = True
-            for dst_rank in dst_ranks:
-                ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
-                rpc.rpc_sync(
-                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
-                )
-            # all worker_ids in dst_ranks should be recorded.
-            worker_ids = ctx._known_worker_ids()
-            self.assertEqual(len(worker_ids), len(dst_ranks))
-            self.assertEqual(set(worker_ids), dst_ranks)
 
     @dist_init
     def test_error_in_context(self):

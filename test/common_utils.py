@@ -32,6 +32,7 @@ import __main__
 import errno
 
 import expecttest
+import hashlib
 
 import torch
 import torch.cuda
@@ -1232,11 +1233,32 @@ def check_test_defined_in_running_script(test_case):
             test_case.id(), running_script_path, test_case_class_file)
 
 
-def load_tests(loader, tests, pattern):
-    set_running_script_path()
-    test_suite = unittest.TestSuite()
-    for test_group in tests:
-        for test in test_group:
-            check_test_defined_in_running_script(test)
-            test_suite.addTest(test)
-    return test_suite
+num_shards = os.environ.get('TEST_NUM_SHARDS', None)
+shard = os.environ.get('TEST_SHARD', None)
+if num_shards is not None and shard is not None:
+    num_shards = int(num_shards)
+    shard = int(shard)
+
+    def load_tests(loader, tests, pattern):
+        set_running_script_path()
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                check_test_defined_in_running_script(test)
+                name = test.id().split('.')[-1]
+                if name in THESE_TAKE_WAY_TOO_LONG:
+                    continue
+                hash_id = int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16)
+                if hash_id % num_shards == shard:
+                    test_suite.addTest(test)
+        return test_suite
+else:
+
+    def load_tests(loader, tests, pattern):
+        set_running_script_path()
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                check_test_defined_in_running_script(test)
+                test_suite.addTest(test)
+        return test_suite
