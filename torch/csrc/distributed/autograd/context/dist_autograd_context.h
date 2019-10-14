@@ -61,6 +61,9 @@ class TORCH_API DistAutogradContext {
  private:
   friend class DistEngine;
 
+  // Called once the future for an outstanding RPC has been invoked.
+  void outStandingRpcCallback(const rpc::Message& message);
+
   // Record that we would like to accumulate the provided gradient on the given
   // variable.
   void accumulateGrad(

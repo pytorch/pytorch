@@ -67,7 +67,10 @@ void DistEngine::computeDependencies(
 
   // Build the graph task and graph root.
   auto graphTask = std::make_shared<GraphTask>(
-      /* keep_graph */ false, /* create_graph */ false, /* depth */ 0);
+      /* keep_graph */ false,
+      /* create_graph */ false,
+      /* depth */ 0,
+      /* exit_on_error */ true);
 
   // Run BFS to traverse the graph locally. The roots of the graph are
   // GraphRoot and all send functions for this autograd context.

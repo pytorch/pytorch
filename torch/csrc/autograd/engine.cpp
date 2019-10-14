@@ -348,6 +348,10 @@ auto Engine::thread_on_exception(NodeTask& task, std::exception& e) -> void {
     }
     task.base_->exception_ = std::current_exception();
     task.base_->has_error_ = true;
+    if (task.base_->exit_on_error_) {
+      // Notify other threads if we are supposed to exit on errors.
+      task.base_->not_done_.notify_all();
+    }
   }
 }
 
@@ -480,16 +484,21 @@ static variable_list call_function(NodeTask& task) {
 auto Engine::evaluate_function(NodeTask& task) -> void {
   // If exec_info_ is not empty, we have to instrument the execution
   auto & exec_info_ = task.base_->exec_info_;
-  if (!exec_info_.empty()) {
-    auto & fn_info = exec_info_.at(task.fn_.get());
-    if (auto *capture_vec = fn_info.captures_.get()) {
-      // Lock mutex for writing to task.base_->captured_vars_
-      std::lock_guard<std::mutex> lock(task.base_->mutex_);
-      for (auto capture : *capture_vec) {
-        task.base_->captured_vars_[capture.output_idx_] = task.inputs_[capture.input_idx_];
+  {
+    // Lock mutex for writing to task.base_->captured_vars_ and looking up
+    // exec_info_.
+    std::lock_guard<std::mutex> lock(task.base_->mutex_);
+    if (!exec_info_.empty()) {
+      auto& fn_info = exec_info_.at(task.fn_.get());
+      if (auto* capture_vec = fn_info.captures_.get()) {
+        for (auto capture : *capture_vec) {
+          task.base_->captured_vars_[capture.output_idx_] =
+              task.inputs_[capture.input_idx_];
+        }
       }
+      if (!fn_info.needed_)
+        return;
     }
-    if (!fn_info.needed_) return;
   }
 
   // Switches to a function's CUDA stream (if applicable) before calling it
@@ -661,6 +670,11 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
       std::move(task), /* incrementOutstandingTasks */ false);
 }
 
+bool graphTaskCompleted(const GraphTask& graph_task) {
+  return graph_task.outstanding_tasks_.load() == 0 ||
+      (graph_task.exit_on_error_ && graph_task.has_error_.load());
+}
+
 variable_list Engine::execute_with_graph_task(
     GraphTask& graph_task,
     std::shared_ptr<Node> graph_root) {
@@ -673,9 +687,8 @@ variable_list Engine::execute_with_graph_task(
   // Not a worker
   if (worker_device == NO_DEVICE) {
     // Wait for all tasks to complete
-    graph_task.not_done_.wait(lock, [&graph_task]{
-      return graph_task.outstanding_tasks_.load() == 0;
-    });
+    graph_task.not_done_.wait(
+        lock, [&graph_task] { return graphTaskCompleted(graph_task); });
   } else {
     graph_task.owner_ = worker_device;
     ++total_depth;
@@ -683,9 +696,8 @@ variable_list Engine::execute_with_graph_task(
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
       add_thread_pool_task(&graph_task);
-      graph_task.not_done_.wait(lock, [&graph_task]{
-        return graph_task.outstanding_tasks_.load() == 0;
-      });
+      graph_task.not_done_.wait(
+          lock, [&graph_task] { return graphTaskCompleted(graph_task); });
     } else {
       // Get back to work while we wait for our new graph_task to
       // complete!

@@ -1,12 +1,15 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import sys
 import time
 import unittest
 
 import torch
+import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-from dist_utils import INIT_METHOD_TEMPLATE, dist_init
+from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
+from torch.distributed.rpc import RpcBackend
 
 import threading
 
@@ -357,7 +360,10 @@ class DistAutogradTest(object):
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
-            t3 = SimulateBackwardError.apply(t1)
+
+            # Perform some ops before error simulation.
+            tmp = (t1 + t2) * (t1 + t2)
+            t3 = SimulateBackwardError.apply(tmp)
 
             # Run multiple round trips across different nodes and verify the
             # original node receives an error thrown on a node deep in the chain.
@@ -374,8 +380,9 @@ class DistAutogradTest(object):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @dist_init
-    @unittest.skip("Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
+    @dist_init(sync_at_shutdown=False)
+    @unittest.skipIf(TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP,
+                     "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     def test_backward_node_failure(self):
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
@@ -384,7 +391,11 @@ class DistAutogradTest(object):
             res = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
                                args=(t1, t2))
 
-            if self.rank == 0:
+            # Wait for all RPCs to be done.
+            dist.barrier()
+
+            # Kill all odd rank nodes.
+            if self.rank % 2 == 0:
                 # Wait a bit for all other nodes to die.
                 time.sleep(3)
                 with self.assertRaises(RuntimeError):
@@ -456,6 +467,17 @@ class DistAutogradTest(object):
                 r4 = self._exec_func(exec_mode, torch.div, t1, t2).sum()
 
                 local_grads = self._verify_backwards(exec_mode, [r1, r2, r3, r4], context_id, local_grads, t1, t2)
+
+    @dist_init
+    def test_backward_different_dtypes(self):
+        local_grads = None
+        t1 = torch.rand((3, 3), requires_grad=True, dtype=torch.float32)
+        t2 = torch.rand((3, 3), requires_grad=True, dtype=torch.float64)
+        for exec_mode in [ExecMode.LOCAL, ExecMode.REMOTE]:
+            with dist_autograd.context() as context_id:
+                loss = self._exec_func(exec_mode, torch.add, t1, t2).sum()
+
+                local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
 
 
 if __name__ == '__main__':

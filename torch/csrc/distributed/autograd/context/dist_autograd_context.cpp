@@ -1,9 +1,29 @@
+#include <functional>
+
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
 #include <c10/util/Exception.h>
 
 namespace torch {
 namespace distributed {
 namespace autograd {
+
+namespace {
+
+// Autograd function used to enqueue an error on the local autograd engine.
+class ErrorFunc : public torch::autograd::Node {
+ public:
+  explicit ErrorFunc(const std::exception& error) : error_(error) {}
+
+  torch::autograd::variable_list apply(
+      torch::autograd::variable_list&& grads) override {
+    throw error_;
+  }
+
+ private:
+  std::exception error_;
+};
+
+} // anonymous namespace.
 
 DistAutogradContext::DistAutogradContext(int64_t contextId)
     : contextId_(contextId) {}
@@ -83,8 +103,33 @@ void DistAutogradContext::setGraphTask(
 
 void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
+  futureMessage->addCallback(std::bind(
+      &DistAutogradContext::outStandingRpcCallback,
+      this,
+      std::placeholders::_1));
   std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
+}
+
+void DistAutogradContext::outStandingRpcCallback(const rpc::Message& message) {
+  if (message.type() == rpc::MessageType::EXCEPTION) {
+    // If we have an error, let the local autograd engine know about it.
+    std::string err(message.payload().begin(), message.payload().end());
+    auto exception = std::runtime_error(err);
+
+    // Enqueue 'ErrorFunc' on the local autograd engine.
+    auto& localEngine = torch::autograd::Engine::get_default_engine();
+    auto errorFunc = std::make_shared<ErrorFunc>(exception);
+
+    // Increment out standing tasks for this function and set appropriate
+    // exec_info_ for this function to execute.
+    graphTask_->outstanding_tasks_++;
+    // Lock mutex for writing to exec_info_.
+    std::lock_guard<std::mutex> lock(graphTask_->mutex_);
+    graphTask_->exec_info_[errorFunc.get()].needed_ = true;
+    localEngine.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
+        graphTask_.get(), errorFunc, torch::autograd::InputBuffer(0)));
+  }
 }
 
 void DistAutogradContext::clearAndWaitForOutstandingRpcs() {

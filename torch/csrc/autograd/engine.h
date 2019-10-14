@@ -94,13 +94,22 @@ struct GraphTask {
     return exec_info_.empty();
   }
 
-  GraphTask(bool keep_graph, bool grad_mode, int reentrant_depth)
+  // Whether or not to stop execution for this GraphTask when an error is
+  // encountered.
+  bool exit_on_error_;
+
+  GraphTask(
+      bool keep_graph,
+      bool grad_mode,
+      int reentrant_depth,
+      bool exit_on_error = false)
       : has_error_(false),
         outstanding_tasks_(0),
         keep_graph_(keep_graph),
         grad_mode_(grad_mode),
         owner_(NO_DEVICE),
-        reentrant_depth_(reentrant_depth) {}
+        reentrant_depth_(reentrant_depth),
+        exit_on_error_(exit_on_error) {}
 };
 
 struct NodeTask {
