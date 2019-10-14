@@ -314,7 +314,7 @@ Examples::
         return input * scale.align_as(input)
 
     >>> num_channels = 3
-    >>> scale = torch.randn(num_channels, names='C')
+    >>> scale = torch.randn(num_channels, names=('C',))
     >>> imgs = torch.rand(32, 128, 128, num_channels, names=('N', 'H', 'W', 'C'))
     >>> more_imgs = torch.rand(32, num_channels, 128, 128, names=('N', 'C', 'H', 'W'))
     >>> videos = torch.randn(3, num_channels, 128, 128, 128, names=('N', 'C', 'H', 'W', 'D'))
