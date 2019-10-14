@@ -145,7 +145,7 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
   {
     TestModel model;
     model.register_parameter("undefined_tensor", Tensor(), /*requires_grad=*/false);
-    ASSERT_FALSE(model->named_parameters()["undefined_tensor"].defined());
+    ASSERT_FALSE(model.named_parameters()["undefined_tensor"].defined());
   }
   {
     std::stringstream buffer;
@@ -153,7 +153,7 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
 
     TestModel model;
     model.register_parameter("undefined_tensor", Tensor());
-    ASSERT_FALSE(model->named_parameters()["undefined_tensor"].defined());
+    ASSERT_FALSE(model.named_parameters()["undefined_tensor"].defined());
 
     ASSERT_EQ(
       count_substr_occurrences(
