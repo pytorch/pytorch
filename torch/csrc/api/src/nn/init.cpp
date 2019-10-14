@@ -35,14 +35,14 @@ struct Fan {
   int64_t out;
 };
 
-#define COMPUTE_NONLINEARITY_ENUM(name) \
+#define COMPUTE_NONLINEARITY_ENUM(name) /* NOLINT(cppcoreguidelines-macro-usage) */ \
 case Nonlinearity::name: \
   TORCH_WARN( \
     "The enum value `torch::nn::init::Nonlinearity::", #name, "` is deprecated and will be removed in 1.5. ", \
     "Please use `torch::k", #name, "` instead."); \
   return torch::k##name;
 
-#define COMPUTE_FANMODE_ENUM(name) \
+#define COMPUTE_FANMODE_ENUM(name) /* NOLINT(cppcoreguidelines-macro-usage) */ \
 case FanMode::name: \
   TORCH_WARN( \
     "The enum value `torch::nn::init::FanMode::", #name, "` is deprecated and will be removed in 1.5. ", \
