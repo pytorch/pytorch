@@ -36,7 +36,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, load_tests, default_floating_dtype
+    get_function_arglist, load_tests
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
@@ -2268,58 +2268,6 @@ class TestNN(NNTestCase):
             self.assertEqual(embedding.weight.device.type, 'cuda')
             embedding.to('cpu')
             self.assertEqual(embedding.weight.device.type, 'cpu')
-
-    def test_embedding_padding_idx(self):
-        embedding = nn.Embedding(10, 20, padding_idx=0)
-        input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long)
-        output = embedding(input)
-        self.assertEqual(output[0][0].sum(), 0)
-        self.assertEqual(output[1][2].sum(), 0)
-
-        embedding = nn.Embedding(10, 20, padding_idx=0, sparse=True)
-        input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long)
-        output = embedding(input)
-        self.assertEqual(output[0][0].sum(), 0)
-        self.assertEqual(output[1][2].sum(), 0)
-
-        # negative indexing check for padding_idx
-        # padding_idx=-2, num_embeddings=10 ==> index 8 padded
-        embedding = nn.Embedding(10, 20, padding_idx=-2)
-        input = torch.tensor([[0, 2, 8, 5], [4, 8, 0, 9]], dtype=torch.long)
-        output = embedding(input)
-        self.assertEqual(output[0][2].sum(), 0)
-        self.assertEqual(output[1][1].sum(), 0)
-
-        embedding = nn.Embedding(10, 20, padding_idx=-2, sparse=True)
-        input = torch.tensor([[0, 2, 8, 5], [4, 8, 0, 9]], dtype=torch.long)
-        output = embedding(input)
-        self.assertEqual(output[0][2].sum(), 0)
-        self.assertEqual(output[1][1].sum(), 0)
-
-        # out of bounds check for padding_idx
-        self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)
-        self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=-25)
-
-        # test backward when input contains padding_idx
-        padding_idx = 0
-        embedding = nn.Embedding(5, 2, padding_idx=padding_idx)
-        for n in (1, 2):
-            for other_indices in ([], [1, 3], [2]):
-                indices = torch.tensor(other_indices + [padding_idx] * n, dtype=torch.long)
-                pre = embedding.weight[padding_idx].clone()
-                embedding(indices).sum().backward()
-                after = (embedding.weight + embedding.weight.grad)[padding_idx]
-                embedding.zero_grad()
-                self.assertEqual(after, pre)
-
-                # test double backward
-                emb_sum = embedding(indices).sum()
-                emb_grad = torch.autograd.grad(outputs=emb_sum, inputs=list(embedding.parameters()), retain_graph=True)
-                scalar = emb_grad[0].sum() + emb_sum
-                scalar.backward()
-                after = (embedding.weight + embedding.weight.grad)[padding_idx]
-                embedding.zero_grad()
-                self.assertEqual(after, pre)
 
     def test_embedding_max_norm(self):
         embedding = nn.Embedding(22, 5, max_norm=1.0)
@@ -5367,7 +5315,7 @@ class TestNN(NNTestCase):
             self.assertEqual(output1, output2)
             self.assertEqual(hidden1, hidden2)
 
-    def _test_RNN_cpu_vs_cudnn(self, dropout):
+    def _test_RNN_cpu_vs_cudnn(self, dropout, dtype=torch.double):
 
         def forward_backward(cuda, rnn, input_val, hx_val, grad_output, grad_hy, weights_val):
             is_lstm = isinstance(rnn, nn.LSTM)
@@ -5445,11 +5393,11 @@ class TestNN(NNTestCase):
 
                 num_directions = 2 if bidirectional else 1
                 if batch_first:
-                    input_val = torch.randn(batch, seq_length, input_size)
-                    grad_output = torch.randn(batch, seq_length, hidden_size * num_directions)
+                    input_val = torch.randn(batch, seq_length, input_size, dtype=dtype)
+                    grad_output = torch.randn(batch, seq_length, hidden_size * num_directions, dtype=dtype)
                 else:
-                    input_val = torch.randn(seq_length, batch, input_size)
-                    grad_output = torch.randn(seq_length, batch, hidden_size * num_directions)
+                    input_val = torch.randn(seq_length, batch, input_size, dtype=dtype)
+                    grad_output = torch.randn(seq_length, batch, hidden_size * num_directions, dtype=dtype)
 
                 if not contig:
                     grad_output = make_noncontig(grad_output)
@@ -5457,8 +5405,8 @@ class TestNN(NNTestCase):
                     input_var = make_noncontig(input_val)
                     hx_val = make_noncontig(hx_val)
 
-                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size)
-                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
+                hx_val = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
+                grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size, dtype=dtype)
 
                 if variable_len:
                     lengths = [7, 5, 5, 2, 1, 1]
@@ -5492,12 +5440,12 @@ class TestNN(NNTestCase):
                 compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
         for nonlinearity in ('tanh', 'relu'):
-            hx_val = torch.randn(num_layers, batch, hidden_size)
-            input_val = torch.randn(seq_length, batch, input_size)
+            hx_val = torch.randn(num_layers, batch, hidden_size, dtype=dtype)
+            input_val = torch.randn(seq_length, batch, input_size, dtype=dtype)
             grad_output = torch.randn(
-                seq_length, batch, hidden_size * num_directions)
+                seq_length, batch, hidden_size * num_directions, dtype=dtype)
             grad_hy = torch.randn(
-                num_layers * num_directions, batch, hidden_size)
+                num_layers * num_directions, batch, hidden_size, dtype=dtype)
 
             rnn = nn.RNN(input_size, hidden_size, num_layers, bias=bias, nonlinearity=nonlinearity)
             outputs_cpu = forward_backward(False, rnn, input_val, hx_val, grad_output, grad_hy, rnn.all_weights)
@@ -5508,9 +5456,13 @@ class TestNN(NNTestCase):
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @default_floating_dtype(torch.float)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         self._test_RNN_cpu_vs_cudnn(0)
+
+    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    def test_RNN_cpu_vs_cudnn_with_dropout(self):
+        # Because of dropout randomness, can only compare dropout=0 and dropout=1
+        self._test_RNN_cpu_vs_cudnn(1)
 
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cudnn_weight_norm(self):
@@ -5532,12 +5484,6 @@ class TestNN(NNTestCase):
         # remove weight norm
         m = torch.nn.utils.remove_weight_norm(m, name=name)
         self.assertEqual(m(input), expected_output)
-
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
-    @default_floating_dtype(torch.float)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
-    def test_RNN_cpu_vs_cudnn_with_dropout(self):
-        # Because of dropout randomness, can only compare dropout=0 and dropout=1
-        self._test_RNN_cpu_vs_cudnn(1)
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):
@@ -8807,6 +8753,58 @@ class TestNNDeviceType(NNTestCase):
         tensorTwice[0, 3] = 8
         self.assertEqual(embedding.weight.grad._indices(), tensorTwice)
         self.assertEqual(embedding.weight.grad._values(), onesTwice)
+
+    def test_embedding_padding_idx(self, device):
+        embedding = nn.Embedding(10, 20, padding_idx=0).to(device)
+        input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long).to(device)
+        output = embedding(input)
+        self.assertEqual(output[0][0].sum(), 0)
+        self.assertEqual(output[1][2].sum(), 0)
+
+        embedding = nn.Embedding(10, 20, padding_idx=0, sparse=True).to(device)
+        input = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.long).to(device)
+        output = embedding(input)
+        self.assertEqual(output[0][0].sum(), 0)
+        self.assertEqual(output[1][2].sum(), 0)
+
+        # negative indexing check for padding_idx
+        # padding_idx=-2, num_embeddings=10 ==> index 8 padded
+        embedding = nn.Embedding(10, 20, padding_idx=-2).to(device)
+        input = torch.tensor([[0, 2, 8, 5], [4, 8, 0, 9]], dtype=torch.long).to(device)
+        output = embedding(input)
+        self.assertEqual(output[0][2].sum(), 0)
+        self.assertEqual(output[1][1].sum(), 0)
+
+        embedding = nn.Embedding(10, 20, padding_idx=-2, sparse=True).to(device)
+        input = torch.tensor([[0, 2, 8, 5], [4, 8, 0, 9]], dtype=torch.long).to(device)
+        output = embedding(input)
+        self.assertEqual(output[0][2].sum(), 0)
+        self.assertEqual(output[1][1].sum(), 0)
+
+        # out of bounds check for padding_idx
+        self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)
+        self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=-25)
+
+        # test backward when input contains padding_idx
+        padding_idx = 0
+        embedding = nn.Embedding(5, 2, padding_idx=padding_idx).to(device)
+        for n in (1, 2, 1000):  # Need large N to trigger all the methods we have implemented
+            for other_indices in ([], [1, 3], [2]):
+                indices = torch.tensor(other_indices + [padding_idx] * n, dtype=torch.long).to(device)
+                pre = embedding.weight[padding_idx].clone()
+                embedding(indices).sum().backward()
+                after = (embedding.weight + embedding.weight.grad)[padding_idx]
+                embedding.zero_grad()
+                self.assertEqual(after, pre)
+
+                # test double backward
+                emb_sum = embedding(indices).sum()
+                emb_grad = torch.autograd.grad(outputs=emb_sum, inputs=list(embedding.parameters()), retain_graph=True)
+                scalar = emb_grad[0].sum() + emb_sum
+                scalar.backward()
+                after = (embedding.weight + embedding.weight.grad)[padding_idx]
+                embedding.zero_grad()
+                self.assertEqual(after, pre)
 
     @dtypesIfCUDA(torch.half, torch.float)
     @dtypes(torch.float)
