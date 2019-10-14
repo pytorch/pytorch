@@ -91,7 +91,7 @@ MultiLabelSoftMarginLossImpl::MultiLabelSoftMarginLossImpl(
 }
 
 void MultiLabelSoftMarginLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::MultiLabelSoftMarginLoss";
+  stream << "torch::nn::MultiLabelSoftMarginLoss()";
 }
 
 void MultiLabelSoftMarginLossImpl::reset() {
