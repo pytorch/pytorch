@@ -52,7 +52,9 @@ Memory management
 .. autofunction:: reset_max_memory_allocated
 .. autofunction:: memory_reserved
 .. autofunction:: max_memory_reserved
-.. autofunction:: reset_max_memory_reserved
+.. FIXME The following doesn't seem to exist. Is it supposed to?
+   https://github.com/pytorch/pytorch/issues/27785
+   .. autofunction:: reset_max_memory_reserved
 .. autofunction:: memory_cached
 .. autofunction:: max_memory_cached
 .. autofunction:: reset_max_memory_cached

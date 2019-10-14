@@ -6,13 +6,14 @@
 #include <torch/csrc/distributed/rpc/types.h>
 
 #include <algorithm>
+#include <cctype>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
 // A globally unique ID to identify an RpcAgent
-struct WorkerInfo {
+struct TORCH_API WorkerInfo {
   WorkerInfo(std::string name, int id)
       : WorkerInfo(std::move(name), (worker_id_t)id) {
     TORCH_CHECK(
@@ -50,7 +51,7 @@ struct WorkerInfo {
 // will invoke the given ``RequestCallback`` to process received requests. It
 // should immediately become ready to serve request and accept response after
 // construction.
-class RpcAgent {
+class TORCH_API RpcAgent {
  public:
   // `WorkerInfo` is the globally unique identifier for this RpcAgent instance.
   // It contains a ``name_`` field and an ``id_`` field. ``name_`` is the
@@ -97,10 +98,17 @@ class RpcAgent {
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
+  static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
+
+  static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
+
  protected:
   const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
+
+ private:
+  static std::shared_ptr<RpcAgent> defaultRpcAgent_;
 };
 
 } // namespace rpc
