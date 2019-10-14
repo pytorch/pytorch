@@ -22,6 +22,7 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/MemoryFormatUtils.h>
 
 namespace at {
 namespace native {
@@ -191,9 +192,9 @@ template <typename scalar_t>
 Tensor median_cuda_template(const Tensor& self) {
   TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
   if (self.dim() == 0 && self.numel() == 1) {
-    return self.clone();
+    return clone_if_possible_with_memory_format(self);
   }
-  auto self_copy = self.clone().view(-1);
+  auto self_copy = clone_if_possible_with_memory_format(self).view(-1);
   auto values = at::empty({1}, self.options());
   auto indices = at::empty({1}, self.options().dtype(kLong));
   TORCH_CHECK(
