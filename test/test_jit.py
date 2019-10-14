@@ -6,6 +6,9 @@ import torch
 # JIT tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
+from jit.test_recursive_script import TestRecursiveScript
+TestRecursiveScript = TestRecursiveScript
+
 # Torch
 from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
@@ -28,10 +31,10 @@ from torch.quantization import QConfig
 from torch.quantization._quantize_script import PackedParams
 
 # Testing utils
+import jit_utils
 from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    skipIfRocm, skipIfNoLapack, suppress_warnings, load_tests, IS_SANDCASTLE, \
-    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    default_floating_dtype
+    skipIfRocm, skipIfNoLapack, suppress_warnings, IS_SANDCASTLE, \
+    freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, enable_profiling_mode, do_input_map, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -68,10 +71,6 @@ import types
 import unittest
 import warnings
 import zipfile
-
-# load_tests from common_utils is used to automatically filter tests for
-# sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
 
 try:
     import torchvision
@@ -350,13 +349,16 @@ class TestJit(JitTestCase):
         torch.jit.trace(decision, (torch.rand(3, 4), torch.tensor([True], dtype=torch.bool)), check_trace=True)
 
     def test_restore_device(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, cpu_device_str):
+                super(M, self).__init__()
+                self.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
+                                       device=cpu_device_str))
+                self.b0 = torch.tensor([0.9], dtype=torch.float,
+                                       device=cpu_device_str)
+
         # main purpose is checking map_location works
-        m = torch.jit.ScriptModule()
-        cpu_device_str = 'cpu'
-        m.p0 = nn.Parameter(torch.tensor([0.3], dtype=torch.float,
-                                         device=cpu_device_str))
-        m.register_buffer('b0', torch.tensor([0.9], dtype=torch.float,
-                                             device=cpu_device_str))
+        m = M("cpu")
         m2 = self.getExportImportCopy(m)
         self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
         self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
@@ -380,7 +382,7 @@ class TestJit(JitTestCase):
     def test_restore_device_cuda(self):
         class MyModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(MyModule, self).__init__(False)
+                super(MyModule, self).__init__()
                 self.register_buffer('b0', torch.randn(1, 3))
                 self.p0 = nn.Parameter(torch.randn(2, 3))
 
@@ -423,10 +425,14 @@ class TestJit(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_restore_shared_storage_on_cuda(self):
-        whole_tensor = torch.randn(4, 5, dtype=torch.float, device='cpu')
-        m = torch.jit.ScriptModule()
-        m.p0 = nn.Parameter(whole_tensor.narrow(0, 0, 1))
-        m.register_buffer('b0', whole_tensor.narrow(0, 3, 1))
+        class Foo(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Foo, self).__init__()
+                whole_tensor = torch.randn(4, 5, dtype=torch.float, device='cpu')
+                self.p0 = nn.Parameter(whole_tensor.narrow(0, 0, 1))
+                self.register_buffer('b0', whole_tensor.narrow(0, 3, 1))
+
+        m = Foo()
         m2 = self.getExportImportCopy(m, map_location=torch.device('cuda:0'))
         self.assertEqual(tuple(m.parameters()), tuple(m2.parameters()))
         self.assertEqual(tuple(m.buffers()), tuple(m2.buffers()))
@@ -1028,6 +1034,10 @@ graph(%x : Tensor,
 
         def test_module(module, relu_call, num_observers):
             m = torch.jit.script(module())
+            # TODO: this is because right-now the InsertObservers is in-place.
+            # When we change the implementation to clone the module before
+            # inserting observers, we can remove this copy
+            m = m.copy()
             observer = torch.jit.script(Observer())
             qconfig_dict = {
                 '':
@@ -2366,8 +2376,6 @@ graph(%Ra, %Rb):
         with self.assertRaises(AttributeError):
             linear_submodule.in_features
         linear_submodule.weight
-        with self.assertRaises(RuntimeError):
-            traced_model.asdf = 4
         linear_submodule.weight = nn.Parameter(torch.randn(linear_submodule.weight.shape))
         with self.assertRaises(RuntimeError):
             del linear_submodule.weight
@@ -3375,6 +3383,94 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+    def test_set_attribute_through_optional(self):
+        class A(torch.nn.Module):
+            __annotations__ = {"x": Optional[torch.Tensor]}
+
+            def __init__(self):
+                super(A, self).__init__()
+                self.x = None
+
+            @torch.jit.ignore
+            def foo(self):
+                if self.x is None:
+                    self.x = torch.tensor([3])
+                return self.x
+
+            def forward(self, x):
+                a = self.foo()
+                return x + 1
+
+        m = torch.jit.script(A())
+        self.assertEqual(m.x, None)
+        m(torch.rand(1))
+        self.assertEqual(m.x, torch.tensor([3]))
+
+    def test_mutate_constant(self):
+        class M(torch.jit.ScriptModule):
+            __constants__ = ["foo"]
+
+            def __init__(self, foo):
+                super(M, self).__init__()
+                self.foo = foo
+
+        m = M(5)
+        with self.assertRaises(AttributeError):
+            m.foo = 6
+
+
+    def test_class_attribute(self):
+        class M(torch.jit.ScriptModule):
+            FOO = 0
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.foo = self.FOO
+        m = M()
+        self.assertEqual(m.foo, M.FOO)
+
+    def test_class_attribute_in_script(self):
+        class M(torch.jit.ScriptModule):
+            FOO = 0
+
+            def __init__(self):
+                super(M, self).__init__()
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.FOO
+        with self.assertRaises(RuntimeError):
+            M()
+
+    def test_not_initialized_err(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                self.foo = torch.rand(2, 3)
+        with self.assertRaises(RuntimeError):
+            M()
+
+    def test_attribute_in_init(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__()
+                self.foo = torch.jit.Attribute(0.1, float)
+                # we should be able to use self.foo as a float here
+                assert 0.0 < self.foo
+        M()
+
+    def test_scriptable_fn_as_attr(self):
+        class M(torch.nn.Module):
+            def __init__(self, fn):
+                super(M, self).__init__()
+                self.fn = fn
+
+            def forward(self, x):
+                return self.fn(x)
+
+        m = M(F.sigmoid)
+        inp = torch.rand(2, 3)
+        self.checkModule(m, (inp, ))
+
     def test_sequence_parsing(self):
         tests = [
             ("return [x, x,]", True),
@@ -3400,6 +3496,7 @@ def foo(x):
                 cu.define(full)
 
     def test_namedtuple_python(self):
+        global MyTuple, MyMod  # see [local resolution in python]
         MyTuple = namedtuple('MyTuple', ['a'])
 
         @torch.jit.unused
@@ -3425,10 +3522,13 @@ def foo(x):
                 return MyTuple(1)
 
             def forward(self, x):
-                return self.fn()
+                if True:
+                    return MyTuple(torch.rand(2, 3))
+                else:
+                    return self.fn()
 
-        mod = torch.jit.script(MyMod())
-        FileCheck().check_dag("NamedTuple").check_dag("Exception").run(mod.forward.graph)
+        # shouldn't throw a type error
+        torch.jit.script(MyMod())
 
     def test_eval_python(self):
         def _test(m):
@@ -3763,6 +3863,9 @@ def foo(x):
 
     def test_training_param(self):
         class What(torch.jit.ScriptModule):
+            def __init__(self):
+                super(What, self).__init__()
+
             @torch.jit.script_method
             def forward(self, x):
                 # type: (int) -> int
@@ -4181,6 +4284,61 @@ def foo(xyz):
                 return x
         self.getExportImportCopy(C())
 
+    def test_custom_container_forward(self):
+        class Test(nn.Module):
+            __constants__ = ['embed']
+
+            def __init__(self, mod):
+                super().__init__()
+                self.embed = mod
+
+            def forward(self, x):
+                return self.embed(x)
+
+        class CustomSequential(nn.Sequential):
+            def forward(self, x):
+                ret_list = []
+                for mod in self.mods:
+                    ret_list.append(mod(x))
+                return ret_list
+
+        with self.assertRaisesRegex(Exception, "Sequential"):
+            scripted_obj = torch.jit.script(Test(CustomSequential()))
+
+        class CustomModuleList(nn.ModuleList):
+            def forward(self, x):
+                ret_list = []
+                for mod in self.mods:
+                    ret_list.append(mod(x))
+                return ret_list
+
+        with self.assertRaisesRegex(Exception, "ModuleList"):
+            scripted_obj = torch.jit.script(Test(CustomModuleList()))
+
+
+        class CustomModuleDict(nn.ModuleDict):
+            def forward(self, x):
+                ret_list = []
+                for mod in self.mods:
+                    ret_list.append(mod(x))
+                return ret_list
+
+        with self.assertRaisesRegex(Exception, "ModuleDict"):
+            scripted_obj = torch.jit.script(Test(CustomModuleDict()))
+
+
+        class TestScript(torch.jit.ScriptModule):
+            __constants__ = ['embed']
+
+            def __init__(self, mod):
+                super().__init__()
+                self.embed = mod
+
+            def forward(self, x):
+                return self.embed(x)
+
+        with self.assertRaisesRegex(Exception, "ModuleDict"):
+            scripted_obj = torch.jit.script(TestScript(CustomModuleDict()))
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -7890,7 +8048,6 @@ a")
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 0)
         self._test_binary_op_shape(['mul', 'div', 'add', 'sub'], 3)
 
-    @default_floating_dtype(torch.float)
     def test_wrapped_number(self):
         # Scalar's get converted to 'wrapped' tensors of default tensor type.
         # Wrapped tensors behave differently in certain promotion operations:
@@ -7902,6 +8059,7 @@ a")
             x = -10000.0
             result = x * torch.ones(1, dtype=torch.float)
             return result
+
         scripted = torch.jit.trace(foobar, (), check_trace=True)
 
     def test_no_dtype_shape(self):
@@ -8063,18 +8221,6 @@ a")
         self.assertEqual(o1, 1)
         self.assertEqual(o2, 3.5)
 
-    def test_script_module_fail_const(self):
-        class M(torch.jit.ScriptModule):
-            def __init__(self):
-                super(M, self).__init__()
-                self.b = False
-
-            @torch.jit.script_method
-            def forward(self):
-                return self.b
-        with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
-            M()
-
     def test_script_module_fail_exist(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -8083,9 +8229,10 @@ a")
             @torch.jit.script_method
             def forward(self, x):
                 return x + self.whatisgoingon
-        with self.assertRaisesRegex(RuntimeError, "module has no attribute"):
+        with self.assertRaisesRegex(RuntimeError, "Module 'M' has no attribute"):
             M()
 
+    @unittest.skip("[module dedupe] currently NoneType refinement on optional attributes doesn't work.")
     def test_script_module_none_exist_fail(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, my_optional):
@@ -8097,37 +8244,43 @@ a")
                 if self.my_optional is not None:
                     return torch.neg(x) + self.my_optional
                 return torch.neg(x)
-        with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
+        with self.assertRaisesRegex(RuntimeError, "has no attribute 'my_optional'"):
             x = torch.rand(3, 4)
             fb = M(None)
             fb(x)
 
-    def test_script_module_valid_consts(self):
-        tester = self
-
+    def test_script_module_invalid_consts(self):
         class Foo(torch.jit.ScriptModule):
-            __constants__ = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
+            __constants__ = ['invalid']
 
             def __init__(self):
                 super(Foo, self).__init__()
-                self.a = 1
-                self.b = 1.2
-                self.c = False
-                with tester.assertRaisesRegex(
-                        TypeError,
-                        "'Linear' object for attribute 'd' is not a valid constant"):
-                    self.d = [nn.Linear(3, 4)]
-                self.e = lambda x: x
-                self.f = [3, 4, 5]
-                tester.assertTrue(type(self.f) is tuple)
-                self.g = [3, (3, 4), 5]
-                with tester.assertRaisesRegex(TypeError, "not a valid constant"):
-                    self.h = type(1)
-                with tester.assertRaisesRegex(TypeError, "not a valid constant"):
-                    self.i = (3, 4, {})
+                self.invalid = [nn.Linear(3, 4)]
 
-        with torch.jit.optimized_execution(False):
-            f = Foo()
+        with self.assertRaisesRegex(
+                TypeError,
+                "'Linear' object for attribute 'invalid' is not a valid constant"):
+            Foo()
+
+        class Foo2(torch.jit.ScriptModule):
+            __constants__ = ['invalid']
+
+            def __init__(self):
+                super(Foo2, self).__init__()
+                self.invalid = type(1)
+
+        with self.assertRaisesRegex(TypeError, "not a valid constant"):
+            Foo2()
+
+        class Foo3(torch.jit.ScriptModule):
+            __constants__ = ['invalid']
+
+            def __init__(self):
+                super(Foo3, self).__init__()
+                self.invalid = (3, 4, {})
+
+        with self.assertRaisesRegex(TypeError, "not a valid constant"):
+            Foo3()
 
     def test_script_module_param_buffer_mutation(self):
         # TODO: add param mutation test case after JIT support it
@@ -8289,21 +8442,8 @@ a")
                     print(1)
                 return 4
 
-        with self.assertRaisesRegex(RuntimeError, "did you forget to add it __constants__"):
+        with self.assertRaisesRegex(RuntimeError, "has no attribute 'mods'"):
             M()
-
-        # Specialized error for Tensors
-        class S(torch.jit.ScriptModule):
-            def __init__(self):
-                super(S, self).__init__()
-                self.tensor_constant = torch.ones(2)
-
-            @torch.jit.script_method
-            def forward(self):
-                return self.tensor_constant + 2
-
-        with self.assertRaisesRegex(RuntimeError, "Tensors must be added to a module as a buffer or parameter"):
-            S()
 
     class DerivedStateModule(torch.jit.ScriptModule):
         def __init__(self):
@@ -8559,7 +8699,7 @@ a")
             m = M()
             o = m(i)
             v = i
-            for sub in m.mods:
+            for sub in m.mods._modules.values():
                 v = sub(v)
             self.assertEqual(o, v)
 
@@ -9450,7 +9590,7 @@ a")
                 y = self.baz(x)
                 return x
 
-        with self.assertRaisesRegex(RuntimeError, "Expected at most 1 arguments but found 2"):
+        with self.assertRaisesRegex(RuntimeError, "Expected at most 2 arguments but found 3"):
             ModuleTooMany()
         with self.assertRaisesRegex(RuntimeError, "Argument 1 not provided"):
             ModuleTooFew()
@@ -9745,6 +9885,7 @@ a")
         self.assertEqual(output_orig, output_import)
         self.assertEqual(grad_orig, grad_import)
 
+
     def test_compile_module_with_constant(self):
         class Double(nn.Module):
             def __init__(self, downsample=None):
@@ -9794,7 +9935,7 @@ a")
         class M(torch.jit.ScriptModule):
 
             def __init__(self):
-                super(M, self).__init__(False)
+                super(M, self).__init__()
                 self.param = torch.nn.Parameter(torch.zeros((5, 5), device='cuda:0').random_())
 
             @torch.jit.script_method
@@ -9965,7 +10106,7 @@ a")
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
         f = io.BytesIO()
-        with self.assertRaisesRegex(RuntimeError, "Couldn't export Python operator"):
+        with self.assertRaisesRegex(RuntimeError, "Couldn't export Python"):
             torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False,
                                example_outputs=outputs)
 
@@ -12215,6 +12356,8 @@ a")
         '''
         test_str = []
         for pair in self.type_input_return_pairs():
+            # clear the class registry as we will be defining foo multiple times
+            jit_utils.clear_class_registry()
             tm = TestModule()
             tm.define(self.format_code(code, pair))
             test_str.append(str(tm.foo.schema))
@@ -12247,6 +12390,8 @@ a")
 
         test_str = []
         for pair in self.type_input_return_pairs():
+            # clear the class registry as we will be defining foo multiple times
+            jit_utils.clear_class_registry()
             tm = TestModule()
             tm.define(self.format_code(code, pair))
             test_str.append(str(tm.foo.schema))
@@ -13528,7 +13673,6 @@ a")
                 self.buffer2 = state[1] + 10
                 self.training = state[3]
 
-
         class M(torch.jit.ScriptModule):
             __constants__ = ['number']
 
@@ -13579,7 +13723,7 @@ a")
 
             @torch.jit.export
             def __getstate__(self):
-                return (5, self.training)
+                return 5, self.training
 
             @torch.jit.export
             def __setstate__(self, state):
@@ -15000,6 +15144,7 @@ a")
         self.checkScript(fn, ())
 
     def test_named_tuple_redefine(self):
+        global _1, _2
         _1 = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
         _2 = namedtuple('GoogLeNetOutputs', ['different'])
 
@@ -15010,6 +15155,7 @@ a")
                 return x
 
     def test_named_tuple_py2(self):
+        global _GoogLeNetOutputs  # see [local resolution in python]
         _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
 
         @torch.jit.script
@@ -15024,6 +15170,7 @@ a")
         self.assertEqual(out.aux_logits1, vals[2])
 
     def test_named_tuple_good_error(self):
+        global _GoogLeNetOutputs  # see [local resolution in python]
         _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
 
         @torch.jit.script
@@ -15215,7 +15362,6 @@ a")
 
             @torch.jit.export
             def __setstate__(self, state):
-                # type: (Tuple[Tensor, bool])
                 self.tensor = state[0]
                 self.training = state[1]
 
@@ -15352,472 +15498,6 @@ a")
         with self.assertRaisesRegex(RuntimeError, "Inferred \'a\' to be of type \'Tensor"):
             foo(1)
 
-
-class TestRecursiveScript(JitTestCase):
-    def test_init_error(self):
-        class M(nn.Module):
-            def __init__(self):
-                self.x = 2
-
-            def forward(self):
-                pass
-
-        with self.assertRaisesRegex(RuntimeError, "has not been initialized"):
-            torch.jit.script(M())
-
-    def test_script_after_eval(self):
-        class M(nn.Module):
-            def forward(self):
-                if self.training:
-                    return 2
-                else:
-                    return 0
-
-        m = M()
-        sm1 = torch.jit.script(m)
-        m.eval()
-        sm2 = torch.jit.script(m)
-
-        # m is in eval mode, training should be False
-        self.assertFalse(m.training)
-
-        # sm1 was created while m had training = True
-        self.assertTrue(sm1.training)
-        self.assertEqual(sm1.training, sm1._c._get_attribute('training'))
-        self.assertEqual(sm1(), 2)
-
-        # sm2 was created after m was eval'ed
-        self.assertFalse(sm2.training)
-        self.assertEqual(sm2.training, sm2._c._get_attribute('training'))
-        self.assertEqual(sm2(), 0)
-
-    def test_module_name(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.x = 2
-
-            def forward(self, t):
-                return t + self.x
-
-        m = torch.jit.script(MyModule())
-        FileCheck().check("ClassType<MyModule>").run(m.graph)
-
-    def test_repeated_error_stack(self):
-        def d(x):
-            return "a" - 2
-
-        def c(x):
-            return d(x)
-
-        def b(x):
-            return c(x)
-
-        def a(x):
-            return b(x)
-
-        try:
-            torch.jit.script(a)
-        except Exception as e:
-            FileCheck().check_count("is being compiled", 2).run(str(e))
-
-        try:
-            torch.jit.script(a)
-        except Exception as e:
-            # Make sure that no entries are left over from the previous failure
-            FileCheck().check_count("is being compiled", 2).run(str(e))
-
-    @unittest.skipIf(True, "Class annotations are a thing in > 3.5, need to fix for < 3.7")
-    def test_constants_with_final(self):
-        class M(torch.nn.Module):
-            # TODO: Use this (see below)
-            # x : torch.jit.Final[int]
-
-            def __init__(self):
-                super(M, self).__init__()
-                self.x = 2
-
-            def forward(self, t):
-                return t + self.x
-
-
-        # TODO: Fix this test so that we can actually define the class like
-        #   class M(torch.nn.Module):
-        #       x : torch.jit.Final[int]
-        M.__annotations__ = {'x': torch.jit.Final[int]}
-
-        m = M()
-
-        self.checkModule(M(), (torch.randn(2, 2),))
-
-    def test_ignore_class(self):
-        @torch.jit.ignore
-        class MyScriptClass(object):
-            def unscriptable(self):
-                return "a" + 200
-
-
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super(TestModule, self).__init__()
-
-            def forward(self, x):
-                return MyScriptClass()
-
-        with self.assertRaisesRegex(torch.jit.frontend.FrontendError, "Cannot instantiate class"):
-            t = torch.jit.script(TestModule())
-
-    def test_method_call(self):
-        class M(nn.Module):
-            def test(self, x):
-                return x
-
-            def forward(self, z):
-                y = self.test(z)
-                return z + 20 + y
-
-        self.checkModule(M(), (torch.randn(2, 2),))
-
-    def test_module_repr(self):
-        class Submodule(nn.Module):
-            def forward(self, x):
-                return x
-
-        class MyModule(nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.conv = nn.Conv2d(10, 10, 3)
-                self.lin = nn.Linear(10, 10)
-                self.sub = Submodule()
-
-            def forward(self, x):
-                return self.lin(x) + self.sub(x) + self.conv(x)
-
-        m = torch.jit.script(MyModule())
-
-        with self.capture_stdout() as out:
-            print(m)
-
-        f = FileCheck()
-        f.check('MyModule')
-        f.check('Conv2d')
-        f.check('Linear')
-        f.check('Submodule')
-        f.run(out[0])
-
-
-        self.assertEqual(m.original_name, 'MyModule')
-
-    def test_class_compile(self):
-        def other_fn(a, b):
-            # type: (int, Tensor) -> Tensor
-            return a * b
-
-        class B(object):
-            def __init__(self, x):
-                self.x = 2
-
-            def helper(self, a):
-                return self.x + a + other_fn(self.x, a)
-
-
-        class N(torch.nn.Module):
-            def __init__(self):
-                super(N, self).__init__()
-
-            def forward(self, x):
-                b = B(x)
-                return b.helper(x)
-
-        self.checkModule(N(), (torch.randn(2, 2),))
-
-    def test_error_stack(self):
-        def d(x):
-            # type: (int) -> int
-            return x + 10
-
-        def c(x):
-            return d("hello") + d(x)
-
-        def b(x):
-            return c(x)
-
-        def a(x):
-            return b(x)
-
-        try:
-            scripted = torch.jit.script(a)
-        except RuntimeError as e:
-            checker = FileCheck()
-            checker.check("Expected a value of type 'int'")
-            checker.check("def c(x)")
-            checker.check("def b(x)")
-            checker.check("def a(x)")
-            checker.run(str(e))
-
-    def test_error_stack_module(self):
-        def d(x):
-            # type: (int) -> int
-            return x + 10
-
-        def c(x):
-            return d("hello") + d(x)
-
-        def b(x):
-            return c(x)
-
-        class Submodule(torch.nn.Module):
-            def __init__(self):
-                super(Submodule, self).__init__()
-
-            def forward(self, x):
-                return b(x)
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.submodule = Submodule()
-
-            def some_method(self, y):
-                return y + self.submodule(y)
-
-            def forward(self, x):
-                return self.some_method(x)
-
-        try:
-            scripted = torch.jit.script(M())
-        except RuntimeError as e:
-            checker = FileCheck()
-            checker.check("Expected a value of type 'int'")
-            checker.check("return d(\"hello\")")
-            checker.check("\'b")
-            checker.check("return c(x)")
-            checker.check("Submodule.forward\'")
-            checker.check("return b(x)")
-            checker.check("M.some_method\'")
-            checker.check("return y + self.submodule(y)")
-            checker.check("M.forward\'")
-            checker.check("return self.some_method(x)")
-            checker.run(str(e))
-
-    @_tmp_donotuse_dont_inline_everything
-    def test_script_basic(self):
-        def a_python_fn(a, b, c):
-            return a + b + c
-
-        @torch.jit.script
-        def a_script_fn(d, e, f):
-            return a_python_fn(d, e, f)
-
-        graph = str(a_script_fn.graph)
-        FileCheck().check("prim::CallFunction").run(graph)
-        FileCheck().check_not("^a_python_fn").run(graph)
-        t = torch.ones(2, 2)
-        self.assertEqual(a_script_fn(t, t, t), t + t + t)
-
-    def test_error_stack_class(self):
-        class X(object):
-            def bad_fn(self):
-                import pdb  # noqa
-
-        def fn(x):
-            return X(10)
-
-        try:
-            torch.jit.script(fn)
-        except Exception as e:
-            checker = FileCheck()
-            checker.check("import statements")
-            checker.check("is being compiled since it was called from")
-            checker.run(str(e))
-
-    def test_module_basic(self):
-        class Other(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self, x):
-                super(Other, self).__init__()
-                self.x = x
-                self.param = torch.nn.Parameter(torch.ones(2, 2))
-
-            def some_unscriptable_method(self):
-                a = 2
-                a = [2]
-                return a
-
-            def forward(self, t):
-                return t + self.x + self.param
-
-
-        class M(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self):
-                super(M, self).__init__()
-                self.other = Other(200)
-
-            def forward(self, t):
-                return self.other(t) * 2
-
-        self.checkModule(M(), (torch.ones(2, 2),))
-
-    def test_module_function_export(self):
-        class Other(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self, x):
-                super(Other, self).__init__()
-                self.x = x
-                self.param = torch.nn.Parameter(torch.ones(2, 2))
-
-            @torch.jit.export
-            def some_entry_point(self, y):
-                return y + 20
-
-            def forward(self, t):
-                return t + self.x + self.param
-
-
-        class M(torch.nn.Module):
-            __constants__ = ['x']
-
-            def __init__(self):
-                super(M, self).__init__()
-                self.other = Other(200)
-
-            def forward(self, t):
-                return self.other(t) * 2
-
-        self.checkModule(M(), (torch.ones(2, 2),))
-
-    def test_iterable_modules(self):
-        class Inner(torch.nn.Module):
-            def forward(self, x):
-                return x + 10
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.sequential = nn.Sequential(
-                    Inner(),
-                    Inner(),
-                    nn.Sequential(Inner(), Inner())
-                )
-                self.module_list = nn.ModuleList([Inner(), Inner()])
-
-            def forward(self, x):
-                for mod in self.module_list:
-                    x += mod(x)
-                x += self.sequential(x)
-                return x
-
-        self.checkModule(M(), (torch.randn(5, 5),))
-
-    def test_attributes(self):
-        @torch.jit.script
-        class Inner(object):
-            def __init__(self):
-                self.b = "a string"
-
-        @torch.jit.script
-        class Foo(object):
-            def __init__(self):
-                self.a = 4
-                self.inner = Inner()
-
-        @torch.jit.script
-        class SFoo(object):
-            def __init__(self):
-                self.a = 4
-                self.inner = Inner()
-
-            def __setstate__(self, obj):
-                # type: (Tuple[int, Inner]) -> None
-                a, inner = obj
-                self.a = a
-                self.inner = inner
-
-            def __getstate__(self):
-                return (self.a, self.inner)
-
-
-        untyped_values = (
-            ('my_dict', {"I": "am", "a test": "test"}),
-            ('my_float', 2.3),
-            ('my_int', 99),
-            ('my_bool', False),
-            ('my_tuple', (1, 2, 3, 4)),
-            ('my_list', [(1, 2), (3, 4)]),
-            # ('my_tensor', torch.randn(2, 2)),
-            ('my_int_list', [1, 2, 3, 4]),
-            # ('my_tensor_list', [torch.ones(2, 2) + i for i in range(4)]),
-            ('my_bool_list', [True, True, False, True]),
-            ('my_float_list', [1., 2., 3., 4.]),
-            ('my_str_list', ['hello', 'bye']),
-        )
-        typed_values = (
-            ('my_empty_list', []),
-            ('my_empty_dict', {}),
-            ('my_none', None),
-            ('my_object', Foo()),
-            ('my_object2', SFoo()),
-        )
-
-        class M(torch.nn.Module):
-            # TODO: re-enable this once this test is in a Python 3-only syntax
-            # file
-            # my_empty_list : List[int]
-            # my_empty_dict : Dict[str, int]
-            # my_none : Optional[int]
-
-            def __init__(self):
-                super(M, self).__init__()
-
-            def forward(self, x):
-                return (
-                    self.my_dict,
-                    self.my_float,
-                    self.my_int,
-                    self.my_bool,
-                    # self.my_tensor,
-                    self.my_int_list,
-                    # self.my_tensor_list,
-                    self.my_bool_list,
-                    self.my_float_list,
-                    self.my_str_list,
-                    self.my_empty_list,
-                    self.my_empty_dict,
-                    self.my_none,
-                    self.my_object.a,
-                    self.my_object.inner.b,
-                    self.my_object.a,
-                    self.my_object2.inner.b,
-                )
-
-        # TODO: as a followup, fix this test
-        # We can't define class attributes like we should be doing:
-        #   class M(torch.nn.Module):
-        #       my_empty_list : List[int]
-        #       my_empty_dict : Dict[str, int]
-        #       my_none : Optional[int]
-        #       my_out_of_line_attribute: List[int] = [1, 2, 3]
-        # since there's no string frontend for Python classes (so the `define`)
-        # trick doesn't work.
-        M.__annotations__ = {
-            'my_empty_list': List[int],
-            'my_empty_dict': Dict[str, int],
-            'my_none': Optional[int],
-            'my_object': Foo,
-            'my_object2': SFoo,
-        }
-
-        m = M()
-        for name, value in untyped_values + typed_values:
-            setattr(m, name, value)
-
-        self.checkModule(m, (torch.randn(5, 5),))
-
-
 class MnistNet(nn.Module):
     def __init__(self):
         super(MnistNet, self).__init__()
@@ -15837,7 +15517,7 @@ class MnistNet(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
-class TestEndToEndHybridFrontendModels(JitTestCase):
+class TestModels(JitTestCase):
     @staticmethod
     def _test_dcgan_models(self, device, check_export_import=True):
         class DCGANGenerator(nn.Module):
@@ -18007,7 +17687,7 @@ class TestDataParallel(JitTestCase):
         __constants__ = ['m']
 
         def __init__(self):
-            super(TestDataParallel.Msm, self).__init__(False)
+            super(TestDataParallel.Msm, self).__init__()
             self.m = nn.Sequential(nn.Linear(2, 2), nn.BatchNorm1d(2),
                                    nn.ReLU(), nn.Linear(2, 2))
 
@@ -18017,7 +17697,7 @@ class TestDataParallel(JitTestCase):
 
     class Msm1(torch.jit.ScriptModule):
         def __init__(self, block):
-            super(TestDataParallel.Msm1, self).__init__(False)
+            super(TestDataParallel.Msm1, self).__init__()
             self.block = block
 
         @torch.jit.script_method
@@ -18035,13 +17715,6 @@ class TestDataParallel(JitTestCase):
                 self.assertEqual(b.get_device(), i)
             replica_input = input.cuda(i)
             self.assertEqual(replica(replica_input).data, expected_output)
-
-    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
-    def test_python_submodule_exception(self):
-        module = self.Msm1(self.Mpy()).cuda()
-        msg = "Cannot replicate.*"
-        with self.assertRaisesRegex(Exception, msg):
-            dp.replicate(module, {0, 1})
 
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "multi-GPU not supported")
     def test_python_submodule_script(self):
@@ -19370,6 +19043,7 @@ class TestClassType(JitTestCase):
                         self.attr = x
 
     def test_class_type_as_param(self):
+        global FooTest  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
         class FooTest(object):
             def __init__(self, x):
@@ -19428,7 +19102,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
-        torch._C._jit_clear_class_registry()
+
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -19461,7 +19135,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
-        torch._C._jit_clear_class_registry()
+        jit_utils.clear_class_registry()
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -19502,7 +19176,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
-        torch._C._jit_clear_class_registry()
+        jit_utils.clear_class_registry()
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -19512,6 +19186,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(2 * input, output)
 
     def test_python_interop(self):
+        global Foo   # see [local resolution in python]
         @torch.jit.script  # noqa: B903
         class Foo(object):
             def __init__(self, x, y):
@@ -19538,6 +19213,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(y, f2.y)
 
     def test_class_specialization(self):
+        global Foo  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
         class Foo(object):
             def __init__(self, x, y):
@@ -19562,6 +19238,7 @@ class TestClassType(JitTestCase):
         FileCheck().check_count("Double(*, *) = prim::GetAttr", 4).run(graphstr)
 
     def test_class_sorting(self):
+        global Foo  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
         class Foo(object):
             def __init__(self, x):
@@ -19646,16 +19323,16 @@ class TestClassType(JitTestCase):
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
-        import jit.foo
-        import jit.bar
-        import jit.very.very.nested
+        import jit._imported_class_test.foo
+        import jit._imported_class_test.bar
+        import jit._imported_class_test.very.very.nested
 
         class MyMod(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, a):
-                foo = jit.foo.FooSameName(a)
-                bar = jit.bar.FooSameName(a)
-                three = jit.very.very.nested.FooUniqueName(a)
+                foo = jit._imported_class_test.foo.FooSameName(a)
+                bar = jit._imported_class_test.bar.FooSameName(a)
+                three = jit._imported_class_test.very.very.nested.FooUniqueName(a)
                 return foo.x + bar.y + three.y
 
         m = MyMod()
@@ -19665,7 +19342,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
-        torch._C._jit_clear_class_registry()
+        jit_utils.clear_class_registry()
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -19675,6 +19352,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(3 * input, output)
 
     def test_interface(self):
+        global Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2
         @torch.jit.script
         class Foo(object):
             def __init__(self):
@@ -19836,6 +19514,7 @@ class TestClassType(JitTestCase):
         # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
+        global Foo, MyClass  # see [local resolution in python]
         @torch.jit.script
         class Foo(object):
             def __init__(self, x):
@@ -19991,6 +19670,7 @@ class TestClassType(JitTestCase):
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
 
     def test_cast_overloads(self):
+        global Foo  # see [local resolution in python]
         @torch.jit.script
         class Foo(object):
             def __init__(self, val):
@@ -20208,6 +19888,357 @@ class TestDocs(unittest.TestCase):
             err = result.stderr.decode('utf-8')
             raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && make doctest`)".format(err, out))
 
+class TestTypeSharing(JitTestCase):
+    def assertSameType(self, m1, m2):
+        if not isinstance(m1, torch.jit.ScriptModule):
+            m1 = torch.jit.script(m1)
+        if not isinstance(m2, torch.jit.ScriptModule):
+            m2 = torch.jit.script(m2)
+        self.assertEqual(m1._c._type(), m2._c._type())
+
+    def assertDifferentType(self, m1, m2):
+        if not isinstance(m1, torch.jit.ScriptModule):
+            m1 = torch.jit.script(m1)
+        if not isinstance(m2, torch.jit.ScriptModule):
+            m2 = torch.jit.script(m2)
+        self.assertNotEqual(m1._c._type(), m2._c._type())
+
+    def test_basic(self):
+        class M(torch.nn.Module):
+            def __init__(self, a, b, c):
+                super(M, self).__init__()
+                self.a = a
+                self.b = b
+                self.c = c
+
+            def forward(self, x):
+                return x
+        a = torch.rand(2, 3)
+        b = torch.rand(2, 3)
+        c = torch.rand(2, 3)
+        m1 = M(a, b, c)
+        m2 = M(a, b, c)
+        self.assertSameType(m1, m2)
+
+    def test_diff_attr_values(self):
+        """
+        Types should be shared even if attribute values differ
+        """
+        class M(torch.nn.Module):
+            def __init__(self, a, b, c):
+                super(M, self).__init__()
+                self.a = a
+                self.b = b
+                self.c = c
+
+            def forward(self, x):
+                return x
+        a = torch.rand(2, 3)
+        b = torch.rand(2, 3)
+        c = torch.rand(2, 3)
+        m1 = M(a, b, c)
+        m2 = M(a * 2, b * 3, c * 4)
+        self.assertSameType(m1, m2)
+
+    def test_constants(self):
+        """
+        Types should be shared for identical constant values, and different for different constant values
+        """
+        class M(torch.nn.Module):
+            __constants__ = ["const"]
+
+            def __init__(self, attr, const):
+                super(M, self).__init__()
+                self.attr = attr
+                self.const = const
+
+            def forward(self):
+                return self.const
+
+        attr = torch.rand(2, 3)
+        m1 = M(attr, 1)
+        m2 = M(attr, 1)
+        self.assertSameType(m1, m2)
+
+        # a different constant value
+        m3 = M(attr, 2)
+        self.assertDifferentType(m1, m3)
+
+    def test_linear(self):
+        """
+        Simple example with a real nn Module
+        """
+        a = torch.nn.Linear(5, 5)
+        b = torch.nn.Linear(5, 5)
+        c = torch.nn.Linear(10, 10)
+        a = torch.jit.script(a)
+        b = torch.jit.script(b)
+        c = torch.jit.script(c)
+
+        self.assertSameType(a, b)
+        self.assertDifferentType(a, c)
+
+    def test_submodules(self):
+        """
+        If submodules differ, the types should differ.
+        """
+        class M(torch.nn.Module):
+            def __init__(self, in1, out1, in2, out2):
+                super(M, self).__init__()
+                self.submod1 = torch.nn.Linear(in1, out1)
+                self.submod2 = torch.nn.Linear(in2, out2)
+
+            def forward(self, x):
+                x = self.submod1(x)
+                x = self.submod2(x)
+                return x
+
+        a = M(1, 1, 2, 2)
+        b = M(1, 1, 2, 2)
+        self.assertSameType(a, b)
+        self.assertSameType(a.submod1, b.submod1)
+        c = M(2, 2, 2, 2)
+        self.assertDifferentType(a, c)
+
+        self.assertSameType(b.submod2, c.submod1)
+        self.assertDifferentType(a.submod1, b.submod2)
+
+    def test_param_vs_attribute(self):
+        """
+        The same module with an `foo` as a parameter vs. attribute shouldn't
+        share types
+        """
+        class M(torch.nn.Module):
+            def __init__(self, foo):
+                super(M, self).__init__()
+                self.foo = foo
+
+            def forward(self, x):
+                return x + self.foo
+
+        as_param = torch.nn.Parameter(torch.ones(2, 2))
+        as_attr = torch.ones(2, 2)
+        param_mod = M(as_param)
+        attr_mod = M(as_attr)
+        self.assertDifferentType(attr_mod, param_mod)
+
+    def test_same_but_different_classes(self):
+        """
+        Even if everything about the module is the same, different originating
+        classes should prevent type sharing.
+        """
+        class A(torch.nn.Module):
+            __constants__ = ["const"]
+
+            def __init__(self, in1, out1, in2, out2):
+                super(A, self).__init__()
+                self.submod1 = torch.nn.Linear(in1, out1)
+                self.submod2 = torch.nn.Linear(in2, out2)
+                self.const = 5
+
+            def forward(self, x):
+                x = self.submod1(x)
+                x = self.submod2(x)
+                return x * self.const
+
+        class B(torch.nn.Module):
+            __constants__ = ["const"]
+
+            def __init__(self, in1, out1, in2, out2):
+                super(B, self).__init__()
+                self.submod1 = torch.nn.Linear(in1, out1)
+                self.submod2 = torch.nn.Linear(in2, out2)
+                self.const = 5
+
+            def forward(self, x):
+                x = self.submod1(x)
+                x = self.submod2(x)
+                return x * self.const
+
+        a = A(1, 1, 2, 2)
+        b = B(1, 1, 2, 2)
+        self.assertDifferentType(a, b)
+
+    def test_mutate_attr_value(self):
+        """
+        Mutating the value of an attribute should not change type sharing
+        """
+        class M(torch.nn.Module):
+            def __init__(self, in1, out1, in2, out2):
+                super(M, self).__init__()
+                self.submod1 = torch.nn.Linear(in1, out1)
+                self.submod2 = torch.nn.Linear(in2, out2)
+                self.foo = torch.ones(in1, in1)
+
+            def forward(self, x):
+                x = self.submod1(x)
+                x = self.submod2(x)
+                return x + self.foo
+
+        a = M(1, 1, 2, 2)
+        b = M(1, 1, 2, 2)
+        a.foo = torch.ones(2, 2)
+        b.foo = torch.rand(2, 2)
+        self.assertSameType(a, b)
+
+    def test_assign_python_attr(self):
+        """
+        Assigning a new (python-only) attribute should not change type sharing
+        """
+        class M(torch.nn.Module):
+            def __init__(self, in1, out1, in2, out2):
+                super(M, self).__init__()
+                self.submod1 = torch.nn.Linear(in1, out1)
+                self.submod2 = torch.nn.Linear(in2, out2)
+                self.foo = torch.ones(in1, in1)
+
+            def forward(self, x):
+                x = self.submod1(x)
+                x = self.submod2(x)
+                return x + self.foo
+
+        # explicitly call script() to freeze the type
+        a = torch.jit.script(M(1, 1, 2, 2))
+        b = torch.jit.script(M(1, 1, 2, 2))
+        a.new_attr = "foo bar baz"
+        self.assertSameType(a, b)
+
+        # but if we assign attributes *before* calling script(), the types
+        # should be different, since `new_attr` should be turned into a Script
+        # attribute
+        a = M(1, 1, 2, 2)
+        b = M(1, 1, 2, 2)
+        a.new_attr = "foo bar baz"
+        self.assertDifferentType(a, b)
+
+    def test_failed_attribute_compilation(self):
+        """
+        Attributes whose type cannot be inferred should fail cleanly with nice hints
+        """
+        class NotScriptable(object):
+            pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                # assign a type we know can't be converted to TorchScript
+                self.foo = NotScriptable()
+
+            def forward(self):
+                # try to use it in forward
+                return self.foo
+
+        m = M()
+        with self.assertRaisesRegex(RuntimeError, "failed to convert Python type"):
+            torch.jit.script(m)
+
+    def test_script_function_attribute(self):
+        """
+        Different functions passed in should lead to different types
+        """
+        @torch.jit.script
+        def fn1(x):
+            return x + x
+
+        @torch.jit.script
+        def fn2(x):
+            return x - x
+
+        class M(torch.nn.Module):
+            def __init__(self, fn):
+                super(M, self).__init__()
+                self.fn = fn
+
+            def forward(self, x):
+                return self.fn(x)
+
+        fn1_mod = M(fn1)
+        fn2_mod = M(fn2)
+
+        self.assertDifferentType(fn1_mod, fn2_mod)
+
+    def test_python_function_attribute(self):
+        """
+        Different functions passed in should lead to different types
+        """
+        def fn1(x):
+            return x + x
+
+        def fn2(x):
+            return x - x
+
+        class M(torch.nn.Module):
+            def __init__(self, fn):
+                super(M, self).__init__()
+                self.fn = fn
+
+            def forward(self, x):
+                return self.fn(x)
+
+        fn1_mod = M(fn1)
+        fn2_mod = M(fn2)
+
+        self.assertDifferentType(fn1_mod, fn2_mod)
+
+    def test_tracing_gives_different_types(self):
+        """
+        Since we can't guarantee that methods are the same between different
+        trace runs, tracing must always generate a unique type.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x, y):
+                if x.sum() > y.sum():
+                    return x
+                else:
+                    return y
+
+        a = torch.jit.trace(M(), (torch.zeros(1, 1), torch.ones(1, 1)))
+        b = torch.jit.trace(M(), (torch.ones(1, 1), torch.zeros(1, 1)))
+        self.assertDifferentType(a, b)
+
+    def test_ignored_fns(self):
+        class M(torch.nn.Module):
+            def __init__(self, foo):
+                super(M, self).__init__()
+                self.foo = foo
+
+            @torch.jit.ignore
+            def ignored(self):
+                return self.foo
+
+            def forward(self):
+                return self.ignored()
+
+        a = torch.jit.script(M(torch.ones(1)))
+        b = torch.jit.script(M(torch.ones(2)))
+        self.assertSameType(a, b)
+        self.assertNotEqual(a(), b())
+
+    def test_script_module_containing_traced_module(self):
+        class Traced(torch.nn.Module):
+            def __init__(self):
+                super(Traced, self).__init__()
+
+            def forward(self, x):
+                if x.sum() > 0:
+                    return x
+                else:
+                    return x + x
+
+        class M(torch.nn.Module):
+            def __init__(self, input):
+                super(M, self).__init__()
+                self.traced = torch.jit.trace(Traced(), input)
+
+            def forward(self, x):
+                return self.traced(x)
+
+        a = M((torch.ones(1), ))
+        b = M((torch.zeros(1), ))
+        self.assertDifferentType(a, b)
 
 for test in autograd_method_tests():
     add_autograd_test(*test)

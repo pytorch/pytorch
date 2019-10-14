@@ -514,8 +514,8 @@ class SparseLookup(ModelLayer):
                     self.reducer, self.sparse_key
                 )
 
-    def _add_ops(self, net, version='fp32'):
-        if self.evicted_values:
+    def _add_ops(self, net, version='fp32', is_train=True):
+        if self.evicted_values and is_train:
             net.CopyRowsToTensor(
                 [self.w, self.evicted_values.get(), self.reinit_vec], [self.w])
         if _is_id_list(self.input_record):
@@ -526,7 +526,7 @@ class SparseLookup(ModelLayer):
             raise "Unsupported input type {0}".format(self.input_record)
 
     def add_train_ops(self, net):
-        self._add_ops(net, self.trainer_version)
+        self._add_ops(net, self.trainer_version, is_train=True)
 
     def add_ops(self, net):
         version_info = get_current_scope().get(
@@ -550,6 +550,6 @@ class SparseLookup(ModelLayer):
         if not self.support_8bit() and version in {'uint8rowwise',
                                                    'fused_uint8rowwise',
                                                    'fused_uint4rowwise'}:
-            version = 'fp32'
+            version = 'fp16'
 
-        self._add_ops(net, version)
+        self._add_ops(net, version, is_train=False)
