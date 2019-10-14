@@ -149,10 +149,10 @@ using MaxUnpool3dOptions = MaxUnpoolOptions<3>;
 /// Options for a `D`-dimensional lppool functional and module.
 template <size_t D>
 struct LPPoolOptions {
-  LPPoolOptions(ExpandingArray<D> kernel_size)
-      : kernel_size_(kernel_size), stride_(kernel_size) {}
+  LPPoolOptions(float norm_type, ExpandingArray<D> kernel_size)
+      : kernel_size_(kernel_size), stride_(kernel_size), norm_type_(norm_type) {}
 
-  TORCH_ARG(float, norm_type) = 1.0f;
+  TORCH_ARG(float, norm_type);
 
   // the size of the window to take an average over
   TORCH_ARG(ExpandingArray<D>, kernel_size);

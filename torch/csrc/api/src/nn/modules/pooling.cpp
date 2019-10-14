@@ -210,6 +210,7 @@ template <size_t D, typename Derived>
 void LPPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
          << "torch::nn::LPPool" << D << "d("
+         << "norm_type=" << options.norm_type() << ", "
          << "kernel_size=" << options.kernel_size() << ", "
          << "stride=" << options.stride() << ", "
          << "ceil_mode=" << options.ceil_mode() << ")";
