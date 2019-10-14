@@ -8,6 +8,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/EnableNamedTensor.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/MemoryFormatUtils.h>
 
 namespace at {
 namespace native {
@@ -120,7 +121,7 @@ static std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     indices.zero_();
     return std::forward_as_tuple(values, indices);
   }
-  auto tmp_values = self.clone();
+  auto tmp_values = clone_if_possible_with_memory_format(self);
   auto tmp_indices = at::empty(self.sizes(), self.options().dtype(kLong));
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "kthvalue_cpu", [&] {
     dim_apply(
@@ -290,9 +291,9 @@ Tensor median_cpu(const Tensor& self) {
 #endif
   TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
   if (self.dim() == 0 && self.numel() == 1) {
-    return self.clone();
+    return clone_if_possible_with_memory_format(self);
   }
-  auto tmp_values = self.clone().view(-1);
+  auto tmp_values = clone_if_possible_with_memory_format(self).view(-1);
   auto result = at::empty({1}, self.options());
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "median", [&] {
     // note, quick_select is 0 based while kthvalue is not
