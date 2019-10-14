@@ -323,6 +323,9 @@ Tensor _histc_cuda_template(
     maxvalue = maxvalue + 1;
   }
 
+  TORCH_CHECK(!(std::isinf(minval) || std::isinf(maxval) || std::isnan(minval) || std::isnan(maxval)), "range of [", minval, ", ", maxval, "] is not finite");
+  TORCH_CHECK(minval < maxval, "max must be larger than min");
+
   auto ret = cuda::CUDA_tensor_histogram<input_t, input_t, false>(
     output, self, Tensor(), nbins, minvalue, maxvalue);
   return output;
