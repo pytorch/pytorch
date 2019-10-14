@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/functions/utils.h>
+#include <ATen/MemoryFormatUtils.h>
 
 #include <cstdint>
 #include <stdexcept>
@@ -54,7 +55,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       // addition of !post_hooks().empty().
       variable.grad() = new_grad.detach();
     } else {
-      variable.grad() = new_grad.clone();
+      variable.grad() = clone_if_possible_with_memory_format(new_grad);
     }
   } else if (!GradMode::is_enabled()) {
     // This case is not strictly necessary, but it makes the first-order only case
