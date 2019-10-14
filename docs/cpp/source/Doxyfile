@@ -33,7 +33,6 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/Backend.h \
                          ../../../aten/src/ATen/core/ivalue.h \
                          ../../../aten/src/ATen/core/ScalarType.h \
-                         ../../../aten/src/ATen/core/Tensor.h \
                          ../../../aten/src/ATen/cuda/CUDAContext.h \
                          ../../../aten/src/ATen/cudnn/Descriptors.h \
                          ../../../aten/src/ATen/cudnn/Handles.h \
@@ -44,6 +43,7 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../aten/src/ATen/mkl/Descriptors.h \
                          ../../../aten/src/ATen/Scalar.h \
                          ../../../aten/src/ATen/TensorOptions.h \
+                         ../../../aten/src/ATen/core/Tensor.h \
                          ../../../build/aten/src/ATen/Functions.h \
                          ../../../c10/core/Device.h \
                          ../../../c10/core/DeviceType.h \
