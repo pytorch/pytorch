@@ -6,6 +6,7 @@
 #include <torch/utils.h>
 
 #include <ATen/ATen.h>
+#include <ATen/MemoryFormatUtils.h>
 
 #include <cmath>
 #include <functional>
@@ -47,7 +48,7 @@ void LBFGS::add_grad(const torch::Tensor& step_size, const Tensor& update) {
 
 torch::Tensor LBFGS::step(LossClosure closure) {
   torch::Tensor orig_loss = closure();
-  torch::Tensor loss = orig_loss.clone();
+  torch::Tensor loss = clone_if_possible_with_memory_format(orig_loss);
   int64_t current_evals = 1;
   func_evals += 1;
 
@@ -68,7 +69,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
     if (state_n_iter == 1) {
       d = flat_grad.neg();
       H_diag = ONE;
-      prev_flat_grad = flat_grad.clone();
+      prev_flat_grad = clone_if_possible_with_memory_format(flat_grad);
     } else {
       Tensor y = flat_grad.sub(prev_flat_grad);
       Tensor s = d.mul(t);
