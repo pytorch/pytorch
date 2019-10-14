@@ -17,6 +17,7 @@
 #include <gloo/scatter.h>
 
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/MemoryFormatUtils.h>
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
@@ -1017,7 +1018,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
     for (size_t i = 0; i < inputs.size(); i++) {
-      outputs.push_back(output.clone());
+      outputs.push_back(clone_if_possible_with_memory_format(output));
     }
   }
 
