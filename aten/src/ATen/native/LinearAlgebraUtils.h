@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/MemoryFormatUtils.h>
 #include <limits>
 #include <sstream>
 #include <cstring>
@@ -22,7 +23,8 @@ static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   // this will be efficient (no reordering of the data will occur)
   // because the first transpose will make the tensor contiguous,
   // and cloning a contiguous tensor is fast.
-  auto result = src.transpose(-2, -1).clone();
+  auto tr = src.transpose(-2, -1);
+  auto result = clone_if_possible_with_memory_format(tr);
   result.transpose_(-2, -1);
   return result;
 }
