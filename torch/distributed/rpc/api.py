@@ -1,6 +1,7 @@
 from torch.distributed import invoke_rpc_builtin, invoke_rpc_python_udf
 from torch.distributed import invoke_remote_builtin, invoke_remote_python_udf
-from torch.distributed import _init_rref_context, _destroy_rref_context
+from torch.distributed import _init_rpc_agent
+from torch.distributed import _destroy_rref_context
 from torch.distributed import ProcessGroupAgent
 from torch.distributed import WorkerInfo
 from .backend_registry import is_backend_registered, init_backend
@@ -77,7 +78,6 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
                                self_rank, group.rank()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
-        _init_rref_context(_agent)
     elif is_backend_registered(backend):
         _agent = init_backend(
             backend,
@@ -85,9 +85,9 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
             self_name=self_name,
             init_method=init_method
         )
-        _init_rref_context(_agent)
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
+    _init_rpc_agent(_agent)
 
 
 @_require_initialized
