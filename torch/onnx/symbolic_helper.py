@@ -302,11 +302,12 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     if not _is_none(scale_factor):
         scale_factor = _interpolate_get_scales(g, scale_factor, dim)
     elif not _is_none(size):
-        is_scalar = ((_maybe_get_const(size, 't').dim() == 0))
-        if is_scalar:
-            size = unsqueeze(g, size, 0)
-            size = [size for i in range(dim - 2)]
-            size = g.op("Concat", *size, axis_i=0)
+        if not _is_packed_list(size):
+            is_scalar = ((_maybe_get_const(size, 't').dim() == 0))
+            if is_scalar:
+                size = unsqueeze(g, size, 0)
+                size = [size for i in range(dim - 2)]
+                size = g.op("Concat", *size, axis_i=0)
         scale_factor = _interpolate_size_to_scales(g, input, size, dim)
     else:
         _unimplemented("Both size and scales are None in __interpolate")
