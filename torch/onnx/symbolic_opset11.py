@@ -5,6 +5,7 @@ import torch.onnx.symbolic_helper as sym_help
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_helper import _black_list_in_opset
+from torch.onnx.symbolic_opset9 import expand
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -13,7 +14,7 @@ from torch.onnx.symbolic_helper import _black_list_in_opset
 # This file exports ONNX ops for opset 11
 
 black_listed_operators = [
-    "eq", "ne", "hardtanh"
+    "hardtanh"
 ]
 
 
@@ -97,7 +98,7 @@ def scatter(g, self, dim, index, src):
 
 @parse_args('v', 'i', 'none')
 def cumsum(g, self, dim, dtype=None):
-    dim_tensor = g.op("Constant", value_t=torch.tensor(dim))
+    dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
     csum = g.op("CumSum", self, dim_tensor)
     if dtype and dtype.node().kind() != 'prim::Constant':
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
@@ -133,3 +134,46 @@ def round(g, self):
 
 def det(g, self):
     return g.op("Det", self)
+
+
+def size(g, self, dim):
+    return sym_help._size_helper(g, self, dim)
+
+
+def squeeze(g, self, dim=None):
+    if dim is None:
+        dims = []
+        for i, size in enumerate(self.type().sizes()):
+            if size == 1:
+                dims.append(i)
+    else:
+        dims = [sym_help._get_const(dim, 'i', 'dim')]
+    return g.op("Squeeze", self, axes_i=dims)
+
+
+@parse_args('v', 'i')
+def unsqueeze(g, self, dim):
+    return g.op("Unsqueeze", self, axes_i=[dim])
+
+
+def mm(g, self, other):
+    return g.op("Gemm", self, other, beta_f=0.0, alpha_f=1.0)
+
+
+def index_fill(g, self, dim, index, value):
+    dim_value = sym_help._parse_arg(dim, 'i')
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, value, dim_i=dim_value, operator_s="index_fill")
+    expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
+    value = sym_help._maybe_get_scalar(value)
+    value = sym_help._if_scalar_type_as(g, value, self)
+    expanded_value = expand(g, value, expanded_index_shape, None)
+    return scatter(g, self, dim, expanded_index, expanded_value)
+
+
+def index_copy(g, self, dim, index, source):
+    dim_value = sym_help._parse_arg(dim, 'i')
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
+    expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
+    return scatter(g, self, dim, expanded_index, source)

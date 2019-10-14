@@ -297,20 +297,6 @@ def suppress_warnings(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def default_floating_dtype(dtype):
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            old_type = torch.tensor(()).dtype
-            torch.set_default_dtype(dtype)
-            try:
-                return fn(*args, **kwargs)
-            finally:
-                torch.set_default_dtype(old_type)
-
-        return wrapper
-
-    return decorator
 
 def get_cpu_type(type_name):
     module, name = type_name.rsplit('.', 1)
