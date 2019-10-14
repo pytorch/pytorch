@@ -104,13 +104,17 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda_memcheck* ]]; then
+  export CUDA_MEMCHECK_EXEC=cuda_memcheck
+fi
+
 test_python_nn() {
-  time python test/run_test.py --include nn --verbose
+  time $CUDA_MEMCHECK_EXEC python test/run_test.py --include nn --verbose
   assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
+  time $CUDA_MEMCHECK_EXEC python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
   assert_git_not_dirty
 }
 
