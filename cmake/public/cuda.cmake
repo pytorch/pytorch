@@ -194,7 +194,7 @@ add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt dl)
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static${CMAKE_STATIC_LIBRARY_SUFFIX}" rt dl)
 else()
     set_property(
         TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
@@ -216,7 +216,7 @@ if(CAFFE2_USE_CUDNN)
       ${CUDNN_INCLUDE_PATH})
   if(CAFFE2_STATIC_LINK_CUDA)
     target_link_libraries(caffe2::cudnn INTERFACE
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos${CMAKE_STATIC_LIBRARY_SUFFIX}" dl)
   endif()
 endif()
 
@@ -225,9 +225,9 @@ add_library(caffe2::curand UNKNOWN IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a")
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static${CMAKE_STATIC_LIBRARY_SUFFIX}")
       target_link_libraries(caffe2::curand INTERFACE
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos${CMAKE_STATIC_LIBRARY_SUFFIX}" dl)
 else()
     set_property(
         TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
@@ -243,9 +243,9 @@ add_library(caffe2::cufft INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a")
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static${CMAKE_STATIC_LIBRARY_SUFFIX}")
       target_link_libraries(caffe2::cufft INTERFACE
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos${CMAKE_STATIC_LIBRARY_SUFFIX}" dl)
 else()
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
@@ -272,11 +272,11 @@ add_library(caffe2::cublas INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static${CMAKE_STATIC_LIBRARY_SUFFIX}")
     if (CUDA_VERSION VERSION_EQUAL 10.1)
       set_property(
         TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static${CMAKE_STATIC_LIBRARY_SUFFIX}")
     endif()
 else()
     set_property(
