@@ -44,6 +44,7 @@ jobs:
             set -x
             choco install -y curl 7zip
             choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
+            choco install -y visualstudio2017community --package-parameters "--quiet --norestart --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.DiagnosticTools --add Microsoft.VisualStudio.Component.Windows10SDK.16299.Desktop --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.VC.140"
             .jenkins/pytorch/win-build.sh
 # PR jobs pr builds
 workflows:
