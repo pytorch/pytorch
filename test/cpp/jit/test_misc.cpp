@@ -3,6 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/Parallel.h>
 #include <ATen/ThreadLocalDebugInfo.h>
+#include <ATen/MemoryFormatUtils.h>
 
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
@@ -243,10 +244,10 @@ void testATenNativeBatchNorm() {
   at::Tensor running_var = torch::randn({input_size[1]});
 
   // running_mean and running_var are changed in-place, so clone and send them
-  at::Tensor running_mean_eager = running_mean.clone();
-  at::Tensor running_var_eager = running_var.clone();
-  at::Tensor running_mean_jit = running_mean.clone();
-  at::Tensor running_var_jit = running_var.clone();
+  at::Tensor running_mean_eager = clone_if_possible_with_memory_format(running_mean);
+  at::Tensor running_var_eager = clone_if_possible_with_memory_format(running_var);
+  at::Tensor running_mean_jit = clone_if_possible_with_memory_format(running_mean);
+  at::Tensor running_var_jit = clone_if_possible_with_memory_format(running_var);
 
   // run forward eagerly
   at::Tensor output, savemean, saveinvstd;
