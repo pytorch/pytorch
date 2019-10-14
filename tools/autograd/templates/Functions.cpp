@@ -7,6 +7,7 @@
 
 #include "Functions.h"
 #include <ATen/Utils.h>
+#include <ATen/MemoryFormatUtils.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -101,7 +102,7 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
     self_scaled = self.sign() * (self.abs() == norm).type_as(self);
-    scale_v = grad.clone();
+    scale_v = clone_if_possible_with_memory_format(grad);
   } else if (p < 2.0) {
     self_scaled = self.sign() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
@@ -271,7 +272,8 @@ Tensor sum_scan_exclusive(const Tensor& x, int64_t dim) {
   Tensor ret = at::cumsum(-x, dim);
 
   int64_t end_idx = ret.size(dim) - 1;
-  Tensor ret_sum = ret.narrow(dim, end_idx, 1).clone();
+  auto narrowed = ret.narrow(dim, end_idx, 1);
+  Tensor ret_sum = clone_if_possible_with_memory_format(narrowed);
   ret -= ret_sum.expand_as(ret);
   ret += x;
   return ret;
@@ -419,7 +421,8 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
     return x;
   }
   auto ret = at::cumsum(-x, dim);
-  auto ret_sum = ret.narrow(dim, ret.size(dim) - 1, 1).clone();
+  auto narrowed = ret.narrow(dim, ret.size(dim) - 1, 1);
+  auto ret_sum = clone_if_possible_with_memory_format(narrowed);
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
