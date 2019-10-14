@@ -261,6 +261,46 @@ bool THCTensor_allSameDevice(THCState* state, THCTensor ** inputs, int numInputs
   return true;
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+bool THCTensor_canUse24BitIndexMath(THCState* state, const THCTensor* t, ptrdiff_t max_elem) {
+  ptrdiff_t elements = THCTensor_nElement(state, t);
+  if (elements >= max_elem) {
+    return false;
+  }
+  if (t->dim() == 0) {
+    return true;
+  }
+
+  ptrdiff_t offset = 0;
+  ptrdiff_t linearId = elements - 1;
+
+  for (int i = THCTensor_nDimensionLegacyAll(state, t) - 1; i >= 0; --i) {
+    ptrdiff_t curDimIndex =
+      linearId % THCTensor_size(state, t, i);
+    ptrdiff_t curDimOffset = curDimIndex *
+      THCTensor_stride(state, t, i);
+    offset += curDimOffset;
+    linearId /= THCTensor_size(state, t, i);
+  }
+
+  if (offset >= max_elem) {
+    return false;
+  }
+
+  return true;
+}
+
+bool THCTensor_all24BitIndexable(THCState* state, THCTensor** inputs, int numInputs) {
+  for (int i = 0; i < numInputs; ++i) {
+    if (!THCTensor_canUse24BitIndexMath(state, inputs[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+#endif
+
 bool THCTensor_canUse32BitIndexMath(THCState* state, const THCTensor* t, ptrdiff_t max_elem) {
   ptrdiff_t elements = THCTensor_nElement(state, t);
   if (elements >= max_elem) {
