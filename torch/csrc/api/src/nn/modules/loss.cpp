@@ -12,7 +12,7 @@ void L1LossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor L1LossImpl::forward(const Tensor& input, const Tensor& target) {
-  return torch::l1_loss(input, target, options.reduction());
+  return F::l1_loss(input, target, options);
 }
 
 // ============================================================================
@@ -25,7 +25,7 @@ void KLDivLossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor KLDivLossImpl::forward(const Tensor& input, const Tensor& target) {
-  return torch::kl_div(input, target, options.reduction());
+  return F::kl_div(input, target, options);
 }
 
 // ============================================================================
@@ -37,13 +37,13 @@ void MSELossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor MSELossImpl::forward(const Tensor& input, const Tensor& target) {
-  return torch::mse_loss(input, target, options.reduction());
+  return F::mse_loss(input, target, options);
 }
 
 // ============================================================================
 
 BCELossImpl::BCELossImpl(const BCELossOptions& options_) : options(options_) {
-  register_parameter("weight", weight);
+  register_parameter("weight", options.weight());
 }
 
 void BCELossImpl::pretty_print(std::ostream& stream) const {
@@ -51,8 +51,7 @@ void BCELossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor BCELossImpl::forward(const Tensor& input, const Tensor& target) {
-  return torch::binary_cross_entropy(
-      input, target, weight, options.reduction());
+  return F::binary_cross_entropy(input, target, options);
 }
 
 // ============================================================================

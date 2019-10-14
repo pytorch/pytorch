@@ -149,6 +149,51 @@ TEST_F(FunctionalTest, AdaptiveAvgPool3d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3, 3}));
 }
 
+TEST_F(FunctionalTest, L1Loss) {
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::l1_loss(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, MSELoss) {
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::mse_loss(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, BCELoss) {
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::binary_cross_entropy(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, KLDivLoss) {
+  KLDivLoss loss;
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::kl_div(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::kFloat);
   auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);

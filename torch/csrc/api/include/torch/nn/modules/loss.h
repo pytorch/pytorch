@@ -103,9 +103,6 @@ struct TORCH_API BCELossImpl : Module {
 
   /// The options with which this `Module` was constructed.
   BCELossOptions options;
-
-  /// A manual rescaling weight given to the loss of each batch element.
-  Tensor weight;
 };
 
 /// A `ModuleHolder` subclass for `BCELossImpl`.

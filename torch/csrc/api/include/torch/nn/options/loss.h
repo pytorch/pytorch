@@ -19,17 +19,40 @@ struct TORCH_API L1LossOptions {
 // ============================================================================
 
 /// Options for a KLDiv loss module.
-using KLDivLossOptions = L1LossOptions;
+struct TORCH_API KLDivLossOptions {
+  KLDivLossOptions(Reduction::Reduction reduction = Reduction::Mean)
+      : reduction_(reduction) {}
+
+  /// Specifies the reduction to apply to the output.
+  TORCH_ARG(Reduction::Reduction, reduction);
+};
 
 // ============================================================================
 
 /// Options for a MSE loss module.
-using MSELossOptions = L1LossOptions;
+struct TORCH_API MSELossOptions {
+  MSELossOptions(Reduction::Reduction reduction = Reduction::Mean)
+      : reduction_(reduction) {}
+
+  /// Specifies the reduction to apply to the output.
+  TORCH_ARG(Reduction::Reduction, reduction);
+};
 
 // ============================================================================
 
 /// Options for a BCE loss module.
-using BCELossOptions = L1LossOptions;
+struct TORCH_API BCELossOptions {
+  BCELossOptions(
+      Tensor weight = {},
+      Reduction::Reduction reduction = Reduction::Mean)
+      : weight_(weight), reduction_(reduction) {}
+
+  /// A manual rescaling weight given to the loss of each batch element.
+  TORCH_ARG(Tensor, weight);
+
+  /// Specifies the reduction to apply to the output.
+  TORCH_ARG(Reduction::Reduction, reduction);
+};
 
 // ============================================================================
 
