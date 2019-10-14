@@ -131,6 +131,21 @@ Tensor SoftmaxImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
+SoftminImpl::SoftminImpl(const SoftminOptions& options_)
+    : options(options_) {}
+
+void SoftminImpl::reset() {}
+
+void SoftminImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softmin(dim=" << options.dim() << ")";
+}
+
+Tensor SoftminImpl::forward(const Tensor& input) {
+  return F::softmin(input, options);
+}
+
+// ============================================================================
+
 LogSoftmaxImpl::LogSoftmaxImpl(const LogSoftmaxOptions& options_)
     : options(options_) {}
 
@@ -142,6 +157,19 @@ void LogSoftmaxImpl::pretty_print(std::ostream& stream) const {
 
 Tensor LogSoftmaxImpl::forward(const Tensor& input) {
   return F::log_softmax(input, options);
+}
+
+// ============================================================================
+
+void Softmax2dImpl::reset() {}
+
+void Softmax2dImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softmax2d()";
+}
+
+Tensor Softmax2dImpl::forward(const Tensor& input) {
+  TORCH_CHECK(input.dim() == 4, "Softmax2d requires a 4D tensor as input");
+  return F::softmax(input, SoftmaxOptions(/*dim=*/1));
 }
 
 // ============================================================================
@@ -263,6 +291,77 @@ void SoftplusImpl::reset() {}
 void SoftplusImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Softplus(beta=" << options.beta()
          << ", threshold=" << options.threshold() << ")";
+}
+
+// ============================================================================
+
+SoftshrinkImpl::SoftshrinkImpl(const SoftshrinkOptions& options_)
+    : options(options_) {}
+
+Tensor SoftshrinkImpl::forward(const Tensor& input) {
+  return F::softshrink(input, options);
+}
+
+void SoftshrinkImpl::reset() {}
+
+void SoftshrinkImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softshrink(" << options.lambda() << ")";
+}
+
+// ============================================================================
+
+Tensor SoftsignImpl::forward(const Tensor& input) {
+  return F::softsign(input);
+}
+
+void SoftsignImpl::reset() {}
+
+void SoftsignImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softsign()";
+}
+
+// ============================================================================
+
+Tensor TanhImpl::forward(const Tensor& input) {
+  return torch::tanh(input);
+}
+
+void TanhImpl::reset() {}
+
+void TanhImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Tanh()";
+}
+
+// ============================================================================
+
+Tensor TanhshrinkImpl::forward(const Tensor& input) {
+  return F::tanhshrink(input);
+}
+
+void TanhshrinkImpl::reset() {}
+
+void TanhshrinkImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Tanhshrink()";
+}
+
+// ============================================================================
+
+ThresholdImpl::ThresholdImpl(const ThresholdOptions& options_)
+    : options(options_) {}
+
+Tensor ThresholdImpl::forward(Tensor& input) {
+  return F::threshold(input, options);
+}
+
+void ThresholdImpl::reset() {}
+
+void ThresholdImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Threshold(threshold=" << options.threshold()
+         << ", value=" << options.value();
+  if (options.inplace()) {
+    stream << std::boolalpha << ", inplace=" << options.inplace();
+  }
+  stream << ")";
 }
 
 } // namespace nn
