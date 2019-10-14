@@ -209,6 +209,7 @@ Pointwise Ops
 .. autofunction:: fmod
 .. autofunction:: frac
 .. autofunction:: lerp
+.. autofunction:: lgamma
 .. autofunction:: log
 .. autofunction:: log10
 .. autofunction:: log1p
