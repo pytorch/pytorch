@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/MemoryFormatUtils.h>
 
 using namespace at;
 
@@ -109,7 +110,7 @@ void TestIn3Basic(DeprecatedTypeProperties& T) {
   auto a = randn({3, 5, 2}, T);
   auto b = randn({3, 1, 2}, T);
   auto c = randn({1, 5, 1}, T);
-  auto aClone = a.clone();
+  auto aClone = clone_if_possible_with_memory_format(a);
   ASSERT_TRUE(a.addcmul_(b, c).equal(
       aClone.addcmul_(b.expand(a.sizes()), c.expand(a.sizes()))));
 }
@@ -119,7 +120,7 @@ void TestIn3WithScalar(DeprecatedTypeProperties& T) {
   auto a = randn({3, 5, 2}, T);
   auto b = randn({3, 1, 2}, T);
   auto c = randn({1, 5, 1}, T);
-  auto aClone = a.clone();
+  auto aClone = clone_if_possible_with_memory_format(a);
   auto bScalar = ones({1}, T);
   bScalar.unsafeGetTensorImpl()->maybe_zero_dim(true);
   ASSERT_TRUE(a.addcmul_(bScalar, c)
