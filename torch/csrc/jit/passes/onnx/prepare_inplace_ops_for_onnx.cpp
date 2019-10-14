@@ -82,7 +82,7 @@ struct ConvertedIndex {
   ConvertedIndex(Value* index, c10::Symbol orig_node_kind)
       : index(index), orig_node_kind(orig_node_kind) {}
 
-  Value* index;
+  Value* index = nullptr;
   c10::Symbol orig_node_kind;
 };
 
@@ -117,21 +117,30 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
         auto size = CreateSizeOfDim(orig_data, cur_dim, index_put_node);
         WithInsertPoint guard(index_put_node);
         auto index_tensor = graph->insert(aten::arange, {size});
-        dim_index_map[cur_dim] = {index_tensor, aten::slice};
+        dim_index_map.emplace(std::piecewise_construct,
+                              std::forward_as_tuple(cur_dim),
+                              std::forward_as_tuple(index_tensor, aten::slice));
       } else if (cur_dim - dim_offset < orig_tensor_indices.size()) {
-        dim_index_map[cur_dim] = {orig_tensor_indices[cur_dim - dim_offset], aten::index};
+        dim_index_map.emplace(std::piecewise_construct,
+                              std::forward_as_tuple(cur_dim),
+                              std::forward_as_tuple(orig_tensor_indices[cur_dim - dim_offset], aten::index));
       }
       cur_dim++;
     }
 
+    AT_ASSERT(cur_dim == dim);
     if (node->kind() == aten::slice) {
       auto size = CreateSizeOfDim(orig_data, dim, index_put_node);
       auto index_tensor = ConvertSliceToIndex(node, size, index_put_node);
-      dim_index_map[dim] = {index_tensor, aten::slice};
+      dim_index_map.emplace(std::piecewise_construct,
+                            std::forward_as_tuple(dim),
+                            std::forward_as_tuple(index_tensor, aten::slice));
     } else if (node->kind() == aten::select) {
       auto index = node->get(attr::index)->toInt();
       auto index_tensor = ConvertSelectToIndex(index, index_put_node);
-      dim_index_map[dim] = {index_tensor, aten::select};
+      dim_index_map.emplace(std::piecewise_construct,
+                            std::forward_as_tuple(dim),
+                            std::forward_as_tuple(index_tensor, aten::select));
       dim_offset++;
     } else {
       AT_ERROR("Unexpected node kind ", node->kind().toDisplayString(),
@@ -142,7 +151,9 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
   }
 
   while (cur_dim - dim_offset < orig_tensor_indices.size()) {
-    dim_index_map[cur_dim] = {orig_tensor_indices[cur_dim - dim_offset], aten::index};
+    dim_index_map.emplace(std::piecewise_construct,
+                          std::forward_as_tuple(cur_dim),
+                          std::forward_as_tuple(orig_tensor_indices[cur_dim - dim_offset], aten::index));
     cur_dim++;
   }
 
@@ -151,8 +162,15 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
   return dim_index_map;
 }
 
-// TODO: refactor this, create a struct to store all necessary information.
-// The current code is too verbose.
+// Convert slice/select operators to tensor indices.
+// Reshape the tensor indices according to their axis.
+// E.g.                 x[1:3, 0, ind1, ind2] = y
+//  slice index shape:   [2,   1, 1 ]
+//  select index shape:  [     1, 1 ]
+//  ind1 shape:          [        _ ]
+//  ind2 shape:          [        _ ]
+// where _ is the original size of ind1 and ind2.
+// ind1 and ind2 are both 1-d tensors since currently we only supports 1-d tensor indices.
 std::vector<Value*> ReshapeToAdvancedIndexingFormat(
     Graph* graph,
     Node* index_put_node,
@@ -163,7 +181,9 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   size_t max_index_dim = 0;
   size_t tensor_ind_count = 0;
   for (size_t i = 0; i < dim_index_map.size(); ++i) {
-    if (dim_index_map[i].orig_node_kind == aten::index) {
+    auto index_i = dim_index_map.find(i);
+    AT_ASSERT(index_i != dim_index_map.end());
+    if (index_i->second.orig_node_kind == aten::index) {
       if (i < min_index_dim) min_index_dim = i;
       if (i > max_index_dim) max_index_dim = i;
       tensor_ind_count++;
@@ -174,13 +194,14 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
     AT_ERROR("Only consecutive 1-d tensor indices are supported in exporting aten::index_put to ONNX.");
   }
 
-
   size_t tensor_ind_offset = tensor_ind_count == 0 ? 0 : tensor_ind_count - 1;
   WithInsertPoint guard(index_put_node);
   for (size_t i = 0; i < dim_index_map.size(); ++i) {
     size_t ind_size = 0;
-    Value *index = dim_index_map[i].index;
-    switch (dim_index_map[i].orig_node_kind) {
+    auto index_i = dim_index_map.find(i);
+    AT_ASSERT(index_i != dim_index_map.end());
+    Value *index = index_i->second.index;
+    switch (index_i->second.orig_node_kind) {
       case aten::select:
       case aten::slice: {
         if (i < min_index_dim) {
@@ -196,7 +217,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
         break;
       }
       default:
-        AT_ERROR("Unexpected node kind ", dim_index_map[i].orig_node_kind);
+        AT_ERROR("Unexpected node kind ", index_i->second.orig_node_kind);
     }
 
     std::vector<int64_t> view_shape(ind_size, 1);
@@ -211,16 +232,20 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
 void SquashSliceAndSelect(Node* index_put_node) {
   auto graph = index_put_node->owningGraph();
 
+  // Find slice and select operators that are associated with this index operator.
+  // E.g. x[1:3, 0] = y will generate one slice operator(1:3) and one select operator(0).
   std::vector<Node*> slice_and_select_nodes = FetchSliceAndSelect(index_put_node);
 
   Node* last_node = slice_and_select_nodes.size() > 0 ? slice_and_select_nodes.back() : index_put_node;
   Value* orig_data = last_node->input(0);
 
+  // Convert fetched slice/select operators into tensor indices.
   std::unordered_map<int64_t, ConvertedIndex> dim_index_map =
       MergeSliceAndSelectToIndices(graph, index_put_node, slice_and_select_nodes, last_node, orig_data);
   std::vector<Value*> indices =
       ReshapeToAdvancedIndexingFormat(graph, index_put_node, dim_index_map);
 
+  // Create new aten::index_put operator.
   WithInsertPoint guard(index_put_node);
   const auto list_indices = graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
                                  ->output();
