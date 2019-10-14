@@ -19,6 +19,6 @@ struct TORCH_API LayerNormOptions {
   /// a value added to the denominator for numerical stability.
   TORCH_ARG(double, eps) = 1e-5;
 };
-
+//std::vector<int64_t>
 } // namespace nn
 } // namespace torch
