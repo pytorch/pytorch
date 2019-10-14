@@ -4,6 +4,7 @@ from .observer import *  # noqa: F401
 from .QConfig import *  # noqa: F401
 from .fake_quantize import *  # noqa: F401
 from .fuse_modules import fuse_modules  # noqa: F401
+from .stubs import *  # noqa: F401
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -14,10 +15,10 @@ def default_eval_fn(model, calib_data):
         model(data)
 
 _all__ = [
-    'QuantWrapper', 'QuantStub', 'DeQuantStub', 'DEFAULT_MODULE_MAPPING',
-    # Top level API for quantizing a float model
+    'QuantWrapper', 'QuantStub', 'DeQuantStub',
+    # Top level API for eager mode quantization
     'quantize',
-    # Sub functions called by quantize
+    # Sub functions used by eager mode quantization
     'prepare', 'convert',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
