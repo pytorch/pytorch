@@ -104,8 +104,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda_memcheck* ]]; then
-  export CUDA_MEMCHECK_EXEC=cuda_memcheck
+if [[ "$BUILD_ENVIRONMENT" == *cuda-memcheck* ]]; then
+  export CUDA_MEMCHECK_EXEC=cuda-memcheck
 fi
 
 test_python_nn() {
@@ -138,7 +138,7 @@ test_aten() {
     ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
 
     ls build/bin
-    aten/tools/run_tests.sh build/bin
+    $CUDA_MEMCHECK_EXEC aten/tools/run_tests.sh build/bin
     assert_git_not_dirty
   fi
 }
@@ -234,6 +234,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_aten
   test_libtorch
   test_custom_script_ops
+elif [[ "$BUILD_ENVIRONMENT" == *cuda-memcheck* ]]; then
+  test_python_nn
+  test_python_all_except_nn
+  test_aten
 else
   test_torchvision
   test_python_nn
