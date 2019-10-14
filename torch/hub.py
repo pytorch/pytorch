@@ -432,7 +432,7 @@ def _download_url_to_file(url, dst, hash_prefix=None, progress=True):
             _download_url_to_file will be removed in after 1.3 release')
     download_url_to_file(url, dst, hash_prefix, progress)
 
-def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True, check_hash=False):
+def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=True, check_hash=False, rename_file=None):
     r"""Loads the Torch serialized object at the given URL.
 
     If downloaded file is a zip file, it will be automatically
@@ -480,7 +480,7 @@ def load_state_dict_from_url(url, model_dir=None, map_location=None, progress=Tr
             raise
 
     parts = urlparse(url)
-    filename = os.path.basename(parts.path)
+    filename = os.path.basename(parts.path) if rename_file is None else rename_file
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
