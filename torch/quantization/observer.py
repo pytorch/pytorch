@@ -202,9 +202,8 @@ class MinMaxObserver(_ObserverBase):
             raise NotImplementedError(
                 "Cannot reduce range for symmetric quantization for quint8"
             )
-
-    def forward(self, x_orig):
-        x = x_orig.detach()  # avoid keeping autograd tape
+    @torch.no_grad()
+    def forward(self, x):
         min_val = self.min_val
         max_val = self.max_val
         if min_val is None or max_val is None:
@@ -215,7 +214,7 @@ class MinMaxObserver(_ObserverBase):
             max_val = torch.max(torch.max(x), max_val)
         self.min_val = min_val
         self.max_val = max_val
-        return x_orig
+        return x
 
     @torch.jit.export
     def calculate_qparams(self):
@@ -243,8 +242,8 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         self.averaging_constant = averaging_constant
         super(MovingAverageMinMaxObserver, self).__init__(**kwargs)
 
-    def forward(self, x_orig):
-        x = x_orig.detach()  # avoid keeping autograd tape
+    @torch.no_grad()
+    def forward(self, x):
         min_val = self.min_val
         max_val = self.max_val
         if min_val is None or max_val is None:
@@ -255,7 +254,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             max_val = max_val + self.averaging_constant * (torch.max(x) - max_val)
         self.min_val = min_val
         self.max_val = max_val
-        return x_orig
+        return x
 
 
 class PerChannelMinMaxObserver(_ObserverBase):
@@ -279,8 +278,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
                 "Cannot reduce range for symmetric quantization for quint8"
             )
 
-    def forward(self, x_orig):
-        x = x_orig.detach()  # avoid keeping autograd tape
+    @torch.no_grad()
+    def forward(self, x):
         min_vals = self.min_vals
         max_vals = self.max_vals
         x_dim = x.size()
@@ -298,7 +297,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
             max_vals = torch.max(torch.max(y, 1)[0], max_vals)
         self.min_vals = min_vals
         self.max_vals = max_vals
-        return x_orig
+        return x
 
     def calculate_qparams(self):
         return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)
@@ -326,8 +325,8 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         self.averaging_constant = averaging_constant
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(**kwargs)
 
-    def forward(self, x_orig):
-        x = x_orig.detach()  # avoid keeping autograd tape
+    @torch.no_grad()
+    def forward(self, x):
         min_vals = self.min_vals
         max_vals = self.max_vals
         x_dim = x.size()
@@ -345,7 +344,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
             max_vals = max_vals + self.averaging_constant * (torch.max(y, 1)[0] - max_vals)
         self.min_vals = min_vals
         self.max_vals = max_vals
-        return x_orig
+        return x
 
 class HistogramObserver(_ObserverBase):
     r"""
