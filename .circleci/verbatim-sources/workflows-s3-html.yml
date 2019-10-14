@@ -6,25 +6,30 @@
   # These jobs are all idempotent and very lightweight; they just upload html
   # files that track what binaries are available and what their sizes are.
   update_s3_htmls:
-    triggers:
-      - schedule:
-          cron: "0 9 * * *"
+    jobs:
+      - setup:
           filters:
             branches:
-              only:
-                - master
-    jobs:
-      - setup
+              only: postnightly
       - update_s3_htmls_for_nightlies:
           context: org-member
           requires:
             - setup
+          filters:
+            branches:
+              only: postnightly
       - update_s3_htmls_for_nightlies_devtoolset7:
           context: org-member
           requires:
             - setup
+          filters:
+            branches:
+              only: postnightly
       - upload_binary_sizes:
           context: org-member
           requires:
             - setup
+          filters:
+            branches:
+              only: postnightly
 
