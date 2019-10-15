@@ -217,11 +217,10 @@ jobs:
 
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
-            export USE_NCCL=0
             mkdir build
             pushd build
             # We really only need compile_commands.json, so no need to build!
-            time cmake ..
+            time USE_NCCL=0 cmake ..
             popd
 
             # Generate ATen files.
