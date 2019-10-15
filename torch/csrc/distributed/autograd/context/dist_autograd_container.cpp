@@ -161,7 +161,6 @@ void DistAutogradContainer::releaseContext(
     // Reset the thread_local current context id, since it is no longer valid.
     current_context_id_ = kInvalidContextId;
   }
-
 }
 
 DistAutogradContext& DistAutogradContainer::retrieveContext(
