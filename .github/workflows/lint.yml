@@ -280,8 +280,13 @@ jobs:
       - name: Run regex linter
         run: |
           set -eux
-          python tools/regex_linter.py                \
-            --diff ${GITHUB_BASE_REF}                 \
+
+          git remote add upstream https://github.com/pytorch/pytorch
+          git fetch upstream "$GITHUB_BASE_REF"
+          BASE_BRANCH="upstream/$GITHUB_BASE_REF"
+
+          python tools/regex_linter.py            \
+            --diff ${BASE_BRANCH}                 \
             "$@" > ${GITHUB_WORKSPACE}/regex-linter-output.txt
 
           cat ${GITHUB_WORKSPACE}/regex-linter-output.txt
