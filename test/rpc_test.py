@@ -11,18 +11,17 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from common_utils import load_tests
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
-from torch.distributed import ProcessGroupAgent
 from torch.distributed.rpc import RpcBackend
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 
 
-def requires_process_group_agent(func):
-    from torch.distributed.rpc.api import _agent
-
-    return unittest.skipUnless(
-        TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP,
-        "Only ProcessGroupAgent supports global termination detection",
-    )(func)
+def requires_process_group_agent(message=""):
+    def decorator(old_func):
+        return unittest.skipUnless(
+            TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP,
+            message,
+        )(old_func)
+    return decorator
 
 
 VALUE_FUTURE = concurrent.futures.Future()
@@ -228,7 +227,7 @@ class RpcTest(object):
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_init_rpc_agent")
     def test_register_rpc_backend_and_init_rpc_backend(
-        self, mock_init_rref_context, mock_dist_autograd_init
+        self, mock_rpc_agent, mock_dist_autograd_init
     ):
         backend_name = "stub_backend"
         rpc.register_backend(
@@ -236,10 +235,7 @@ class RpcTest(object):
         )
         rpc.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
 
-    @unittest.skipIf(
-        TEST_CONFIG.rpc_backend != RpcBackend.PROCESS_GROUP,
-        "PROCESS_GROUP rpc backend specific test, skip",
-    )
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_duplicate_name(self):
         dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
@@ -627,7 +623,6 @@ class RpcTest(object):
             self.assertEqual(rrefs[i].to_here(), expected[i])
 
     @dist_init
-    @requires_process_group_agent
     def test_multi_builtin_remote_ret(self):
         def args_fn(n):
             return (torch.ones(n, n), torch.ones(n, n))
@@ -635,7 +630,6 @@ class RpcTest(object):
         self._test_multi_remote_call(torch.add, args_fn=args_fn)
 
     @dist_init
-    @requires_process_group_agent
     def test_py_udf_remote(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -647,7 +641,6 @@ class RpcTest(object):
         self.assertEqual(rref.to_here(), my_function(n, n + 1, n + 2))
 
     @dist_init
-    @requires_process_group_agent
     def test_multi_py_udf_remote(self):
         def kwargs_fn(n):
             return {"a": torch.ones(n, n), "b": torch.ones(n, n), "c": torch.ones(n, n)}
@@ -655,7 +648,6 @@ class RpcTest(object):
         self._test_multi_remote_call(my_function, kwargs_fn=kwargs_fn)
 
     @dist_init
-    @requires_process_group_agent
     def test_py_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -671,7 +663,6 @@ class RpcTest(object):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @dist_init
-    @requires_process_group_agent
     def test_py_rref_args_user_share(self):
         n = self.rank + 1
         owner_rank = n % self.world_size
@@ -688,7 +679,6 @@ class RpcTest(object):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @dist_init
-    @requires_process_group_agent
     def test_py_rpc_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -706,7 +696,6 @@ class RpcTest(object):
         self.assertEqual(c, torch.ones(n, n) + 4)
 
     @dist_init
-    @requires_process_group_agent
     def test_nested_remote(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -719,7 +708,6 @@ class RpcTest(object):
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
     @dist_init
-    @requires_process_group_agent
     def test_nested_rref(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -735,7 +723,6 @@ class RpcTest(object):
         self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
     @dist_init
-    @requires_process_group_agent
     def test_nested_rref_stress(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -758,7 +745,6 @@ class RpcTest(object):
             self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
     @dist_init
-    @requires_process_group_agent
     def test_multi_layer_nested_async_rpc(self):
         # This test will exit right away, but there will be a chain of async
         # RPCs. The termination algorithm should detect those messages properly.
@@ -771,7 +757,6 @@ class RpcTest(object):
         multi_layer_nested_async_rpc(dst_rank, self.world_size, ttl)
 
     @dist_init
-    @requires_process_group_agent
     def test_remote_with_exception(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -780,7 +765,6 @@ class RpcTest(object):
             rref.to_here()
 
     @dist_init
-    @requires_process_group_agent
     def test_rpc_return_rref(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -793,7 +777,6 @@ class RpcTest(object):
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
 
     @dist_init
-    @requires_process_group_agent
     def test_rref_forward_chain(self):
         ttl = 8
         n = self.rank + 1
@@ -813,7 +796,6 @@ class RpcTest(object):
         self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
 
     @dist_init
-    @requires_process_group_agent
     def test_remote_same_worker(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -829,7 +811,7 @@ class RpcTest(object):
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     def test_requires_process_group_agent_decorator(self):
-        @requires_process_group_agent
+        @requires_process_group_agent("test_func did not run")
         def test_func():
             return "expected result"
 

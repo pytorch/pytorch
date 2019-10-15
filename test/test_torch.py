@@ -224,8 +224,6 @@ class _TestTorchMixin(object):
                        'is_nonzero',
                        'is_same_size',
                        'isclose',
-                       'lgamma',
-                       'lgamma_',
                        'log_softmax',
                        'map2_',
                        'new',
