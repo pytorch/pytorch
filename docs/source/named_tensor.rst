@@ -301,7 +301,6 @@ operators, see :ref:`name_inference_reference-doc`.
 
    .. automethod:: unflatten
    .. py:method:: flatten(dims, out_dim) -> Tensor
-      :noindex:
 
       Flattens :attr:`dims` into a single dimension with name :attr:`out_dim`.
 

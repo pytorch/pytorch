@@ -1,5 +1,5 @@
 import torch
-from . import bar
+import jit.bar
 # This file contains definitions of script classes.
 # They are used by test_jit.py to test ScriptClass imports
 
@@ -8,4 +8,4 @@ from . import bar
 class FooSameName(object):
     def __init__(self, x):
         self.x = x
-        self.nested = bar.FooSameName(x)
+        self.nested = jit.bar.FooSameName(x)

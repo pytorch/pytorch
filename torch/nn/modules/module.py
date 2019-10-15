@@ -249,7 +249,7 @@ class Module(object):
     def apply(self, fn):
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
-        (see also :ref:`nn-init-doc`).
+        (see also :ref:`torch-nn-init`).
 
         Args:
             fn (:class:`Module` -> None): function to be applied to each submodule

@@ -588,7 +588,10 @@
   save_invstd: not_implemented("native_batch_norm_backward save_invstd")
 
 - name: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
-  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_layer_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, M, N, eps, grad_input_mask) : native_layer_norm_backward(grads[0].is_contiguous() ? grads[0] : grads[0].contiguous(), input, result1, result2, weight, M, N, grad_input_mask)"
+  input, weight, bias: native_layer_norm_backward(grad.contiguous(), input, result1, result2, weight, M, N, grad_input_mask)
+
+- name: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  grad_out, input, weight: native_layer_norm_double_backward(grads[0].contiguous(), grads[1].contiguous(), grads[2].contiguous(), grad_out.contiguous(), input, mean, rstd, weight, M, N, grad_input_mask)
 
 - name: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
@@ -1012,6 +1015,9 @@
 - name: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: smooth_l1_loss_backward(grad, self, target, reduction)
 
+- name: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
+  self: soft_margin_loss_backward(grad, self, target, reduction)
+
 - name: relu(Tensor self) -> Tensor
   self: threshold_backward(grad, self, 0)
 
@@ -1342,6 +1348,10 @@
 - name: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   grad_output: _softmax_backward_data(grad.to(output.dtype()), output, dim, self)
   self: softmax_double_backward(grad.to(output.dtype()), grad_output, dim, output).to(self.dtype())
+
+- name: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
+  grad_output: soft_margin_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
+  self: soft_margin_loss_double_backward(grad * grad_output, self, target, reduction)
 
 - name: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd) -> Tensor
   grad_output: softshrink_backward(grad, self, lambd)

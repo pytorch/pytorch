@@ -11,17 +11,18 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from common_utils import load_tests
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
+from torch.distributed import ProcessGroupAgent
 from torch.distributed.rpc import RpcBackend
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 
 
-def requires_process_group_agent(message=""):
-    def decorator(old_func):
-        return unittest.skipUnless(
-            TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP,
-            message,
-        )(old_func)
-    return decorator
+def requires_process_group_agent(func):
+    from torch.distributed.rpc.api import _agent
+
+    return unittest.skipUnless(
+        isinstance(_agent, ProcessGroupAgent),
+        "Only ProcessGroupAgent supports global termination detection",
+    )
 
 
 VALUE_FUTURE = concurrent.futures.Future()
@@ -135,13 +136,13 @@ def multi_layer_nested_async_rpc(dst, world_size, ttl):
 
 def nested_rref(dst):
     return (
-        rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1)),
-        rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 2)),
+        dist.remote(dst, torch.add, args=(torch.ones(2, 2), 1)),
+        dist.remote(dst, torch.add, args=(torch.ones(2, 2), 2)),
     )
 
 
 def nested_remote(dst):
-    rref = rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 3))
+    rref = dist.remote(dst, torch.add, args=(torch.ones(2, 2), 3))
     return rref.to_here()
 
 
@@ -149,7 +150,7 @@ def rref_forward_chain(dst, world_size, rref, ttl):
     if ttl > 0:
         current_dst = "worker{}".format(dst)
         next_dst = (dst + 1) % world_size
-        ret_rref = rpc.remote(
+        ret_rref = dist.remote(
             current_dst, rref_forward_chain, args=(next_dst, world_size, rref, ttl - 1)
         )
         return [ret_rref]
@@ -158,7 +159,7 @@ def rref_forward_chain(dst, world_size, rref, ttl):
 
 
 def rpc_return_rref(dst):
-    return rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
+    return dist.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
 
 
 def light_rpc():
@@ -235,7 +236,10 @@ class RpcTest(object):
         )
         rpc.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
 
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    @unittest.skipIf(
+        TEST_CONFIG.rpc_backend != RpcBackend.PROCESS_GROUP,
+        "PROCESS_GROUP rpc backend specific test, skip",
+    )
     def test_duplicate_name(self):
         dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
@@ -623,6 +627,7 @@ class RpcTest(object):
             self.assertEqual(rrefs[i].to_here(), expected[i])
 
     @dist_init
+    @requires_process_group_agent
     def test_multi_builtin_remote_ret(self):
         def args_fn(n):
             return (torch.ones(n, n), torch.ones(n, n))
@@ -630,10 +635,11 @@ class RpcTest(object):
         self._test_multi_remote_call(torch.add, args_fn=args_fn)
 
     @dist_init
+    @requires_process_group_agent
     def test_py_udf_remote(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        rref = rpc.remote(
+        rref = dist.remote(
             "worker{}".format(dst_rank),
             my_function,
             kwargs={"a": n, "b": n + 1, "c": n + 2},
@@ -641,6 +647,7 @@ class RpcTest(object):
         self.assertEqual(rref.to_here(), my_function(n, n + 1, n + 2))
 
     @dist_init
+    @requires_process_group_agent
     def test_multi_py_udf_remote(self):
         def kwargs_fn(n):
             return {"a": torch.ones(n, n), "b": torch.ones(n, n), "c": torch.ones(n, n)}
@@ -648,59 +655,63 @@ class RpcTest(object):
         self._test_multi_remote_call(my_function, kwargs_fn=kwargs_fn)
 
     @dist_init
+    @requires_process_group_agent
     def test_py_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        rref_a = rpc.remote(
+        rref_a = dist.remote(
             "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 2)
         )
-        rref_b = rpc.remote(
+        rref_b = dist.remote(
             "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 1)
         )
-        rref_c = rpc.remote(
+        rref_c = dist.remote(
             "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @dist_init
+    @requires_process_group_agent
     def test_py_rref_args_user_share(self):
         n = self.rank + 1
         owner_rank = n % self.world_size
         user_rank = (n + 1) % self.world_size
-        rref_a = rpc.remote(
+        rref_a = dist.remote(
             "worker{}".format(owner_rank), my_function, args=(torch.ones(n, n), 2, 0)
         )
-        rref_b = rpc.remote(
+        rref_b = dist.remote(
             "worker{}".format(owner_rank), my_function, args=(torch.ones(n, n), 1, 0)
         )
-        rref_c = rpc.remote(
+        rref_c = dist.remote(
             "worker{}".format(user_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
 
     @dist_init
+    @requires_process_group_agent
     def test_py_rpc_rref_args(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        rref_a = rpc.remote(
+        rref_a = dist.remote(
             "worker{}".format(dst_rank), my_function, args=(torch.ones(n, n), 2, 0)
         )
-        rref_b = rpc.remote(
+        rref_b = dist.remote(
             "worker{}".format(dst_rank), my_function, args=(torch.ones(n, n), 1, 0)
         )
 
-        c = rpc.rpc_sync(
+        c = dist.rpc_sync(
             "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
 
         self.assertEqual(c, torch.ones(n, n) + 4)
 
     @dist_init
+    @requires_process_group_agent
     def test_nested_remote(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
-        rref = rpc.remote(
+        rref = dist.remote(
             "worker{}".format(dst_rank1),
             nested_remote,
             args=("worker{}".format(dst_rank2),),
@@ -708,11 +719,12 @@ class RpcTest(object):
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 3)
 
     @dist_init
+    @requires_process_group_agent
     def test_nested_rref(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
-        rref_of_rrefs = rpc.remote(
+        rref_of_rrefs = dist.remote(
             "worker{}".format(dst_rank1),
             nested_rref,
             args=("worker{}".format(dst_rank2),),
@@ -723,6 +735,7 @@ class RpcTest(object):
         self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
     @dist_init
+    @requires_process_group_agent
     def test_nested_rref_stress(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
@@ -730,7 +743,7 @@ class RpcTest(object):
         all_rrefs = []
         for _ in range(20):
             all_rrefs.append(
-                rpc.remote(
+                dist.remote(
                     "worker{}".format(dst_rank1),
                     nested_rref,
                     args=("worker{}".format(dst_rank2),),
@@ -745,6 +758,7 @@ class RpcTest(object):
             self.assertEqual(rrefs[1].to_here(), torch.ones(2, 2) + 2)
 
     @dist_init
+    @requires_process_group_agent
     def test_multi_layer_nested_async_rpc(self):
         # This test will exit right away, but there will be a chain of async
         # RPCs. The termination algorithm should detect those messages properly.
@@ -757,19 +771,21 @@ class RpcTest(object):
         multi_layer_nested_async_rpc(dst_rank, self.world_size, ttl)
 
     @dist_init
+    @requires_process_group_agent
     def test_remote_with_exception(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        rref = rpc.remote("worker{}".format(dst_rank), raise_func)
+        rref = dist.remote("worker{}".format(dst_rank), raise_func)
         with self.assertRaisesRegex(Exception, "ValueError"):
             rref.to_here()
 
     @dist_init
+    @requires_process_group_agent
     def test_rpc_return_rref(self):
         n = self.rank + 1
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
-        rref = rpc.rpc_sync(
+        rref = dist.rpc_sync(
             "worker{}".format(dst_rank1),
             rpc_return_rref,
             args=("worker{}".format(dst_rank2),),
@@ -777,12 +793,13 @@ class RpcTest(object):
         self.assertEqual(rref.to_here(), torch.ones(2, 2) + 1)
 
     @dist_init
+    @requires_process_group_agent
     def test_rref_forward_chain(self):
         ttl = 8
         n = self.rank + 1
         dst_rank = n % self.world_size
 
-        rref = rpc.remote(
+        rref = dist.remote(
             "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 1)
         )
 
@@ -796,24 +813,17 @@ class RpcTest(object):
         self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
 
     @dist_init
+    @requires_process_group_agent
     def test_remote_same_worker(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        rref_a = rpc.remote(
+        rref_a = dist.remote(
             "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 2)
         )
-        rref_b = rpc.remote(
+        rref_b = dist.remote(
             "worker{}".format(dst_rank), torch.add, args=(torch.ones(n, n), 1)
         )
-        rref_c = rpc.remote(
+        rref_c = dist.remote(
             "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
-
-    def test_requires_process_group_agent_decorator(self):
-        @requires_process_group_agent("test_func did not run")
-        def test_func():
-            return "expected result"
-
-        if TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP:
-            self.assertEqual(test_func(), "expected result")
