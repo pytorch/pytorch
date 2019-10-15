@@ -595,7 +595,8 @@ class CyclicLR(_LRScheduler):
     `step` should be called after a batch has been used for training.
 
     This class has three built-in policies, as put forth in the paper:
-    * "triangular": A basic triangular cycle w/ no amplitude scaling.
+
+    * "triangular": A basic triangular cycle without amplitude scaling.
     * "triangular2": A basic triangular cycle that scales initial amplitude by half each cycle.
     * "exp_range": A cycle that scales initial amplitude by gamma**(cycle iterations) at each
         cycle iteration.
@@ -940,6 +941,7 @@ class OneCycleLR(_LRScheduler):
 
     Note also that the total number of steps in the cycle can be determined in one
     of two ways (listed in order of precedence):
+
     1. A value for total_steps is explicitly provided.
     2. A number of epochs (epochs) and a number of steps per epoch
        (steps_per_epoch) are provided.
