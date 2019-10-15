@@ -218,11 +218,8 @@ jobs:
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
 
-            mkdir build
-            pushd build
             # We really only need compile_commands.json, so no need to build!
             time python setup.py --cmake-only
-            popd
 
             # Generate ATen files.
             time python aten/src/ATen/gen.py \
