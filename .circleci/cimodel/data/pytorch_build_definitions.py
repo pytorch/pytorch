@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from collections import OrderedDict
 
 from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
@@ -162,7 +160,7 @@ def gen_dependent_configs(xenial_parent_config):
 
         configs.append(c)
 
-    for x in ["pytorch_short_perf_test_gpu", "pytorch_python_doc_push", "pytorch_cpp_doc_push"]:
+    for x in ["pytorch_python_doc_push", "pytorch_cpp_doc_push"]:
         configs.append(HiddenConf(x, parent_build=xenial_parent_config))
 
     return configs
