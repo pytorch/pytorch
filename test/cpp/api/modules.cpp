@@ -746,6 +746,36 @@ TEST_F(ModulesTest, Fold) {
   ASSERT_EQ(y.size(3), 5);
 }
 
+TEST_F(ModulesTest, Unfold) {
+  {
+    Unfold model(UnfoldOptions({2, 4}));
+    auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
+    auto output = model(input);
+    auto expected_sizes = std::vector<int64_t>({2, 16, 3});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(output.sizes(), expected_sizes);
+    ASSERT_EQ(s.ndimension(), 0);
+  }
+  {
+    // input wrong dimension
+    Unfold model(UnfoldOptions({2, 4}));
+    ASSERT_THROWS_WITH(
+        model(torch::randn({1, 5, 2})),
+        "Input Error: Only 4D input Tensors are supported (got 3D)");
+  }
+  {
+    // calculated output shape is too small
+    Unfold model(UnfoldOptions({2, 3}));
+    ASSERT_THROWS_WITH(
+        model(torch::randn({1, 2, 2, 2})),
+        "Given input with spatial size (2, 2), kernel_size=(2, 3), "
+        "dilation=(1, 1), padding=(0, 0), calculated shape of the array of "
+        "sliding blocks as (1, 0), which is too small (non-positive).");
+  }
+}
+
 TEST_F(ModulesTest, SimpleContainer) {
   auto model = std::make_shared<SimpleContainer>();
   auto l1 = model->add(Linear(10, 3), "l1");
@@ -1048,6 +1078,34 @@ TEST_F(ModulesTest, CosineSimilarity) {
 
   ASSERT_TRUE(output.allclose(expected, 1e-04));
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
+}
+
+TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
+  MultiLabelSoftMarginLoss loss;
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({0.7608436}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
+  auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
+  auto options = MultiLabelSoftMarginLossOptions().reduction(Reduction::None).weight(weight);
+  MultiLabelSoftMarginLoss loss = MultiLabelSoftMarginLoss(options);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
 TEST_F(ModulesTest, PairwiseDistance) {
@@ -1464,6 +1522,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
 }
 
+TEST_F(ModulesTest, PrettyPrintUnfold) {
+  ASSERT_EQ(
+      c10::str(Unfold(torch::IntArrayRef({2, 4}))),
+      "torch::nn::Unfold(kernel_size=[2, 4], dilation=[1, 1], padding=[0, 0], stride=[1, 1])");
+  ASSERT_EQ(
+      c10::str(Unfold(UnfoldOptions({2, 4}).dilation(2).padding({2, 1}).stride(2))),
+      "torch::nn::Unfold(kernel_size=[2, 4], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
+}
+
 TEST_F(ModulesTest, PrettyPrintMaxPool) {
   ASSERT_EQ(
       c10::str(MaxPool1d(5)),
@@ -1637,6 +1704,10 @@ TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
   ASSERT_EQ(
       c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
       "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintMultiLabelSoftMarginLoss) {
+  ASSERT_EQ(c10::str(MultiLabelSoftMarginLoss()), "torch::nn::MultiLabelSoftMarginLoss()");
 }
 
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
