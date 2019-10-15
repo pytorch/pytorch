@@ -11,7 +11,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
 {
   THNN_CHECK_SHAPE(input, target);
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     THTensor_(resizeAs)(output, input);
     TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, output,
       scalar_t z = fabs(*input_data - *target_data);
@@ -28,7 +28,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     sum += z < 1 ? 0.5*z*z : z - 0.5;
   );
 
-  if (reduction == Reduction::Mean)
+  if (reduction == at::Reduction::Mean)
     sum /= THTensor_(nElement)(input);
 
   THTensor_(set0d)(output, sum);
@@ -45,7 +45,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
   THNN_CHECK_SHAPE(input, target);
   THTensor_(resizeAs)(gradInput, input);
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     THNN_CHECK_SHAPE(gradOutput, input);
     TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
       scalar_t x = *input_data - *target_data;
@@ -64,7 +64,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
   }
 
   THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-  scalar_t norm = (reduction == Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.) * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
+  scalar_t norm = (reduction == at::Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.) * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
 
   TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
     scalar_t x = *input_data - *target_data;

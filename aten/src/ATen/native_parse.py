@@ -129,10 +129,10 @@ def type_argument_translations(arg):
     elif default == 'None':
         default = 'c10::nullopt'
     # The JIT signature schema uses Mean, but in particular C++ needs
-    # the legacy Reduction::Mean. So we'll continue emiting that until
+    # the legacy at::Reduction::Mean. So we'll continue emiting that until
     # we change this at either a JIT schema or C++ level.
     elif default == 'Mean':
-        default = 'Reduction::Mean'
+        default = 'at::Reduction::Mean'
     elif default == 'contiguous_format':
         default = 'MemoryFormat::Contiguous'
     elif default == 'per_tensor_affine':
