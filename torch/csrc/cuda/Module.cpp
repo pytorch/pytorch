@@ -215,7 +215,7 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module, PyObject *noargs)
   Py_RETURN_NONE;
 }
 
-PyObject * THCPModule_cudaDeviceReset(PyObject *module, PyObject *noargs)
+PyObject * THCPModule_cudaDeviceReset(PyObject *_unused, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   THCudaCheck(cudaDeviceReset());
