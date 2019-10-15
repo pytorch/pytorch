@@ -61,6 +61,22 @@ struct TORCH_API CosineEmbeddingLossOptions {
 
 // ============================================================================
 
+/// Options for a multi-label soft margin loss functional and module.
+struct TORCH_API MultiLabelSoftMarginLossOptions {
+  /// A manual rescaling weight given to each
+  /// class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+  /// treated as if having all ones.
+  TORCH_ARG(Tensor, weight) = Tensor();
+
+  /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+  /// 'none': no reduction will be applied, 'mean': the sum of the output will
+  /// be divided by the number of elements in the output, 'sum': the output will
+  /// be summed. Default: 'mean'
+  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+};
+
+// ============================================================================
+
 /// Options for a triplet-margin-Loss functional and module.
 struct TORCH_API TripletMarginLossOptions {
   /// Specifies the threshold for which the distance of a negative sample must
