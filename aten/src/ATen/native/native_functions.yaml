@@ -94,6 +94,12 @@
   variants: method
   supports_named_tensor: True
 
+
+- func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
+  use_c10_dispatcher: unboxed_only
+  dispatch:
+    CUDA: _use_cudnn_ctc_loss
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   use_c10_dispatcher: unboxed_only
   dispatch:
