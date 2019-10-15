@@ -45,7 +45,7 @@ class DiagonalTensor:
     def tensor(self):
         return self._i * torch.eye(self._N)
 
-    def __torch_function__(self, func, args=None, kwargs=None):
+    def __torch_function__(self, func, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
         if func not in HANDLED_FUNCTIONS:
@@ -80,7 +80,7 @@ def mm(mat1, mat2):
     return 0
 
 class SubTensor(torch.Tensor):
-    def __torch_function__(self, func, args=None, kwargs=None):
+    def __torch_function__(self, func, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
@@ -112,7 +112,7 @@ class SubDiagonalTensor(DiagonalTensor):
     def tensor(self):
         return self._i * torch.eye(self._N)
 
-    def __torch_function__(self, func, args=None, kwargs=None):
+    def __torch_function__(self, func, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
@@ -188,7 +188,7 @@ def implements_tensor_like(torch_function):
     return decorator
 
 class TensorLike:
-    def __torch_function__(self, func, args=None, kwargs=None):
+    def __torch_function__(self, func, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 

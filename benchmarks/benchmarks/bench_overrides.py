@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 class DuckTensor(object):
-    def __torch_function__(self, func, args=None, kwargs=None):
+    def __torch_function__(self, func, args=(), kwargs=None):
         pass
 
 HANDLED_FUNCTIONS = {}
@@ -17,7 +17,7 @@ def implements(torch_function):
     return decorator
 
 class SubTensor(Tensor):
-    def __torch_function__(self, func, args=None, kwargs=None):
+    def __torch_function__(self, func, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
 
