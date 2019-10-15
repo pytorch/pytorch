@@ -22,7 +22,7 @@ static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   // this will be efficient (no reordering of the data will occur)
   // because the first transpose will make the tensor contiguous,
   // and cloning a contiguous tensor is fast.
-  auto result = src.transpose(-2, -1).clone();
+  auto result = src.transpose(-2, -1).clone(at::MemoryFormat::Contiguous);
   result.transpose_(-2, -1);
   return result;
 }
