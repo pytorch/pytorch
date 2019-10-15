@@ -100,9 +100,17 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
     return DEFAULT;
   }
 
+// Fixing dispatch error in Windows debug builds.
+// See https://github.com/pytorch/pytorch/issues/22681 for more details.
+#if defined(_MSC_VER) && defined(_DEBUG)
+  FnPtr cpu_dispatch_ptr;
+  FnPtr cuda_dispatch_ptr;
+  FnPtr hip_dispatch_ptr;
+#else
   FnPtr cpu_dispatch_ptr = nullptr;
   FnPtr cuda_dispatch_ptr = nullptr;
   FnPtr hip_dispatch_ptr = nullptr;
+#endif
   static FnPtr DEFAULT;
 #ifdef HAVE_AVX_CPU_DEFINITION
   static FnPtr AVX;
@@ -140,13 +148,9 @@ struct RegisterHIPDispatch {
     name(const name&) = delete;            \
     name& operator=(const name&) = delete; \
   };                                       \
-  CAFFE2_API struct name& get ## name
+  extern CAFFE2_API struct name name
 
-#define DEFINE_DISPATCH(name) \
-  struct name& get ## name { \
-    static struct name singleton; \
-    return singleton; \
-  }
+#define DEFINE_DISPATCH(name) struct name name
 
 #define REGISTER_ARCH_DISPATCH(name, arch, fn) \
   template <> decltype(fn) DispatchStub<decltype(fn), struct name>::arch = fn;
