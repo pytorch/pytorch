@@ -85,6 +85,10 @@ DistAutogradContext& DistAutogradContainer::getOrCreateContext(
   return context;
 }
 
+rpc::worker_id_t DistAutogradContainer::getWorkerId() const {
+  return worker_id_;
+}
+
 const DistAutogradContext& DistAutogradContainer::newContext() {
   TORCH_CHECK(
       current_context_id_ == kInvalidContextId,
