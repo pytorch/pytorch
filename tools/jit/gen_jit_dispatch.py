@@ -531,7 +531,7 @@ def signature(decl, should_match_schema=True):
                 .replace('}}', ']') \
                 .replace('true', 'True') \
                 .replace('false', 'False') \
-                .replace('Reduction::Mean', 'Mean') \
+                .replace('at::Reduction::Mean', 'Mean') \
                 .replace('MemoryFormat::Contiguous', 'contiguous_format') \
                 .replace('QScheme::PER_TENSOR_AFFINE', 'per_tensor_affine') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
