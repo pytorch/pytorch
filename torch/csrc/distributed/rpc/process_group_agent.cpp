@@ -148,8 +148,6 @@ ProcessGroupAgent::ProcessGroupAgent(
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
 
-  // construct PythonRpcHandler singleton here
-  PythonRpcHandler::getInstance();
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
@@ -183,7 +181,6 @@ void ProcessGroupAgent::join() {
       SendWork(allWorkerInfo_[dst], Message({}, {}, MessageType::SHUTDOWN)));
   threadPool_.waitWorkComplete();
   listenerThread_.join();
-  PythonRpcHandler::getInstance().cleanup();
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {

@@ -1,7 +1,7 @@
 from torch.distributed import invoke_rpc_builtin, invoke_rpc_python_udf
 from torch.distributed import invoke_remote_builtin, invoke_remote_python_udf
 from torch.distributed import _init_rpc_agent
-from torch.distributed import _destroy_rref_context
+from torch.distributed import _destroy_rref_context, _cleanup_python_rpc_handler
 from torch.distributed import ProcessGroupAgent
 from torch.distributed import WorkerInfo
 from .backend_registry import is_backend_registered, init_backend
@@ -38,6 +38,11 @@ def join_rpc():
         _agent.join()
         _agent = None
         _destroy_rref_context()
+        # clean up python rpc handler in join_rpc(), see comments in
+        # PythonRpcHandler::cleanup(), call it in python API because the
+        # cleanup() function has python dependency, it assumes python
+        # interpreter exists
+        _cleanup_python_rpc_handler()
 
 
 @_require_initialized
