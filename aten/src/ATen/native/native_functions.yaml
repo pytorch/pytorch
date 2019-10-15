@@ -5706,31 +5706,8 @@
     CPU: legacy::cpu::_thnn_smooth_l1_loss_backward
     CUDA: legacy::cuda::_thnn_smooth_l1_loss_backward
 
-- func: soft_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_soft_margin_loss_forward_out
-    CUDA: legacy::cuda::_thnn_soft_margin_loss_forward_out
-
 - func: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_soft_margin_loss_forward
-    CUDA: legacy::cuda::_thnn_soft_margin_loss_forward
-
-- func: soft_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_soft_margin_loss_backward_out
-    CUDA: legacy::cuda::_thnn_soft_margin_loss_backward_out
-
-- func: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  use_c10_dispatcher: full
-  python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_soft_margin_loss_backward
-    CUDA: legacy::cuda::_thnn_soft_margin_loss_backward
 
 - func: elu.out(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
