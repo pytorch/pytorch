@@ -1314,6 +1314,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
 
+    def test_round(self):
+        class Pad(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.Functional(t4d, (1, 1), "constant", 0)
+
+        x = torch.randn(2,3,4)
+        self.run_test(Pad(), x)
+
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
             self._elman_rnn_test(*args, **kwargs)
