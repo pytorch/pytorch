@@ -271,35 +271,6 @@ def _scatter_helper(g, self, dim, index, src):
     return scatter(g, self, dim, index, src)
 
 
-# Generate paddings in ONNX order based on pad in pytorch.
-# Arguments:
-#     dim: the dimension of the tensor.
-#     pad: the paddings in pytorch.
-#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
-def _prepare_onnx_paddings(g, dim, pad):    
-    assert isinstance(dim, int)
-    # The desired order of paddings is
-    # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
-    # n is the dimension of input.
-    if _export_onnx_opset_version <= 10:
-        # assume zero-dimensions in the beginning
-        paddings = list(pad[:]) + [0] * (dim * 2 - len(pad))
-        # reverse order and collate first beginnings and then ends
-        paddings = paddings[-2::-2] + paddings[-1::-2]
-        return paddings
-    else:
-        pad_t = _unpack_list(pad, 'is')
-        print("ttttttttt", pad_t, " diiim ", dim)
-        pad = g.op("Constant", value_t=torch.tensor(pad_t))
-        pad_ext = g.op("Pad", pad, g.op("Constant", value_t=torch.tensor([0, (2*dim - len(pad_t))])))
-        pad_reshaped = g.op("Reshape", pad_ext, g.op("Constant", value_t=torch.tensor([-1, 2])))
-        pad_reshaped = torch.onnx.symbolic_opset10.flip(g, pad_reshaped, [0])
-        pad_transpose = g.op("Transpose", pad_reshaped, perm_i=[1,0])
-        paddings = g.op("Reshape", pad_transpose, g.op("Constant", value_t=torch.tensor([1, -1])))
-        # paddings = g.op("ConcatFromSequence", pad_reshaped, axis_i=1, new_axis_i=1)
-        return paddings
-
-
 def _size_helper(g, self, dim):
     full_shape = g.op("Shape", self)
     from torch.onnx.symbolic_opset9 import select
@@ -327,6 +298,7 @@ def _index_fill_reshape_helper(g, self, dim, index):
                                    g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index))
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
+
 
 # ---------------------------------------------------------------------
 # ONNX operator version

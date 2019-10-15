@@ -612,7 +612,7 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
-    def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
+    def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode,  count_include_pad, divisor_override=None):
         if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
         if divisor_override and divisor_override.node().kind() != 'prim::Constant':
@@ -622,20 +622,14 @@ def _avg_pool(name, tuple_fn):
         padding = tuple(tuple_fn(padding))
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
-        if count_include_pad:
-            input = g.op("Pad", input,
-                         pads_i=((0,) * 2 + padding) * 2,
-                         mode_s='constant',
-                         value_f=0.)
-            padding = (0,) * len(padding)
-        if ceil_mode:
             padding = padding + tuple(numpy.add(padding_ceil, padding))
         else:
             padding = padding * 2
         output = g.op("AveragePool", input,
                       kernel_shape_i=tuple_fn(kernel_size),
                       strides_i=tuple_fn(stride),
-                      pads_i=padding)
+                      pads_i=padding,
+                      count_include_pad_i=count_include_pad)
         return output
     return symbolic_fn
 
@@ -690,27 +684,41 @@ adaptive_max_pool2d = _adaptive_pool('adaptive_max_pool2d', "MaxPool", _pair, ma
 adaptive_max_pool3d = _adaptive_pool('adaptive_max_pool3d', "MaxPool", _triple, max_pool3d_with_indices)
 
 
+# Generate paddings in ONNX order based on pad in pytorch.
+# Arguments:
+#     dim: the dimension of the tensor.
+#     pad: the paddings in pytorch.
+#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
+def _prepare_onnx_paddings(dim, pad):
+    assert isinstance(dim, int)
+    # The desired order of paddings is
+    # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
+    # n is the dimension of input.
+    # assume zero-dimensions in the beginning
+    paddings = list(pad[:]) + [0] * (dim * 2 - len(pad))
+    # reverse order and collate first beginnings and then ends
+    paddings = paddings[-2::-2] + paddings[-1::-2]
+    return paddings
+
+
 @parse_args('v', 'is', 'f')
 def constant_pad_nd(g, input, padding, value):
-    from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "constant"
-    paddings = prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
 
 
 @parse_args('v', 'is')
 def reflection_pad(g, input, padding):
-    from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "reflect"
-    paddings = prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
 @parse_args('v', 'is')
 def replication_pad(g, input, padding):
-    from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "edge"
-    paddings = prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 

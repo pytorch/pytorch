@@ -68,6 +68,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         # export the model to ONNX
         f = io.BytesIO()
         input_copy = copy.deepcopy(input)
+        # f = '/home/neraoof/test/results/model.onnx'
         torch.onnx._export(model, input_copy, f,
                            opset_version=self.opset_version,
                            example_outputs=output,
@@ -321,33 +322,38 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool(self):
         model = torch.nn.AvgPool1d(2, stride=1)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
+        model = torch.nn.AvgPool1d(2, stride=1, count_include_pad=False)
+        x = torch.randn(20, 16, 50)
+        self.run_test(model, x)
+
     def test_avgpool_1d_ceil(self):
-        model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
+        model = torch.nn.AvgPool1d(3, 2, ceil_mode=True, count_include_pad=False)
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
-    def test_avgpool_2d_ceil(self):
-        model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
-        x = torch.randn(20, 16, 50, 32)
+        model = torch.nn.AvgPool1d(3, 2, ceil_mode=True, count_include_pad=False)
+        x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
+    def test_avgpool_2d_ceil(self):
+        model = torch.nn.AvgPool2d(3, 2, ceil_mode=True, count_include_pad=False)
+        x = torch.randn(20, 16, 50, 32)
+        self.run_test(model, x,)
+
     def test_avgpool_3d_ceil(self):
-        model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
+        model = torch.nn.AvgPool3d(3, 2, ceil_mode=True, count_include_pad=False)
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
+
+    # def test_pad(self):
+    #     model = torch.nn.ConstantPad1d(2, 2.5)
+    #     x = torch.randn(2, 3, 4, dtype=torch.float64)
+    #     self.run_test(model, x)
 
     def test_arithmetic(self):
         class ArithmeticModule(torch.nn.Module):
@@ -1314,13 +1320,34 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
 
-    def test_round(self):
-        class Pad(torch.nn.Module):
-            def forward(self, x):
-                return torch.nn.Functional(t4d, (1, 1), "constant", 0)
+    # TODO: enable this test once ORT supports more input types
+    @skipIfUnsupportedOpsetVersion([11])
+    def test_constant_pad(self):
+        model = torch.nn.ConstantPad1d(2, 3.5)
+        x = torch.randn(2, 4, 4)
+        self.run_test(model, x)
 
-        x = torch.randn(2,3,4)
-        self.run_test(Pad(), x)
+        model = torch.nn.ConstantPad2d((3, 0, 2, 1), 3.5)
+        x = torch.randn(2, 2, 4, 4)
+        self.run_test(model, x)
+
+    def test_reflection_pad(self):
+        model = torch.nn.ReflectionPad1d(2)
+        x = torch.randn(2, 4, 4)
+        self.run_test(model, x)
+
+        model = torch.nn.ReflectionPad2d((3, 0, 2, 1))
+        x = torch.randn(2, 2, 4, 4)
+        self.run_test(model, x)
+
+    def test_replication_pad(self):
+        model = torch.nn.ReplicationPad1d(2)
+        x = torch.randn(2, 4, 4)
+        self.run_test(model, x)
+
+        model = torch.nn.ReplicationPad2d((3, 0, 2, 1))
+        x = torch.randn(2, 2, 4, 4)
+        self.run_test(model, x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':

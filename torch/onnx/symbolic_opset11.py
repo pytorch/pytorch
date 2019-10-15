@@ -132,23 +132,50 @@ def round(g, self):
     return g.op("Round", self)
 
 
-@parse_args('v', 'v', 'f')
-def constant_pad_nd(g, input, padding, value):
+# Generate paddings in ONNX order based on pad in pytorch.
+# Arguments:
+#     dim: the dimension of the tensor.
+#     pad: the paddings in pytorch.
+#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
+def _prepare_onnx_paddings(g, dim, pad):
+    # The desired order of paddings is
+    # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
+    # n is the dimension of input.
+    pad_shape = g.op("Shape", pad)
+    # assume zero-dimensions in the beginning
+    pad_len = torch.onnx.symbolic_opset9.select(g, pad_shape, g.op("Constant", value_t=torch.tensor([0])),
+                                                g.op("Constant", value_t=torch.tensor([0])))
+    extension = g.op("Sub", g.op("Mul", g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64)),
+                     g.op("Constant", value_t=torch.tensor(2, dtype=torch.int64))), pad_len)
+    ext_pad = g.op("Pad", g.op("Cast", extension, to_i=sym_help.cast_pytorch_to_onnx['Float']),
+                    g.op("Constant", value_t=torch.tensor([1, 0], dtype=torch.int64)))
+    # reverse order and collate first beginnings and then ends
+    ext_pad = g.op("Cast", ext_pad, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    paddings = g.op("Cast", pad, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    paddings = g.op("Reshape", g.op("Pad", paddings, ext_pad), g.op("Constant", value_t=torch.tensor([-1, 2])))
+    paddings = g.op("Transpose",  torch.onnx.symbolic_opset10.flip(g, paddings, [0]), perm_i=[1, 0])
+    paddings = g.op("Reshape", paddings, g.op("Constant", value_t=torch.tensor([1, -1])))
+    padding_c = g.op("Cast", g.op("Squeeze", paddings, axes_i=[0]), to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    return padding_c
+
+
+def constant_pad_nd(g, input, padding, value=None):
     mode = "constant"
-    paddings = sym_help._prepare_onnx_paddings(input.type().dim(), padding)
-    return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
+    value = sym_help._if_scalar_type_as(g, value, input)
+    pad = _prepare_onnx_paddings(g, input.type().dim(), padding)
+    return g.op("Pad", input, pad, value, mode_s=mode)
 
 
 def reflection_pad(g, input, padding):
     mode = "reflect"
-    paddings = sym_help._prepare_onnx_paddings(input.type().dim(), padding)
-    return g.op("Pad", input, pads_i=paddings, mode_s=mode)
+    paddings = _prepare_onnx_paddings(g, input.type().dim(), padding)
+    return g.op("Pad", input, paddings, mode_s=mode)
 
 
 def replication_pad(g, input, padding):
     mode = "edge"
-    paddings = sym_help._prepare_onnx_paddings(input.type().dim(), padding)
-    return g.op("Pad", input, pads_i=paddings, mode_s=mode)
+    paddings = _prepare_onnx_paddings(g, input.type().dim(), padding)
+    return g.op("Pad", input, paddings, mode_s=mode)
 
 
 reflection_pad1d = reflection_pad
