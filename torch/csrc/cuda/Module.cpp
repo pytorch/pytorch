@@ -217,10 +217,10 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module, PyObject *noargs)
 
 PyObject * THCPModule_cudaDeviceReset(PyObject *module, PyObject *noargs)
 {
-  auto mutex = c10::cuda::CUDACachingAllocator::getFreeMutex();
-  PyGILState_Release(cudaMutexGILState);
-  cudaDeviceReset();
+  HANDLE_TH_ERRORS
+  THCudaCheck(cudaDeviceReset());
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject * THCPModule_hasPrimaryContext(PyObject *_unused, PyObject *arg)
