@@ -1476,7 +1476,6 @@
     - arg: THTensor* result
       output: True
       resize: [ [self, 0] ]
-      cpu_zero: True
     - argument 0
     - THTensor* self
     - THTensor* vec
