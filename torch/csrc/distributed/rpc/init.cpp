@@ -103,7 +103,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("_start_rpc_agent", [](std::shared_ptr<RpcAgent> agent) {
+  module.def("_start_rpc_agent", [](const std::shared_ptr<RpcAgent>& agent) {
     RpcAgent::setDefaultRpcAgent(agent);
     agent->start();
   });
