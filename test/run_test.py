@@ -314,6 +314,10 @@ def parse_args():
         action='store_true',
         help='always run blacklisted windows tests')
     parser.add_argument(
+        '--cuda-memcheck',
+        action='store_true',
+        help='Run cuda-memcheck')
+    parser.add_argument(
         'additional_unittest_args',
         nargs='*',
         help='additional arguments passed through to unittest, e.g., '
@@ -324,6 +328,8 @@ def parse_args():
 def get_executable_command(options):
     if options.coverage:
         executable = ['coverage', 'run', '--parallel-mode', '--source torch']
+    elif options.cuda_memcheck:
+        executable = ['cuda-memcheck', '--error-exitcode', '1', sys.executable]
     else:
         executable = [sys.executable]
     if options.pytest:
@@ -427,6 +433,9 @@ def main():
 
     if options.jit:
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
+
+    if options.cuda_memcheck:
+        os.environ["PYTORCH_TEST_WITH_CUDA_MEMCHECK"] = "1"
 
     for test in selected_tests:
         test_name = 'test_{}'.format(test)
