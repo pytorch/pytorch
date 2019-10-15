@@ -298,7 +298,7 @@ TEST(OptimTest, ExternalVectorOfParameters) {
   std::vector<torch::Tensor> parameters = {
       torch::randn({2, 2}), torch::randn({3, 3}), torch::randn({4, 4})};
   std::vector<torch::Tensor> original_parameters = {
-      parameters[0].clone(), parameters[1].clone(), parameters[2].clone()};
+      parameters[0].clone(at::MemoryFormat::Contiguous), parameters[1].clone(at::MemoryFormat::Contiguous), parameters[2].clone(at::MemoryFormat::Contiguous)};
 
   // Set all gradients to one
   for (auto& parameter : parameters) {
@@ -318,7 +318,7 @@ TEST(OptimTest, AddParameter_LBFGS) {
   torch::manual_seed(0);
 
   std::vector<torch::Tensor> parameters = {torch::randn({5, 5})};
-  std::vector<torch::Tensor> original_parameters = {parameters[0].clone()};
+  std::vector<torch::Tensor> original_parameters = {parameters[0].clone(at::MemoryFormat::Contiguous)};
 
   // Set all gradients to one
   for (auto& parameter : parameters) {
