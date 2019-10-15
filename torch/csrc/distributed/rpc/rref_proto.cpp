@@ -101,8 +101,7 @@ Message RRefFetchRet::toMessage() && {
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
-  return Message(
-      std::move(payload), std::move(tensor_table), type_);
+  return Message(std::move(payload), std::move(tensor_table), type_);
 }
 
 std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(

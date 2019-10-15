@@ -86,7 +86,8 @@ class TORCH_API ScriptRRefFetchRet final : public RRefFetchRet {
   explicit ScriptRRefFetchRet(std::vector<at::IValue> values)
       : RRefFetchRet(std::move(values), MessageType::SCRIPT_RREF_FETCH_RET) {}
 
-  static std::unique_ptr<ScriptRRefFetchRet> fromMessage(const Message& message);
+  static std::unique_ptr<ScriptRRefFetchRet> fromMessage(
+      const Message& message);
 };
 
 class TORCH_API PythonRRefFetchRet final : public RRefFetchRet {
@@ -94,7 +95,8 @@ class TORCH_API PythonRRefFetchRet final : public RRefFetchRet {
   explicit PythonRRefFetchRet(std::vector<at::IValue> values)
       : RRefFetchRet(std::move(values), MessageType::PYTHON_RREF_FETCH_RET) {}
 
-  static std::unique_ptr<PythonRRefFetchRet> fromMessage(const Message& message);
+  static std::unique_ptr<PythonRRefFetchRet> fromMessage(
+      const Message& message);
 };
 
 // UserRRef (regardless it's the creator or not) uses this message to notiify
