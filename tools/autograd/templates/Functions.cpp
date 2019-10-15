@@ -1003,24 +1003,6 @@ Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & 
   return (r * grad).sum();
 }
 
-Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto z = (input * -target).exp();
-  auto zplus1 = z + 1;
-  auto grad_input = grad * (target * target) * z / (zplus1 * zplus1);
-  if (reduction == at::Reduction::Mean) {
-    grad_input /= input.numel();
-  }
-  return grad_input;
-}
-
-Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
-  if (reduction == at::Reduction::None) {
-    return soft_margin_loss_backward(grad, input, target, reduction);
-  }
-  auto r = soft_margin_loss_backward(ones_like(grad_output), input, target, reduction);
-  return (r * grad).sum();
-}
-
 Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scalar beta, Scalar threshold) {
   auto x = (input * beta);
   return sigmoid_backward(grad, x.sigmoid()) * (x < threshold).type_as(grad) * beta;
@@ -2319,6 +2301,97 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 
+}
+
+std::tuple<Tensor, Tensor, Tensor>
+infinitely_differentiable_native_layer_norm_backward(
+    const Tensor& dY,
+    const Tensor& dmean,
+    const Tensor& drstd,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    double eps,
+    std::array<bool, 3> grad_input_mask) {
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+
+  const Tensor X_tensor = X.reshape({M, N});
+  const Tensor mean_tensor = mean.reshape({M, 1});
+  const Tensor rstd_tensor = rstd.reshape({M, 1});
+  const double s = 1.0 / static_cast<double>(N);
+
+  Tensor dY_tensor;
+  if (dY.defined()) {
+    dY_tensor = dY.reshape({M, N});
+  }
+
+  if (grad_input_mask[0]) {
+    Tensor gamma_tensor;
+    if (gamma.defined()) {
+      gamma_tensor = gamma.reshape({1, N});
+    }
+    Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
+    Tensor var;
+    Tensor dvar;
+    if (drstd.defined()) {
+      var = ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
+      dvar = -0.5 * rstd_cube * drstd.view({M, 1});
+    }
+    Tensor ds;
+    Tensor db;
+    if (dY.defined()) {
+      ds = (gamma.defined() ? dY_tensor * X_tensor * gamma_tensor
+                            : dY_tensor * X_tensor)
+               .sum(1)
+               .unsqueeze_(-1);
+      db = (gamma.defined() ? dY_tensor * gamma_tensor : dY_tensor)
+               .sum(1)
+               .unsqueeze_(-1);
+      const Tensor& a = rstd_tensor;
+      const Tensor b = (db * mean_tensor - ds) * rstd_cube * s;
+      const Tensor c = -b * mean_tensor - db * rstd_tensor * s;
+      dX = a * dY_tensor + b * X_tensor + c;
+      if (dmean.defined() && drstd.defined()) {
+        dX += var_std_mean_backward(
+            {dvar, dmean.view({M, 1})},
+            X_tensor,
+            var,
+            mean_tensor,
+            {1},
+            false,
+            true,
+            false);
+      }
+      dX = dX.reshape_as(X);
+    } else if (dmean.defined() && drstd.defined()) {
+      dX = var_std_mean_backward(
+               {dvar, dmean.view({M, 1})},
+               X_tensor,
+               var,
+               mean_tensor,
+               {1},
+               false,
+               true,
+               false)
+               .reshape_as(X);
+    }
+  }
+
+  if (grad_input_mask[1] && dY.defined()) {
+    dgamma = (dY_tensor * (X_tensor - mean_tensor) * rstd_tensor)
+                 .sum(0)
+                 .reshape_as(gamma);
+  }
+  if (grad_input_mask[2] && dY.defined()) {
+    dbeta = dY_tensor.sum(0).reshape_as(gamma);
+  }
+
+  return std::make_tuple(dX, dgamma, dbeta);
 }
 
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
