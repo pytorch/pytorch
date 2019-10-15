@@ -222,7 +222,8 @@ class MinMaxObserver(_ObserverBase):
             \frac{\min}{\max}(X)\right) & \text{otherwise}
         \end{cases}
 
-    where :math:`X` is the observed tensor.
+    where :math:`X` is the observed tensor, and the :math:`\frac{\min}{\max}` is
+    the minimum or maximum function depending on the context.
 
     The scale :math:`s` and zero point :math:`z` are then computed as:
 
@@ -339,6 +340,8 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
 
     where :math:`x_\text{min/max}` is the running average min/max, :math:`X` is
     is the incoming tensor, and :math:`c` is the ``averaging_constant``.
+    The :math:`\frac{\min}{\max}` represents the minimum or maximum function
+    depending on the context.
 
     The scale and zero point are then computed as in
     :class:`~torch.quantization.observer.MinMaxObserver`.
