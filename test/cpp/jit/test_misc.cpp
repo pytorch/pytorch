@@ -243,10 +243,10 @@ void testATenNativeBatchNorm() {
   at::Tensor running_var = torch::randn({input_size[1]});
 
   // running_mean and running_var are changed in-place, so clone and send them
-  at::Tensor running_mean_eager = running_mean.clone();
-  at::Tensor running_var_eager = running_var.clone();
-  at::Tensor running_mean_jit = running_mean.clone();
-  at::Tensor running_var_jit = running_var.clone();
+  at::Tensor running_mean_eager = running_mean.clone(at::MemoryFormat::Contiguous);
+  at::Tensor running_var_eager = running_var.clone(at::MemoryFormat::Contiguous);
+  at::Tensor running_mean_jit = running_mean.clone(at::MemoryFormat::Contiguous);
+  at::Tensor running_var_jit = running_var.clone(at::MemoryFormat::Contiguous);
 
   // run forward eagerly
   at::Tensor output, savemean, saveinvstd;
