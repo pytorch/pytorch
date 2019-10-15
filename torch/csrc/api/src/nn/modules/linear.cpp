@@ -66,7 +66,7 @@ void BilinearImpl::reset() {
   if (options.bias()) {
     bias = register_parameter("bias", torch::empty(options.out_features()));
   } else {
-    bias = register_parameter("bias", torch::Tensor());
+    bias = register_parameter("bias", torch::Tensor(), /*requires_grad=*/false);
   }
 
   const auto bound = 1.0 / std::sqrt(weight.size(1));
