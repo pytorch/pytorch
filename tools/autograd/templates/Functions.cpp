@@ -835,10 +835,10 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
 }
 
 Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto result = kl_div_backward(grad, input, target, Reduction::None);
-  if (reduction == Reduction::Mean) {
+  auto result = kl_div_backward(grad, input, target, at::Reduction::None);
+  if (reduction == at::Reduction::Mean) {
     return result.mean();
-  } else if (reduction == Reduction::Sum) {
+  } else if (reduction == at::Reduction::Sum) {
     return result.sum();
   }
   return result;
@@ -847,10 +847,10 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
 // Compute derivatives for targets.
 // Assume targets are given as probabilities (i.e. without taking the logarithm).
 Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) {
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
   }
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
   }
   return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
@@ -868,7 +868,7 @@ Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_outpu
     grad_target.mul_(weight);
   }
 
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     grad_target.div_(target.numel());
   }
 
@@ -913,9 +913,9 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   if (weight.defined()) {
     gI *= weight;
   }
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     return gI / input.numel();
-  } else if (reduction == Reduction::Sum) {
+  } else if (reduction == at::Reduction::Sum) {
     return gI.sum();
   }
   return gI;
@@ -930,19 +930,19 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   if (weight.defined()) {
     ggO *= weight;
   }
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     return ggO / input.numel();
-  } else if (reduction == Reduction::Sum) {
+  } else if (reduction == at::Reduction::Sum) {
     return ggO.sum();
   }
   return ggO;
 }
 
 Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto output = l1_loss_backward(grad, input, target, Reduction::None);
-  if (reduction == Reduction::Mean) {
+  auto output = l1_loss_backward(grad, input, target, at::Reduction::None);
+  if (reduction == at::Reduction::Mean) {
     return output.mean();
-  } else if (reduction == Reduction::Sum) {
+  } else if (reduction == at::Reduction::Sum) {
     return output.sum();
   }
   return output;
@@ -951,14 +951,14 @@ Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & i
 Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto d = (input - target).abs();
   auto grad_input = grad * (d < 1).type_as(grad);
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
 Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     return smooth_l1_loss_backward(grad, input, target, reduction);
   }
   auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction);
@@ -989,14 +989,14 @@ Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t o
 
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64_t reduction) {
   auto grad_input = 2 * grad;
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
 Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     return mse_loss_backward(grad, input, target, reduction);
   }
   auto r = mse_loss_backward(ones_like(grad_output), input, target, reduction);
