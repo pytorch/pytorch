@@ -875,9 +875,17 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor clone(const Tensor& tensor, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Preserve);
+  Tensor src;
+  if (tensor.dim() <= 1) {
+    src = tensor;
+  } else if (tensor.dim() == 2) {
+    src = tensor.t();
+  } else {
+    src = tensor.transpose(0, -1).transpose(-1, -2);
+  }
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
       // Copy all strides
