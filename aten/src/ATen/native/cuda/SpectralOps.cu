@@ -179,7 +179,7 @@ static inline Tensor _run_cufft(
     IntArrayRef output_sizes, bool input_was_cloned
 ) {
   if (config.should_clone_input() && !input_was_cloned) {
-    input = input.clone();
+    input = input.clone(at::MemoryFormat::Contiguous);
   }
 
   auto& plan = config.plan();
@@ -349,7 +349,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // from a slicing.
   auto complex_size_bytes = 2 * input.element_size();
   if (reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0) {
-    input = input.clone();
+    input = input.clone(at::MemoryFormat::Contiguous);
     input_was_cloned = true;
   }
 
