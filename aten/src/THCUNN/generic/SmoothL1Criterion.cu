@@ -16,7 +16,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     "input and target need to have the same number of elements"
   );
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     THCTensor_(resizeAs)(state, output, input);
     THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, input, target, output,
                         smoothl1_updateOutput_no_reduce_functor<scalar_t>());
@@ -41,7 +41,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     thrust::plus<accreal>(), smoothl1_functor<scalar_t, accreal>()
   );
 
-  if (reduction == Reduction::Mean)
+  if (reduction == at::Reduction::Mean)
     sum /= size;
 
   THCTensor_(free)(state, input);
@@ -67,7 +67,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
 
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     THCUNN_check_shape(state, gradOutput, input);
     THC_pointwiseApply3<scalar_t, scalar_t, scalar_t>(state, input, target, gradInput,
                         smoothl1_updateGradInput_no_reduce_functor<scalar_t>());
@@ -78,7 +78,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  scalar_t norm = ScalarConvert<accreal, scalar_t>::to(reduction == Reduction::Mean ? accreal(1)/size : accreal(1));
+  scalar_t norm = ScalarConvert<accreal, scalar_t>::to(reduction == at::Reduction::Mean ? accreal(1)/size : accreal(1));
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
