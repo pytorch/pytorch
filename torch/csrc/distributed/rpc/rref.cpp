@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/rpc/rref.h>
 
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 
@@ -131,42 +130,39 @@ const ForkId& UserRRef<T>::forkId() const {
 }
 
 template <>
-std::shared_ptr<FutureMessage> UserRRef<IValue>::toHere() {
+std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
+  auto future = std::make_shared<ivalue::Future>(nullptr);
   auto agent = RpcAgent::getDefaultRpcAgent();
-  return agent->send(
+  auto fm = agent->send(
       agent->getWorkerInfo(ownerId_),
       ScriptRRefFetchCall(rrefId()).toMessage());
+
+  fm->addCallback([future](const Message& message) {
+    RRefContext::handleException(message);
+    auto rfr = ScriptRRefFetchRet::fromMessage(message);
+    TORCH_INTERNAL_ASSERT(
+        rfr->values().size() == 1,
+        "RRef of IValue should contain a single IValue, but got ",
+        rfr->values().size());
+    future->markCompleted(rfr->values().front());
+  });
+  return future;
 }
 
 template <>
-std::shared_ptr<FutureMessage> UserRRef<py::object>::toHere() {
+std::shared_ptr<ivalue::Future> UserRRef<py::object>::toHere() {
+  auto future = std::make_shared<ivalue::Future>(nullptr);
   auto agent = RpcAgent::getDefaultRpcAgent();
-  return agent->send(
+  auto fm = agent->send(
       agent->getWorkerInfo(ownerId_),
       PythonRRefFetchCall(rrefId()).toMessage());
-}
 
-template <>
-IValue UserRRef<IValue>::getToHereValue(
-    const std::shared_ptr<FutureMessage>& fm) {
-  const Message& message = fm->wait();
-  RRefContext::handleException(message);
-  auto rfr = ScriptRRefFetchRet::fromMessage(message);
-  TORCH_INTERNAL_ASSERT(
-      rfr->values().size() == 1,
-      "RRef of IValue should contain a single IValue, but got ",
-      rfr->values().size());
-  return rfr->values().front();
-}
-
-template <>
-py::object UserRRef<py::object>::getToHereValue(
-    const std::shared_ptr<FutureMessage>& fm) {
-  const Message& message = fm->wait();
-  RRefContext::handleException(message);
-  auto rfr = PythonRRefFetchRet::fromMessage(message);
-  return PythonRpcHandler::getInstance().deserialize(
-      SerializedPyObj::fromIValues(rfr->values()));
+  fm->addCallback([future](const Message& message) {
+    RRefContext::handleException(message);
+    auto rfr = PythonRRefFetchRet::fromMessage(message);
+    future->markCompleted(c10::ivalue::Tuple::create(rfr->values()));
+  });
+  return future;
 }
 
 template class UserRRef<IValue>;

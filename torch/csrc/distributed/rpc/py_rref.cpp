@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 
+#include <torch/csrc/distributed/rpc/python_functions.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/jit/pybind_utils.h>
 
@@ -58,21 +60,21 @@ py::object PyRRef::toHere() {
     }
   } else {
     if (rref_->isPyObj()) {
-      // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires
-      // GIL.
       auto userRRef = std::static_pointer_cast<UserRRef<py::object>>(rref_);
-      auto fm = userRRef->toHere();
-      return userRRef->getToHereValue(fm);
+      auto future = userRRef->toHere();
+      future->wait();
+      // PythonRpcHandler acquires the GIL on creating the py::object
+      return PythonRpcHandler::getInstance().deserialize(
+          SerializedPyObj::fromIValues(future->value().toTuple()->elements()));
     } else {
       auto userRRef = std::static_pointer_cast<UserRRef<IValue>>(rref_);
-      auto fm = userRRef->toHere();
-      IValue value = userRRef->getToHereValue(fm);
-
+      auto future = userRRef->toHere();
+      future->wait();
       {
         // acquiring GIL as torch::jit::toPyObject creates new py::object
         // without grabbing the GIL.
         AutoGIL ag;
-        return torch::jit::toPyObject(std::move(value));
+        return torch::jit::toPyObject(future->value());
       }
     }
   }
