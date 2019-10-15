@@ -15,7 +15,6 @@ LayerNormImpl::LayerNormImpl(const LayerNormOptions& options_) : options(options
   reset();
 }
 
-// todo - how to store the shape? checks based on elementwise_affine?
 void LayerNormImpl::reset() {
   if (options.elementwise_affine()) {
     weight = register_parameter("weight", torch::ones(torch::IntArrayRef(options.normalized_shape())));
@@ -33,10 +32,9 @@ void LayerNormImpl::pretty_print(std::ostream& stream) const {
          << ")";
 }
 
-//todo- where to get this: torch.backends.cudnn.enabled value from
 torch::Tensor LayerNormImpl::forward(const Tensor& input) {
   return torch::layer_norm(input, torch::IntArrayRef(options.normalized_shape()), weight, bias, options.eps(),
-                          at::globalContext().userEnabledCuDNN()/*torch.backends.cudnn.enabled*/)
+                          at::globalContext().userEnabledCuDNN());
 }
 } // namespace nn
 } // namespace torch

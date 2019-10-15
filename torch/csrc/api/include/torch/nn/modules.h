@@ -19,3 +19,4 @@
 #include <torch/nn/modules/pooling.h>
 #include <torch/nn/modules/rnn.h>
 #include <torch/nn/modules/activation.h>
+#include <torch/nn/modules/normalization.h>

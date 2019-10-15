@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
-#include <torch/nn/options/layernorm.h>
+#include <torch/nn/options/normalization.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -43,13 +43,13 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
   /// Initialized to zeros `elementwise_affine` option is set to `true` upon construction.
   Tensor bias;
 
-  //todo- update description
   /// A `ModuleHolder` subclass for `LayerNormImpl`.
   /// See the documentation for `LayerNormImpl` class to learn what methods it
   /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
   /// module storage semantics.
-  TORCH_MODULE(LayerNorm);
 };
+
+TORCH_MODULE(LayerNorm);
 
 } // namespace nn
 } // namespace torch
