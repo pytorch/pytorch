@@ -6935,7 +6935,7 @@ a")
     def test_any_in_class_fails(self):
         with self.assertRaisesRegex(RuntimeError, "contains an Any"):
             @torch.jit.script
-            class Foo:
+            class Foo(object):
                 def __init__(self, a):
                     # type: (Tuple[int,Any]) -> None
                     self.a = a
