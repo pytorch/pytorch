@@ -841,7 +841,30 @@ struct CudaCachingAllocator : public Allocator {
   }
 };
 
+#ifdef CUDA_USE_NAIVE_ALLOCATOR
+// Naive Cuda Allocator:
+// This allocator is only for debugging and testing purpose.
+// Currently it is used for cuda-memcheck to minimize the probability
+// of an out-of-bound access falling into another allocated memory.
+struct CudaNaiveAllocator : public Allocator {
+  DataPtr allocate(size_t size) const override {
+    int device;
+    C10_CUDA_CHECK(cudaGetDevice(&device));
+    void* r = nullptr;
+    if (size != 0) {
+      cudaMalloc(&r, size);
+    }
+    return {r, r, &cudaFree, Device(DeviceType::CUDA, device)};
+  }
+  DeleterFnPtr raw_deleter() const override {
+    return &cudaFree;
+  }
+};
+
+CudaNaiveAllocator device_allocator;
+#else
 CudaCachingAllocator device_allocator;
+#endif
 
 Allocator* get(void)
 {
