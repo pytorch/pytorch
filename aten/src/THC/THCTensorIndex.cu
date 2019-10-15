@@ -208,7 +208,7 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
 // uses fast unsigned int24 computations
 template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
           bool IndexIsMajor>
-__global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
+__global__ void indexAddLargeIndex24(TensorInfo<T, IndexType> dst,
                                    TensorInfo<T, IndexType> src,
                                    TensorInfo<int64_t, IndexType> indices,
                                    int dstAddDim,
