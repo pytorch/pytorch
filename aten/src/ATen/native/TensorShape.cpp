@@ -399,7 +399,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
 }
 
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-    return self.narrow(dim, start, length).clone();
+    return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
@@ -486,7 +486,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
     return self.as_strided(shape, *stride);
   }
-  return at::_unsafe_view(self.clone(), shape);
+  return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
