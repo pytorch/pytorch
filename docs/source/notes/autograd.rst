@@ -3,122 +3,403 @@
 Autograd mechanics
 ==================
 
-This note will present an overview of how autograd works and records the
-operations. It's not strictly necessary to understand all this, but we recommend
-getting familiar with it, as it will help you write more efficient, cleaner
-programs, and can aid you in debugging.
+This note will present an overview of how autograd works. It's not strictly necessary
+to understand all this, but we recommend getting familiar with it, as it will help you
+write more efficient, cleaner programs, and can aid you in debugging.
 
-.. _excluding-subgraphs:
+TL-DR:
 
-Excluding subgraphs from backward
----------------------------------
+- Mathematical formulation: we compute vector Jacobian products using the chain rule. We support inplace operations using hidden versioning of the Tensors.
+- Non-gradients: we provide helper functions to be able to compute things that are not real gradients.
+- Will inplace operation work: Because they modify the original value, if anything needs this value for the backward, the backward will fail.
+- Gradients of 0 vs independent: We don't see the difference.
+- Gradients of 0: They can be represented by a Tensor full of ``0`` s, ``None`` in python, undefined tensor in c++ or and error for ``autograd.grad(allow_unused=False)``.
+- Non-differentiable functions: We have many of those. No guarantee but we try to have a good behavior. Fixed rules on what each elementary operation's backward should compute.
+- Implementation details: Only if you want to understand the current implementation at a high level.
 
-Every Tensor has a flag: :attr:`requires_grad` that allows for fine grained
-exclusion of subgraphs from gradient computation and can increase efficiency.
 
-.. _excluding-requires_grad:
 
-``requires_grad``
-^^^^^^^^^^^^^^^^^
+Mathematical formulation
+^^^^^^^^^^^^^^^^^^^^^^^^
 
-If there's a single input to an operation that requires gradient, its output
-will also require gradient. Conversely, only if all inputs don't require
-gradient, the output also won't require it. Backward computation is never
-performed in the subgraphs, where all Tensors didn't require gradients.
+What does the autograd package do
+"""""""""""""""""""""""""""""""""
+
+The autograd package allows to use automatic differentiation techniques on top of PyTorch Tensors.
+Automatic differentiation allows to compute dot product between a given vector and the Jacobian of a user-defined function.
+In this document, we will consider the function :math:`f: x \rightarrow y` where :math:`x` is a vector of size :math:`I` and :math:`y` is a vector of size :math:`O`.
+For simplicity, in this document, we will always consider inputs and ouputs to be 1D, in practice, they can be Tensors with an arbitrary number of dimensions.
+The jacobian matrix associated with this function is that matrix :math:`J_f` of size :math:`O \text{x} I` such that each entry is
+given by :math:`(J_f)_{ij} = \dfrac{\partial{x_j}}{\partial{y_i}}`. For simplicity, we will write :math:`J_f = \dfrac{\partial{y}}{\partial{x}}`.
+
+Currently, PyTorch only implements reverse mode automatic differentiation which, given
+an arbitrary vector :math:`v` of size :math:`O`, will compute :math:`v^T J_f`.
+
+Note the particularly interesting case where :math:`f`'s output is a scalar value because providing a vector :math:`v` containing
+the value :math:`1` will compute exactly :math:`J_f`.
+This is used extensively in deep learning for example where loss functions are scalar and reverse mode automatic
+differentiation is used to compute the gradients of the loss with respect to the weights of the model.
+It is also regularly called the backpropagation algorithm in this case.
+
+
+
+How does it does that
+"""""""""""""""""""""
+
+One simple interpretation of what it is doing is splitting the user function :math:`f` into composition of smaller
+pre-defined operations.
+We will call such operations elementary.
+The gradient of the original function is the computed by using the chain rule on each of these elementary operations.
+
+For example, if we split :math:`f` into two elementary operations, namely :math:`y = op_2(op_1(x))`,
+the automatic differentiation will compute :math:`v^T J_f = (v^T J_{op_2}) J_{op_1} =  v^T J_{op_2} J_{op_1}`.
+
+Link with the code
+""""""""""""""""""
+
+The tensors for which the user want to compute the gradients can be marked using the :code:`.requires_grad_()` function.
+The user can then use any pytorch function on this tensor to compute the final value of its function.
+Each of these function is composed of one or more elementary operation.
+Each operation will add an element to the "chain" if jacobian products that the backward pass will compute.
+In particular, consider the following function:
 
 .. code::
 
-    >>> x = torch.randn(5, 5)  # requires_grad=False by default
-    >>> y = torch.randn(5, 5)  # requires_grad=False by default
-    >>> z = torch.randn((5, 5), requires_grad=True)
-    >>> a = x + y
-    >>> a.requires_grad
-    False
-    >>> b = a + z
-    >>> b.requires_grad
-    True
+    def f(w):
+        x = op_1(w)
+        y = op_2(x)
+        return y
 
-This is especially useful when you want to freeze part of your model, or you
-know in advance that you're not going to use gradients w.r.t. some parameters.
-For example if you want to finetune a pretrained CNN, it's enough to switch the
-:attr:`requires_grad` flags in the frozen base, and no intermediate buffers will
-be saved, until the computation gets to the last layer, where the affine
-transform will use weights that require gradient, and the output of the network
-will also require them.
+    # w is a Tensor of the appropriate size
+    w.requires_grad_()
+
+    # v is a Tensor of the appropriate size
+    f(w).backward(v)
+
+The backward pass will compute the following for a given vector :math:`v`: :math:`v^T J_f = v^T J_{op_2} J_{op_1} = v^T \dfrac{\partial{y}}{\partial{x}} \dfrac{\partial{x}}{\partial{w}} = v^T \dfrac{\partial{y}}{\partial{w}}`.
+
+Adding a new operation as follows:
 
 .. code::
 
-    model = torchvision.models.resnet18(pretrained=True)
-    for param in model.parameters():
-        param.requires_grad = False
-    # Replace the last fully-connected layer
-    # Parameters of newly constructed modules have requires_grad=True by default
-    model.fc = nn.Linear(512, 100)
+    def f(w):
+        x = op_1(w)
+        y = op_2(x)
+        z = op_3(y)
+        return z
 
-    # Optimize only the classifier
-    optimizer = optim.SGD(model.fc.parameters(), lr=1e-2, momentum=0.9)
+    w.requires_grad_()
+    f(w).backward(v)
 
-.. _how-autograd-encodes-history:
+Will change the computation to: :math:`v^T J_f = v^T J_{op_3} J_{op_2} J_{op_1} = v^T \dfrac{\partial{z}}{\partial{y}} \dfrac{\partial{y}}{\partial{x}} \dfrac{\partial{x}}{\partial{w}} = v^T \dfrac{\partial{z}}{\partial{w}}`.
 
-How autograd encodes the history
---------------------------------
+Handling inplace operations
+"""""""""""""""""""""""""""
 
-Autograd is reverse automatic differentiation system.  Conceptually,
-autograd records a graph recording all of the operations that created
-the data as you execute operations, giving you a directed acyclic graph
-whose leaves are the input tensors and roots are the output tensors.
-By tracing this graph from roots to leaves, you can automatically
-compute the gradients using the chain rule.
+The only special case that needs to be considered here are inplace operations.
+The main reason to use inplace operations is to preserve side effects and prevent additional memory requirements.
+The first point means that if a tensor is referenced in different places, the inplace operation should modify all these references.
+The second point means that no extra memory allocation should be done under the hood otherwise it would defeat the purpose of inplace operations.
 
-Internally, autograd represents this graph as a graph of
-:class:`Function` objects (really expressions), which can be
-:meth:`~torch.autograd.Function.apply` ed to compute the result of
-evaluating the graph.  When computing the forwards pass, autograd
-simultaneously performs the requested computations and builds up a graph
-representing the function that computes the gradient (the ``.grad_fn``
-attribute of each :class:`torch.Tensor` is an entry point into this graph).
-When the forwards pass is completed, we evaluate this graph in the
-backwards pass to compute the gradients.
+To be able to fulfill these two needs, we make inplace operations actually be inplace during the forward pass giving exactely the same behavior
+as any other non-autograd library that provides inplace operations.
+To be able to compute the gradients, we consider that there are different versions of the tensor that existed and that the user tensor always points to the latest version.
+This allows us to write the automatic differentiation rules as before.
 
-An important thing to note is that the graph is recreated from scratch at every
-iteration, and this is exactly what allows for using arbitrary Python control
-flow statements, that can change the overall shape and size of the graph at
-every iteration. You don't have to encode all possible paths before you
-launch the training - what you run is what you differentiate.
+See the two functions below for examples where we use subscripts to specify each version of the Tensor.:
 
-In-place operations with autograd
----------------------------------
+.. code::
 
-Supporting in-place operations in autograd is a hard matter, and we discourage
-their use in most cases. Autograd's aggressive buffer freeing and reuse makes
-it very efficient and there are very few occasions when in-place operations
-actually lower memory usage by any significant amount. Unless you're operating
-under heavy memory pressure, you might never need to use them.
+    def f(x):
+        z = op_1(x)
+        # z points to z_0
+        z.op_2_()
+        # z points to z_1
+        return z
 
-There are two main reasons that limit the applicability of in-place operations:
+    def g(x):
+        z = op_1(x)
+        # z points to z_0
+        y = z.select(0, 0)
+        # y is a view into z
+        # y points to y_0 = z_0.select(0, 0)
+        z.op_2_()
+        # both z and y now points to y_1 = z_1.select(0, 0)
+        return y
 
-1. In-place operations can potentially overwrite values required to compute
-   gradients.
+The corresponding autograd computations can simply be writen using the implicit variables: :math:`v^T J_f = v^T J_{op_2\_} J_{op_1} = v^T \dfrac{\partial{z_1}}{\partial{z_0}} \dfrac{\partial{z_0}}{\partial{x}} = v^T \dfrac{\partial{z_1}}{\partial{x}} = v^T \dfrac{\partial{z}}{\partial{x}}`.
+And for g, it is harder to write as only part of :code:`op_2_()` is used when computing :code:`y`, but it can be written as :math:`v^T J_g = v^T \dfrac{\partial{y_1}}{\partial{y_0}} \dfrac{\partial{y_0}}{\partial{z_0}} \dfrac{\partial{z_0}}{\partial{x}}`.
 
-2. Every in-place operation actually requires the implementation to rewrite the
-   computational graph. Out-of-place versions simply allocate new objects and
-   keep references to the old graph, while in-place operations, require
-   changing the creator of all inputs to the :class:`Function` representing
-   this operation. This can be tricky, especially if there are many Tensors
-   that reference the same storage (e.g. created by indexing or transposing),
-   and in-place functions will actually raise an error if the storage of
-   modified inputs is referenced by any other :class:`Tensor`.
+Computing not gradients
+^^^^^^^^^^^^^^^^^^^^^^^
 
-In-place correctness checks
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+In some cases, the user might need to compute something that is not the "true gradient" of its function.
+We identify few use cases here:
 
-Every tensor keeps a version counter, that is incremented every time it is
-marked dirty in any operation. When a Function saves any tensors for backward,
-a version counter of their containing Tensor is saved as well. Once you access
-``self.saved_tensors`` it is checked, and if it is greater than the saved value
-an error is raised. This ensures that if you're using in-place
-functions and not seeing any errors, you can be sure that the computed
-gradients are correct.
+- Ignore the gradients for some part of the computation as they could render the computed gradients unstable: gradients of square root near :math:`0`.
+- Ignore the gradients in a set of computations where we know they will be :math:`0` and so don't need to be computed: a set of operations that compute values that are the used as integer to index a tensor.
+- Update the value of a tensor that requires gradients without this update being recorded: initialization of the weights of a neural network.
+- Work with tensors that may or may not require gradients to perform operations that do not need gradients computed: optimizers for neural networks or method that compute the 0-1 accuracy for classification.
+
+To be able to perform all these operations, we provide three main constructs.
+
+Detaching
+"""""""""
+
+The first construct is the method :code:`y = x.detach()` that can be used on any tensor.
+This is a special function for which :math:`J_{detach} = \bm{0}`.
+This means that however :code:`y` is used, the contribution via :code:`y` to the gradient of :code:`x` is always going to be :math:`0`.
+
+.. code::
+
+    def f(x):
+        z = op_1(x)
+
+        y = z.detach()
+        return y
+
+    # x is a Tensor of the appropriate size
+    x.requires_grad_()
+
+    # v is a Tensor of the appropriate size
+    f(x).backward(v)
+
+The backward pass will compute the following for a given vector :math:`v`: :math:`v^T J_f = v^T J_{detach} J_{op_1} = v^T \bm{0} \dfrac{\partial{z}}{\partial{x}} = \bm{0}`.
+
+Note that the new Tensor shares the same data as the original one (it is a view).
+This means that inplace operations on :code:`y` will change values in :code:`x`.
+
+Disable gradient computation
+""""""""""""""""""""""""""""
+
+The second construct is the function decorator :code:`torch.no_grad()` (it can also be used as a context manager).
+When it decorates a function :code:`outputs = f(inputs)`, it is defined as enforcing :math:`\forall in \in inputs, \forall out \in outputs, \dfrac{\partial{out}}{\partial{in}} = 0`.
+Note that for the context manager version, outputs are all the variables that are assigned (on the left side of an :code:`=` in the block).
+
+.. code::
+
+    # Original function
+    @torch.no_grad()
+    def f(x, y):
+        # Some ops using x and y, producing z and w
+        return z, w
+
+    # It can also be used as a context manager:
+    # Some variables x, y
+    with torch.no_grad():
+        # Some ops using x, y, producing z, w
+
+
+
+Hooks
+"""""
+
+The third contruct is more general as it allows to change the gradients in arbitrary ways, not only setting them to :math:`0` as the first two.
+A hook can be registered on any Tensor that requires gradients.
+This hook function will be passes the computed gradient as input and can optionally return the new value for this gradient.
+
+.. code::
+
+  def h(g):
+    return foo(g)
+
+  def f(x):
+      y = op_1(x)
+      y.register_hook(h)
+
+      z = op_2(y)
+    return z
+
+  # x is a Tensor of the appropriate size
+  x.requires_grad_()
+
+  # v is a Tensor of the appropriate size
+  f(x).backward(v)
+
+The backward pass will compute the following for a given vector :math:`v`: :math:`\text{foo}(v^T J_{op_2}) J_{op_1}`.
+
+
+
+Equivalence
+"""""""""""
+
+detach and no_grad can be implemented using the others as follows:
+
+.. code::
+
+    # Original code
+    y = x.detach()
+
+    # torch.no_grad version
+    with torch.no_grad():
+        # Using `view_as` as a no-op here
+        y = x.view_as(x)
+
+    # hook version
+    # Using `view_as` as a no-op here
+    y = x.view_as(x)
+    y.register_hook(lambda grad: torch.zeros_like(grad))
+
+
+    # Original code
+    @torch.no_grad()
+    def f(x, y):
+        # Some ops using x and y, producing z and w
+        return z, w
+
+    # Equivalent formulation with detach
+    def f_eq(x, y):
+        x, y = x.detach(), y.detach()
+        # Some ops using x and y, producing z and w
+        return z, w
+
+    # Equivalent formulation with detach
+    def f_eq(x, y):
+        x, y = x.view_as(x), y.view_as(y)
+        x.register_hook(lambda grad: torch.zeros_like(grad))
+        y.register_hook(lambda grad: torch.zeros_like(grad))
+        # Some ops using x and y, producing z and w
+        return z, w
+
+
+Will inplace ops work?
+^^^^^^^^^^^^^^^^^^^^^^
+
+We repeat the example from above here for clarity:
+
+.. code::
+
+    def f(x):
+        z = op_1(x)
+        # z points to z_0
+        z.op_2_()
+        # z points to z_1
+        return z
+
+The main limitation of out inplace operation strategy is that in this example, if :code:`op_1` needs the value of its output :code:`z_0` to compute :math:`J_{op_1}`, then the autograd computation cannot be performed correctly anymore.
+Because we do not want to hide memory allocation from the user, the backward pass will raise an error.
+In such a case, to be able to perform this backward pass we need to either replace :code:`op_2_` with an equivalent out-of-place operation or make sure :code:`op_2_` modifies inplace a copy of :code:`z` by adding a :code:`.clone()` for example.
+
+Gradient of 0 vs independent of the input
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+As long as all gradients are finite values, these two can be seen as being the same.
+In practice, this is the case for most pytorch programs.
+The autograd engine does not make a difference between the two.
+
+Unfortunately as soon as :code:`inf` or :code:`nan` appear, the two become different.
+This is because a gradient of :math:`0` should propagate the non-finite values while an independent gradient should propagate an independent gradient.
+This is a problem when trying to hide pathological points with indexing for example: https://github.com/pytorch/pytorch/issues/9688 .
+
+How do we express gradients of 0
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A gradient of :math:`0` (or independent) can be expressed in any of the following ways:
+
+- A Tensor full of zeros
+- In python, a ``None`` Tensor
+- In cpp, and ``undefined`` Tensor
+- Using autograd.grad(allow_unused=False), an error stating that the output is independent of the input
+
+Non-differentiable functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+The chain rule can **only** be applied in the case where are considering each elementary operation
+at a point where it is differentiable. If any of them is evaluated at a point where it is not,
+the computed gradient can be arbitrarily incorrect. For example, consider the gradient at :math:`0` of the identity function
+when it is decomposed as :math:`id(x) = relu(x) - relu(-x)`.
+
+This means that the function that computes the :math:`2` norm and the one that square all the elements of a tensor, sum them and returns the square root
+of the result will not have the same behavior with respect to gradients all the time.
+In particular, if the sum is :math:`0`, the square root function is not differentiable at this point and so the returned gradient can be anything while the :math:`2`
+norm function has a well defined gradient at :math:`0` of :math:`0`.
+
+To try and reduce the impact of this limitation, we define the gradients of the elementary operations by applying the following rules in order:
+
+.. note::
+
+    - Both the `detach()` method and the `torch.no_grad` decorator are expected not to follow these rules.
+    - This is work in progress, if you find a :code:`Function` that does not follow these rules, please open a new issue with the tag "module:autograd".
+
+#. If the function is not defined (:math:`sqrt(-1)` or :math:`log(-1)` for example) then this is undefined. Most function will return :math:`nan`, but for performance reasons, some functions will return not-nan values (:math:`log(-1)` for example).
+#. If a gradient exist at the current point, return it.
+#. If the function is convex, return one of it's subgradients at the current point, if more than one exists, return the subgradient with minimum norm (As it is always a descent direction, see "Convex Optimization Algorithms" by Dimitri Bertsekas, Proposition 4.3.1 for a proof).
+#. Define the gradient at the current point by continuity (note that :math:`inf` is possible here). If multiple values are possible, pick one arbitrarily.
+
+.. note::
+
+    Even though we try our best, unless all the used elementary operations used are in case 2, the returned gradient is not guaranteed to be correct.
+
+
+Implementation details
+^^^^^^^^^^^^^^^^^^^^^^
+
+.. warn::
+
+  All the following elements are implementation details.
+  You should not rely on them being fixed but they can be useful to debug code that uses the current version.
+
+Computational graph
+"""""""""""""""""""
+
+To know in which order the chain rule should be applied, we need to record the order the operations are applied to be able to replay it in the reverse order later.
+This is known as tape-based automatic differentiation.
+In our case, we create a directed acyclic graph.
+The nodes, called :code:`Node` represent the backward computations to be performed for a give elementary operation.
+The edges link a given :code:`Node` to all the :code:`Node`s that created the inputs of the elementary operation it represents.
+
+You can access the :code:`Node` that created a given Tensor (if the Tensor requires gradients and is not a leaf Tensor) using the ``.grad_fn`` field.
+You can then access the edges that link the different :code:`Node`s by using the ``.next_functions`` field of a :code:`Node`.
+A handy package to explore this graph is [torchviz](https://github.com/szagoruyko/pytorchviz).
+
+We use ``autograd.Function`` as a nice interface to create this graph.
+Indeed, during the ``.apply``, the forward is invoked and all the inputs and outputs are connected properly to the exiting graph associated to the inputs.
+The :code:`Node` that is created is a wrapper around the user-defined backward function (and the name is appended with ``Backward`` as you can see in the
+graph examples in torchviz.
+
+
+Not Gradients
+"""""""""""""
+
+The operations that do not compute gradients that are presented above are implemented as follows to obtain the behavior described above.
+
+Detach is returning a new Tensor object that shares the same Storage.
+The Tensor is the same except that it does not require gradient and its grad_fn is always ``None``.
+
+No grad simply prevents any :code:`Node` from being added to the graph.
+
+
+Inplace handling
+""""""""""""""""
+
+To get the required behavior for inplace operations, two things are needed.
+First, to be able to ensure correctness, we need to track the versions of the different Tensors to make sure that a :code:`Node` has access to the version it needs, not a modified one.
+Second, we need to build a graph that will perform the correct backward computation.
+
+From the python api, the current version of a Tensor can be queried with `._version`.
+The `Function` wrapper takes care of managing this version by using the information provided by the `.mark_dirty()` method available on the context.
+It also takes care of making sure that the Tensors given to the `.backward()` function have not been modified inplace.
+
+Building the graph in the absence of any views is simple as all the inplace operations can be "reinterpreted" as out of place.
+The inplace operations will only create a linear chain of :code:`Node`s as if `x.op_()` was writen `x = x.op()` (assuming corresponding out of place operation exists).
+
+Building the graph is more complex as we allow both views and inplace operations.
+Here, the view operations are responsible to mark any views that they make as being linked to the input.
+You can check if a Tensor is a view with `._is_view` and query the Tensor it is a view of with `._base`.
+Two case can happen then:
+
+- If this Tensor is not modified inplace, then its `.grad_fn` is the :code:`Node` associated with the view operation. And the base's `.grad_fn` is the :code:`Node` that corresponds to its forward function.
+- If this Tensor is modified inplace, its graph is "rebased". This has a few effects:
+
+  - The base `.grad_fn` becomes a `CopySlices`. This special :code:`Node` is a wrapper around the :code:`Node` corresponding to the inplace operations and apply it to the subset of the base on which the inplace operation was performed (through the view).
+  - All the views' `.grad_fn` become `AsStridedBackard`s that point to the newly created `CopySlices` from the base.
+
+This is repeated every time an inplace operation is performed on a view and so the base's backward graph can contain a chain of `CopySlices` before finally getting to the :code:`Node` that corresponds to its forward function.
+
+
+
+
+
+
 
 Multithreaded Autograd
 ----------------------
