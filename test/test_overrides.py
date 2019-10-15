@@ -463,7 +463,7 @@ def var_override(input):
     return -1
 
 @implements_tensor_like(torch.var_mean)
-def var_override(input):
+def var_mean_override(input):
     return -1
 
 @implements_tensor_like(torch.argsort)
