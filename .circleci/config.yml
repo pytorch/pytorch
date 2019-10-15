@@ -35,7 +35,7 @@ jobs:
       - checkout
       - run:
           name: Install VC2017
-          no_output_timeout: "10m"
+          no_output_timeout: "60m"
           command: |
             set -x
             choco install -y curl 7zip
