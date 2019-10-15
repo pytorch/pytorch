@@ -1067,7 +1067,7 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
 }
 
 TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
-  MultiLabelMarginLoss loss(Reduction::None);
+  MultiLabelMarginLoss loss(torch::Reduction::None);
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
