@@ -3,6 +3,8 @@
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
@@ -194,6 +196,14 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
           autogradContext, sendFunction);
 
       return c10::guts::make_unique<PropagateGradientsResp>();
+    }
+    case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
+      // clean up the distributed autograd context on this node
+      auto currentContextId =
+          DistAutogradContainer::getInstance().currentContext().contextId();
+      DistAutogradContainer::getInstance().releaseContext(
+          currentContextId, false /* notifyWorkers */);
+      return c10::guts::make_unique<CleanupAutogradContextResp>();
     }
     default: {
       TORCH_INTERNAL_ASSERT(

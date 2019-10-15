@@ -24,7 +24,7 @@ class TORCH_API PropagateGradientsReq : public rpc::RpcCommandBase {
 
   // Serialization and deserialization methods.
   rpc::Message toMessage() && override;
-  static std::unique_ptr<PropagateGradientsReq> fromMessage(
+  static std::unique_ptr<PropagateGradientsReq> fromMessage( // todo
       const rpc::Message& message);
 
  private:

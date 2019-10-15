@@ -13,6 +13,11 @@ import threading
 prev_rank_rpc_done = False
 prev_rank_context_id = 0
 
+known_context_ids = []
+
+def store_context_id(context_id):
+    global known_context_ids
+    known_context_ids.append(context_id)
 
 def _set_rpc_done(context_id):
     global prev_rank_rpc_done
@@ -222,17 +227,19 @@ class DistAutogradTest(object):
 
     @dist_init
     def test_worker_ids_recorded(self):
+        global known_context_ids
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
             # if no tensors require grad, we do not add the send functions, so
             # no worker ids should be recorded.
             t1 = torch.ones(3, 3, requires_grad=False)
             t2 = torch.zeros(3, 3, requires_grad=False)
+
             for dst_rank in dst_ranks:
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
-                rpc.rpc_sync(
-                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
-                )
+                # rpc.rpc_sync(
+                #     "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
+                # )
             # no worker ids should be recorded.
             ctx = dist_autograd._current_context()
             worker_ids = ctx._known_worker_ids()
@@ -243,13 +250,31 @@ class DistAutogradTest(object):
             t2.requires_grad = True
             for dst_rank in dst_ranks:
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
-                rpc.rpc_sync(
-                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
-                )
+                # rpc.rpc_sync(
+                #     "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
+                # )
+                # tell dst worker to store this context id
+                rpc.rpc_sync("worker{}".format(dst_rank), store_context_id, args=(context_id,))
             # all worker_ids in dst_ranks should be recorded.
             worker_ids = ctx._known_worker_ids()
             self.assertEqual(len(worker_ids), len(dst_ranks))
             self.assertEqual(set(worker_ids), dst_ranks)
+            # should have stored 3 context ids
+            print("known_context_ids are {} for rank {}".format(known_context_ids, self.rank))
+            self.assertEqual(len(known_context_ids), 3)
+        contexts = dist_autograd._retrieve_context(known_context_ids[0])
+        print(contexts)
+        # autograd context should be cleaned up by now.
+        with self.assertRaises(RuntimeError):
+            ctx = dist_autograd._retrieve_context(context_id)
+        # all other contexts should also be cleaned up
+        for context_id in known_context_ids:
+            with self.assertRaises(RuntimeError):
+                ctx = dist_autograd._retrieve_context(context_id)
+        # clear the list
+        known_context_ids = []
+
+
 
     @dist_init
     def test_error_in_context(self):

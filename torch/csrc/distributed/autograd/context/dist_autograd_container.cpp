@@ -128,13 +128,17 @@ DistAutogradContext& DistAutogradContainer::currentContext() {
   return it->second;
 }
 
-void DistAutogradContainer::releaseContext(int64_t context_id) {
+void DistAutogradContainer::releaseContext(
+    int64_t context_id,
+    bool notifyWorkers) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   TORCH_CHECK(
       autograd_context_.find(context_id) != autograd_context_.end(),
       "Could not find autograd context with id: ",
       context_id);
   autograd_context_.erase(context_id);
+
+  auto agent = rpc::RpcAgent::getDefaultRpcAgent();
 
   if (current_context_id_ == context_id) {
     // Reset the thread_local current context id, since it is no longer valid.

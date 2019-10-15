@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
@@ -47,6 +48,9 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
       return autograd::PropagateGradientsReq::fromMessage(request);
+    }
+    case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
+      return autograd::CleanupAutogradContextReq::fromMessage(request);
     }
     default: {
       TORCH_INTERNAL_ASSERT(
