@@ -12,11 +12,11 @@ namespace autograd {
 // Used to request other workers to clean up their autograd context.
 class TORCH_API CleanupAutogradContextReq : public rpc::RpcCommandBase {
  public:
-  CleanupAutogradContextReq(int64_t context_id);
+  explicit CleanupAutogradContextReq(int64_t context_id);
   // Serialization and deserialization methods.
   rpc::Message toMessage() && override;
   static std::unique_ptr<CleanupAutogradContextReq> fromMessage(
-      const rpc::Message& message); // todo
+      const rpc::Message& message);
   int64_t getContextId();
 
  private:

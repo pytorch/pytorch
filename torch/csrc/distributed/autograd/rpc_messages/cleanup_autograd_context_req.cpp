@@ -37,7 +37,7 @@ std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::
   int64_t context_id = tupleElements[0].toInt();
 
   return std::unique_ptr<CleanupAutogradContextReq>(
-      new CleanupAutogradContextReq(context_id)); // todo
+      new CleanupAutogradContextReq(context_id));
 }
 
 } // namespace autograd

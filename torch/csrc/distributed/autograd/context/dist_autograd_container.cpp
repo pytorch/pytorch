@@ -150,7 +150,6 @@ void DistAutogradContainer::releaseContext(
         autograd_context_.find(context_id)->second.getKnownWorkerIds();
     auto agent = rpc::RpcAgent::getDefaultRpcAgent();
     for (const auto& worker_id : workerIds) {
-      std::cout << "sending release message to worker id " << worker_id << " to release context with id " << context_id << std::endl;
       agent->send(
           agent->getWorkerInfo(worker_id),
           CleanupAutogradContextReq(context_id).toMessage());
