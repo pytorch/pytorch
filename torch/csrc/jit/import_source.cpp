@@ -109,9 +109,9 @@ struct SourceImporterImpl : public Resolver,
         // Constants present in the model. Used to resolve "CONSTANTS.n" to the
         // actual value
         {"CONSTANTS", std::make_shared<ConstantTableValue>(tensor_table)},
-        {"fork", std::make_shared<ForkValue>()},
-        {"annotate", std::make_shared<AnnotateValue>()},
-        {"uninitialized", std::make_shared<UninitializedValue>()},
+        {"fork", SpecialFormValue::create(prim::fork)},
+        {"annotate", SpecialFormValue::create(prim::annotate)},
+        {"uninitialized", SpecialFormValue::create(prim::Uninitialized)},
         {"inf",
          std::make_shared<ConstantValue>(
              std::numeric_limits<double>::infinity())},

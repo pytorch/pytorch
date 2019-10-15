@@ -12,6 +12,8 @@ white_list = [
     ('quantize', datetime.date(2019, 10, 1)),
     ('q_per_channel_axis', datetime.date(2019, 10, 1)),
     ('fbgemm_is_cpu_supported', datetime.date(2019, 10, 1)),
+    ('c10_experimental', datetime.date(2020, 1, 1)),
+    ('native_layer_norm_double_backward', datetime.date(2019, 10, 20)),
 ]
 
 
