@@ -166,7 +166,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-
   clang-tidy:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -253,6 +252,47 @@ jobs:
           check_name: 'clang-tidy'
           linter_output_path: 'clang-tidy-output.txt'
           commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) (?<errorCode>\[.*\])'
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  regex-linter:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7.4
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@master
+      - name: Checkout PR tip
+        run: |
+          set -eux
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # We are on a PR, so actions/checkout leaves us on a merge commit.
+            # Check out the actual tip of the branch.
+            git checkout ${{ github.event.pull_request.head.sha }}
+          fi
+          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
+        id: get_pr_tip
+      - name: Run regex linter
+        run: |
+          set -eux
+          python tools/regex_linter.py                \
+            --diff ${GITHUB_BASE_REF}                 \
+            "$@" > ${GITHUB_WORKSPACE}/regex-linter-output.txt
+
+          cat ${GITHUB_WORKSPACE}/regex-linter-output.txt
+        env:
+          PR_TARGET: ${{ github.base_ref }}
+      - name: Add annotations
+        uses: suo/add-annotations-github-action@master
+        with:
+          check_name: 'regex-linter'
+          linter_output_path: 'regex-linter-output.txt'
+          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
