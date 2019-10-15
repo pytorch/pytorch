@@ -360,3 +360,77 @@ TEST_F(FunctionalTest, LogSigmoid) {
   auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
+
+TEST_F(FunctionalTest, GumbelSoftmax) {
+
+    // Test 1: 1D shape, 0 and -1 dim
+    for(const auto dim: {0, -1}) {
+        auto logits = torch::randn({5});
+        int expected_count = 1;
+        auto y_draw = F::gumbel_softmax(logits, GumbelSoftmaxOptions().hard(true).dim(dim));
+
+        // All values positive
+        ASSERT_GE(y_draw.min().item<int>(), 0);
+        // Shape unchanged
+        ASSERT_TRUE(y_draw.sizes() == logits.sizes());
+        // One choice per draw
+        ASSERT_TRUE(torch::allclose(y_draw.sum(), torch::tensor(expected_count, torch::kFloat)));
+    }
+
+    { // Test 2: 2D shape, 1 dim
+        auto logits = torch::randn({5, 4});
+        int expected_count = 5;
+        auto y_draw = F::gumbel_softmax(logits, GumbelSoftmaxOptions().hard(true).dim(1));
+
+        // All values positive
+        ASSERT_GE(y_draw.min().item<int>(), 0);
+        // Shape unchanged
+        ASSERT_TRUE(y_draw.sizes() == logits.sizes());
+        // One choice per draw
+        ASSERT_TRUE(torch::allclose(y_draw.sum(), torch::tensor(expected_count, torch::kFloat)));
+    }
+
+    // Test 3 3D shape, 1 and -1 dim
+    int dims[] = {1, -1};
+    int expected[] = {5*3, 5*4};
+    for(auto i=0; i<2; i++) {
+        auto logits = torch::randn({5, 4, 3});
+        int expected_count = expected[i];
+        auto y_draw = F::gumbel_softmax(logits, GumbelSoftmaxOptions().hard(true).dim(dims[i]));
+
+        // All values positive
+        ASSERT_GE(y_draw.min().item<int>(), 0);
+        // Shape unchanged
+        ASSERT_TRUE(y_draw.sizes() == logits.sizes());
+        // One choice per draw
+        ASSERT_TRUE(torch::allclose(y_draw.sum(), torch::tensor(expected_count, torch::kFloat)));
+    }
+
+    { // Test 4: Straight through
+        int num_draws = 100;
+        auto logits = torch::tensor({{0.2, 0.8, 0.1}});
+        logits = logits.reshape({1, 3});
+        logits.requires_grad();
+        auto probs = logits.softmax(-1);
+
+        auto counts = torch::zeros_like(logits);
+        torch::Tensor y_draw;
+        for (auto i=0; i<num_draws; i++) {
+            y_draw = F::gumbel_softmax(logits, GumbelSoftmaxOptions().hard(true));
+            counts += y_draw;
+        }
+
+        // All values positive
+        ASSERT_GE(y_draw.min().item<int>(), 0);
+        // Each experiment should result in 1 draw
+        ASSERT_EQ(counts.sum().item<int>(), num_draws);
+
+        // Check results are asymptotically as expected
+        auto expected = probs * num_draws;
+        // ~z is approximately N(0,1) for unbiased count
+        auto z = (counts - expected) / (expected * (1 - probs)).sqrt();
+        // A (lazy) approximate 99% two-sided test:
+        // occurs with prob alpha~>=0.01 if unbiased
+        ASSERT_LT(z.abs().max().item<float>(), 2.58);
+    }
+}
