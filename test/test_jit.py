@@ -4284,61 +4284,6 @@ def foo(xyz):
                 return x
         self.getExportImportCopy(C())
 
-    def test_custom_container_forward(self):
-        class Test(nn.Module):
-            __constants__ = ['embed']
-
-            def __init__(self, mod):
-                super().__init__()
-                self.embed = mod
-
-            def forward(self, x):
-                return self.embed(x)
-
-        class CustomSequential(nn.Sequential):
-            def forward(self, x):
-                ret_list = []
-                for mod in self.mods:
-                    ret_list.append(mod(x))
-                return ret_list
-
-        with self.assertRaisesRegex(Exception, "Sequential"):
-            scripted_obj = torch.jit.script(Test(CustomSequential()))
-
-        class CustomModuleList(nn.ModuleList):
-            def forward(self, x):
-                ret_list = []
-                for mod in self.mods:
-                    ret_list.append(mod(x))
-                return ret_list
-
-        with self.assertRaisesRegex(Exception, "ModuleList"):
-            scripted_obj = torch.jit.script(Test(CustomModuleList()))
-
-
-        class CustomModuleDict(nn.ModuleDict):
-            def forward(self, x):
-                ret_list = []
-                for mod in self.mods:
-                    ret_list.append(mod(x))
-                return ret_list
-
-        with self.assertRaisesRegex(Exception, "ModuleDict"):
-            scripted_obj = torch.jit.script(Test(CustomModuleDict()))
-
-
-        class TestScript(torch.jit.ScriptModule):
-            __constants__ = ['embed']
-
-            def __init__(self, mod):
-                super().__init__()
-                self.embed = mod
-
-            def forward(self, x):
-                return self.embed(x)
-
-        with self.assertRaisesRegex(Exception, "ModuleDict"):
-            scripted_obj = torch.jit.script(TestScript(CustomModuleDict()))
 
     def test_tensor_shape(self):
         x = torch.empty(34, 56, 78)
@@ -11364,7 +11309,7 @@ a")
             ''')
 
     def test_invalid_call_arguments(self):
-        with self.assertRaisesRegex(RuntimeError, 'Arguments for call are not valid'):
+        with self.assertRaisesRegex(RuntimeError, 'but instead found type '):
             @torch.jit.script
             def invalid_call_arguments(x):
                 return torch.unsqueeze(3, 4, 5, 6, 7, 8)
