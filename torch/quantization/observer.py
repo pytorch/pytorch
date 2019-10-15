@@ -216,14 +216,18 @@ class MinMaxObserver(_ObserverBase):
 
     .. math::
 
-        x_\text{min/max} = \begin{cases}
-            \frac{\min}{\max}(X) & \text{if~}x_\text{min/max} = \O \\
-            \frac{\min}{\max}\left(x_\text{min/max},
-            \frac{\min}{\max}(X)\right) & \text{otherwise}
-        \end{cases}
+        \begin{array}{ll}
+        x_\text{min} &= \begin{cases}
+            \min(X) & \text{if~}x_\text{min} = \text{None} \\
+            \min\left(x_\text{min}, \min(X)\right) & \text{otherwise}
+        \end{cases}\\
+        x_\text{max} &= \begin{cases}
+            \max(X) & \text{if~}x_\text{max} = \text{None} \\
+            \max\left(x_\text{max}, \max(X)\right) & \text{otherwise}
+        \end{cases}\\
+        \end{array}
 
-    where :math:`X` is the observed tensor, and the :math:`\frac{\min}{\max}` is
-    the minimum or maximum function depending on the context.
+    where :math:`X` is the observed tensor.
 
     The scale :math:`s` and zero point :math:`z` are then computed as:
 
@@ -231,7 +235,8 @@ class MinMaxObserver(_ObserverBase):
 
         \begin{aligned}
             \text{if Symmetric:}&\\
-            &s = 2 x_\text{max} / \left( Q_\text{max} - Q_\text{min} \right) \\
+            &s = 2 \max(|x_\text{min}|, x_\text{max}) /
+                \left( Q_\text{max} - Q_\text{min} \right) \\
             &z = \begin{cases}
                 0 & \text{if dtype is qint8} \\
                 128 & \text{otherwise}
@@ -245,7 +250,7 @@ class MinMaxObserver(_ObserverBase):
     where :math:`Q_\text{min}` and :math:`Q_\text{max}` are the minimum and
     maximum of the quantized data type.
 
-    .. note:: Only works with ``torch.per_tensor_affine`` quantization shceme.
+    .. note:: Only works with ``torch.per_tensor_symmetric`` quantization scheme
 
     .. note:: If the running minimum equals to the running maximum, the scale
               and zero_point are set to 1.0 and 0.
@@ -333,15 +338,19 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
 
     .. math::
 
-        x_\text{min/max} = \begin{cases}
-            \frac{\min}{\max}(X) & \text{if~}x_\text{min/max} = \O \\
-            (1 - c) x_\text{min/max} + c \frac{\min}{\max}(X) & \text{otherwise}
-        \end{cases}
+        \begin{array}{ll}
+                x_\text{min} = \begin{cases}
+                    \min(X) & \text{if~}x_\text{min} = \text{None} \\
+                    (1 - c) x_\text{min} + c \min(X) & \text{otherwise}
+                \end{cases}\\
+                x_\text{max} = \begin{cases}
+                    \max(X) & \text{if~}x_\text{max} = \text{None} \\
+                    (1 - c) x_\text{max} + c \max(X) & \text{otherwise}
+                \end{cases}\\
+        \end{array}
 
     where :math:`x_\text{min/max}` is the running average min/max, :math:`X` is
     is the incoming tensor, and :math:`c` is the ``averaging_constant``.
-    The :math:`\frac{\min}{\max}` represents the minimum or maximum function
-    depending on the context.
 
     The scale and zero point are then computed as in
     :class:`~torch.quantization.observer.MinMaxObserver`.
@@ -513,6 +522,20 @@ class HistogramObserver(_ObserverBase):
         dtype: Quantized data type
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+
+    The scale and zero point are computed as follows:
+
+    1. Create the histogram of the incoming inputs.
+        The histogram is computed continuously, and the ranges per bin change
+        with every new tensor observed.
+    2. Search the distribution in the histogram for optimal min/max values.
+        The search for the min/max values ensures the minimization of the
+        quantization error.
+        During the search the bins that were formed due to outliers are ignored.
+        This is achieved by computing the quantization error assuming the min or
+        max are within specific bins in the histogram.
+    3. Compute the scale and zero point the same way as in the
+        :class:`~torch.quantization.MinMaxObserver`
     """
 
     __annotations__ = {
@@ -603,7 +626,8 @@ class HistogramObserver(_ObserverBase):
         return norm
 
     def _non_linear_param_search(self):
-        r"""
+        r"""Non-linear parameter search.
+
         An approximation for L2 error minimization for selecting min/max.
         By selecting new min/max, we filter out outliers in input distribution.
         This follows the implementation of NormMinimization::NonlinearQuantizationParamsSearch in
@@ -616,14 +640,15 @@ class HistogramObserver(_ObserverBase):
         total = sum(self.histogram)
         cSum = torch.cumsum(self.histogram, dim=0)
 
-        stepsize = 1e-5
-        alpha = 0.0
-        beta = 1.0
+        stepsize = 1e-5  # granularity
+        alpha = 0.0  # lower bound
+        beta = 1.0  # upper bound
         start_bin = 0
         end_bin = self.bins - 1
         norm_min = float("inf")
 
         while alpha < beta:
+            # Find the next step
             next_alpha = alpha + stepsize
             next_beta = beta - stepsize
 
@@ -635,12 +660,15 @@ class HistogramObserver(_ObserverBase):
             while r > start_bin and cSum[r] > next_beta * total:
                 r = r - 1
 
+            # decide the next move
             next_start_bin = start_bin
             next_end_bin = end_bin
             if (l - start_bin) > (end_bin - r):
+                # move the start bin
                 next_start_bin = l
                 alpha = next_alpha
             else:
+                # move the end bin
                 next_end_bin = r
                 beta = next_beta
 
