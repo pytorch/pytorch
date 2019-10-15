@@ -82,7 +82,7 @@ Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking
 
 Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   return to_impl(
-      self, self.options().dtype(dtype), copy, non_blocking, optional_memory_format);
+      self, self.options().dtype(dtype), non_blocking, copy, optional_memory_format);
 }
 
 Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
