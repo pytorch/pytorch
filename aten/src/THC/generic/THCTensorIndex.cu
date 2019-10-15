@@ -580,7 +580,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
       (IDX_IS_MAJOR) ? sliceSize : numIndices,                \
       dstAddDimSize);
 #ifdef __HIP_PLATFORM_HCC__
-define LARGE_INDEX24(TENSOR_TYPE, TYPE,                       \
+#define LARGE_INDEX24(TENSOR_TYPE, TYPE,                      \
                     DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)  \
   indexAddLargeIndex<TENSOR_TYPE, TYPE,                       \
                      DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR> \
