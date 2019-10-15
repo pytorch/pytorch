@@ -109,6 +109,10 @@ test_python_nn() {
   assert_git_not_dirty
 }
 
+test_python_all_except_nn() {
+  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
+}
+
 test_python_cuda_memcheck() {
   export PYTORCH_TEST_WITH_CUDA_MEMCHECK=1
   time cuda-memcheck --error-exitcode 1 --tool memcheck python test/run_test.py --verbose
