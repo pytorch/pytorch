@@ -1938,6 +1938,9 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
+
+    .. _Kullback-Leibler divergence:
+        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -2259,7 +2262,7 @@ def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='m
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
-    return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
+    return torch.soft_margin_loss(input, target, reduction_enum)
 
 
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
