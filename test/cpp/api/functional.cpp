@@ -711,7 +711,7 @@ TEST_F(FunctionalTest, RReLU) {
       for (const auto inplace : {false, true}) {
         auto x = torch::linspace(-10.0, 10.0, size * size * size);
         x.resize_({size, size, size});
-        auto x_copy = x.clone();
+        auto x_copy = x.clone(at::MemoryFormat::Contiguous);
         auto y = F::rrelu(x, RReLUOptions().lower(lower)
           .upper(upper).inplace(inplace));
         auto z = ((x_copy >= 0) * (x_copy == y) +
@@ -734,7 +734,7 @@ TEST_F(FunctionalTest, RReLUDefaultOptions) {
   const auto upper = 1.0 / 3.0;
   auto x = torch::linspace(-10.0, 10.0, size * size * size);
   x.resize_({size, size, size});
-  auto x_copy = x.clone();
+  auto x_copy = x.clone(at::MemoryFormat::Contiguous);
   auto y = F::rrelu(x);
   auto z = ((x_copy >= 0) * (x_copy == y) +
     (x_copy < 0) * (y >= x_copy * upper) * (y <= lower * x_copy)) * 1.0;
