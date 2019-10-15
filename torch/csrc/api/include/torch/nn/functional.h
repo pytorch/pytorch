@@ -5,3 +5,4 @@
 #include <torch/nn/functional/pooling.h>
 #include <torch/nn/functional/vision.h>
 #include <torch/nn/functional/embedding.h>
+#include <torch/nn/functional/pixelshuffle.h>
