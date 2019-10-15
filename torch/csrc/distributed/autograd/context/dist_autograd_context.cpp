@@ -12,7 +12,7 @@ namespace {
 // Autograd function used to enqueue an error on the local autograd engine.
 class ErrorFunc : public torch::autograd::Node {
  public:
-  explicit ErrorFunc(const std::exception& error) : error_(error) {}
+  explicit ErrorFunc(const std::runtime_error& error) : error_(error) {}
 
   torch::autograd::variable_list apply(
       torch::autograd::variable_list&& grads) override {
@@ -20,7 +20,7 @@ class ErrorFunc : public torch::autograd::Node {
   }
 
  private:
-  std::exception error_;
+  std::runtime_error error_;
 };
 
 } // anonymous namespace.
@@ -30,6 +30,17 @@ DistAutogradContext::DistAutogradContext(int64_t contextId)
 
 int64_t DistAutogradContext::contextId() const {
   return contextId_;
+}
+
+std::unordered_set<rpc::worker_id_t> DistAutogradContext::getKnownWorkerIds()
+    const {
+  std::lock_guard<std::mutex> guard(lock_);
+  return knownWorkerIds_;
+};
+
+void DistAutogradContext::addKnownWorkerId(const rpc::worker_id_t workerId) {
+  std::lock_guard<std::mutex> guard(lock_);
+  knownWorkerIds_.insert(workerId);
 }
 
 void DistAutogradContext::addSendFunction(

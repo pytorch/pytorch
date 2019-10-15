@@ -49,7 +49,11 @@ def dist_init(sync_at_shutdown=True):
             )
             test_method(self, *arg, **kwargs)
             if sync_at_shutdown:
+                # Wait for all nodes to finish processing.
                 dist.barrier()
+
+            # Shutdown RPC cleanly.
+            rpc.join_rpc()
         return wrapper
 
     return decorator
