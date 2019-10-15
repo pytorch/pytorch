@@ -322,7 +322,8 @@ def init_process_group(backend,
         2. Specify ``init_method`` (a URL string) which indicates where/how
            to discover peers. Optionally specify ``rank`` and ``world_size``,
            or encode all required parameters in the URL and omit them.
-        If neither is specified, ``init_method`` is assumed to be "env://".
+
+    If neither is specified, ``init_method`` is assumed to be "env://".
 
 
     Arguments:
