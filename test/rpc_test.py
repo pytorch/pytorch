@@ -809,3 +809,11 @@ class RpcTest(object):
             "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here(), torch.ones(n, n) + 4)
+
+    def test_requires_process_group_agent_decorator(self):
+        @requires_process_group_agent("test_func did not run")
+        def test_func():
+            return "expected result"
+
+        if TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP:
+            self.assertEqual(test_func(), "expected result")

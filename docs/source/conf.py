@@ -56,6 +56,11 @@ extensions = [
     'javasphinx',
 ]
 
+# autosectionlabel throws warnings if section names are duplicated.
+# The following tells autosectionlabel to not throw a warning for
+# duplicated section names that are in different documents.
+autosectionlabel_prefix_document = True
+
 # katex options
 #
 #
