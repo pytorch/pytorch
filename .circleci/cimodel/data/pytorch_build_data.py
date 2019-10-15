@@ -26,8 +26,6 @@ CONFIG_TREE_DATA = [
                 XImportant("3.6"),  # This is actually the ASAN build
                 ("3.6", [
                     ("namedtensor", [XImportant(True)]),  # ASAN
-                    ("parallel_tbb", [XImportant(True)]),
-                    ("parallel_native", [XImportant(True)]),
                 ]),
             ]),
             ("7", [
