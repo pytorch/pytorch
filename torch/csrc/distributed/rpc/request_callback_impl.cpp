@@ -200,6 +200,8 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       auto& cleanupContextReq = static_cast<CleanupAutogradContextReq&>(rpc);
       auto cleanupContextId = cleanupContextReq.getContextId();
+      // release the context if it still exists on this thread. We need to check
+      // if it exists since it may have been deleted by an in-flight RPC.
       if (DistAutogradContainer::getInstance().hasContextWithId(
               cleanupContextId)) {
         DistAutogradContainer::getInstance().releaseContext(

@@ -17,6 +17,8 @@ class TORCH_API CleanupAutogradContextReq : public rpc::RpcCommandBase {
   rpc::Message toMessage() && override;
   static std::unique_ptr<CleanupAutogradContextReq> fromMessage(
       const rpc::Message& message);
+
+  // Retrieve the context id we are cleaning up with this message.
   int64_t getContextId();
 
  private:

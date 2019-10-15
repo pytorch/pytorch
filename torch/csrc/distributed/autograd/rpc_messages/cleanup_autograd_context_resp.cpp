@@ -4,10 +4,6 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
-CleanupAutogradContextResp::CleanupAutogradContextResp(){
-
-};
-
 rpc::Message CleanupAutogradContextResp::toMessage() && {
   std::vector<torch::Tensor> tensors;
   std::vector<char> payload;

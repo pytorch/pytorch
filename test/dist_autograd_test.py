@@ -5,7 +5,6 @@ import unittest
 
 import torch
 import torch.distributed.autograd as dist_autograd
-import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from dist_utils import INIT_METHOD_TEMPLATE, dist_init
 
