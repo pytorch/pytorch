@@ -300,6 +300,11 @@ class Tensor(torch._C._TensorBase):
         r"""See :func:`torch.norm`"""
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
+    def clone(self, memory_format=None):
+        if memory_format is None:
+            raise RuntimeError("ERROR: Python call to clone()")
+        return _C._VariableFunctions.clone(self, memory_format)
+
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa

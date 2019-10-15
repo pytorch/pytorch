@@ -876,6 +876,9 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  if (!optional_memory_format.has_value()) {
+    TORCH_CHECK(false, "ERROR: C++ call to clone()");
+  }
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Contiguous);
   if (memory_format == MemoryFormat::Preserve) {
