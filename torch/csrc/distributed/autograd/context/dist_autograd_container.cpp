@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 
 namespace torch {
 namespace distributed {
@@ -132,18 +133,30 @@ void DistAutogradContainer::releaseContext(
     int64_t context_id,
     bool notifyWorkers) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
+
   TORCH_CHECK(
       autograd_context_.find(context_id) != autograd_context_.end(),
       "Could not find autograd context with id: ",
       context_id);
-  autograd_context_.erase(context_id);
 
-  auto agent = rpc::RpcAgent::getDefaultRpcAgent();
+  if (notifyWorkers) {
+    // notify other workers to clean up their contexts.
+    auto workerIds =
+        autograd_context_.find(context_id)->second.getKnownWorkerIds();
+    auto agent = rpc::RpcAgent::getDefaultRpcAgent();
+    for (const auto& worker_id : workerIds) {
+      agent->send(
+          agent->getWorkerInfo(worker_id),
+          CleanupAutogradContextReq().toMessage());
+    }
+  }
+  autograd_context_.erase(context_id);
 
   if (current_context_id_ == context_id) {
     // Reset the thread_local current context id, since it is no longer valid.
     current_context_id_ = kInvalidContextId;
   }
+
 }
 
 DistAutogradContext& DistAutogradContainer::retrieveContext(
