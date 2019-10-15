@@ -16,6 +16,9 @@
 #include <thrust/device_ptr.h>
 #include <thrust/sort.h>
 #include <algorithm> // for std::min
+#ifdef __HIP_PLATFORM_HCC__
+#include "ATen/rocm/ROCm_uint24.hpp"
+#endif
 
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
@@ -199,6 +202,52 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
     atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
   }
 }
+
+#ifdef __HIP_PLATFORM_HCC__
+// this is a specialization of the indexAddLargeIndex kernel for ROCm which
+// uses fast unsigned int24 computations
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          bool IndexIsMajor>
+__global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
+                                   TensorInfo<T, IndexType> src,
+                                   TensorInfo<int64_t, IndexType> indices,
+                                   int dstAddDim,
+                                   int srcAddDim,
+                                   IndexType totalSize,
+                                   IndexType innerSize,
+                                   int64_t dstAddDimSize) {
+  // We stride over the output including the indexed dimension
+  // (totalSize), and calculate the destination index point based on that
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalSize;
+       linearIndex += gridDim.x * blockDim.x) {
+    IndexType srcIndex, elementInSlice;
+    if (IndexIsMajor) {
+      srcIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      srcIndex = linearIndex % innerSize;
+    }
+
+    // Lua indices begin at 1
+    IndexType dstIndex =
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get24(srcIndex, indices)];
+    assert(dstIndex < dstAddDimSize);
+
+    IndexType dstOffset =
+      IndexToOffset<T, IndexType, DstDim>::get24(elementInSlice, dst);
+    dstOffset += dstIndex * dst.strides[dstAddDim];
+
+    IndexType srcOffset =
+      IndexToOffset<T, IndexType, SrcDim>::get24(elementInSlice, src);
+    srcOffset += srcIndex * src.strides[srcAddDim];
+
+    atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
+  }
+}
+#endif
 
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.
