@@ -50,7 +50,7 @@ class Cloneable : public virtual Module {
     for (const auto& parameter : parameters_) {
       auto& tensor = *parameter;
       auto data = device && tensor.device() != *device ?
-          tensor.to(*device) : autograd::Variable(tensor).clone();
+          tensor.to(*device) : autograd::Variable(tensor).clone(at::MemoryFormat::Contiguous);
       copy->parameters_[parameter.key()].set_data(data);
     }
     TORCH_CHECK(
@@ -62,7 +62,7 @@ class Cloneable : public virtual Module {
     for (const auto& buffer : buffers_) {
       auto& tensor = *buffer;
       auto data = device && tensor.device() != *device ?
-          tensor.to(*device) : autograd::Variable(tensor).clone();
+          tensor.to(*device) : autograd::Variable(tensor).clone(at::MemoryFormat::Contiguous);
       copy->buffers_[buffer.key()].set_data(data);
     }
     TORCH_CHECK(
