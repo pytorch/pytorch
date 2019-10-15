@@ -217,8 +217,9 @@ class MinMaxObserver(_ObserverBase):
     .. math::
 
         x_\text{min/max} = \begin{cases}
-            \min(X) & \text{if~}x_\text{min/max} = \O \\
-            \min(x_\text{min/max}, \min(X)) & \text{otherwise}
+            \frac{\min}{\max} & \text{if~}x_\text{min/max} = \O \\
+            \frac{\min}{\max}\left(x_\text{min/max},
+            \frac{\min}{\max}\left(X\right)\right) & \text{otherwise}
         \end{cases}
 
     where :math:`X` is the observed tensor.
@@ -332,8 +333,8 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
     .. math::
 
         x_\text{min/max} = \begin{cases}
-            \min(X) & \text{if~}x_\text{min/max} = \O \\
-            (1 - c) x_\text{min/max} + c \min(X) & \text{otherwise}
+            \frac{\min}{\max} & \text{if~}x_\text{min/max} = \O \\
+            (1 - c) x_\text{min/max} + c \frac{\min}{\max} & \text{otherwise}
         \end{cases}
 
     where :math:`x_\text{min/max}` is the running average min/max, :math:`X` is

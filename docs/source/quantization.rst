@@ -200,7 +200,7 @@ Layers for the quantization-aware training
 Observers for computing the quantization parameters
 
 * :class:`~torch.quantization.MinMaxObserver` — Derives the quantization parameters from the running minimum and maximum of the observed tensor inputs (per tensor variant)
-* :class:`~torch.quantization.MovingAverageObserver` — Derives the quantization parameters from the running averages of the minimums and maximums of the observed tensor inputs (per tensor variant)
+* :class:`~torch.quantization.MovingAverageMinMaxObserver` — Derives the quantization parameters from the running averages of the minimums and maximums of the observed tensor inputs (per tensor variant)
 * :class:`~torch.quantization.PerChannelMinMaxObserver`— Derives the quantization parameters from the running minimum and maximum of the observed tensor inputs (per channel variant)
 * :class:`~torch.quantization.MovingAveragePerChannelMinMaxObserver` — Derives the quantization parameters from the running averages of the minimums and maximums of the observed tensor inputs (per channel variant)
 * :class:`~torch.quantization.HistogramObserver` — Derives the quantization parameters by creating a histogram of running minimums and maximums.
