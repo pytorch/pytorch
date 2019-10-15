@@ -110,6 +110,7 @@ test_python_nn() {
 }
 
 test_python_cuda_memcheck() {
+  export PYTORCH_TEST_WITH_CUDA_MEMCHECK=1
   time cuda-memcheck --error-exitcode 1 --tool memcheck python test/run_test.py --verbose
   time cuda-memcheck --error-exitcode 1 --tool racecheck python test/run_test.py --verbose
   time cuda-memcheck --error-exitcode 1 --tool synccheck python test/run_test.py --verbose
