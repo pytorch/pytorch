@@ -226,10 +226,12 @@ Tensor empty_like(
                                          use_memory_format);
     } else if (qscheme == kPerChannelAffine) {
       // Copy the tensors with channels to avoid accidental overrides
+      auto q_per_channel_scales = self.q_per_channel_scales().clone(at::MemoryFormat::Contiguous);
+      auto q_per_channel_zero_points = self.q_per_channel_zero_points().clone(at::MemoryFormat::Contiguous);
       return at::_empty_per_channel_affine_quantized(
           self.sizes(),
-          self.q_per_channel_scales().clone(),
-          self.q_per_channel_zero_points().clone(),
+          q_per_channel_scales,
+          q_per_channel_zero_points,
           self.q_per_channel_axis(),
           options,
           use_memory_format);
