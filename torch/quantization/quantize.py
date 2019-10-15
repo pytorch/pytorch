@@ -194,16 +194,20 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     Args:
         module: input model
         qconfig_spec: Either:
-            * A dictionary that maps from name or type of submodule to quantization
+
+            - A dictionary that maps from name or type of submodule to quantization
               configuration, qconfig applies to all submodules of a given
               module unless qconfig for the submodules are specified (when the
               submodule already has qconfig attribute). Entries in the dictionary
               need to be QConfigDynamic instances.
-            * A set of types and/or submodule names to apply dynamic quantization to,
+
+            - A set of types and/or submodule names to apply dynamic quantization to,
               in which case the `dtype` argument is used to specifiy the bit-width
+
         inplace: carry out model transformations in-place, the original module is mutated
         mapping: maps type of a submodule to a type of corresponding dynamically quantized version
             with which the submodule needs to be replaced
+
     """
     if qconfig_spec is None:
         if dtype == torch.qint8:
@@ -268,11 +272,13 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
 def convert(module, mapping=None, inplace=False):
     r"""Converts the float module with observers (where we can get quantization
     parameters) to a quantized module.
+
     Args:
         module: calibrated module with observers
-        mapping: a dictionary that maps from float module type to quantized module type, can 
-                 be overwrritten to allow swapping user defined Modules
+        mapping: a dictionary that maps from float module type to quantized module type, can
+            be overwritten to allow swapping user defined Modules
         inplace: carry out model transformations in-place, the original module is mutated
+
     """
     if mapping is None:
         mapping = DEFAULT_MODULE_MAPPING
