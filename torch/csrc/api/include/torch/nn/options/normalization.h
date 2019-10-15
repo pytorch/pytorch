@@ -3,6 +3,7 @@
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
+#include <vector>
 
 namespace torch {
 namespace nn {

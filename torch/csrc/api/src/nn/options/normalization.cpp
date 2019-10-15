@@ -3,7 +3,7 @@
 namespace torch {
 namespace nn {
 
-LayerNormOptions::LayerNormOptions(torch::IntArrayRef normalized_shape) : normalized_shape(normalized_shape) {}
+LayerNormOptions::LayerNormOptions(std::vector<int64_t> normalized_shape) : normalized_shape_(normalized_shape) {}
 
 } // namespace nn
 } // namespace torch

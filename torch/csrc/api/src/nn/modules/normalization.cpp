@@ -21,13 +21,14 @@ LayerNormImpl::LayerNormImpl(const LayerNormOptions& options_) : options(options
 void LayerNormImpl::reset() {
   options.elementwise_affine(elementwise_affine);
   options.eps(eps);
-  if(options.elementwise_affine()) {
-    weight = register_parameter("weight", torch::ones(options.normalized_shape()));
-    bias = register_parameter("bias", torch::zeros(options.normalized_shape()));
-  } else {
-    weight = register_parameter("weight", torch::empty(options.normalized_shape()));
-    bias = register_parameter("bias", torch::empty(options.normalized_shape()));
-  }
+  // IntArrayRef size =
+  // if(options.elementwise_affine()) {
+  //   weight = register_parameter("weight", torch::ones(options.normalized_shape()));
+  //   bias = register_parameter("bias", torch::zeros(options.normalized_shape()));
+  // } else {
+  //   weight = register_parameter("weight", torch::empty(options.normalized_shape()));
+  //   bias = register_parameter("bias", torch::empty(options.normalized_shape()));
+  // }
 }
 
 void LayerNormImpl::pretty_print(std::ostream& stream) const {
@@ -39,8 +40,8 @@ void LayerNormImpl::pretty_print(std::ostream& stream) const {
 
 //todo- where to get this: torch.backends.cudnn.enabled value from
 torch::Tensor LayerNormImpl::forward(const Tensor& input) {
-  return torch::layer_norm(input, options.normalized_shape(), weight, bias, options.eps(),
-                          false/*torch.backends.cudnn.enabled*/)
+  // return torch::layer_norm(input, options.normalized_shape(), weight, bias, options.eps(),
+  //                         at::globalContext().userEnabledCuDNN()/*torch.backends.cudnn.enabled*/)
 }
 } // namespace nn
 } // namespace torch

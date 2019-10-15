@@ -12,7 +12,7 @@ namespace nn {
 
 class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
  public:
-  explicit LayerNormImpl(torch::IntArrayRef normalized_shape)
+  explicit LayerNormImpl(std::vector<int64_t> normalized_shape)
       : LayerNormImpl(LayerNormOptions(normalized_shape)) {}
   explicit LayerNormImpl(const LayerNormOptions& options_);
 
