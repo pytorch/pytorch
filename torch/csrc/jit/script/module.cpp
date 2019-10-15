@@ -379,7 +379,7 @@ void Module::train(bool on) {
     p.second.train(on);
   }
   if (auto slot = find_attribute("training")) {
-    module_object()->setSlot(*slot, on);
+    set_attribute("training", on);
   } else {
     TORCH_INTERNAL_ASSERT("'training' attribute not found");
   }
@@ -429,28 +429,32 @@ module_list Module::get_modules() const {
   return module_list(*this, EntityType::MODULE);
 }
 
-c10::optional<size_t> Module::find_parameter(const std::string& name) const {
+c10::optional<autograd::Variable> Module::find_parameter(
+    const std::string& name) const {
   auto slot_idx = type()->findAttributeSlot(name);
   if (slot_idx && type()->is_parameter(*slot_idx)) {
-    return *slot_idx;
+    return autograd::as_variable_ref(
+        module_object()->getSlot(*slot_idx).toTensor());
   }
   return c10::nullopt;
 }
 
-c10::optional<size_t> Module::find_attribute(const std::string& name) const {
+c10::optional<IValue> Module::find_attribute(const std::string& name) const {
   auto slot_idx = type()->findAttributeSlot(name);
   if (slot_idx && !type()->is_parameter(*slot_idx) &&
       !type()->is_module(*slot_idx)) {
-    return *slot_idx;
+    return module_object()->getSlot(*slot_idx);
   }
   return c10::nullopt;
 }
 
-c10::optional<size_t> Module::find_buffer(const std::string& name) const {
-  auto slot_idx = find_attribute(name);
+c10::optional<autograd::Variable> Module::find_buffer(
+    const std::string& name) const {
+  auto slot_idx = type()->findAttributeSlot(name);
   if (slot_idx &&
       type()->getAttribute(*slot_idx)->isSubtypeOf(TensorType::get())) {
-    return *slot_idx;
+    return autograd::as_variable_ref(
+        module_object()->getSlot(*slot_idx).toTensor());
   }
   return c10::nullopt;
 }

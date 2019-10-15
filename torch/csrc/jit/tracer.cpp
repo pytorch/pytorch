@@ -288,6 +288,7 @@ static void gatherParametersAndBuffers(
 
   state->setValue(self.module_object(), self_value);
 
+  auto self_ty = self.type();
   for (auto s : self.get_slots()) {
     if (s.second.type()->isSubtypeOf(TensorType::get())) {
       addInput(
@@ -295,7 +296,7 @@ static void gatherParametersAndBuffers(
           s.second,
           s.second.type(),
           g.insertGetAttr(self_value, s.first));
-    } else if (*self.entity_type(s.first) == script::EntityType::MODULE) {
+    } else if (self_ty->is_module(self_ty->getAttributeSlot(s.first))) {
       gatherParametersAndBuffers(
           state,
           g.insertGetAttr(self_value, s.first),

@@ -181,6 +181,10 @@ struct TORCH_API Module {
     return module_object()->getAttr(name);
   }
 
+  void set_attribute(const std::string& name, IValue v) const {
+    return module_object()->setAttr(name, v);
+  }
+
   autograd::Variable get_buffer(const std::string& name) const {
     return autograd::as_variable_ref(get_attribute(name).toTensor());
   }
@@ -226,9 +230,10 @@ struct TORCH_API Module {
         });
   }
 
-  c10::optional<size_t> find_parameter(const std::string& name) const;
-  c10::optional<size_t> find_attribute(const std::string& name) const;
-  c10::optional<size_t> find_buffer(const std::string& name) const;
+  c10::optional<autograd::Variable> find_parameter(
+      const std::string& name) const;
+  c10::optional<IValue> find_attribute(const std::string& name) const;
+  c10::optional<autograd::Variable> find_buffer(const std::string& name) const;
   c10::optional<Module> find_module(const std::string& name) const;
   c10::optional<Method> find_method(const std::string& basename) const;
 
@@ -244,7 +249,7 @@ struct TORCH_API Module {
   /// True if the module is in training mode.
   bool is_training() {
     if (auto p = find_attribute("training")) {
-      return module_object()->getSlot(*p).toBool();
+      return p->toBool();
     }
 
     // We are in training mode by default
@@ -343,6 +348,7 @@ struct TORCH_API Module {
     return c10::nullopt;
   }
   EntityType entity_type(size_t offset_) const {
+    TORCH_CHECK(offset_ < type()->numAttributes());
     if (type()->is_parameter(offset_)) {
       return EntityType::PARAMETER;
     }
