@@ -336,7 +336,7 @@ namespace c10 {
   struct in_place_type_t { explicit in_place_type_t() = default; };
 
 #ifdef MPARK_VARIABLE_TEMPLATES
-  constexpr variant_in_place_t in_place{};
+  constexpr variant_in_place_t variant_in_place{};
 
   template <std::size_t I> constexpr in_place_index_t<I> in_place_index{};
 
