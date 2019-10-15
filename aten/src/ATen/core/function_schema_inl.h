@@ -186,12 +186,12 @@ inline void FunctionSchema::checkArg(
     const IValue& value,
     const Argument& argument,
     optional<size_t> pos) const {
-  if (!value.type()->isSubtypeOf(argument.type())) {
+  if (!isSubvalueOf(value, argument.type())) {
     std::string position = pos ? ::c10::str(" in position ", *pos) : "";
     TORCH_CHECK(
         false,
         formatTypeMismatchMsg(
-            argument, value.type()->python_str(), pos));
+            argument, attemptToRecoverType(value)->python_str(), pos));
   }
 }
 
