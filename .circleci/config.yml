@@ -34,6 +34,22 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Install VC2017
+          no_output_timeout: "10m"
+          shell: cmd.exe
+          command: |
+            cd C:\
+            :: Install Visual Studio 2015
+            set EXE=vs_2015_community.exe
+            curl https://s3.amazonaws.com/ossci-windows/%EXE% --output %EXE%
+            %EXE% /q /norestart /InstallSelectableItems NativeLanguageSupport_Group
+            :: Install Visual Studio 2017
+            :: NOTE: before this bug https://devtalk.nvidia.com/default/topic/1027209/cuda-9-0-does-not-work-with-the-latest-vs-2017-update/?offset=1 is fixed, we should use VS 2017 15.4.5 version
+            set EXE=vs_2017_15.4.5_Community.exe
+            curl https://s3.amazonaws.com/ossci-windows/%EXE% --output %EXE%
+            call %EXE% --quiet --norestart --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.DiagnosticTools --add Microsoft.VisualStudio.Component.Windows10SDK.16299.Desktop --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.VC.140
+
+      - run:
           name: Build
           no_output_timeout: "90m"
           command: |
@@ -44,7 +60,6 @@ jobs:
             set -x
             choco install -y curl 7zip
             choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
-            choco install -y visualstudio2017community --package-parameters "--quiet --norestart --wait --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.VC.DiagnosticTools --add Microsoft.VisualStudio.Component.Windows10SDK.16299.Desktop --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.VC.ATL --add Microsoft.VisualStudio.Component.VC.140"
             .jenkins/pytorch/win-build.sh
 # PR jobs pr builds
 workflows:
