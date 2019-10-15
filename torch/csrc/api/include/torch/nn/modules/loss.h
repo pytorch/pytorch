@@ -128,7 +128,7 @@ TORCH_MODULE(CosineEmbeddingLoss);
 /// Creates a criterion that optimizes a two-class classification
 /// logistic loss between input tensor :math:`x` and target tensor :math:`y`
 /// (containing 1 or -1).
-struct TORCH_API SoftMarginLossImpl : Module {
+struct TORCH_API SoftMarginLossImpl : public Cloneable<SoftMarginLossImpl> {
   explicit SoftMarginLossImpl(const SoftMarginLossOptions& options_ = {});
 
   /// Pretty prints the `SoftMarginLoss` module into the given `stream`.

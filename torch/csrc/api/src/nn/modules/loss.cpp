@@ -129,8 +129,10 @@ Tensor TripletMarginLossImpl::forward(
 SoftMarginLossImpl::SoftMarginLossImpl(
     const torch::nn::SoftMarginLossOptions& options_) : options(options_) {}
 
+void SoftMarginLossImpl::reset() {}
+
 void SoftMarginLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::SoftMarginLoss";
+  stream << "torch::nn::SoftMarginLoss()";
 }
 
 Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
