@@ -39,7 +39,7 @@ MANUAL_IMPLEMENTATIONS = {
 # on demand.  Only concrete ATen methods can be disabled this way; it will have
 # NO EFFECT otherwise.
 DONT_RECORD_TRACE = {
-    'convolution', 'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d',
+    'conv1d', 'conv2d', 'conv3d', 'conv_transpose1d',
     'conv_transpose2d', 'conv_transpose3d', 'lstm_cell', 'gru_cell',
     'rnn_tanh_cell', 'rnn_relu_cell', 'linear',
     # FIXME: figure out a better way when we support sparse tensors in jit
