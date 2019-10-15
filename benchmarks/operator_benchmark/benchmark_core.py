@@ -72,7 +72,6 @@ class BenchmarkRunner(object):
         self.max_iters = 1e6
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
-        self.print_per_iter = False
         if self.args.iterations:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
@@ -80,10 +79,6 @@ class BenchmarkRunner(object):
         # to match the tag anymore
         if self.args.test_name is not None:
             self.args.tag_filter = None
-
-        if self.args.ai_pep_format:
-            self.print_per_iter = True
-
 
     def _print_header(self):
         DASH_LINE = '-' * 40
@@ -108,8 +103,6 @@ class BenchmarkRunner(object):
     def _print_perf_result(self, reported_run_time_us, test_case):
         if self.args.ai_pep_format:
             # Output for AI-PEP
-            # Print out per iteration execution time instead of avg time
-            return
             test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
             for run in range(self.num_runs):
                 print("{}Observer ".format(test_case.framework) + json.dumps(
@@ -154,28 +147,26 @@ class BenchmarkRunner(object):
                 has_explicit_iteration_count) and
                 curr_test_total_time > self.args.min_time_per_test)
 
-    def _launch_forward(self, test_case, iters, print_per_iter):
+    def _launch_forward(self, test_case, iters):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
-        forward_time = timeit.timeit(functools.partial(func, iters, print_per_iter), number=1)
+        forward_time = timeit.timeit(functools.partial(func, iters), number=1)
         return forward_time
 
-    def _launch_backward(self, test_case, iters, print_per_iter=False):
+    def _launch_backward(self, test_case, iters):
         """ This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
-        test_case.run_forward(num_runs=1, print_per_iter=False)
+        test_case.run_forward(num_runs=1)
         if test_case.framework == "PyTorch":
             test_case._output_mean()
-        backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters,
-                                                        print_per_iter),
-                                      number=1)
+        backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters), number=1)
         return backward_time
 
-    def _measure_time(self, launch_test, test_case, iters, print_per_iter):
+    def _measure_time(self, launch_test, test_case, iters):
         """
         This function execute the operator for <iters> iterations then look at the time.
         If it's not significant, the number of iterations will be increased before rerun.
@@ -187,7 +178,7 @@ class BenchmarkRunner(object):
             if self.args.wipe_cache:
                 torch.ops.operator_benchmark._clear_cache()
 
-            run_time_sec = launch_test(test_case, iters, print_per_iter)
+            run_time_sec = launch_test(test_case, iters)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable
             results_are_significant = self._iteration_result_is_significant(
@@ -261,10 +252,9 @@ class BenchmarkRunner(object):
                 launch_func = self._launch_forward
 
             # Warmup
-            launch_func(test_case, self.args.warmup_iterations, print_per_iter=False)
+            launch_func(test_case, self.args.warmup_iterations)
             # Actual Execution
-            reported_time = [self._measure_time(launch_func, test_case,
-                                                self.iters, self.print_per_iter)
+            reported_time = [self._measure_time(launch_func, test_case, self.iters)
                              for _ in range(self.num_runs)]
 
             self._print_perf_result(reported_time, test_case)
