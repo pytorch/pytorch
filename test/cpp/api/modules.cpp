@@ -1736,6 +1736,10 @@ TEST_F(ModulesTest, PrettyPrintMultiLabelSoftMarginLoss) {
   ASSERT_EQ(c10::str(MultiLabelSoftMarginLoss()), "torch::nn::MultiLabelSoftMarginLoss()");
 }
 
+TEST_F(ModulesTest, PrettyPrintSoftMarginLoss) {
+  ASSERT_EQ(c10::str(SoftMarginLoss()), "torch::nn::SoftMarginLoss()");
+}
+
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
   ASSERT_EQ(
       c10::str(CosineSimilarity()),
