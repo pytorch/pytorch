@@ -139,22 +139,28 @@ void Module::to_impl(
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // First call `to()` on every child module.
-  for (auto p : get_modules()) {
-    p.second.to_impl(device, dtype, non_blocking);
+  for (NameModule m : get_modules()) {
+    m.module.to_impl(device, dtype, non_blocking);
   }
   // Then convert every of our parameters.
-  for (const auto& parameter : get_parameters()) {
-    module_state_to(parameter.second, device, dtype, non_blocking);
+  for (NameValue parameter : get_parameters()) {
+    module_state_to(parameter.value, device, dtype, non_blocking);
   }
   // Then convert every tensor attributes (buffers).
-  for (const auto& attr : get_attributes()) {
-    if (attr.second.type()->isSubtypeOf(TensorType::get())) {
-      module_state_to(attr.second, device, dtype, non_blocking);
+  for (NameValue attr : get_attributes()) {
+    if (attr.value.type()->isSubtypeOf(TensorType::get())) {
+      module_state_to(attr.value, device, dtype, non_blocking);
     }
   }
 }
 
-using Slot = std::pair<c10::intrusive_ptr<c10::ivalue::Object>, size_t>;
+struct Slot {
+  c10::intrusive_ptr<c10::ivalue::Object> obj;
+  size_t offset;
+  bool operator==(const Slot& other) const {
+    return (this->obj == other.obj && this->offset == other.offset);
+  }
+};
 
 // remove the first module argument, replacing any access of its
 // parameters/attributes with extra_ivalue input Slots that hold what value to
@@ -172,8 +178,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
 
   struct SlotHash {
     std::size_t operator()(const Slot& slot) const {
-      auto obj_hash = std::hash<c10::ivalue::Object*>{}(slot.first.get());
-      auto offset_hash = std::hash<size_t>{}(slot.second);
+      auto obj_hash = std::hash<c10::ivalue::Object*>{}(slot.obj.get());
+      auto offset_hash = std::hash<size_t>{}(slot.offset);
       return torch::hash_combine(obj_hash, offset_hash);
     }
   };
@@ -194,7 +200,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     }
     extra_ivalues.emplace_back(slot);
     slot_to_offset[slot] = extra_ivalues.size() - 1;
-    return g->addInput()->setType(slot.first->getSlot(slot.second).type());
+    return g->addInput()->setType(slot.obj->getSlot(slot.offset).type());
   };
 
   auto self_value = g->inputs().at(self_offset);
@@ -213,7 +219,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       std::vector<Slot> new_slots;
       std::tie(subgraph, new_slots) = lower_graph(e.mod, *subgraph, e.offset);
       e.n->g_(attr::Subgraph, subgraph);
-      for (const auto& slot : new_slots) {
+      for (const Slot& slot : new_slots) {
         e.n->addInput(getOrAddSlot(slot));
       }
       e.n->removeInput(e.offset);
@@ -239,8 +245,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
         continue;
       }
     }
-    e.n->output()->replaceAllUsesWith(
-        getOrAddSlot(std::make_pair(e.mod, slot_idx)));
+    e.n->output()->replaceAllUsesWith(getOrAddSlot({e.mod, slot_idx}));
     e.n->destroy();
   }
 
@@ -259,8 +264,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
 static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
   std::vector<at::Tensor> result;
   result.reserve(slots.size());
-  for (const auto& slot : slots) {
-    result.emplace_back(slot.first->getSlot(slot.second).toTensor());
+  for (const Slot& slot : slots) {
+    result.emplace_back(slot.obj->getSlot(slot.offset).toTensor());
   }
   return result;
 }
@@ -331,8 +336,8 @@ void Module::clone_method(const Module& orig, const std::string& name) {
     to_scan.pop_back();
     type_remap[entry.first.module_object()->type()] =
         entry.second.module_object()->type();
-    for (auto p : entry.first.get_modules()) {
-      to_scan.emplace_back(p.second, entry.second.get_module(p.first));
+    for (const NameModule& s : entry.first.get_modules()) {
+      to_scan.emplace_back(s.module, entry.second.get_module(s.name));
     }
   }
   return clone_method(orig, orig.get_method(name).function(), type_remap);
@@ -352,18 +357,18 @@ Module Module::clone_impl(
   type_remap[type()] = r.type();
 
   // Copy slots. If a slot is a module - recursively clone it.
-  for (auto p : get_slots()) {
-    if (*entity_type(p.first) == EntityType::MODULE) {
-      const Module& orig = Module(p.second.toObject());
+  for (const NameValue& s : get_slots()) {
+    if (*entity_type(s.name) == EntityType::MODULE) {
+      const Module& orig = Module(s.value.toObject());
       Module cloned = orig.clone_impl(type_remap);
       type_remap[orig.type()] = cloned.type();
-      r.register_module(p.first, cloned);
+      r.register_module(s.name, cloned);
     } else {
       r.register_attribute(
-          p.first,
-          p.second.type(),
-          p.second,
-          *entity_type(p.first) == EntityType::PARAMETER);
+          s.name,
+          s.value.type(),
+          s.value,
+          *entity_type(s.name) == EntityType::PARAMETER);
     }
   }
 
@@ -375,8 +380,8 @@ Module Module::clone_impl(
 }
 
 void Module::train(bool on) {
-  for (auto p : get_modules()) {
-    p.second.train(on);
+  for (NameModule s : get_modules()) {
+    s.module.train(on);
   }
   if (auto slot = find_attribute("training")) {
     set_attribute("training", on);
@@ -478,8 +483,8 @@ c10::optional<Method> Module::find_method(const std::string& basename) const {
 }
 
 void Module::apply(const std::function<void(Module&)>& fn) {
-  for (auto p : get_modules()) {
-    p.second.apply(fn);
+  for (NameModule s : get_modules()) {
+    s.module.apply(fn);
   }
   fn(*this);
 }
@@ -495,19 +500,19 @@ std::string Module::dump_to_str(
   std::stringstream methods_ss;
   std::stringstream submodules_ss;
 
-  for (auto p : get_parameters()) {
-    parameters_ss << p.first << " = ";
+  for (const NameValue& p : get_parameters()) {
+    parameters_ss << p.name << " = ";
     if (print_param_values) {
-      parameters_ss << p.second.toTensor() << std::endl;
+      parameters_ss << p.value.toTensor() << std::endl;
     } else {
       parameters_ss << "..." << std::endl;
     }
   }
 
-  for (auto p : get_attributes()) {
-    attributes_ss << p.first << " = ";
-    if (!p.second.isTensor() || print_attr_values) {
-      attributes_ss << p.second << std::endl;
+  for (const NameValue& p : get_attributes()) {
+    attributes_ss << p.name << " = ";
+    if (!p.value.isTensor() || print_attr_values) {
+      attributes_ss << p.value << std::endl;
     } else {
       attributes_ss << "..." << std::endl;
     }
@@ -534,10 +539,10 @@ std::string Module::dump_to_str(
   ss << torch::jit::jit_log_prefix("  ", methods_ss.str());
   ss << "  }" << std::endl;
   ss << "  submodules {" << std::endl;
-  for (const auto& p : get_modules()) {
+  for (const NameModule& s : get_modules()) {
     // We do level + 2, because one level of indentation comes from 'submodules'
     // scope and the other one goes from a specific submodule we're printing.
-    ss << p.second.dump_to_str(
+    ss << s.module.dump_to_str(
         print_method_bodies, print_attr_values, print_param_values, level + 2);
   }
   ss << "  }" << std::endl;

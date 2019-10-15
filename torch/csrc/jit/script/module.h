@@ -46,8 +46,12 @@ struct Module;
 
 template <typename T>
 struct slot_list_impl;
-using module_list = slot_list_impl<std::pair<std::string, Module>>;
-using ivalue_list = slot_list_impl<std::pair<std::string, IValue>>;
+
+struct NameModule;
+struct NameValue;
+
+using module_list = slot_list_impl<NameModule>;
+using ivalue_list = slot_list_impl<NameValue>;
 using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 
 enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
@@ -382,6 +386,16 @@ struct TORCH_API Module {
   mutable ModulePtr module_value_;
 };
 
+struct NameModule {
+  std::string name;
+  Module module;
+};
+
+struct NameValue {
+  std::string name;
+  IValue value;
+};
+
 // this iterator for the slot list defined below has a position in the list i_
 // and an optional field type_ that if present
 // restricts iteration to only the slots of module_ that
@@ -428,19 +442,15 @@ struct TORCH_API slot_iterator_impl {
 };
 
 template <>
-inline std::pair<std::string, Module> slot_iterator_impl<
-    std::pair<std::string, Module>>::operator*() const {
-  return std::make_pair(
-      module_.type()->getAttributeName(i_),
-      module_.module_object()->getSlot(i_).toObject());
+inline NameModule slot_iterator_impl<NameModule>::operator*() const {
+  return {module_.type()->getAttributeName(i_),
+          module_.module_object()->getSlot(i_).toObject()};
 }
 
 template <>
-inline std::pair<std::string, IValue> slot_iterator_impl<
-    std::pair<std::string, IValue>>::operator*() const {
-  return std::make_pair(
-      module_.type()->getAttributeName(i_),
-      module_.module_object()->getSlot(i_));
+inline NameValue slot_iterator_impl<NameValue>::operator*() const {
+  return {module_.type()->getAttributeName(i_),
+          module_.module_object()->getSlot(i_)};
 }
 
 template <typename T>

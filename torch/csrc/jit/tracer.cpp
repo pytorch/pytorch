@@ -289,18 +289,15 @@ static void gatherParametersAndBuffers(
   state->setValue(self.module_object(), self_value);
 
   auto self_ty = self.type();
-  for (auto s : self.get_slots()) {
-    if (s.second.type()->isSubtypeOf(TensorType::get())) {
+  for (const script::NameValue& s : self.get_slots()) {
+    if (s.value.type()->isSubtypeOf(TensorType::get())) {
       addInput(
-          state,
-          s.second,
-          s.second.type(),
-          g.insertGetAttr(self_value, s.first));
-    } else if (self_ty->is_module(self_ty->getAttributeSlot(s.first))) {
+          state, s.value, s.value.type(), g.insertGetAttr(self_value, s.name));
+    } else if (self_ty->is_module(self_ty->getAttributeSlot(s.name))) {
       gatherParametersAndBuffers(
           state,
-          g.insertGetAttr(self_value, s.first),
-          script::Module(s.second.toObject()));
+          g.insertGetAttr(self_value, s.name),
+          script::Module(s.value.toObject()));
     }
   }
 }

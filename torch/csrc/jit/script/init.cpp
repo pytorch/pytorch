@@ -526,8 +526,8 @@ void initJitScriptBindings(PyObject* module) {
           "_get_modules",
           [](Module& self) {
             std::vector<std::pair<std::string, Module>> modules;
-            for (auto p : self.get_modules()) {
-              modules.emplace_back(p);
+            for (const NameModule& s : self.get_modules()) {
+              modules.emplace_back(std::make_pair(s.name, s.module));
             }
             return modules;
           })
@@ -537,10 +537,10 @@ void initJitScriptBindings(PyObject* module) {
             auto parameters = self.get_parameters();
             py::tuple result(parameters.size());
             auto i = 0;
-            for (auto p : parameters) {
+            for (const NameValue& p : parameters) {
               py::tuple r(2);
               result[i++] = std::make_tuple(
-                  p.first, autograd::as_variable_ref(p.second.toTensor()));
+                  p.name, autograd::as_variable_ref(p.value.toTensor()));
             }
             return result;
           })
@@ -550,11 +550,11 @@ void initJitScriptBindings(PyObject* module) {
             auto attributes = self.get_attributes();
             py::tuple result(attributes.size());
             size_t i = 0;
-            for (auto p : attributes) {
+            for (const NameValue& attr : attributes) {
               py::tuple r(3);
-              IValue v = p.second;
+              IValue v = attr.value;
               result[i++] = std::make_tuple(
-                  p.first, p.second.type(), toPyObject(std::move(v)));
+                  attr.name, v.type(), toPyObject(std::move(v)));
             }
             return result;
           })

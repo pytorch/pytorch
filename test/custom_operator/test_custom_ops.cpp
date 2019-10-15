@@ -14,11 +14,12 @@ template <typename Predicate>
 void check_all_parameters(
     const torch::jit::script::Module& module,
     Predicate predicate) {
-  for (const auto& parameter : module.get_parameters()) {
-    AT_ASSERT(predicate(parameter.second.toTensor()));
+  for (const torch::jit::script::NameValue& parameter :
+       module.get_parameters()) {
+    AT_ASSERT(predicate(parameter.value.toTensor()));
   }
-  for (const auto& child : module.get_modules()) {
-    check_all_parameters(child.second, predicate);
+  for (const torch::jit::script::NameModule& child : module.get_modules()) {
+    check_all_parameters(child.module, predicate);
   }
 }
 } // namespace helpers
