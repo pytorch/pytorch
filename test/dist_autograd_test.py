@@ -250,14 +250,12 @@ class DistAutogradTest(object):
 
     @dist_init
     def test_worker_ids_recorded(self):
-        global known_context_ids
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
             # if no tensors require grad, we do not add the send functions, so
             # no worker ids should be recorded.
             t1 = torch.ones(3, 3, requires_grad=False)
             t2 = torch.zeros(3, 3, requires_grad=False)
-
             for dst_rank in dst_ranks:
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
             # no worker ids should be recorded.
@@ -270,8 +268,6 @@ class DistAutogradTest(object):
             t2.requires_grad = True
             for dst_rank in dst_ranks:
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
-                # tell dst worker to store this context id
-                rpc.rpc_sync("worker{}".format(dst_rank), store_context_id, args=(context_id,))
             # all worker_ids in dst_ranks should be recorded.
             worker_ids = ctx._known_worker_ids()
             self.assertEqual(len(worker_ids), len(dst_ranks))
