@@ -26,7 +26,7 @@ const enumtype::k##name k##name; \
 }
 
 #define TORCH_ENUM_PRETTY_PRINT(name) \
-std::string operator()(enumtype::k##name& v) const { \
+const char* operator()(enumtype::k##name& v) const { \
   return #name; \
 }
 
