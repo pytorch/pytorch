@@ -236,7 +236,7 @@ TEST(CustomAutogradTest, MarkNonDifferentiableMixed) {
 TEST(CustomAutogradTest, MarkNonDifferentiableNone) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable input) {
-      auto output = input.clone();
+      auto output = input.clone(at::MemoryFormat::Contiguous);
       ctx->mark_non_differentiable({output});
       return output;
     }
@@ -292,7 +292,7 @@ TEST(CustomAutogradTest, ReturnDuplicateInplace) {
   ASSERT_THROWS_WITH(DoubleInplace::apply(x), "leaf Variable that requires grad");
   // TODO ASSERT_THROWS_WITH(DoubleInplace::apply(x.clone()[0]), "only one output");
 
-  auto out = DoubleInplace::apply(x.clone());
+  auto out = DoubleInplace::apply(x.clone(at::MemoryFormat::Contiguous));
   ASSERT_TRUE(torch::equal(out[0],out[1]));
 }
 
