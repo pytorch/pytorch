@@ -114,18 +114,18 @@ void PyTorchStreamReader::init() {
   size_t version_size;
   std::tie(version_ptr, version_size) = getRecord("version");
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
-  version_ = caffe2::stoull(version);
+  size_t version_number = caffe2::stoull(version);
   AT_ASSERTM(
-      version_ >= kMinSupportedFileFormatVersion,
+      version_number >= kMinSupportedFileFormatVersion,
       "Attempted to read a PyTorch file with version ",
-      c10::to_string(version_),
+      c10::to_string(version_number),
       ", but the minimum supported version for reading is ",
       c10::to_string(kMinSupportedFileFormatVersion),
       ". Your PyTorch script module file is too old. Please re-export it again.");
   AT_ASSERTM(
-      version_ <= kMaxSupportedFileFormatVersion,
+      version_number <= kMaxSupportedFileFormatVersion,
       "Attempted to read a PyTorch file with version ",
-      version_,
+      version_number,
       ", but the maximum supported version for reading is ",
       kMaxSupportedFileFormatVersion,
       ". Your PyTorch installation may be too old.");
