@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/variant.h>
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
