@@ -13,7 +13,6 @@ CONFIG_TREE_DATA = [
             ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
                 ("3.6", [
-                    ("namedtensor", [XImportant(True)]),
                     ("parallel_tbb", [XImportant(True)]),
                     ("parallel_native", [XImportant(True)]),
                 ]),
@@ -24,9 +23,6 @@ CONFIG_TREE_DATA = [
         ("clang", [
             ("5", [
                 XImportant("3.6"),  # This is actually the ASAN build
-                ("3.6", [
-                    ("namedtensor", [XImportant(True)]),  # ASAN
-                ]),
             ]),
             ("7", [
                 ("3.6", [
@@ -48,23 +44,10 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("libtorch", [XImportant(True)])
                 ]),
-                ("2.7", [
-                    ("namedtensor", [XImportant(True)]),
-                ]),
             ]),
             ("9.2", [X("3.6")]),
             ("10", [X("3.6")]),
             ("10.1", [X("3.6")]),
-        ]),
-        ("android", [
-            ("r19c", [
-                ("3.6", [
-                    ("android_abi", [XImportant("x86_32")]),
-                    ("android_abi", [X("x86_64")]),
-                    ("android_abi", [X("arm-v7a")]),
-                    ("android_abi", [X("arm-v8a")]),
-                ])
-            ]),
         ]),
     ]),
 ]
@@ -132,7 +115,6 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
 
         next_nodes = {
             "xla": XlaConfigNode,
-            "namedtensor": NamedTensorConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -148,17 +130,6 @@ class XlaConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_xla"] = node_name
-
-    def child_constructor(self):
-        return ImportantConfigNode
-
-
-class NamedTensorConfigNode(TreeConfigNode):
-    def modify_label(self, label):
-        return "NAMEDTENSOR=" + str(label)
-
-    def init2(self, node_name):
-        self.props["is_namedtensor"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

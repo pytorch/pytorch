@@ -62,16 +62,9 @@ default_set = set([
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
 
-    # Named tensor
-    "pytorch-namedtensor-linux-xenial-py3.6-gcc5.4",
-    "pytorch-namedtensor-linux-xenial-py3-clang5-asan",
-    "pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2",
-
     # Parallel backends
     "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4",
     "pytorch-parallelnative-linux-xenial-py3.6-gcc5.4",
-    "pytorch-paralleltbb-linux-xenial-py3-clang5-asan",
-    "pytorch-parallelnative-linux-xenial-py3-clang5-asan",
 
     # Other checks
     'pytorch-short-perf-test-gpu',
