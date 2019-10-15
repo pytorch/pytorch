@@ -30,20 +30,20 @@
 - name: _thnn_multi_margin_loss(Tensor self, LongTensor target, Scalar p, Scalar margin, Tensor? weight, int64_t reduction)
   cname: MultiMarginCriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0 || (reduction == Reduction::None && self_->dim() == 1)
+    output: reduction != at::Reduction::None || self_->dim() == 0 || (reduction == at::Reduction::None && self_->dim() == 1)
 
-- name: _thnn_multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=Reduction::Mean)
+- name: _thnn_multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=at::Reduction::Mean)
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
+    output: reduction != at::Reduction::None || self_->dim() == 0
     is_target: target_->dim() == 0
 
 - name: _thnn_nll_loss(Tensor self, LongTensor target, Tensor? weight, int64_t reduction, int64_t ignore_index)
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
+    output: reduction != at::Reduction::None || self_->dim() == 0
     total_weight: 'true'
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Half', 'BFloat16']
@@ -53,7 +53,7 @@
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: reduction != Reduction::None || self_->dim() == 0
+    output: reduction != at::Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
 - name: _thnn_smooth_l1_loss(Tensor self, Tensor target, int64_t reduction)
