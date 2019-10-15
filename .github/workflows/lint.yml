@@ -220,7 +220,7 @@ jobs:
             mkdir build
             pushd build
             # We really only need compile_commands.json, so no need to build!
-            time USE_NCCL=0 cmake ..
+            time python setup.py --cmake-only
             popd
 
             # Generate ATen files.
