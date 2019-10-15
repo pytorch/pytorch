@@ -1107,7 +1107,7 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
 }
 
 TEST_F(ModulesTest, SoftMarginLossNoReduction) {
-  SoftMarginLoss loss(Reduction::None);
+  SoftMarginLoss loss(torch::Reduction::None);
   auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output = loss->forward(input, target);

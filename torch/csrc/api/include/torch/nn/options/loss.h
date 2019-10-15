@@ -63,14 +63,14 @@ struct TORCH_API CosineEmbeddingLossOptions {
 
 /// Options for a soft margin loss functional and module.
 struct TORCH_API SoftMarginLossOptions {
-  SoftMarginLossOptions(Reduction::Reduction reduction = Reduction::Mean)
+  SoftMarginLossOptions(torch::Reduction::Reduction reduction = torch::Reduction::Mean)
     : reduction_(reduction) {}
 
   /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
-  TORCH_ARG(Reduction::Reduction, reduction);
+  TORCH_ARG(torch::Reduction::Reduction, reduction);
 };
 
 // ============================================================================
