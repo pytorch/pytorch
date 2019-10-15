@@ -119,7 +119,7 @@ class Event(torch._C._CudaEventBase):
             (default: ``False``)
 
     .. _CUDA Event Documentation:
-    https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
+       https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
     """
 
     def __new__(cls, enable_timing=False, blocking=False, interprocess=False):
