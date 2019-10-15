@@ -128,9 +128,11 @@ TORCH_MODULE(CosineEmbeddingLoss);
 /// Creates a criterion that optimizes a multi-class multi-classification
 /// hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
 /// and output :math:`y` (which is a 2D `Tensor` of target class indices).
-struct TORCH_API MultiLabelMarginLossImpl : Module {
+struct TORCH_API MultiLabelMarginLossImpl : public Cloneable<MultiLabelMarginLossImpl> {
   explicit MultiLabelMarginLossImpl(
     const MultiLabelMarginLossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `L1Loss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;

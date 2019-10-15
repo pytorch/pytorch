@@ -1067,7 +1067,7 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
 }
 
 TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
-  MultiLabelMarginLoss loss(MultiLabelMarginLossOptions().reduction(Reduction::None));
+  MultiLabelMarginLoss loss(Reduction::None);
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
@@ -1730,6 +1730,10 @@ TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
   ASSERT_EQ(
       c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
       "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintMultiLabelMarginLoss) {
+  ASSERT_EQ(c10::str(MultiLabelMarginLoss()), "torch::nn::MultiLabelMarginLoss()");
 }
 
 TEST_F(ModulesTest, PrettyPrintMultiLabelSoftMarginLoss) {

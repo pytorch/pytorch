@@ -130,8 +130,10 @@ MultiLabelMarginLossImpl::MultiLabelMarginLossImpl(
     const torch::nn::MultiLabelMarginLossOptions& options_)
     : options(options_) {}
 
+void MultiLabelMarginLossImpl::reset() {}
+
 void MultiLabelMarginLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::MultiLabelMarginLoss";
+  stream << "torch::nn::MultiLabelMarginLoss()";
 }
 
 Tensor MultiLabelMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
