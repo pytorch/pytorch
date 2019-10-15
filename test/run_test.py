@@ -434,6 +434,9 @@ def main():
     if options.jit:
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
+    if options.cuda_memcheck:
+        os.environ["PYTORCH_TEST_WITH_CUDA_MEMCHECK"] = "1"
+
     for test in selected_tests:
         test_name = 'test_{}'.format(test)
         test_module = parse_test_module(test)
