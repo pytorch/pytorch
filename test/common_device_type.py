@@ -3,7 +3,7 @@ from functools import wraps
 import unittest
 import torch
 from common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
-    skipCUDANonDefaultStreamIf
+    TEST_WITH_CUDA_MEMCHECK, skipCUDANonDefaultStreamIf
 
 # Note: Generic Device-Type Testing
 #
@@ -219,6 +219,8 @@ class CUDATestBase(DeviceTypeTestBase):
 device_type_test_bases.append(CPUTestBase)
 if torch.cuda.is_available():
     device_type_test_bases.append(CUDATestBase)
+if TEST_WITH_CUDA_MEMCHECK:
+    device_type_test_bases = [CUDATestBase]
 
 
 # Adds 'instantiated' device-specific test cases to the given scope.

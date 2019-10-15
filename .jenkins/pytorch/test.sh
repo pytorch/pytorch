@@ -114,6 +114,15 @@ test_python_all_except_nn() {
   assert_git_not_dirty
 }
 
+test_python_cuda_memcheck() {
+  export PYTORCH_TEST_WITH_CUDA_MEMCHECK=1
+  time cuda-memcheck --error-exitcode 1 --tool memcheck python test/run_test.py --verbose
+  time cuda-memcheck --error-exitcode 1 --tool racecheck python test/run_test.py --verbose
+  time cuda-memcheck --error-exitcode 1 --tool synccheck python test/run_test.py --verbose
+  time cuda-memcheck --error-exitcode 1 --tool initcheck python test/run_test.py --verbose
+  assert_git_not_dirty
+}
+
 test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
@@ -230,6 +239,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_aten
   test_libtorch
   test_custom_script_ops
+elif [[ "$BUILD_ENVIRONMENT" == *cuda-memcheck* ]]; then
+  test_python_cuda_memcheck
 else
   test_torchvision
   test_python_nn
