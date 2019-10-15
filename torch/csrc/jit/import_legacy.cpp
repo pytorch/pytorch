@@ -51,8 +51,7 @@ class ScriptModuleDeserializer final {
             [this](const std::string& qualifier) {
               return findSourceInArchiveFromQualifier(
                   *reader_, export_prefix_, qualifier);
-            },
-            reader_->version()) {}
+            }) {}
 
   script::Module LEGACY_deserialize();
 

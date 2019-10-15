@@ -89,7 +89,5 @@ class Unpickler {
   c10::optional<at::Device> device_;
 };
 
-void restoreAccurateTypeTags(const IValue& root, const c10::TypePtr& type_tag);
-
 } // namespace jit
 } // namespace torch
