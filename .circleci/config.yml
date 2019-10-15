@@ -43,7 +43,7 @@ jobs:
             # Install Visual Studio 2015
             export EXE=vs_2015_community.exe
             curl https://s3.amazonaws.com/ossci-windows/$EXE --output $EXE
-            ./$EXE /q /norestart /InstallSelectableItems NativeLanguageSupport_Group
+            ./$EXE /norestart /InstallSelectableItems NativeLanguageSupport_Group
             # Install Visual Studio 2017
             # NOTE: before this bug https://devtalk.nvidia.com/default/topic/1027209/cuda-9-0-does-not-work-with-the-latest-vs-2017-update/?offset=1 is fixed, we should use VS 2017 15.4.5 version
             export EXE=vs_2017_15.4.5_Community.exe
