@@ -209,6 +209,40 @@ class MinMaxObserver(_ObserverBase):
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
 
+    Given running min/max as :math:`x_\text{min}` and :math:`x_\text{max}`,
+    scale :math:`s` and zero point :math:`z` are computed as:
+
+    The running minimum/maximum :math:`x_\text{min/max}` is computed as:
+
+    .. math::
+
+        x_\text{min/max} = \begin{cases}
+            \min(X) & \text{if~}x_\text{min/max} = \O \\
+            \min(x_\text{min/max}, \min(X)) & \text{otherwise}
+        \end{cases}
+
+    where :math:`X` is the observed tensor.
+
+    The scale :math:`s` and zero point :math:`z` are then computed as:
+
+    .. math::
+
+        \begin{aligned}
+            \text{if Symmetric:}&\\
+            &s = 2 x_\text{max} / \left( Q_\text{max} - Q_\text{min} \right) \\
+            &z = \begin{cases}
+                0 & \text{if dtype is qint8} \\
+                128 & \text{otherwise}
+            \end{cases}\\
+            \text{Otherwise:}&\\
+                &s = \left( x_\text{max} - x_\text{min}  \right ) /
+                    \left( Q_\text{max} - Q_\text{min} \right ) \\
+                &z = Q_\text{min} - \text{round}(x_\text{min} / s)
+        \end{aligned}
+
+    where :math:`Q_\text{min}` and :math:`Q_\text{max}` are the minimum and
+    maximum of the quantized data type.
+
     .. note:: Only works with ``torch.per_tensor_affine`` quantization shceme.
 
     .. note:: If the running minimum equals to the running maximum, the scale
@@ -257,28 +291,7 @@ class MinMaxObserver(_ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        r"""Calculates the quantization parameters.
-
-        Given running min/max as :math:`r_\text{min}` and :math:`r_\text{max}`,
-        scale :math:`s` and zero point :math:`z` are computed as:
-
-        .. math::
-
-            \begin{aligned}
-                \text{if Symmetric:}&\\
-                &s = 2 r_\text{max} / \left( Q_\text{max} - Q_\text{min} \right) \\
-                &z = \begin{cases}
-                    0 & \text{if dtype is qint8} \\
-                    128 & \text{otherwise}
-                \end{cases}\\
-                \text{Otherwise:}&\\
-                    &s = \left( r_\text{max} - r_\text{min}  \right ) / \left( Q_\text{max} - Q_\text{min} \right ) \\
-                    &z = Q_\text{min} - \text{round}(r_\text{min} / s)
-            \end{aligned}
-
-        where :math:`Q_\text{min}` and :math:`Q_\text{max}` are the minimum and
-        maximum of the quantized data type.
-        """
+        r"""Calculates the quantization parameters."""
         return self._calculate_qparams(self.min_val, self.max_val)
 
     @torch.jit.export
@@ -300,9 +313,46 @@ class MinMaxObserver(_ObserverBase):
 
 
 class MovingAverageMinMaxObserver(MinMaxObserver):
-    def __init__(self, averaging_constant=0.01, **kwargs):
+    r"""Observer module for computing the quantization parameters based on the
+    moving average of the min and max values.
+
+    This observer computes the quantization parameters based on the moving
+    averages of minimums and maximums of the incoming tensors. The module
+    records the average minimum and maximum of incoming tensors, and uses this
+    statistic to compute the quantization parameters.
+
+    Args:
+        averaging_constant: Averaging constant for min/max.
+        dtype: Quantized data type
+        qscheme: Quantization scheme to be used
+        reduce_range: Reduces the range of the quantized data type by 1 bit
+
+    The moving average min/max is computed as follows
+
+    .. math::
+
+        x_\text{min/max} = \begin{cases}
+            \min(X) & \text{if~}x_\text{min/max} = \O \\
+            (1 - c) x_\text{min/max} + c \min(X) & \text{otherwise}
+        \end{cases}
+
+    where :math:`x_\text{min/max}` is the running average min/max, :math:`X` is
+    is the incoming tensor, and :math:`c` is the ``averaging_constant``.
+
+    The scale and zero point are then computed as in
+    :class:`~torch.quantization.observer.MinMaxObserver`.
+
+    .. note:: Only works with ``torch.per_tensor_affine`` quantization shceme.
+
+    .. note:: If the running minimum equals to the running maximum, the scale
+              and zero_point are set to 1.0 and 0.
+    """
+    def __init__(self, averaging_constant=0.01, dtype=torch.quint8,
+                 qscheme=torch.per_tensor_affine, reduce_range=False):
         self.averaging_constant = averaging_constant
-        super(MovingAverageMinMaxObserver, self).__init__(**kwargs)
+        super(MovingAverageMinMaxObserver, self).__init__(dtype=dtype,
+                                                          qscheme=qscheme,
+                                                          reduce_range=reduce_range)
 
     def forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
@@ -320,14 +370,34 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
 
 
 class PerChannelMinMaxObserver(_ObserverBase):
-    r"""Per Channel Observer Module
-    The module will record the running average of max and min value for each
-    channel of the observed Tensor and calculate_qparams will calculate
-    scales and zero_points for each channel
+    r"""Observer module for computing the quantization parameters based on the
+    running per channel min and max values.
+
+    This observer uses the tensor min/max statistics to compute the per channel
+    quantization parameters. The module records the running minimum and maximum
+    of incoming tensors, and uses this statistic to compute the quantization
+    parameters.
+
+    Args:
+        ch_axis: Channel axis
+        dtype: Quantized data type
+        qscheme: Quantization scheme to be used
+        reduce_range: Reduces the range of the quantized data type by 1 bit
+
+    The quantization parameters are computed the same way as in
+    :class:`~torch.quantization.observer.MinMaxObserver`, with the difference
+    that the running min/max values are stored per channel.
+    Scales and zero points are thus computed per channel as well.
+
+    .. note:: If the running minimum equals to the running maximum, the scales
+              and zero_points are set to 1.0 and 0.
     """
 
-    def __init__(self, ch_axis=0, **kwargs):
-        super(PerChannelMinMaxObserver, self).__init__(**kwargs)
+    def __init__(self, ch_axis=0, dtype=torch.quint8,
+                 qscheme=torch.per_tensor_affine, reduce_range=False):
+        super(PerChannelMinMaxObserver, self).__init__(dtype=dtype,
+                                                       qscheme=qscheme,
+                                                       reduce_range=reduce_range)
         self.ch_axis = ch_axis
         self.register_buffer('min_vals', None)
         self.register_buffer('max_vals', None)
@@ -377,15 +447,36 @@ class PerChannelMinMaxObserver(_ObserverBase):
                                                                     missing_keys, unexpected_keys, error_msgs)
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
-    r"""Per Channel Observer Module
-    The module will record the running average of max and min value for each
-    channel of the observed Tensor and calculate_qparams will calculate
-    scales and zero_points for each channel
+    r"""Observer module for computing the quantization parameters based on the
+    running per channel min and max values.
+
+    This observer uses the tensor min/max statistics to compute the per channel
+    quantization parameters. The module records the running minimum and maximum
+    of incoming tensors, and uses this statistic to compute the quantization
+    parameters.
+
+    Args:
+        averaging_constant: Averaging constant for min/max.
+        ch_axis: Channel axis
+        dtype: Quantized data type
+        qscheme: Quantization scheme to be used
+        reduce_range: Reduces the range of the quantized data type by 1 bit
+
+    The quantization parameters are computed the same way as in
+    :class:`~torch.quantization.observer.MovingAverageMinMaxObserver`, with the
+    difference that the running min/max values are stored per channel.
+    Scales and zero points are thus computed per channel as well.
+
+    .. note:: If the running minimum equals to the running maximum, the scales
+              and zero_points are set to 1.0 and 0.
     """
 
-    def __init__(self, averaging_constant=0.01, **kwargs):
+    def __init__(self, averaging_constant=0.01, ch_axis=0, dtype=torch.quint8,
+                 qscheme=torch.per_tensor_affine, reduce_range=False):
+        super(MovingAveragePerChannelMinMaxObserver, self).__init__(
+            ch_axis=ch_axis, dtype=dtype, qscheme=qscheme,
+            reduce_range=reduce_range)
         self.averaging_constant = averaging_constant
-        super(MovingAveragePerChannelMinMaxObserver, self).__init__(**kwargs)
 
     def forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
@@ -411,7 +502,13 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
 class HistogramObserver(_ObserverBase):
     r"""
     The module records the running histogram of tensor values along with
-    min/max values. calculate_qparams will calculate scale and zero_point
+    min/max values. ``calculate_qparams`` will calculate scale and zero_point.
+
+    Args:
+        bins: Number of bins to use for the histogram
+        dtype: Quantized data type
+        qscheme: Quantization scheme to be used
+        reduce_range: Reduces the range of the quantized data type by 1 bit
     """
 
     __annotations__ = {
@@ -419,9 +516,12 @@ class HistogramObserver(_ObserverBase):
         "max_val": Optional[torch.Tensor],
     }
 
-    def __init__(self, bins=2048, **kwargs):
+    def __init__(self, bins=2048, dtype=torch.quint8,
+                 qscheme=torch.per_tensor_affine, reduce_range=False):
         # bins: The number of bins used for histogram calculation.
-        super(HistogramObserver, self).__init__(**kwargs)
+        super(HistogramObserver, self).__init__(dtype=dtype,
+                                                qscheme=qscheme,
+                                                reduce_range=reduce_range)
         self.bins = bins
         self.register_buffer('histogram', torch.zeros(self.bins))
         self.min_val = None
@@ -676,7 +776,12 @@ class HistogramObserver(_ObserverBase):
 
 class RecordingObserver(_ObserverBase):
     r"""
-    The module is mainly for debug and records the tensor values during runtime
+    The module is mainly for debug and records the tensor values during runtime.
+
+    Args:
+        dtype: Quantized data type
+        qscheme: Quantization scheme to be used
+        reduce_range: Reduces the range of the quantized data type by 1 bit
     """
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
@@ -704,6 +809,9 @@ class NoopObserver(Observer):
 
     Primarily used for quantization to float16 which doesn't require determining
     ranges.
+
+    Args:
+        dtype: Quantized data type
     """
     def __init__(self, dtype=torch.float16):
         if dtype != torch.float16:
