@@ -154,10 +154,8 @@ class DistAutogradTest(object):
             # We should have send/recv functions from the previous rank, get all
             # contexts in this node to find them.
 
-            # Wait for the prev rank to be done with rpc.
-            while not prev_rank_rpc_done:
-                time.sleep(0.1)
-                pass
+            # Synchronize all workers.
+            rpc.sync_rpc()
 
             # Now verify the autograd graph.
             ctx = dist_autograd._retrieve_context(prev_rank_context_id)
