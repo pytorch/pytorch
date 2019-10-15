@@ -1828,19 +1828,6 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:347"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
-      # Warning: indentation here matters!
-
-      # Pytorch MacOS builds
-      - pytorch_macos_10_13_py3_build:
-          requires:
-            - setup
-      - pytorch_macos_10_13_py3_test:
-          requires:
-            - setup
-            - pytorch_macos_10_13_py3_build
-      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
-          requires:
-            - setup
       - pytorch_linux_build:
           name: pytorch_cuda_memcheck_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
           requires:
@@ -1856,6 +1843,19 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:347"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
+      # Warning: indentation here matters!
+
+      # Pytorch MacOS builds
+      - pytorch_macos_10_13_py3_build:
+          requires:
+            - setup
+      - pytorch_macos_10_13_py3_test:
+          requires:
+            - setup
+            - pytorch_macos_10_13_py3_build
+      - pytorch_macos_10_13_cuda9_2_cudnn7_py3_build:
+          requires:
+            - setup
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
           requires:
