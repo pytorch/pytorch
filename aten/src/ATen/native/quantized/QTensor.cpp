@@ -162,7 +162,7 @@ Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> opti
       "clone for quantized Tensor only works for PerTensorAffine scheme right now");
 
   auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
+      optional_memory_format.value_or(MemoryFormat::Preserve);
 
   // TODO: To support all features of MemoryFormat::Preserve we need to add
   // _empty_affine_quantized_strided function and use it similarly to
