@@ -215,6 +215,15 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module, PyObject *noargs)
   Py_RETURN_NONE;
 }
 
+PyObject * THCPModule_cudaDeviceReset(PyObject *_unused, PyObject *noargs)
+{
+  HANDLE_TH_ERRORS
+  std::cout << "cudaDeviceReset" << std::endl;
+  THCudaCheck(cudaDeviceReset());
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject * THCPModule_hasPrimaryContext(PyObject *_unused, PyObject *arg)
 {
   HANDLE_TH_ERRORS
@@ -472,6 +481,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, nullptr},
   {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
+  {"_cuda_device_reset", (PyCFunction)THCPModule_cudaDeviceReset, METH_NOARGS,  nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", (PyCFunction)THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", (PyCFunction)THCPModule_nccl_unique_id, METH_NOARGS, nullptr},

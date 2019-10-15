@@ -17,6 +17,7 @@ import torch
 import traceback
 import warnings
 import threading
+import atexit
 from torch._six import raise_from
 from subprocess import Popen, PIPE
 from multiprocessing.util import register_after_fork as _register_after_fork
@@ -215,6 +216,8 @@ def _lazy_init():
         finally:
             delattr(_tls, 'is_initializing')
         _initialized = True
+
+atexit.register(torch._C._cuda_device_reset)
 
 
 def _after_fork(arg):
