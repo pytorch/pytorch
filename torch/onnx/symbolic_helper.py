@@ -288,10 +288,15 @@ def _prepare_onnx_paddings(g, dim, pad):
         paddings = paddings[-2::-2] + paddings[-1::-2]
         return paddings
     else:
-        pad_len = pad.type.sizes()[0]
-        pad_ext = g.op("Pad", pad, [0, (2*dim - pad_len)])
-        pad_reshaped = g.op("Reshape", pad, [2, dim/2])
-        paddings = g.op("ConcatFromSequence", axis_i=1, new_axis_i=1)
+        pad_t = _unpack_list(pad, 'is')
+        print("ttttttttt", pad_t, " diiim ", dim)
+        pad = g.op("Constant", value_t=torch.tensor(pad_t))
+        pad_ext = g.op("Pad", pad, g.op("Constant", value_t=torch.tensor([0, (2*dim - len(pad_t))])))
+        pad_reshaped = g.op("Reshape", pad_ext, g.op("Constant", value_t=torch.tensor([-1, 2])))
+        pad_reshaped = torch.onnx.symbolic_opset10.flip(g, pad_reshaped, [0])
+        pad_transpose = g.op("Transpose", pad_reshaped, perm_i=[1,0])
+        paddings = g.op("Reshape", pad_transpose, g.op("Constant", value_t=torch.tensor([1, -1])))
+        # paddings = g.op("ConcatFromSequence", pad_reshaped, axis_i=1, new_axis_i=1)
         return paddings
 
 
