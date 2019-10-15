@@ -72,7 +72,7 @@ ScalarType result_type(TensorList tensors) {
   auto dimResult = ScalarType::Undefined;
   auto zeroResult = ScalarType::Undefined;
   auto wrappedResult = ScalarType::Undefined;
-  for (Tensor tensor : tensors) {
+  for (const Tensor& tensor : tensors) {
     if (!tensor.defined()) {
       continue;
     }
