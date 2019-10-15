@@ -793,7 +793,7 @@ def trace(func,
                                  Tensor in which case it is automatically wrapped in a tuple
 
     Keyword arguments:
-        check_trace (bool, optional): check if the same inputs run through
+        check_trace (``bool``, optional): check if the same inputs run through
                                       traced code produce the same outputs. Default: ``True``. You might want
                                       to disable this if, for example, your network contains non-
                                       deterministic ops or if you are sure that the network is correct despite
@@ -934,7 +934,7 @@ def trace_module(mod,
                                          keys while tracing.
                                          ``{ 'forward' : example_forward_input, 'method2': example_method2_input}``
     Keyword arguments:
-        check_trace (bool, optional): check if the same inputs run through
+        check_trace (``bool``, optional): check if the same inputs run through
                                       traced code produce the same outputs. Default: ``True``. You might want
                                       to disable this if, for example, your network contains non-
                                       deterministic ops or if you are sure that the network is correct despite
