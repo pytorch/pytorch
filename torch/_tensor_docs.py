@@ -314,7 +314,7 @@ Examples::
         return input * scale.align_as(input)
 
     >>> num_channels = 3
-    >>> scale = torch.randn(num_channels, names='C')
+    >>> scale = torch.randn(num_channels, names=('C',))
     >>> imgs = torch.rand(32, 128, 128, num_channels, names=('N', 'H', 'W', 'C'))
     >>> more_imgs = torch.rand(32, num_channels, 128, 128, names=('N', 'C', 'H', 'W'))
     >>> videos = torch.randn(3, num_channels, 128, 128, 128, names=('N', 'C', 'H', 'W', 'D'))
@@ -1496,6 +1496,19 @@ add_docstr_all('lerp_',
 lerp_(end, weight) -> Tensor
 
 In-place version of :meth:`~Tensor.lerp`
+""")
+
+add_docstr_all('lgamma',
+               r"""
+lgamma() -> Tensor
+
+See :func:`torch.lgamma`
+""")
+
+add_docstr_all('lgamma_', r"""
+lgamma_() -> Tensor
+
+In-place version of :meth:`~Tensor.lgamma`
 """)
 
 add_docstr_all('log',
