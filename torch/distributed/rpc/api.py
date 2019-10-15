@@ -95,9 +95,9 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
 @_require_initialized
 def get_worker_info(worker_name=None):
     r"""
-    Get ``WorkerInfo`` of a given worker name. Use this WorkerInfo to avoid
-    passing an expensive string on every invocation. The WorkerInfo contains the
-    name and the id of the worker.
+    Get ``WorkerInfo`` of a given worker name. Use this ``WorkerInfo`` to avoid
+    passing an expensive string on every invocation. The ``WorkerInfo`` contains
+    the name and the id of the worker.
 
     Arguments:
         worker_name (str): the string name of a worker. If ``None``, return the
