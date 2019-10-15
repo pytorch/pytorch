@@ -6,6 +6,7 @@
 #include <torch/types.h>
 
 #include <cstddef>
+#include <vector>
 
 namespace torch {
 namespace nn {
@@ -41,7 +42,6 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
   /// The learned bias.
   /// Initialized to zeros `elementwise_affine` option is set to `true` upon construction.
   Tensor bias;
-};
 
   //todo- update description
   /// A `ModuleHolder` subclass for `LayerNormImpl`.
