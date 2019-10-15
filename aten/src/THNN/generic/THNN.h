@@ -154,21 +154,6 @@ TH_API void THNN_(LogSigmoid_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           THTensor *buffer);           // [BUFFER]
 
-TH_API void THNN_(SoftMarginCriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *output,
-          int64_t reduction);
-
-TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t reduction);
-
 TH_API void THNN_(MSECriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
