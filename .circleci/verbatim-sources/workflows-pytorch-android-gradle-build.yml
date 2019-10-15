@@ -1,3 +1,47 @@
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
+          requires:
+            - setup
+          build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
+          saved_docker_filename: built_image_x86_32.tgz
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
+          requires:
+            - setup
+#         filters:
+#           branches:
+#             only:
+#               - master
+#               - /ci-all\/.*/
+          build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
+          saved_docker_filename: built_image_x86_64.tgz
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
+          requires:
+            - setup
+#         filters:
+#           branches:
+#             only:
+#               - master
+#               - /ci-all\/.*/
+          build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v7a-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
+          saved_docker_filename: built_image_arm_v7a.tgz
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
+          requires:
+            - setup
+#         filters:
+#           branches:
+#             only:
+#               - master
+#               - /ci-all\/.*/
+          build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:347"
+          saved_docker_filename: built_image_arm_v8a.tgz
+
       - pytorch_android_gradle_build-x86_32:
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build-x86_32
           requires:
