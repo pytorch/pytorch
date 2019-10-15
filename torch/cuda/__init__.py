@@ -217,9 +217,7 @@ def _lazy_init():
             delattr(_tls, 'is_initializing')
         _initialized = True
 
-    def reset_at_exit():
-        torch._C._cuda_device_reset()
-    atexit.register(reset_at_exit)
+atexit.register(torch._C._cuda_device_reset)
 
 
 def _after_fork(arg):
