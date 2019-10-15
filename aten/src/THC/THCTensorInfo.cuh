@@ -7,6 +7,10 @@
 #include <THC/THCIntegerDivider.cuh>
 #include <THC/THCTensor.h>
 
+#ifdef __HIP_PLATFORM_HCC__
+#include "ATen/rocm/ROCm_uint24.hpp"
+#endif
+
 // Maximum number of dimensions allowed for cutorch
 #define MAX_CUTORCH_DIMS 25
 
@@ -165,6 +169,26 @@ struct IndexToOffset {
 
     return offset + linearId * info.strides[0];
   }
+
+#ifdef __HIP_PLATFORM_HCC__
+  static __host__ __device__ IndexType get24(
+    IndexType linearId,
+    const TensorInfo<T, IndexType>& info) {
+
+    IndexType offset = 0;
+
+   // Uses static dims
+   for (int i = Dims - 1; i > 0; --i) {
+     IndexType curDimIndex = mod24(linearId, info.sizes[i]);
+     IndexType curDimOffset = mul24(curDimIndex, info.strides[i]);
+     offset += curDimOffset;
+     linearId = div24(linearId, info.sizes[i]);
+   }
+
+   return mad24(linearId, info.strides[0], offset);
+ }
+#endif
+
 };
 
 template <typename T, typename IndexType>
