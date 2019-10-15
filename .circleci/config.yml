@@ -37,6 +37,7 @@ jobs:
           name: Install VC2017
           no_output_timeout: "10m"
           command: |
+            set -x
             choco install -y curl 7zip
             cd C:/
             # Install Visual Studio 2015
