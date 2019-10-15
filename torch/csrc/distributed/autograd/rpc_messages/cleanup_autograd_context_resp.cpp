@@ -14,9 +14,8 @@ rpc::Message CleanupAutogradContextResp::toMessage() && {
 }
 
 std::unique_ptr<CleanupAutogradContextResp> CleanupAutogradContextResp::
-    fromMessage(const rpc::Message& message) {
-  return std::unique_ptr<CleanupAutogradContextResp>(
-      new CleanupAutogradContextResp());
+    fromMessage(const rpc::Message& message /* unused */) {
+  return std::unique_ptr<CleanupAutogradContextResp>();
 }
 
 } // namespace autograd

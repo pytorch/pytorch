@@ -14,7 +14,7 @@ int64_t CleanupAutogradContextReq::getContextId() {
 
 rpc::Message CleanupAutogradContextReq::toMessage() && {
   std::vector<at::IValue> ivalues;
-  ivalues.push_back(context_id_);
+  ivalues.emplace_back(context_id_);
 
   // pickle
   std::vector<torch::Tensor> tensorTable;
@@ -34,6 +34,7 @@ std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::
   IValue tuple =
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+  TORCH_INTERNAL_ASSERT(tupleElements.size() >= 1);
   int64_t context_id = tupleElements[0].toInt();
 
   return std::unique_ptr<CleanupAutogradContextReq>(
