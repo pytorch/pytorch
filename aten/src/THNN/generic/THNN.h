@@ -250,20 +250,6 @@ TH_API void THNN_(Sigmoid_updateGradInput)(
           THTensor *gradInput,
           THTensor *output);
 
-TH_API void THNN_(SmoothL1Criterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *output,
-          int64_t reduction);
-TH_API void THNN_(SmoothL1Criterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t reduction);
-
 TH_API void THNN_(SoftPlus_updateOutput)(
           THNNState *state,
           THTensor *input, THTensor *output,
