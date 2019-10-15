@@ -198,11 +198,17 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       return c10::guts::make_unique<PropagateGradientsResp>();
     }
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
-      // clean up the distributed autograd context on this node
-      auto currentContextId =
-          DistAutogradContainer::getInstance().currentContext().contextId();
-      DistAutogradContainer::getInstance().releaseContext(
-          currentContextId, false /* notifyWorkers */);
+      std::cout << "got a release message on this node\n";
+      auto& cleanupContextReq = static_cast<CleanupAutogradContextReq&>(rpc);
+      auto cleanupContextId = cleanupContextReq.getContextId();
+      if (DistAutogradContainer::getInstance().hasContextWithId(
+              cleanupContextId)) {
+        DistAutogradContainer::getInstance().releaseContext(
+            cleanupContextId, false);
+        std::cout << "released context with id " << cleanupContextId << std::endl;
+      } else {
+        std::cout << "Dont have context with id " << cleanupContextId << std::endl;
+      }
       return c10::guts::make_unique<CleanupAutogradContextResp>();
     }
     default: {

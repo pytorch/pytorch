@@ -114,6 +114,11 @@ bool DistAutogradContainer::hasValidContext() const {
   return current_context_id_ != kInvalidContextId;
 }
 
+bool DistAutogradContainer::hasContextWithId(int64_t context_id) const {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  return autograd_context_.find(context_id) != autograd_context_.end();
+}
+
 DistAutogradContext& DistAutogradContainer::currentContext() {
   TORCH_CHECK(
       hasValidContext(),
@@ -145,9 +150,10 @@ void DistAutogradContainer::releaseContext(
         autograd_context_.find(context_id)->second.getKnownWorkerIds();
     auto agent = rpc::RpcAgent::getDefaultRpcAgent();
     for (const auto& worker_id : workerIds) {
+      std::cout << "sending release message to worker id " << worker_id << " to release context with id " << context_id << std::endl;
       agent->send(
           agent->getWorkerInfo(worker_id),
-          CleanupAutogradContextReq().toMessage());
+          CleanupAutogradContextReq(context_id).toMessage());
     }
   }
   autograd_context_.erase(context_id);

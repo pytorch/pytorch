@@ -49,6 +49,10 @@ class TORCH_API DistAutogradContainer {
   // Checks whether or not the current thread has a valid autograd context.
   bool hasValidContext() const;
 
+  // Checks whether or not the current thread has an autograd context
+  // corresponding to the given id
+  bool hasContextWithId(int64_t context_id) const;
+
   // Generate a new autograd_message_id for send/recv autograd functions.
   int64_t newAutogradMessageId();
 

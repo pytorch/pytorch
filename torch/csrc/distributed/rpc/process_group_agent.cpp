@@ -346,6 +346,9 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
+          if (message.type() == MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP) {
+            std::cout << "GOT THE RESPONSE\n";
+          }
           auto id = message.id();
           std::shared_ptr<FutureMessage> fm = nullptr;
           {
