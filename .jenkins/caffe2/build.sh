@@ -7,10 +7,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 if [[ "$BUILD_ENVIRONMENT" == *centos7* ]]; then
   # CentOS has gcc 4 but we need a newer compiler. Upgrade it.
   sudo yum install -y centos-release-scl
-  sudo yum install -y devtoolset-7\*
+  sudo yum install -y devtoolset-4\*
   sudo yum install -y scl-utils
 
-  source scl_source enable devtoolset-7
+  source scl_source enable devtoolset-4 || yes
   gcc --version
 fi
 
