@@ -158,7 +158,6 @@ class DistAutogradTest(object):
             # contexts in this node to find them.
 
             # Synchronize all workers.
-            # rpc.sync_rpc()
             dist.barrier()
 
             # Now verify the autograd graph.

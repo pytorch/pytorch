@@ -129,25 +129,18 @@ DistAutogradContext& DistAutogradContainer::currentContext() {
   return it->second;
 }
 
-void DistAutogradContainer::releaseContextIfPresent(
-    int64_t context_id,
-    bool notifyWorkers) {
+void DistAutogradContainer::releaseContextIfPresent(int64_t context_id) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   // no-op if the context does not exist on this thread. This could happen if an
   // in-flight RPC has already released the context on this thread.
   if (autograd_context_.find(context_id) == autograd_context_.end()) {
     return;
   }
-  if (notifyWorkers) {
-    sendReleaseContextRpc(context_id);
-  }
-
+  sendReleaseContextRpc(context_id);
   eraseContextIdAndReset(context_id);
 }
 
-void DistAutogradContainer::releaseContext(
-    int64_t context_id,
-    bool notifyWorkers) {
+void DistAutogradContainer::releaseContext(int64_t context_id) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
 
   TORCH_CHECK(
@@ -155,10 +148,7 @@ void DistAutogradContainer::releaseContext(
       "Could not find autograd context with id: ",
       context_id);
 
-  if (notifyWorkers) {
-    sendReleaseContextRpc(context_id);
-  }
-
+  sendReleaseContextRpc(context_id);
   eraseContextIdAndReset(context_id);
 }
 

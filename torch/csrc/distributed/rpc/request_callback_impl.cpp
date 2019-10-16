@@ -205,7 +205,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       // This can created nested RPCs if there are other nodes that get notified
       // to clean up their context.
       DistAutogradContainer::getInstance().releaseContextIfPresent(
-          cleanupContextId, true);
+          cleanupContextId);
       return c10::guts::make_unique<CleanupAutogradContextResp>();
     }
     default: {

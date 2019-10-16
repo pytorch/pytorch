@@ -36,9 +36,14 @@ class TORCH_API DistAutogradContainer {
   const DistAutogradContext& newContext();
 
   // Clean up resources for a given context_id once the autograd pass is done.
-  // if notifyWorkers is true, will send an rpc to other workers this worker
-  // knows about, telling them to clean up their context as well.
-  void releaseContext(int64_t context_id, bool notifyWorkers = false);
+  // Sends RPC to other workers this worker knows about, telling them to clean
+  // up their context as well.
+  void releaseContext(int64_t context_id);
+
+  // Releases an autograd context if it is present on this node. Also sends RPC
+  // to other workers this worker knows about, telling them to clean up their
+  // context. Does nothing if it is not present.
+  void releaseContextIfPresent(int64_t context_id);
 
   // Retrieve the autograd context for a given context_id.
   DistAutogradContext& retrieveContext(int64_t context_id);
@@ -48,10 +53,6 @@ class TORCH_API DistAutogradContainer {
 
   // Checks whether or not the current thread has a valid autograd context.
   bool hasValidContext() const;
-
-  // Releases an autograd context if it is present on this node. Does nothing
-  // if it is not present.
-  void releaseContextIfPresent(int64_t context_id, bool notifyWorkers = false);
 
   // Generate a new autograd_message_id for send/recv autograd functions.
   int64_t newAutogradMessageId();
