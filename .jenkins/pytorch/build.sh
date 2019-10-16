@@ -165,7 +165,11 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # set only when building other architectures
   # only use for "python setup.py install" line
   if [[ "$BUILD_ENVIRONMENT" != *ppc64le*  && "$BUILD_ENVIRONMENT" != *clang* ]]; then
-    WERROR=1 python setup.py install
+    if [[ "$BUILD_ENVIRONMENT" == *xenial-py3.6-gcc5.4* ]]; then
+      WERROR=1 python setup.py install --optimize_debug
+    else
+      WERROR=1 python setup.py install
+    fi
   else
     python setup.py install
   fi
