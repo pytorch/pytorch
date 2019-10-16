@@ -1,6 +1,8 @@
 #pragma once
 
-#if !defined(CAFFE2_IS_XPLAT_BUILD)
+#include <c10/macros/Macros.h>
+
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include <ATen/core/function_schema.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/op_registration/op_registration.h>
@@ -93,7 +95,7 @@ void call_caffe2_op_from_c10(
 }
 
 inline FunctionSchema make_function_schema_for_c10(const char* schema_str) {
-#if defined(CAFFE2_IS_XPLAT_BUILD)
+#if defined(CAFFE2_IS_XPLAT_BUILD) || defined(C10_MOBILE)
   throw std::logic_error("We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
 #else
   c10::FunctionSchema parsed_schema = torch::jit::parseSchema(schema_str);

@@ -771,6 +771,20 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, 4).float()
         self.assertONNX(lambda x: torch.norm(x, p="fro", dim=(0, 1), keepdim=True), x)
 
+    def test_unfold(self):
+        x = torch.randn(2, 3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x.unfold(dimension=2, size=2, step=2), x)
+
+    def test_remainder(self):
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 1, 4)
+        self.assertONNX(lambda x, y: torch.remainder(x, y), (x, y))
+
+    def test_fmod(self):
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 1, 4)
+        self.assertONNX(lambda x, y: torch.fmod(x, y), (x, y), opset_version=10)
+
     def test_gelu(self):
         x = torch.randn(2, 3, 4, 5, requires_grad=True)
         self.assertONNX(lambda x: torch.nn.functional.gelu(x), x)

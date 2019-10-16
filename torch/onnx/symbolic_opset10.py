@@ -128,6 +128,12 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
+def __interpolate(g, input, size, scale_factor, mode , align_corners):
+    scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
+                                                             mode , align_corners)
+    return g.op("Resize", input, scales, mode_s=mode)
+
+
 def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:
         starts = g.op("Unsqueeze", starts, axes_i=[0])
@@ -168,3 +174,7 @@ def flip(g, input, dims):
                                   starts=[-1] * len(dims),
                                   ends=[-9223372036854775807] * len(dims),
                                   steps=[-1] * len(dims))
+
+
+def fmod(g, input, other):
+    return g.op("Mod", input, other, fmod_i=1)

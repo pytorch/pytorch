@@ -51,21 +51,35 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   return ptr;
 }
 
+void ClassType::addMethod(Function* method) {
+  TORCH_CHECK(
+      getMethod(method->name()) == nullptr,
+      "Can't redefine method: ",
+      method->name(),
+      " on class: ",
+      python_str());
+  methods_.push_back(method);
+}
+
 size_t ClassType::addAttribute(
     const std::string& name,
     TypePtr type,
     bool is_parameter) {
+  const char* what = is_parameter ? "parameter" : "attribute";
   for (size_t i = 0; i < attributeNames_.size(); ++i) {
     TORCH_CHECK(
         name != attributeNames_[i],
         "attempting to add ",
-        is_parameter ? "parameter"
-                     : "attribute"
-                       " '",
+        what,
+        " '",
         name,
-        "' but a field of the same name already exists with type ",
+        "' to ",
+        python_str(),
+        " but a field of the same name already exists with type ",
         attributeTypes_[i]->python_str());
   }
+  checkNoAny(*this, what, name, type);
+
   size_t slot = attributeNames_.size();
   attributeNames_.push_back(name);
   attributeTypes_.push_back(type);

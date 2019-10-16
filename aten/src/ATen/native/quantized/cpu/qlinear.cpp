@@ -249,7 +249,8 @@ class QLinearInt8 final : public torch::OperatorKernel {
           kernel_scale,
           kernel_zp);
       auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
-      for (int i = 0; i < weight_contig.numel(); ++i) {
+      auto wt_numel = weight_contig.numel();
+      for (int i = 0; i < wt_numel; ++i) {
         qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
       }
       // Original bias was float, so we requantize it here.
