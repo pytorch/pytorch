@@ -17,7 +17,7 @@ prev_rank_context_id = 0
 known_context_ids = []
 
 # we don't need a lock here since the GIL is held while executing remote
- #python UDFs, so access to known_context_ids is serialized across several workers.
+# python UDFs, so access to known_context_ids is serialized across several workers.
 def store_context_id(context_id):
     global known_context_ids
     known_context_ids.append(context_id)
