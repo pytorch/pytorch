@@ -114,11 +114,6 @@ bool DistAutogradContainer::hasValidContext() const {
   return current_context_id_ != kInvalidContextId;
 }
 
-bool DistAutogradContainer::hasContextWithId(int64_t context_id) const {
-  std::lock_guard<std::mutex> guard(autograd_context_lock_);
-  return autograd_context_.find(context_id) != autograd_context_.end();
-}
-
 DistAutogradContext& DistAutogradContainer::currentContext() {
   TORCH_CHECK(
       hasValidContext(),
@@ -134,6 +129,22 @@ DistAutogradContext& DistAutogradContainer::currentContext() {
   return it->second;
 }
 
+void DistAutogradContainer::releaseContextIfPresent(
+    int64_t context_id,
+    bool notifyWorkers) {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  // no-op if the context does not exist on this thread. This could happen if an
+  // in-flight RPC has already released the context on this thread.
+  if (autograd_context_.find(context_id) == autograd_context_.end()) {
+    return;
+  }
+  if (notifyWorkers) {
+    sendReleaseContextRpc(context_id);
+  }
+
+  eraseContextIdAndReset(context_id);
+}
+
 void DistAutogradContainer::releaseContext(
     int64_t context_id,
     bool notifyWorkers) {
@@ -145,16 +156,25 @@ void DistAutogradContainer::releaseContext(
       context_id);
 
   if (notifyWorkers) {
-    // notify other workers to clean up their contexts.
-    auto workerIds =
-        autograd_context_.find(context_id)->second.getKnownWorkerIds();
-    auto agent = rpc::RpcAgent::getDefaultRpcAgent();
-    for (const auto& worker_id : workerIds) {
-      agent->send(
-          agent->getWorkerInfo(worker_id),
-          CleanupAutogradContextReq(context_id).toMessage());
-    }
+    sendReleaseContextRpc(context_id);
   }
+
+  eraseContextIdAndReset(context_id);
+}
+
+void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
+  // notify other workers to clean up their contexts.
+  auto workerIds =
+      autograd_context_.find(context_id)->second.getKnownWorkerIds();
+  auto agent = rpc::RpcAgent::getDefaultRpcAgent();
+  for (const auto& worker_id : workerIds) {
+    agent->send(
+        agent->getWorkerInfo(worker_id),
+        CleanupAutogradContextReq(context_id).toMessage());
+  }
+}
+
+void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
   autograd_context_.erase(context_id);
 
   if (current_context_id_ == context_id) {

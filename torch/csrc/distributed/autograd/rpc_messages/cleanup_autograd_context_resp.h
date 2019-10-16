@@ -8,7 +8,8 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
-// Used to request other workers to clean up their autograd context.
+// Empty response for CleanupAutogradContextReq. Send to acknowledge receipt of
+// a CleanupAutogradContextReq.
 class TORCH_API CleanupAutogradContextResp : public rpc::RpcCommandBase {
  public:
   CleanupAutogradContextResp() = default;

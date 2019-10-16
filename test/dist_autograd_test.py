@@ -4,6 +4,7 @@ import time
 import unittest
 
 import torch
+import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 from dist_utils import INIT_METHOD_TEMPLATE, dist_init
@@ -15,6 +16,8 @@ prev_rank_context_id = 0
 
 known_context_ids = []
 
+# we don't need a lock here since the GIL is held while executing remote
+ #python UDFs, so access to known_context_ids is serialized across several workers.
 def store_context_id(context_id):
     global known_context_ids
     known_context_ids.append(context_id)
@@ -155,7 +158,8 @@ class DistAutogradTest(object):
             # contexts in this node to find them.
 
             # Synchronize all workers.
-            rpc.sync_rpc()
+            # rpc.sync_rpc()
+            dist.barrier()
 
             # Now verify the autograd graph.
             ctx = dist_autograd._retrieve_context(prev_rank_context_id)

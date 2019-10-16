@@ -49,9 +49,9 @@ class TORCH_API DistAutogradContainer {
   // Checks whether or not the current thread has a valid autograd context.
   bool hasValidContext() const;
 
-  // Checks whether or not the current thread has an autograd context
-  // corresponding to the given id
-  bool hasContextWithId(int64_t context_id) const;
+  // Releases an autograd context if it is present on this node. Does nothing
+  // if it is not present.
+  void releaseContextIfPresent(int64_t context_id, bool notifyWorkers = false);
 
   // Generate a new autograd_message_id for send/recv autograd functions.
   int64_t newAutogradMessageId();
@@ -78,6 +78,15 @@ class TORCH_API DistAutogradContainer {
   DistAutogradContainer& operator=(DistAutogradContainer&&) = delete;
 
   static DistAutogradContainer& getInstanceInternal();
+
+  // Sends an RPC to the workers that have a context corresponding to passed in
+  // context_id. This function should be called with the lock.
+  void sendReleaseContextRpc(int64_t context_id);
+
+  // Erase context_id from the autograd context map, and reset the thread local
+  // current context id if it corresponds to the passed in context id. This
+  // function should be called with the lock.
+  void eraseContextIdAndReset(int64_t context_id);
 
   // Auto incrementing context id used to identify unique autograd passes.
   // Initialized with the first 16 bits being the worker_id.
