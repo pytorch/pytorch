@@ -591,6 +591,25 @@ TEST_F(FunctionalTest, PReLU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, Bilinear) {
+  auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
+  auto input2 = torch::tensor({{7, 4}, {8 ,9}});
+  auto weight = torch::tensor({{{2, 3}, {9, 7}, {8, 6}}});
+  auto bias = torch::tensor({1});
+ 
+  auto y_with_bias = F::bilinear(input1, input2, weight, bias);
+  ASSERT_EQ(y_with_bias.ndimension(), 2);
+  ASSERT_EQ(y_with_bias.sizes(), torch::IntArrayRef({2, 1}));
+  auto y_with_bias_exp = torch::tensor({{449}, {1702}}).reshape({2, 1});
+  ASSERT_TRUE(torch::allclose(y_with_bias, y_with_bias_exp, 1e-4, 1e-7));
+
+  auto y_no_bias = F::bilinear(input1, input2, weight);
+  ASSERT_EQ(y_no_bias.ndimension(), 2);
+  ASSERT_EQ(y_no_bias.sizes(), torch::IntArrayRef({2, 1}));
+  auto y_no_bias_exp = torch::tensor({{448, 1701}}).reshape({2, 1});
+  ASSERT_TRUE(torch::allclose(y_no_bias, y_no_bias_exp, 1e-4, 1e-7));
+}
+
 TEST_F(FunctionalTest, Normalize) {
   const auto expected = torch::tensor(
     {{{0.00000000, 0.10000000, 0.2000, 0.30000000, 0.40000000},
