@@ -5,6 +5,7 @@
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #include <torch/csrc/distributed/rpc/future_message.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <cstdint>
 
 namespace torch {
@@ -58,6 +59,15 @@ class TORCH_API DistAutogradContext {
   DistAutogradContext(DistAutogradContext&&) = delete;
   DistAutogradContext& operator=(DistAutogradContext&&) = delete;
 
+  // records the workerID of a node that we sent an RPC to.
+  // workerIDs are added here when we attach a send function to this autograd
+  // context
+  void addKnownWorkerId(const rpc::worker_id_t workerId);
+
+  // Retrieves a set containing the known workerIds for this context
+  // These are the different workers that this context has sent RPCs to.
+  std::unordered_set<rpc::worker_id_t> getKnownWorkerIds() const;
+
  private:
   friend class DistEngine;
 
@@ -79,6 +89,11 @@ class TORCH_API DistAutogradContext {
   void clearAndWaitForOutstandingRpcs();
 
   const int64_t contextId_;
+
+  // Set containing known worker IDs, used in cleaning up autograd context.
+  // Whenever a sendRpcBackward is attached to the autograd graph for this
+  // context, the destination is added here.
+  std::unordered_set<rpc::worker_id_t> knownWorkerIds_;
 
   // Map from autograd_message_id to appropriate 'send' autograd function.
   std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>
