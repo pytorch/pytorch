@@ -1496,6 +1496,7 @@ workflows:
             - pytorch_linux_xenial_py2_7_9_build
           build_environment: "pytorch-linux-xenial-py2.7.9-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7.9:347"
+          resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py2_7_build
           requires:
@@ -1519,6 +1520,7 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py2.7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7:347"
+          resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_5_build
           requires:
@@ -1532,6 +1534,7 @@ workflows:
             - pytorch_linux_xenial_py3_5_build
           build_environment: "pytorch-linux-xenial-py3.5-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.5:347"
+          resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_pynightly_build
           requires:
@@ -1555,6 +1558,7 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-pynightly-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:347"
+          resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:
@@ -1576,6 +1580,7 @@ workflows:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
           build_environment: "pytorch-linux-backward-compatibility-check-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:347"
+          resource_class: large
       - pytorch_linux_build:
           name: pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_build
           requires:
@@ -1589,6 +1594,7 @@ workflows:
             - pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_build
           build_environment: "pytorch-namedtensor-linux-xenial-py3.6-gcc5.4-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:347"
+          resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc7_build
           requires:
@@ -1612,6 +1618,7 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "pytorch-linux-xenial-py3.6-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc7:347"
+          resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_asan_build
           requires:
@@ -1640,6 +1647,7 @@ workflows:
             - pytorch_namedtensor_linux_xenial_py3_clang5_asan_build
           build_environment: "pytorch-namedtensor-linux-xenial-py3-clang5-asan-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:347"
+          resource_class: large
       - pytorch_linux_build:
           name: pytorch_xla_linux_xenial_py3_6_clang7_build
           requires:
@@ -1653,6 +1661,7 @@ workflows:
             - pytorch_xla_linux_xenial_py3_6_clang7_build
           build_environment: "pytorch-xla-linux-xenial-py3.6-clang7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-clang7:347"
+          resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda9_cudnn7_py2_build
           requires:
@@ -1677,6 +1686,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py2-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:347"
           use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_build
           requires:
@@ -1691,6 +1701,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
           use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_multigpu_test
           requires:
@@ -1699,6 +1710,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-multigpu-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
           use_cuda_docker_runtime: "1"
+          resource_class: gpu.large
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_NO_AVX2_test
           requires:
@@ -1707,6 +1719,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-NO_AVX2-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
           use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_NO_AVX_NO_AVX2_test
           requires:
@@ -1715,6 +1728,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-NO_AVX-NO_AVX2-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
           use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_slow_test
           requires:
@@ -1723,6 +1737,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-slow-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
           use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda9_cudnn7_py3_nogpu_test
           requires:
@@ -1730,6 +1745,7 @@ workflows:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-nogpu-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
+          resource_class: large
       - pytorch_python_doc_push:
           requires:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
@@ -1750,6 +1766,7 @@ workflows:
           build_environment: "pytorch-libtorch-linux-xenial-cuda9-cudnn7-py3-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
           use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
       - pytorch_linux_build:
           name: pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build
           requires:
@@ -1764,6 +1781,7 @@ workflows:
           build_environment: "pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:347"
           use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc7_build
           requires:
@@ -1788,6 +1806,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc7:347"
           use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda10_cudnn7_py3_gcc7_build
           requires:
@@ -1823,6 +1842,7 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7:347"
           use_cuda_docker_runtime: "1"
+          resource_class: gpu.medium
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build
           requires:
