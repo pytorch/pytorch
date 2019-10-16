@@ -639,7 +639,7 @@ class RecordingObserver(_ObserverBase):
 class NoopObserver(Observer):
     r"""
     Observer that doesn't do anything and just passes its configuration to the
-    quantized module's ``.from_float()`.
+    quantized module's ``.from_float()``.
 
     Primarily used for quantization to float16 which doesn't require determining
     ranges.

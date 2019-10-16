@@ -319,8 +319,7 @@ def size(g, self, dim):
         if rank:
             dim = sym_help._maybe_get_const(dim, 'i') + rank
             dim = g.op("Constant", value_t=torch.tensor(dim))
-    full_shape = g.op("Shape", self)
-    return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
+    return sym_help._size_helper(g, self, dim)
 
 
 @parse_args('v', 'i', 'i')
@@ -1008,19 +1007,7 @@ def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, 'i')
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, index, value, dim_i=dim_value, operator_s="index_fill")
-    # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
-    # 2. expand index => [..., dim, ...], same shape as self except for dim.
-    # 3. expand value as well.
-    # 4. apply onnx::scatter.
-
-    if self.type().dim() is None:
-        return _unimplemented("index_fill", "input rank not accesible")
-    self_dim = self.type().dim()
-    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
-    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
-                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
-    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
-
+    expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, self)
     expanded_value = expand(g, value, expanded_index_shape, None)
@@ -1032,16 +1019,7 @@ def index_copy(g, self, dim, index, source):
     dim_value = sym_help._parse_arg(dim, 'i')
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
-    # Similar to index_fill, apply reshape + expand to index.
-
-    if self.type().dim() is None:
-        return _unimplemented("index_copy", "input rank not accesible")
-    self_dim = self.type().dim()
-    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
-    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
-                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
-    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
-
+    expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
 
 
@@ -1341,27 +1319,29 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 def to(g, self, *args):
     # ONNX doesn't have a concept of a device, so we ignore device casts
-    if len(args) == 3:
+    if len(args) == 4:
         if args[0].type().isSubtypeOf(ListType.ofInts()):
-            # aten::to(Tensor, Device, bool, bool)
+            # aten::to(Tensor, Device, bool, bool, memory_format)
             return self
         else:
-            # aten::to(Tensor, ScalarType, bool, bool)
+            # aten::to(Tensor, ScalarType, bool, bool, memory_format)
             dtype = sym_help._get_const(args[0], 'i', 'dtype')
+            # memory_format is ignored
             return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
-    elif len(args) == 4:
-        # aten::to(Tensor, Device, ScalarType, bool, bool)
-        dtype = sym_help._get_const(args[1], 'i', 'dtype')
-        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 5:
-        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
-        dtype = sym_help._get_const(args[0], 'i', 'dtype')
-        # Layout and device are ignored
+        # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
+        dtype = sym_help._get_const(args[1], 'i', 'dtype')
+        # memory_format is ignored
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 6:
-        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, memory_format) -> Tensor
         dtype = sym_help._get_const(args[0], 'i', 'dtype')
-        # Layout and device are ignored
+        # Layout, device and memory_format are ignored
+        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 7:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool, memory_format) -> Tensor
+        dtype = sym_help._get_const(args[0], 'i', 'dtype')
+        # Layout, device and memory_format are ignored
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     else:
         raise NotImplementedError("Unknown aten::to signature")
