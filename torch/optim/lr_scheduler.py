@@ -584,7 +584,7 @@ class ReduceLROnPlateau(object):
 
 
 class CyclicLR(_LRScheduler):
-    """Sets the learning rate of each parameter group according to
+    r"""Sets the learning rate of each parameter group according to
     cyclical learning rate policy (CLR). The policy cycles the learning
     rate between two boundaries with a constant frequency, as detailed in
     the paper `Cyclical Learning Rates for Training Neural Networks`_.
@@ -598,8 +598,8 @@ class CyclicLR(_LRScheduler):
 
     * "triangular": A basic triangular cycle without amplitude scaling.
     * "triangular2": A basic triangular cycle that scales initial amplitude by half each cycle.
-    * "exp_range": A cycle that scales initial amplitude by gamma**(cycle iterations) at each
-        cycle iteration.
+    * "exp_range": A cycle that scales initial amplitude by :math:`\text{gamma}^{\text{cycle iterations}}`
+      at each cycle iteration.
 
     This implementation was adapted from the github repo: `bckenstler/CLR`_
 
@@ -942,8 +942,8 @@ class OneCycleLR(_LRScheduler):
     Note also that the total number of steps in the cycle can be determined in one
     of two ways (listed in order of precedence):
 
-    1. A value for total_steps is explicitly provided.
-    2. A number of epochs (epochs) and a number of steps per epoch
+    #. A value for total_steps is explicitly provided.
+    #. A number of epochs (epochs) and a number of steps per epoch
        (steps_per_epoch) are provided.
        In this case, the number of total steps is inferred by
        total_steps = epochs * steps_per_epoch
