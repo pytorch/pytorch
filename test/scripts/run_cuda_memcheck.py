@@ -21,7 +21,6 @@ import tqdm
 import re
 
 ALL_TESTS = []
-NUM_PROCESSES = multiprocessing.cpu_count()
 GPUS = torch.cuda.device_count()
 
 # parse arguments
@@ -31,6 +30,8 @@ parser.add_argument('timeout', type=int, help='kill the test if it does not term
 parser.add_argument('--ignore', nargs='+', default=['cudaErrorInvalidDeviceFunction'],
                     help='list of regex of the failures not interested, default to ["cudaErrorInvalidDeviceFunction"], '
                          'because cublas does not run error-free under cuda-memcheck')
+parser.add_argument('--nproc', type=int, default=multiprocessing.cpu_count(),
+                    help='Number of processes running tests, default to number of cores in the system')
 args = parser.parse_args()
 
 # Discover tests:
@@ -92,7 +93,7 @@ async def run1():
         progressbar.update(1)
 
 async def main():
-    tasks = [asyncio.create_task(run1()) for _ in range(NUM_PROCESSES)]
+    tasks = [asyncio.create_task(run1()) for _ in range(args.nproc)]
     for t in tasks:
         await t
 
