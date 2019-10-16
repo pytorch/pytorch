@@ -186,10 +186,12 @@ void set_num_threads(int nthreads) {
       // plus one because of master thread
       stored_nthreads = _get_intraop_pool().size() + 1;
     }
-    TORCH_CHECK(stored_nthreads == nthreads,
+    if (stored_nthreads != nthreads) {
+      TORCH_WARN(
         "Error: cannot set number of intraop threads "
         "after parallel work has started or after set_num_threads call "
         "when using native parallel backend");
+    }
   }
 #else
   TORCH_CHECK(false, "set_num_threads is not supported for mobile.");
