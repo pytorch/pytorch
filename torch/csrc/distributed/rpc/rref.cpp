@@ -93,7 +93,7 @@ RRef::RRef(worker_id_t ownerId, const RRefId& rrefId)
 RRefForkData RRef::fork() const {
   auto& ctx = RRefContext::getInstance();
   return RRefForkData(
-      ownerId_, rrefId_, ctx->genGloballyUniqueId(), ctx->getWorkerId());
+      ownerId_, rrefId_, ctx.genGloballyUniqueId(), ctx.getWorkerId());
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
@@ -115,9 +115,9 @@ template <typename T>
 UserRRef<T>::~UserRRef() {
   // TODO: queue this in RRefContext instead of doing it here.
   auto& ctx = RRefContext::getInstance();
-  if (ctx->getWorkerId() != ownerId_) {
-    auto fm = ctx->agent()->send(
-        ctx->agent()->getWorkerInfo(ownerId_),
+  if (ctx.getWorkerId() != ownerId_) {
+    auto fm = ctx.agent()->send(
+        ctx.agent()->getWorkerInfo(ownerId_),
         RRefUserDelete(rrefId_, forkId_).toMessage());
 
     fm->addCallback(
@@ -132,7 +132,7 @@ const ForkId& UserRRef<T>::forkId() const {
 
 template <>
 IValue UserRRef<IValue>::toHere() {
-  auto& agent = RRefContext::getInstance()->agent();
+  auto agent = RpcAgent::getDefaultRpcAgent();
   std::shared_ptr<FutureMessage> fm = agent->send(
       agent->getWorkerInfo(ownerId_),
       ScriptRRefFetchCall(rrefId()).toMessage());
@@ -148,7 +148,7 @@ IValue UserRRef<IValue>::toHere() {
 
 template <>
 py::object UserRRef<py::object>::toHere() {
-  auto& agent = RRefContext::getInstance()->agent();
+  auto agent = RpcAgent::getDefaultRpcAgent();
   std::shared_ptr<FutureMessage> fm = agent->send(
       agent->getWorkerInfo(ownerId_),
       PythonRRefFetchCall(rrefId()).toMessage());

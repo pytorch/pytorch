@@ -109,6 +109,7 @@ struct TORCH_API Method {
 
 struct TORCH_API Module {
   explicit Module(c10::QualifiedName class_name);
+  Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,
@@ -209,6 +210,12 @@ struct TORCH_API Module {
       bool print_attr_values,
       bool print_param_values) const;
 
+  std::string dump_to_str(
+      bool print_method_bodies,
+      bool print_attr_values,
+      bool print_param_values,
+      int level) const;
+
   const std::vector<Method> get_methods() const {
     return fmap(
         type()->methods(),
@@ -259,6 +266,7 @@ struct TORCH_API Module {
     if (auto p = find_attribute("training")) {
       return p->value().toBool();
     }
+
     // We are in training mode by default
     return true;
   }
@@ -367,12 +375,6 @@ struct TORCH_API Module {
 
  private:
   Module clone_impl(std::unordered_map<TypePtr, TypePtr>& type_remap) const;
-
-  std::string _dump_to_string(
-      bool omit_method_bodies,
-      bool omit_attr_values,
-      bool omit_param_values,
-      int level) const;
 
   void clone_method(
       const Module& orig,
