@@ -164,7 +164,7 @@ by name to a specified ordering. This is useful for performing "broadcasting by 
         return input * scale.align_as(input)
 
     >>> num_channels = 3
-    >>> scale = torch.randn(num_channels, names='C')
+    >>> scale = torch.randn(num_channels, names=('C',))
     >>> imgs = torch.rand(3, 3, 3, num_channels, names=('N', 'H', 'W', 'C'))
     >>> more_imgs = torch.rand(3, num_channels, 3, 3, names=('N', 'C', 'H', 'W'))
     >>> videos = torch.randn(3, num_channels, 3, 3, 3, names=('N', 'C', 'H', 'W', 'D')
