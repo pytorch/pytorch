@@ -1,10 +1,14 @@
 #include <torch/nn/modules/linear.h>
+#include <torch/nn/functional/linear.h>
+#include <torch/nn/init.h>
 
 #include <torch/types.h>
 #include <torch/utils.h>
 
 #include <cmath>
 #include <cstdint>
+
+namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
@@ -48,6 +52,38 @@ void LinearImpl::pretty_print(std::ostream& stream) const {
 Tensor LinearImpl::forward(const Tensor& input) {
   AT_ASSERT(!options.with_bias() || bias.defined());
   return torch::linear(input, weight, bias);
+}
+
+// ============================================================================
+
+BilinearImpl::BilinearImpl(const BilinearOptions& options_) : options(options_) {
+  reset();
+}
+
+void BilinearImpl::reset() {
+  weight =
+      register_parameter("weight", torch::empty({options.out_features(), options.in1_features(), options.in2_features()}));
+  if (options.bias()) {
+    bias = register_parameter("bias", torch::empty(options.out_features()));
+  } else {
+    bias = register_parameter("bias", torch::Tensor(), /*requires_grad=*/false);
+  }
+
+  const auto bound = 1.0 / std::sqrt(weight.size(1));
+  init::uniform_(weight, -bound, bound);
+  if (bias.defined()) {
+      init::uniform_(bias, -bound, bound);
+  }
+}
+
+void BilinearImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha << "torch::nn::Bilinear(in1_features=" << options.in1_features()
+         << ", in2_features=" << options.in2_features() << ", out_features=" << options.out_features() << ", bias=" << options.bias()
+         << ")";
+}
+
+Tensor BilinearImpl::forward(const Tensor& input1, const Tensor& input2) {
+  return F::bilinear(input1, input2, weight, bias);
 }
 } // namespace nn
 } // namespace torch

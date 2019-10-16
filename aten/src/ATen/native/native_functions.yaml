@@ -69,6 +69,10 @@
   variants: method
   supports_named_tensor: True
 
+- func: align_to(Tensor(a) self, DimnameList order, int ellipsis_idx) -> Tensor(a)
+  variants: method
+  supports_named_tensor: True
+
 - func: align_as(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: unboxed_only
   variants: method
@@ -89,6 +93,12 @@
 - func: unflatten(Tensor self, int dim, int[] sizes, DimnameList names) -> Tensor
   variants: method
   supports_named_tensor: True
+
+
+- func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
+  use_c10_dispatcher: unboxed_only
+  dispatch:
+    CUDA: _use_cudnn_ctc_loss
 
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   use_c10_dispatcher: unboxed_only
@@ -194,6 +204,54 @@
   supports_named_tensor: True
   dispatch:
     CPU: _abs_out_cpu
+    CUDA: _abs_out_cuda
+
+- func: angle(Tensor self) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+  named_guard: False
+
+- func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  supports_named_tensor: True
+  dispatch:
+    CPU: _angle_out_cpu
+    CUDA: _abs_out_cuda
+
+- func: real(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+  supports_named_tensor: True
+
+- func: real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  supports_named_tensor: True
+  dispatch:
+    CPU: _real_out_cpu
+    CUDA: _abs_out_cuda
+
+- func: imag(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+  supports_named_tensor: True
+
+- func: imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  supports_named_tensor: True
+  dispatch:
+    CPU: _imag_out_cpu
+    CUDA: _abs_out_cuda
+
+- func: conj(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+  supports_named_tensor: True
+
+- func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  supports_named_tensor: True
+  dispatch:
+    CPU: _conj_out_cpu
     CUDA: _abs_out_cuda
 
 - func: acos(Tensor self) -> Tensor
@@ -1469,14 +1527,12 @@
 - func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_cpu
+    CUDA: layer_norm_cuda
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_backward_cpu
-
-- func: native_layer_norm_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  dispatch:
-    CPU: layer_norm_double_backward_cpu
+    CUDA: layer_norm_backward_cuda
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -3553,12 +3609,6 @@
     SparseCUDA: copy_sparse_
   requires_tensor: True
 
-- func: numel(Tensor self) -> int
-  use_c10_dispatcher: full
-  variants: function, method
-  device_guard: False
-  supports_named_tensor: True
-
 - func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: unboxed_only
   variants: function, method
@@ -3692,23 +3742,22 @@
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
-- func: to.dtype_layout(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False) -> Tensor
+- func: to.dtype_layout(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
   device_guard: False
   supports_named_tensor: True
 
-- func: to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor
+- func: to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
   device_guard: False
   supports_named_tensor: True
 
-- func: to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor
+- func: to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
   device_guard: False
   supports_named_tensor: True
 
-- func: to.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False) -> Tensor
-  use_c10_dispatcher: full
+- func: to.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
   device_guard: False
 
