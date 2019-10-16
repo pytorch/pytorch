@@ -20,8 +20,10 @@ def _require_initialized(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         if _agent is None:
-            raise RuntimeError("RPC has not been initialized. "
-                               "Call init_rpc(name) first.")
+            raise RuntimeError(
+                "RPC has not been initialized. Call "
+                "torch.distributed.rpc.init_model_parallel first."
+            )
         return func(*args, **kwargs)
     return wrapper
 
@@ -93,13 +95,17 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
 @_require_initialized
 def get_worker_info(worker_name=None):
     r"""
-    Get WorkerInfo of a given worker name. Use this WorkerInfo to avoid passing
-    an expensive string to ``rpc`` on every invocation. The WorkerInfo contains
-    the name of the worker and the id of the worker.
+    Get ``WorkerInfo`` of a given worker name. Use this ``WorkerInfo`` to avoid
+    passing an expensive string on every invocation. The ``WorkerInfo`` contains
+    the name and the id of the worker.
 
     Arguments:
         worker_name (str): the string name of a worker. If ``None``, return the
                            the id of the current worker. (default ``None``)
+
+    Returns:
+        ``WorkerInfo`` instance for the given ``worker_name`` or ``WorkerInfo``
+        of the current worker if ``worker_name`` is ``None``.
     """
     if worker_name:
         return _agent.get_worker_info(worker_name)
@@ -107,13 +113,13 @@ def get_worker_info(worker_name=None):
         return _agent.get_worker_info()
 
 
-def _to_worker_info(name_or_id):
-    if isinstance(name_or_id, WorkerInfo):
-        return name_or_id
-    elif isinstance(name_or_id, str):
-        return get_worker_info(name_or_id)
+def _to_worker_info(name_or_info):
+    if isinstance(name_or_info, WorkerInfo):
+        return name_or_info
+    elif isinstance(name_or_info, str):
+        return get_worker_info(name_or_info)
     else:
-        raise ValueError("Unsupported RPC worker ID type {}".format(name_or_id))
+        raise ValueError("Cannot get WorkerInfo from name".format(name_or_info))
 
 
 @_require_initialized
@@ -121,7 +127,7 @@ def remote(to, func, args=None, kwargs=None):
     r"""
     Make a ``remote`` call to run ``func`` on worker ``to``, and returns an
     ``RRef`` to the result value immediately. Worker ``to`` will be the owner
-    of the return ``RRef``, and this worker is a user. The owner manages the
+    of the returned ``RRef``, and this worker is a user. The owner manages the
     global reference count of its ``RRef``s, and the owner ``RRef`` is only
     destructed when globally there is no living references to it.
 
@@ -142,7 +148,7 @@ def remote(to, func, args=None, kwargs=None):
         >>> import torch.distributed as dist
         >>> import torch.distributed.rpc as rpc
         >>> dist.init_process_group(backend='gloo', rank=0, world_size=2)
-        >>> rpc.init_rpc("worker0")
+        >>> rpc.init_model_parallel("worker0")
         >>> worker1 = rpc.get_worker_info("worker1")
         >>> rref1 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 3))
         >>> rref2 = rpc.remote(worker1, torch.add, args=(torch.ones(2), 1))
@@ -152,7 +158,7 @@ def remote(to, func, args=None, kwargs=None):
         On worker 1:
         >>> import torch.distributed as dist
         >>> dist.init_process_group(backend='gloo', rank=1, world_size=2)
-        >>> dist.init_rpc("worker1")
+        >>> dist.init_model_parallel("worker1")
         >>> rpc.join_rpc()
     """
     qualified_name = torch.jit._find_builtin(func)
