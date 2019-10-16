@@ -75,5 +75,58 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
 /// module storage semantics.
 TORCH_MODULE(BatchNorm);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Base class for all (dimension-specialized) batchnorm modules.
+template <size_t D, typename Derived>
+class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
+ public:
+  explicit BatchNormImplBase(const BatchNormOptionsv2<D>& options_);
+
+  void reset_parameters();
+
+  void reset_running_stats();
+
+  void reset() override;
+
+  /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this module was constructed.
+  BatchNormOptionsv2<D> options;
+
+  /// The learned weight.
+  /// Only defined if the `affine` option was `true` upon construction.
+  Tensor weight;
+
+  /// The learned bias.
+  /// Only defined if the `affine` option was `true` upon construction.
+  Tensor bias;
+
+  /// The running mean.
+  /// Only defined if the `track_running_stats` option was `true` upon construction.
+  Tensor running_mean;
+
+  /// The running variance.
+  /// Only defined if the `track_running_stats` option was `true` upon construction.
+  Tensor running_var;
+
+  /// The number of the forward call.
+  /// Only defined if the `track_running_stats` option was `true` upon construction.
+  Tensor num_batches_tracked;
+};
+
+/// Applies the BatchNorm1d function.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm1d to learn
+/// about the exact behavior of this module.
+class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
+ public:
+  using BatchNormImplBase<1, BatchNorm1dImpl>::BatchNormImplBase;
+
+  Tensor forward(const Tensor& input);
+};
+
+TORCH_MODULE(BatchNorm1d);
+
 } // namespace nn
 } // namespace torch

@@ -965,6 +965,44 @@ TEST_F(ModulesTest, BatchNormPureForward) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(ModulesTest, BatchNorm1dStateful) {
+  BatchNorm1d bn(BatchNorm1dOptions(5));
+
+  ASSERT_TRUE(bn->options.track_running_stats());
+
+  ASSERT_TRUE(bn->running_mean.defined());
+  ASSERT_EQ(bn->running_mean.dim(), 1);
+  ASSERT_EQ(bn->running_mean.size(0), 5);
+
+  ASSERT_TRUE(bn->running_var.defined());
+  ASSERT_EQ(bn->running_var.dim(), 1);
+  ASSERT_EQ(bn->running_var.size(0), 5);
+
+  ASSERT_TRUE(bn->num_batches_tracked.defined());
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 1);
+  ASSERT_EQ(bn->num_batches_tracked.size(0), 1);
+
+  ASSERT_TRUE(bn->options.affine());
+
+  ASSERT_TRUE(bn->weight.defined());
+  ASSERT_EQ(bn->weight.dim(), 1);
+  ASSERT_EQ(bn->weight.size(0), 5);
+
+  ASSERT_TRUE(bn->bias.defined());
+  ASSERT_EQ(bn->bias.dim(), 1);
+  ASSERT_EQ(bn->bias.size(0), 5);
+}
+
+TEST_F(ModulesTest, BatchNorm1dStateless) {
+  BatchNorm1d bn(BatchNorm1dOptions(5).track_running_stats(false).affine(false));
+
+  ASSERT_FALSE(bn->running_mean.defined());
+  ASSERT_FALSE(bn->running_var.defined());
+  ASSERT_FALSE(bn->num_batches_tracked.defined());
+  ASSERT_FALSE(bn->weight.defined());
+  ASSERT_FALSE(bn->bias.defined());
+}
+
 TEST_F(ModulesTest, Linear_CUDA) {
   Linear model(5, 2);
   model->to(torch::kCUDA);
