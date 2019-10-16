@@ -81,7 +81,9 @@ std::string log_function(const std::shared_ptr<torch::jit::Graph> &graph) {
   std::vector<at::Tensor> tensors;
   std::vector<c10::NamedTypePtr> deps;
   SourceRangeRecords source_ranges;
-  PythonPrint(ss, source_ranges, func, false, tensors, deps, false);
+  PythonPrint pp(ss, source_ranges, tensors, deps, false);
+  pp.printFunction(func);
+  pp.finish();
   return ss.str();
 }
 
