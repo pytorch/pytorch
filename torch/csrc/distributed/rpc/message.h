@@ -31,13 +31,17 @@ enum MessageType {
   RREF_ACK = 13, // ACK to internal RRef messages
 
   // Messages with autograd info
-  MESSAGE_WITH_AUTOGRAD_REQ = 14,
-  MESSAGE_WITH_AUTOGRAD_RESP = 15,
+  FORWARD_AUTOGRAD_REQ = 14,
+  FORWARD_AUTOGRAD_RESP = 15,
+
+  // Messages to propagate gradients on the backward pass.
+  BACKWARD_AUTOGRAD_REQ = 16,
+  BACKWARD_AUTOGRAD_RESP = 17,
 
   // Other internal message types
-  SHUTDOWN = 16,
-  EXCEPTION = 17,
-  UNKNOWN = 18
+  SHUTDOWN = 50,
+  EXCEPTION = 55,
+  UNKNOWN = 60
 };
 
 // A message to be sent/received by an RpcAgent.
