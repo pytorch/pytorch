@@ -1896,11 +1896,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
   assertDense(invalidArgument, inputs);
 
   if (getRank() == opts.rootRank) {
-    if (outputs.size() != 1 ||
-        outputs[0].size() != static_cast<size_t>(getSize())) {
-      invalidArgument(
-          "requires a single-element output list "
-          "containing a list with <size> tensors");
+    if (outputs.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element output list containing a list with "
+         << getSize() << " tensors.";
+      invalidArgument(ss.str());
+    } else if (outputs[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect output list size " << outputs[0].size()
+         << ". Output list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
     }
 
     const auto& type = inputs[0].type();
