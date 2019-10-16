@@ -106,6 +106,27 @@ def cumsum(g, self, dim, dtype=None):
     return csum
 
 
+def masked_select(g, self, mask):
+    from torch.onnx.symbolic_opset9 import nonzero, expand_as
+    index = nonzero(g, expand_as(g, mask, self))
+    return g.op('GatherND', self, index)
+
+
+def masked_scatter(g, self, mask, source):
+    from torch.onnx.symbolic_opset9 import nonzero, expand_as, view, size
+    index = nonzero(g, expand_as(g, mask, self))
+    # NOTE: source can have more elements than needed.
+    # It could also have arbitrary shape.
+    # This is not supported by ONNX::ScatterND, so we need to flatten and slice source tensor.
+    source = view(g, source, torch.LongTensor([-1]))
+    source = sym_help._slice_helper(g, source,
+                                    axes=torch.LongTensor([0]),
+                                    starts=torch.LongTensor([0]),
+                                    ends=size(g, index, torch.LongTensor([0])),
+                                    dynamic_slice=True)
+    return g.op('ScatterND', self, index, source)
+
+
 @parse_args('v', 'i', 'i', 'i')
 def _unique2(g, self, sorted, return_inverse, return_counts):
     u, indices, inverse_indices, counts = g.op("Unique", self, sorted_i=sorted, outputs=4)

@@ -146,7 +146,7 @@ Args:
            If an index appears several times for the same operand, a diagonal is taken.
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
-    operands (list of Tensors): The operands to compute the Einstein sum of.
+    operands (Tensor): The operands to compute the Einstein sum of.
 
 Examples::
 
