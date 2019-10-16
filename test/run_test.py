@@ -20,7 +20,6 @@ PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'autograd',
-    'cpp_api_parity',
     'cpp_extensions',
     'c10d',
     'c10d_spawn',
@@ -87,7 +86,6 @@ WINDOWS_BLACKLIST = [
 ]
 
 ROCM_BLACKLIST = [
-    'cpp_api_parity',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
