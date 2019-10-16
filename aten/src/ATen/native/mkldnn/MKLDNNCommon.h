@@ -30,6 +30,28 @@ ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 // Construct an `ideep::tensor` "view" from dense tensor, note the
 // ideep::tensor will share the underlying buffer
 ideep::tensor itensor_view_from_dense(const Tensor& tensor);
+
+// Helper function for getting an ideep tensor out of an aten Tensor.
+// Note in case the aten Tensor is a dense tensor, the retured ideep
+// tensor is just a view of the storage of the aten dense tensor, so
+// caller needs to make sure the aten dense tensor's lifetime is
+// longer than the ideep tensor.
+inline ideep::tensor get_mkldnn_tensor(const Tensor& tensor) {
+  if (tensor.is_mkldnn()) {
+    return at::native::itensor_from_mkldnn(tensor);
+  } else {
+    return at::native::itensor_view_from_dense(tensor);
+  }
+}
+
+// Helper to create arbitrary DNNL Opaque tensor
+Tensor empty_dnnl(c10::IntArrayRef size, const c10::TensorOptions& options,
+    ideep::format format, int64_t groups);
+
+// This interface serve the purpose that created tensor actually 'like' the input
+// If it a Opaque, then returns an Opaque, otherwise call at::empty_like
+Tensor dnnl_empty_like(const Tensor& input);
+
 }}
 
 #endif // AT_MKLDNN_ENABLED

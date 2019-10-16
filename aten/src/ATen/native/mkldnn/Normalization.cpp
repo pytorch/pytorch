@@ -71,6 +71,53 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   }
 }
 
+Tensor dnnl_batch_norm(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const Tensor& running_mean,
+    const Tensor& running_var,
+    bool train, double momentum, double eps, bool use_cuda) {
+  AT_ASSERTM(input.dim() == 4 || input.dim() == 5,
+             "dnnl_batch_norm: currently dnnl only support 2d and 3d batchnorm");
+  AT_ASSERTM(weight.numel() != 0 && bias.numel() !=0,
+             "dnnl_batch_norm: currently dnnl only support affine model");
+
+  const ideep::tensor x = get_mkldnn_tensor(input);
+  const ideep::tensor w = get_mkldnn_tensor(weight);
+  const ideep::tensor b = get_mkldnn_tensor(bias);
+  bool use_running_stat = (running_mean.numel()!=0  && running_var.numel() !=0);
+
+  auto output = dnnl_empty_like(input);
+  auto y = get_mkldnn_tensor(output);
+
+  if (train) {
+    // perharps this path not be used now
+    ideep::tensor saved_mean;
+    ideep::tensor saved_var;
+    if (use_running_stat) {
+      ideep::tensor m = get_mkldnn_tensor(running_mean);
+      ideep::tensor v = get_mkldnn_tensor(running_var);
+      ideep::batch_normalization_forward_training::compute(
+          x, w, b, y, saved_mean, saved_var, m, v, momentum, eps);
+    } else {
+      ideep::batch_normalization_forward_training::compute(
+          x, w, b, y, saved_mean, saved_var, momentum, eps);
+    }
+  } else {
+    if (use_running_stat) {
+      ideep::tensor m = get_mkldnn_tensor(running_mean);
+      ideep::tensor v = get_mkldnn_tensor(running_var);
+      ideep::batch_normalization_forward_inference::compute(
+          x, m, v, w, b, y, eps);
+    } else {
+      ideep::batch_normalization_forward_inference::compute(
+          x, w, b, y, eps);
+    }
+  }
+  return output;
+}
+
 } // namespace native
 } // namespace at
 

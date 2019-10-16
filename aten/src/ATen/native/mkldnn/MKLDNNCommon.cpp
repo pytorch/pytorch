@@ -59,6 +59,7 @@ ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
 
+// It doesn't manage Tensor resources, Don't create Opaque tensor from it!
 ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   AT_ASSERTM(
       tensor.device().type() == DeviceType::CPU,
@@ -75,6 +76,37 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
            ideep::tensor::data_type::f32},
           tensor.template data_ptr<float>()};
 }
+
+Tensor empty_dnnl(
+    c10::IntArrayRef size, const c10::TensorOptions& options,
+    ideep::format format, int64_t groups) {
+  AT_ASSERT(!options.is_variable());  // ????
+  ideep::tensor o;
+
+  std::vector<int64_t> dst_sizes {size.begin(), size.end()};
+  if (groups > 1) {
+    dst_sizes.insert(dst_sizes.begin(), groups);
+    dst_sizes[1] /= groups;
+  }
+  o.init<AllocForMKLDNN>({{dst_sizes.begin(), dst_sizes.end()},
+      ideep::tensor::data_type::f32, format});
+  return new_with_itensor_mkldnn(std::move(o), options);
+}
+
+Tensor dnnl_empty_like(const Tensor& input) {
+  if (input.is_mkldnn()) {
+    /* We need get extra mem-space for quirk formats */
+    auto it = itensor_from_mkldnn(input);
+
+    /* pre-alloc memory */
+    ideep::tensor o;
+    o.init<AllocForMKLDNN>(it.get_descriptor());
+    return new_with_itensor_mkldnn(std::move(o), input.options());
+  }
+
+  return at::empty_like(input);
+}
+
 }}
 
 #endif // AT_MKLDNN_ENABLED()

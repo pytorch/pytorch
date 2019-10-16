@@ -23,6 +23,14 @@ Tensor& mkldnn_add_(Tensor& self, const Tensor& other, Scalar alpha) {
   AT_ERROR("mkldnn_add_: ATen not compiled with MKLDNN support");
 }
 
+Tensor dnnl_sum(const Tensor& self, const Tensor& other, Scalar alpha) {
+  AT_ERROR("dnnl_sum: ATen not compiled with MKLDNN support");
+}
+
+Tensor& dnnl_sum_(Tensor& self, const Tensor& other, Scalar alpha) {
+  AT_ERROR("dnnl_sum_: ATen not compiled with MKLDNN support");
+}
+
 Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
   AT_ERROR("mkldnn_mul_out: ATen not compiled with MKLDNN support");
 }
@@ -45,6 +53,44 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 namespace at {
 namespace native {
 
+Tensor dnnl_sum(
+    const Tensor& self, const Tensor& other, at::Scalar alpha) {
+  std::vector<ideep::tensor> inputs {
+    get_mkldnn_tensor(self), get_mkldnn_tensor(other)
+  };
+
+  auto output = dnnl_empty_like(self);
+  auto y = get_mkldnn_tensor(output);
+  const std::vector<float> scales {1.0, alpha.to<float>()};
+  ideep::sum::compute(scales, inputs, y);
+
+  return output;
+}
+
+Tensor& dnnl_sum_(Tensor& self, const Tensor& other, at::Scalar alpha) {
+  auto self_ = get_mkldnn_tensor(self);
+  std::vector<ideep::tensor> inputs{
+    self_, get_mkldnn_tensor(other)
+  };
+  const std::vector<float> scales {1.0, alpha.to<float>()};
+  ideep::sum::compute(scales, inputs, self_);
+  return self;
+}
+
+Tensor& dnnl_sum_out(
+    Tensor& out,
+    const Tensor& self,
+    const Tensor& other,
+    at::Scalar alpha) {
+  ideep::tensor& x = itensor_from_mkldnn(self);
+  ideep::tensor& y = itensor_from_mkldnn(other);
+  ideep::tensor& z = itensor_from_mkldnn(out);
+  const std::vector<float> scales{1.0, alpha.to<float>()};
+  ideep::sum::compute<AllocForMKLDNN>(scales, {x, y}, z);
+
+  return out;
+}
+
 Tensor& mkldnn_add_out(
     Tensor& result,
     const Tensor& self,
@@ -52,7 +98,6 @@ Tensor& mkldnn_add_out(
     Scalar alpha) {
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor& y = itensor_from_mkldnn(other);
-
   ideep::tensor& z = itensor_from_mkldnn(result);
   const std::vector<float> scales{1.0, alpha.to<float>()};
   ideep::sum::compute<AllocForMKLDNN>(scales, {x, y}, z);

@@ -8,6 +8,54 @@ namespace at { namespace native {
 
 #if AT_MKLDNN_ENABLED()
 
+//
+// Semantics of _dnnl_reorder, for both directions
+//   1. If output is in nature format (nchw, oihw), return CPUTensor
+//   2. otherwise, return Opaque Tensor
+//   3. 'from' can be any to adaptly accept incoming Tensor
+//
+Tensor dnnl_reorder(
+    const Tensor& input, int64_t from, int64_t to, int64_t groups) {
+  AT_ASSERTM(input.scalar_type() == c10::ScalarType::Float,
+             "dnnl_reorder: Expects float tensor input");
+  AT_ASSERTM(input.dim() <= 5,
+             "dnnl_reorder: Can't convert cpu tensor with dimensions > 5");
+
+  // `get_mkldnn_tensor` accepts both aten and dnnl tensors
+  auto src_itensor = get_mkldnn_tensor(input);
+  if (static_cast<ideep::format>(from) != ideep::format::any)
+    AT_ASSERTM(src_itensor.get_descriptor().get_internal_format() ==
+        static_cast<ideep::format>(from)
+        || src_itensor.as_weights().get_internal_format() ==
+        static_cast<ideep::format>(from),
+               "dnnl_reorder: Incompatible input format");
+
+  // TODO:
+  //  1. Optimize it when from == to
+  //
+  if (static_cast<ideep::format>(to) == ideep::format::nchw
+      || static_cast<ideep::format>(to) == ideep::format::oihw) {
+    // We go to CPUTensor realm
+    auto dims = src_itensor.get_dims();
+    // casts int32_t dims to int64_t
+    auto sizes = std::vector<int64_t>(dims.begin(), dims.end());
+    auto cpu_tensor = at::empty(sizes, input.options().layout(c10::kStrided));
+    src_itensor.to_public(cpu_tensor.template data_ptr<float>());
+    return cpu_tensor;
+  } else {
+    // Go to DNNL special realm
+    auto& input_cont = input.is_mkldnn() ? input : input.contiguous();
+    // pre-alloc a tensor, managed by ideep
+    auto dst_tensor = empty_dnnl(input_cont.sizes(), input_cont.options(),
+        static_cast<ideep::format>(to), groups);
+    auto& dst_itensor = itensor_from_mkldnn(dst_tensor);
+    // do reordering
+    dst_itensor.feed_from(dst_itensor.get_dims(), ideep::tensor::data_type::f32,
+                          input_cont.template data_ptr<float>());
+    return dst_tensor;
+  }
+}
+
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
   ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
@@ -19,6 +67,9 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor) {
   return cpu_tensor;
 }
 
+// TODO: There is no way an Opaque Tensor share custody with a CPUTensor
+// resulted the inevitable copy, should we enable OpaqueTensor to have
+// Storage?
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor) {
   AT_ASSERTM(cpu_tensor.device().type() == DeviceType::CPU,
              "dense_to_mkldnn expects CPU tensor input");
@@ -91,6 +142,11 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef dilation,
     int64_t groups) {
   AT_ERROR("mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
+}
+
+Tensor _dnnl_reorder(
+    const Tensor& input, int64_t from, int64_t to, int64_t groups) {
+  AT_ERROR("_dnnl_reorder: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()

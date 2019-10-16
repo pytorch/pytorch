@@ -10,6 +10,27 @@
 namespace at {
 namespace native {
 
+Tensor dnnl_pooling_avg_2d(
+    const Tensor& self,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    bool ceil_mode) {
+  AT_ERROR(
+      "dnnl_pooling_avg_2d: ATen not compiled with MKLDNN support");
+}
+
+Tensor dnnl_pooling_max_2d(
+    const Tensor& self,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  AT_ERROR(
+      "dnnl_pooling_max_2d: ATen not compiled with MKLDNN support");
+}
+
 Tensor mkldnn_max_pool2d(
     const Tensor& self,
     IntArrayRef kernel_size,
@@ -67,7 +88,7 @@ Tensor& mkldnn_adaptive_avg_pool2d_out(
 namespace at {
 namespace native {
 
-static Tensor _mkldnn_pool2d(
+static Tensor dnnl_pooling_2d_base(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -82,7 +103,7 @@ static Tensor _mkldnn_pool2d(
   auto padding_vec_r = padding_vec;
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
 
-  const ideep::tensor& x = itensor_from_mkldnn(input);
+  const auto x = itensor_from_mkldnn(input);
   std::vector<int64_t> output_sizes;
 
   if (ceil_mode) {
@@ -144,14 +165,14 @@ static Tensor _mkldnn_pool2d(
   return new_with_itensor_mkldnn(std::move(y), input.options());
 }
 
-Tensor mkldnn_max_pool2d(
+Tensor dnnl_max_pool2d(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
-  return _mkldnn_pool2d(
+  return dnnl_pooling_2d_base(
       input,
       kernel_size,
       stride,
@@ -159,6 +180,44 @@ Tensor mkldnn_max_pool2d(
       dilation,
       ceil_mode,
       ideep::algorithm::pooling_max);
+}
+
+Tensor dnnl_avg_pool2d(
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    bool ceil_mode,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
+  TORCH_CHECK(!divisor_override.has_value(),
+           "mkldnn_avg_pool2d operator does not support divisor");
+  return dnnl_pooling_2d_base(
+      input,
+      kernel_size,
+      stride,
+      padding,
+      /*dilation*/ std::vector<int64_t>{1, 1},
+      ceil_mode,
+      count_include_pad ? ideep::algorithm::pooling_avg_include_padding
+                        : ideep::algorithm::pooling_avg_exclude_padding);
+}
+
+// Deprecated
+Tensor mkldnn_max_pool2d(
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  return native::dnnl_max_pool2d(
+      input,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      ceil_mode);
 }
 
 Tensor mkldnn_avg_pool2d(
@@ -171,15 +230,14 @@ Tensor mkldnn_avg_pool2d(
     c10::optional<int64_t> divisor_override) {
   TORCH_CHECK(!divisor_override.has_value(),
            "mkldnn_avg_pool2d operator does not support divisor");
-  return _mkldnn_pool2d(
+  return native::dnnl_avg_pool2d(
       input,
       kernel_size,
       stride,
       padding,
-      /*dilation*/ std::vector<int64_t>{1, 1},
       ceil_mode,
-      count_include_pad ? ideep::algorithm::pooling_avg_include_padding
-                        : ideep::algorithm::pooling_avg_exclude_padding);
+      count_include_pad,
+      divisor_override);
 }
 
 Tensor& mkldnn_avg_pool2d_out(
@@ -212,7 +270,7 @@ Tensor mkldnn_adaptive_avg_pool2d(
         "input size is not divisible by the output size is not supported yet");
     kernel_size[i - 2] = s1 / s2;
   }
-  return _mkldnn_pool2d(
+  return dnnl_pooling_2d_base(
       input,
       kernel_size,
       /*stride*/ kernel_size,

@@ -1747,6 +1747,11 @@
   dispatch:
     MkldnnCPU: mkldnn_max_pool2d
 
+- func: _dnnl_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  dispatch:
+    CPU: dnnl_max_pool2d
+    MkldnnCPU: dnnl_max_pool2d
+
 - func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   use_c10_dispatcher: unboxed_only
   requires_tensor: True
@@ -1832,6 +1837,25 @@
   variants: function, method
 
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
+
+- func: _dnnl_conv2d(Tensor self, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+  dispatch:
+    CPU: dnnl_conv2d
+    MkldnnCPU: dnnl_conv2d
+
+- func: _dnnl_conv2d_relu(Tensor self, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
+  dispatch:
+    CPU: dnnl_conv2d_relu
+    MkldnnCPU: dnnl_conv2d_relu
+
+# At this stage, should self must be a DNNL Opaque Tensor or there is no performance gain.
+- func: _dnnl_sum_conv2d_(Tensor(a!) self, Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, Scalar alpha) -> Tensor(a!)
+  dispatch:
+    MkldnnCPU: dnnl_sum_conv2d_
+
+- func: _dnnl_sum_conv2d_then_relu_(Tensor(a!) self, Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, Scalar alpha) -> Tensor(a!)
+  dispatch:
+    MkldnnCPU: dnnl_sum_conv2d_then_relu_
 
 - func: mkldnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor
   use_c10_dispatcher: unboxed_only
@@ -2363,6 +2387,16 @@
     CUDA: relu_
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: quantized_relu_
+
+- func: _dnnl_relu(Tensor self) -> Tensor
+  dispatch:
+    CPU: dnnl_relu
+    MkldnnCPU: dnnl_relu
+
+- func: _dnnl_relu_(Tensor(a!) self) -> Tensor(a!)
+  dispatch:
+    CPU: dnnl_relu_
+    MkldnnCPU: dnnl_relu_
 
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   use_c10_dispatcher: full
@@ -3641,6 +3675,11 @@
   python_module: nn
   dispatch:
     MkldnnCPU: mkldnn_reorder_conv2d_weight
+
+- func: _dnnl_reorder(Tensor self, int from, int to, int group=1) -> Tensor
+  dispatch:
+    CPU: dnnl_reorder
+    MkldnnCPU: dnnl_reorder
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
   use_c10_dispatcher: full
@@ -6101,7 +6140,7 @@
   dispatch:
     CPU: avg_pool2d_cpu
     CUDA: avg_pool2d_cuda
-    MkldnnCPU: mkldnn_avg_pool2d
+    MkldnnCPU: dnnl_avg_pool2d
     QuantizedCPU: quantized_avg_pool2d
 
 - func: avg_pool2d_backward.grad_input(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override, *, Tensor(a!) grad_input) -> Tensor(a!)
