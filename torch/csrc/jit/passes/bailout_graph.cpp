@@ -344,8 +344,13 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
     int64_t bailout_index,
     const std::shared_ptr<Graph>& orig,
     const std::shared_ptr<Graph>& target) {
+
   auto orig_bailout_node =
       locateBailOutNodeInUnoptimizedGraph(orig->block(), bailout_index);
+
+  std::cout << "bailout triggered for " << *orig_bailout_node << std::endl;
+  std::cout << "orig bailout graph:\n";
+  orig->dump();
   TORCH_INTERNAL_ASSERT(
       orig_bailout_node->inputs().at(0)->type()->cast<FunctionType>() ==
       nullptr);

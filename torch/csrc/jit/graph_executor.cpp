@@ -704,12 +704,16 @@ static bool mayIntroduceGradient(const Block* b) {
 }
 
 bool needsGradient(const std::shared_ptr<const Graph>& graph) {
-  if (!autograd::GradMode::is_enabled())
+  std::cout << "running a gradient!\n";
+  if (!autograd::GradMode::is_enabled()) {
+    std::cout << "is_enabled false\n";
     return false;
+  }
   if (mayIntroduceGradient(graph->block()))
     return true;
 
   if (getProfilingMode()) {
+    std::cout << "getProfilingMode is true \n";
     for (const Value *input : graph->inputs()) {
       for (const auto &use : input->uses()) {
         if (use.user->kind() == prim::BailOut) {
@@ -721,9 +725,13 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
       }
     }
   } else {
+
+    std::cout << "running needsGradient for\n";
+    graph->dump();
     for (const Value *input : graph->inputs()) {
-      if (input->type()->requires_grad())
+      if (input->type()->requires_grad()) {
         return true;
+      }
     }
   }
 
@@ -732,6 +740,13 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
 
 void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   // run custom passes that different backends can register
+
+  const static auto* cdfg = std::getenv("PYTORCH_DISABLE_FUSE_GRAPH");
+  if (cdfg) {
+    std::cout << "PYTORCH_DISABLE_FUSE_GRAPH\n";
+    return;
+  }
+
   for (const auto& pass : getCustomPasses()) {
     pass(graph);
   }
@@ -746,16 +761,36 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
-  const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
-  if (ppg) {
-    std::cout << "before fuse graph:\n";
-    graph->dump();
-  }
+  // const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
+  // if (ppg) {
+  //   std::cout << "before fuse graph:\n";
+  //   graph->dump();
+  // }
 
-  const static auto* cdfg = std::getenv("PYTORCH_DISABLE_FUSE_GRAPH");
-  if (!cdfg) {
+  auto maybe_undefined = [](const Value* v) { 
+  auto tt = v->type()->cast<TensorType>();
+    if (!tt) {
+      return false;
+    }
+    return !tt->undefined().has_value() || *tt->undefined();
+  };
+
+  bool has_maybe_undefineds = false;
+
+  for (const Value *input : graph->inputs()) {
+    if (input->type()->requires_grad() || 
+      maybe_undefined(input)
+    ) {
+      has_maybe_undefineds = true;
+      break;
+    }
+  }
+  
+  if (!has_maybe_undefineds || getProfilingMode())
+  {
     FuseGraph(graph);  
   }
+  
 }
 
 void runOptimization(std::shared_ptr<Graph>& graph) {

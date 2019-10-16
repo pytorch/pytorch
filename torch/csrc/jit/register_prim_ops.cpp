@@ -246,7 +246,15 @@ RegisterOperators reg(
          prim::FusionGroup,
          [](const Node* node) {
            const auto key = registerFusion(node);
-           return [key](Stack& stack) {
+           auto input_size = node->inputs().size();
+           return [key, input_size](Stack& stack) {
+
+             for (auto& val : last(stack, input_size)) {
+               std::cout << "peeking ";
+               if (val.isTensor()) {
+                 std::cout << "tensor defined = " << val.toTensor().defined() << std::endl;
+               }
+             }
              RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
              runFusion(key, stack);
              return 0;

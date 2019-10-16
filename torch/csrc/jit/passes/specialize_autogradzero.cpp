@@ -65,11 +65,11 @@ void specializeAutogradZero(Graph &g) {
   }
 
 
-  const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
-  if (ppg) {
-    std::cout << "specializeAutogradZero =\n";
-    g.dump();
-  }
+  // const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
+  // if (ppg) {
+  //   std::cout << "specializeAutogradZero =\n";
+  //   g.dump();
+  // }
   
   replaceUndefinedWithNone(g.block());
   for (auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
@@ -92,6 +92,7 @@ void specializeAutogradZero(Graph &g) {
         // AutogradZero nodes
         if (all_zeros) {
           auto zero = g.createAutogradZero()->insertAfter(n)->output();
+          state[zero] = State::Zero;
           for (auto o : n->outputs()) {
             o->replaceAllUsesWith(zero);
           }
@@ -111,8 +112,11 @@ void specializeAutogradZero(Graph &g) {
             block_node->moveBefore(n);
           }
 
-          for (size_t i = 0; i < n->outputs().size(); ++i)
+          for (size_t i = 0; i < n->outputs().size(); ++i) {
             n->outputs().at(i)->replaceAllUsesWith(body->outputs().at(i));
+            state[body->outputs().at(i)] = State::Nonzero;
+          }
+            
 
         } else {
           WithInsertPoint guard(*it);
@@ -132,6 +136,9 @@ void specializeAutogradZero(Graph &g) {
             if_stat->outputs().at(i)->copyMetadata(it->outputs().at(i));
           }
           it->replaceAllUsesWith(if_stat);
+          for (auto o : if_stat->outputs()) {
+            state[o] = State::Unknown;
+          }
         }
         it.destroyCurrent();
       } break;

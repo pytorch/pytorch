@@ -16,15 +16,35 @@ struct GuardElimination {
         aliasDb_(c10::guts::make_unique<AliasDb>(graph_)) {}
 
   void run() {
-    moveGuardsToDefs(graph_->block());
-    GRAPH_DUMP("After moveGuardsToDefs", graph_);
+
+    // std::cout << "before moveGuardsToDefs\n";
+    // graph_->dump();
+    size_t attempts = 5;
+    while (attempts-- && moveGuardsToDefs(graph_->block())) {}
+    // std::cout << "after moveGuardsToDefs\n";
+    // graph_->dump();
+    // GRAPH_DUMP("After moveGuardsToDefs", graph_);
     coalesceGuards(graph_->block());
     GRAPH_DUMP("After coalesceGuards", graph_);
+    static const auto* pavg = getenv("PGE");
+    if (pavg) {
+        graph_->dump();
+    }
     eliminateRedundantGuards(graph_->block());
     GRAPH_DUMP("After eliminateRedundantGuards", graph_);
   }
 
-  void moveGuardsToDefs(Block* b) {
+  static bool isLoweredGradOf(Node* n) {
+    if (n->kind() != prim::If) {
+      return false;
+    }
+
+    return n->input(0)->node()->kind() == prim::AutogradAnyNonZero;
+  }
+
+  bool moveGuardsToDefs(Block* b) {
+
+    bool changed = false;
     for (auto it = b->nodes().begin(); it != b->nodes().end();) {
       auto n = *it;
       if (n->kind() == prim::Guard) {
@@ -39,6 +59,7 @@ struct GuardElimination {
           guardee = *n->owningBlock()->nodes().begin();
         }
         bool moved = aliasDb_->moveAfterTopologicallyValid(n, guardee);
+        changed |= moved;
         if (moved) {
           GRAPH_UPDATE(
               "Moved ",
@@ -53,6 +74,20 @@ struct GuardElimination {
         }
       }
     }
+
+    if (b->owningNode() && isLoweredGradOf(b->owningNode())) {
+
+      for (auto it = b->nodes().begin(); it != b->nodes().end();) {
+        auto block_node = *it++;
+        if (block_node->kind() != prim::Guard) {
+          break;
+        }
+        block_node->moveBefore(b->owningNode());
+        changed = true;
+      }
+    }
+
+    return changed;
   }
 
   void coalesceGuards(Block* b) {
@@ -144,6 +179,15 @@ struct GuardElimination {
       } else {
         GRAPH_DEBUG("input ", input->debugName(), " isn't guarded, type ",
                     *input->type());
+
+
+        static const auto* pavg = getenv("PGE");
+        if (pavg) {
+          if (n->kind() == aten::avg_pool2d) {
+            std::cout<< "input " << input->debugName() << " isn't guarded, type " << *input->type();
+          }
+        }
+
         all_inputs_guarded = false;
         break;
       }
@@ -183,6 +227,13 @@ private:
     case aten::neg:
     case prim::ConstantChunk:
     case aten::size:
+    case aten::abs:
+    case aten::sign:
+    case aten::pow:
+    case aten::relu:
+    case aten::avg_pool2d:
+    case prim::AutogradAdd:
+    case prim::AutogradZero:
       return checkInputs(n, no_exceptions);
     case aten::cat:
       // check that the dimension argument is constant
@@ -216,6 +267,7 @@ private:
       }
       return false;
     case prim::Guard:
+    case prim::GradOf:
       return true;
     default:
       GRAPH_DEBUG("cannot remove ", n->kind().toQualString());

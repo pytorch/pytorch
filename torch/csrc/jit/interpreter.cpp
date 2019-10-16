@@ -1021,6 +1021,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case TAIL_CALL: {
             af.functions[inst.X]->ensure_defined();
+
+            std::cout << "triggered a bailout\n";
             const Code &code =
                 af.functions[inst.X]->get_executor().getPlanFor(stack).code;
             size_t num_inputs = code.num_inputs();

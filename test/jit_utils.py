@@ -427,6 +427,8 @@ class JitTestCase(TestCase):
                    drop=None, allow_unused=False, verbose=False,
                    inputs_require_grads=True, check_tolerance=1e-5, export_import=True,
                    _force_outplace=False):
+        
+        print ("entering checkTrace")
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
             # drop allows us to remove some values from ever being used
@@ -458,7 +460,7 @@ class JitTestCase(TestCase):
             recording_inputs = reference_tensors
 
         ge = torch.jit.trace(func, input_tensors, check_tolerance=check_tolerance,
-                             _force_outplace=_force_outplace)
+                             _force_outplace=_force_outplace, check_trace=False)
 
         if export_import:
             ge = self.getExportImportCopy(ge)
@@ -489,8 +491,30 @@ class JitTestCase(TestCase):
         if inputs_require_grads:
             self.assertEqual(grads, grads_ge)
 
+        # print("gradient case 2")
+        # outputs = func(*recording_inputs)
+        # if inputs_require_grads:
+        #     grads = torch.autograd.grad(allSum(outputs), flattened_recording_inputs,
+        #                                 allow_unused=allow_unused, create_graph=True)
+
+        #     grads = torch.autograd.grad(allSum(outputs), flattened_recording_inputs,
+        #                     allow_unused=allow_unused, create_graph=True)
+
+        # outputs_ge = ge(*recording_inputs)
+        # if inputs_require_grads:
+        #     grads_ge = torch.autograd.grad(allSum(outputs_ge), flattened_recording_inputs,
+        #         allow_unused=allow_unused, create_graph=True)
+
+        #     grads_ge = torch.autograd.grad(allSum(outputs_ge), flattened_recording_inputs,
+        #         allow_unused=allow_unused, create_graph=True)
+
+        self.assertEqual(outputs, outputs_ge)
+        if inputs_require_grads:
+            self.assertEqual(grads, grads_ge)
+
         # test the grad grad case
 
+        print ("gradient gradient case")
         outputs = func(*recording_inputs)
         l1 = allSum(outputs)
         if inputs_require_grads:
@@ -504,15 +528,22 @@ class JitTestCase(TestCase):
             recording_inputs = do_input_map(lambda t: Variable(t, requires_grad=True), reference_tensors)
             flattened_recording_inputs = flatten_inputs(recording_inputs)
 
+
+        print ("grad grad single backward")
         outputs_ge = ge(*recording_inputs)
         l1_ge = allSum(outputs_ge)
         if inputs_require_grads:
             grads_ge = torch.autograd.grad(
                 l1_ge, flattened_recording_inputs, create_graph=True, allow_unused=allow_unused)
 
+
+        # os.environ["DEBUSSY"] = "1"
+        print ("grad grad double backward")
         if inputs_require_grads:
             l2_ge = (allSum(grads_ge) * l1_ge)
             grads2_ge = torch.autograd.grad(l2_ge, flattened_recording_inputs, allow_unused=allow_unused)
+
+        # del os.environ["DEBUSSY"]
 
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:

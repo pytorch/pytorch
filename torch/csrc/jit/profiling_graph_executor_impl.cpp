@@ -62,13 +62,19 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
       // EliminateDeadCode(copy);
       const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
       if (ppg) {
-        std::cout << "profiled graph:\n";
+        std::cout << "profiled graph for " << this << std::endl;
         copy->dump();
       }
+      
       profiling_plan_ = ExecutionPlan(copy);
       // fall-through
     }
 
+
+    const char* debussy = getenv("DEBUSSY");
+    if (debussy){
+      std::cout << "DEBUSSY\n";
+    }
     if (!pr_->ready()) {
       return *profiling_plan_;
     }
@@ -87,12 +93,14 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
 
   // insert bailouts
   InsertGuards(copy);
+  auto unoptimized_graph = copy->copy();
   // get rid of autograd specific ops
   // we can probably make guard_elimination.cpp
   // to handle these ops
 
+  EliminateRedundantGuards(copy);
   //if (getProfilingMode()) {
-    specializeAutogradZero(*copy);
+    //specializeAutogradZero(*copy);
   //}
   // hoist out GradOf blocks
   // otherwise we will need to teach
@@ -102,12 +110,18 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   //LowerGradOf(*copy);
 
   // constant fold into ConstantChunk
-  CanonicalizeOps(copy);
+  //CanonicalizeOps(copy);
+  // remove foldable ifs to help EliminateRedundantGuards
+  //ConstantPropagation(copy);
+
+  LowerGradOf(*copy);
   EliminateRedundantGuards(copy);
+  
   if (getProfilingMode()) {
-    InsertBailOuts(copy);
+    InsertBailOuts(copy, unoptimized_graph);
     GRAPH_DUMP("After InsertBailOuts: ", copy);
   }
+  specializeAutogradZero(*copy);
   runRequiredPasses(copy);
   // if (!getProfilingMode()) {
   //   // PropagateInputShapes is likely a no-op since we don't specialize
@@ -115,6 +129,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   //   PropagateInputShapes(copy);
   //   PropagateRequiresGrad(copy);
   // }
+  
   ConstantPropagation(copy);
   runOptimization(copy);
 
@@ -145,7 +160,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
 
   const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
   if (ppg) {
-    std::cout << "optimized graph:\n";
+    std::cout << "optimized graph for" << this << std::endl;
     copy->dump();
   }
   // cache

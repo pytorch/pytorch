@@ -1995,28 +1995,36 @@ graph(%Ra, %Rb):
         self.assertExportImport(trace, (x,))
 
     def run_ge_tests(self, optimize, use_cuda):
+        print("run_ge_tests")
         with torch.jit.optimized_execution(optimize):
             def rand(*args):
                 t = torch.rand(*args).float()
                 if use_cuda:
                     t = t.cuda()
                 return t
-            self.checkTrace(lambda a, b: a * b + b,
-                            [rand(1), rand(1)], [rand(2, 3), rand(2, 3)])
+            #self.checkTrace(lambda a, b: a * b + b,
+            #                [rand(1), rand(1)], [rand(2, 3), rand(2, 3)])
             # trivial identity
-            self.checkTrace(lambda a, b: (
-                b, a), [rand(1), rand(1)])
+            #self.checkTrace(lambda a, b: (
+            #    b, a), [rand(1), rand(1)])
 
             def foo(a):
-                t = a * a
+                t = a + 3
                 return t * t, 4 * t
-            self.checkTrace(foo, [rand(1)])
+
+            print ("being foo")
+            #self.checkTrace(foo, [rand(1)])
+            print("end foo")
             # unused input
             self.checkTrace(
                 lambda a, b: a * a, [rand(1), rand(1)], allow_unused=True)
             # test outputs that do not get used in grad
-            self.checkTrace(foo, [rand(1)], drop=1)
+
+            print ("begin drop")
+            #self.checkTrace(foo, [rand(1)], drop=1)
+            print ("begin end")
             # test autograd fallback
+            print ("testing autograd fallback")
             self.checkTrace(lambda a, b: a * b /
                             (a - 2 * b) + b, [rand(1), rand(1)])
 
@@ -2026,7 +2034,8 @@ graph(%Ra, %Rb):
     @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: fuser support for Windows or Sandcastle")
     @enable_cpu_fuser
     def test_ge_optimized(self):
-        self.run_ge_tests(True, False)
+        with enable_profiling_mode(ProfilingMode.FULL):
+            self.run_ge_tests(True, False)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -15810,6 +15819,7 @@ def the_method({}):
 
 script_method_template = '''
 def forward({}):
+    print("script_method_template")
     return {}
 '''
 
@@ -15870,13 +15880,13 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
 
         script = script_template.format(', '.join(formals), call)
 
-        print ("create_script_fn:")
+        print ("create_script_fn start")
         # print(str(script))
-        print("before cu")
         CU = torch.jit.CompilationUnit(script)
         self.assertExportImport(CU.the_method.graph, tensors)
         output = output_process_fn(CU.the_method(*tensors))
         script_fn.last_graph = CU.the_method.graph_for(*tensors)
+        print ("create_script_fn end")
         return output
     return script_fn
 
@@ -15938,12 +15948,12 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     #     #print(str(func.last_graph))
 
 
-    print ("no grad")
+    print ("no grad", file=sys.stderr)
     # test no gradients case
     outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
     with enable_profiling_mode(ProfilingMode.FULL):
         outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
-    print("no grad graph:")
+    print("no grad graph:", file=sys.stderr)
     #print(str(func.last_graph))
     self.assertEqual(outputs, outputs_test)
 
@@ -15951,11 +15961,11 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
 
     if no_grad:
-        print("skipping")
+        print("skipping", file=sys.stderr)
         # skip grad tests
         return
 
-    print ("grad")
+    print ("grad", file=sys.stderr)
     with enable_profiling_mode(ProfilingMode.FULL):
     # test single grad case
         outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
@@ -15968,7 +15978,25 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         self.assertEqual(outputs, outputs_test)
         self.assertEqual(grads, grads_test)
 
-        print ("grad grad")
+        print("running optimized grad start")
+        recording_inputs_opt, recording_tensors_opt = clone_inputs(True)
+        outputs2 = self.runAndSaveRNG(reference_func, recording_inputs_opt, kwargs)
+        grads2 = torch.autograd.grad(allSum(outputs), recording_tensors_opt,
+                                    allow_unused=allow_unused)
+        grads2_2 = torch.autograd.grad(allSum(outputs), recording_tensors_opt,
+                                    allow_unused=allow_unused)
+
+        outputs_test2 = self.runAndSaveRNG(func, recording_inputs_opt, kwargs)
+        grads_test2 = torch.autograd.grad(allSum(outputs_test), recording_tensors_opt,
+                                        allow_unused=allow_unused)
+        grads_test2_2 = torch.autograd.grad(allSum(outputs_test), recording_tensors_opt,
+                                        allow_unused=allow_unused)
+        self.assertEqual(outputs2, outputs_test2)
+        self.assertEqual(grads2, grads_test2)
+        self.assertEqual(grads2_2, grads_test2_2)
+        print("running optimized grad end")
+
+        print ("grad grad", file=sys.stderr)
         # test the grad grad case
         if self._testMethodName in nn_functional_single_grad:
             return
@@ -15977,8 +16005,13 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         l1 = allSum(outputs)
         grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                     allow_unused=allow_unused)
+
+        
         l2 = (allSum(grads) * l1)
         grads2 = torch.autograd.grad(l2, recording_tensors, allow_unused=allow_unused)
+
+        # jit
+        print ("run jitted func")
 
         recording_inputs, recording_tensors = clone_inputs(True)
 
@@ -15986,7 +16019,12 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         l1_test = allSum(outputs_test)
         grads_test = torch.autograd.grad(
             l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
+
+        print ("asserting", file=sys.stderr)
+        self.assertEqual(grads[0], grads_test[0])
+        print ("after asserting")
         l2_test = (allSum(grads_test) * l1_test)
+        print ("computing grad grad")
         grads2_test = torch.autograd.grad(l2_test, recording_tensors, allow_unused=allow_unused)
 
         self.assertEqual(outputs, outputs_test)
@@ -15995,8 +16033,8 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
             if g2 is None and g2_test is None:
                 continue
             
-            print("g2 = ", str(g2))
-            print("g2_test = ", str(g2_test))
+            print("g2 = ", str(g2), file=sys.stderr)
+            print("g2_test = ", str(g2_test), file=sys.stderr)
             self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 
 
@@ -16814,11 +16852,13 @@ def add_nn_module_test(*args, **kwargs):
 
             # module cannot be imported / exported
             if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
+                print ("emit hooks disabled!")
                 with torch.jit._disable_emit_hooks():
                     module = make_module(script)
                     create_script_module.last_graph = module.graph
                     mod = module(*args)
             else:
+                print ("running emit hooks")
                 module = make_module(script)
                 self.assertExportImportModule(module, tensors)
                 create_script_module.last_graph = module.graph
