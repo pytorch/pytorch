@@ -245,6 +245,9 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
 
 
 def get_default_args(fn):
+    if fn is None:
+        return {}
+
     if PY2:
         argspec = inspect.getargspec(fn)
         if argspec.defaults is not None:

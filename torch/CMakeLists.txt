@@ -82,6 +82,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_sugared_value.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/concrete_module_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/onnx/init.cpp
@@ -233,7 +234,6 @@ if (USE_DISTRIBUTED)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback_impl.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref.cpp
         )

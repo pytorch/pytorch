@@ -1,4 +1,4 @@
-from typing import Any, Callable, TypeVar, Generic, overload, Sequence, List
+from typing import Any, Callable, TypeVar, Generic, overload, Sequence, List, Optional
 from . import Dataset, Sampler
 
 T_co = TypeVar('T_co', covariant=True)
@@ -19,12 +19,13 @@ class DataLoader(Generic[T_co]):
     timeout: float
 
     @overload
-    def __init__(self, dataset: Dataset[T_co], batch_size: int=..., shuffle: bool=..., sampler: Sampler[int]=...,
-                 num_workers: int=..., collate_fn: _collate_fn_t=..., pin_memory: bool=...,
-                 drop_last: bool=..., timeout: float=..., worker_init_fn: _worker_init_fn_t=...) -> None: ...
+    def __init__(self, dataset: Dataset[T_co], batch_size: int=..., shuffle: bool=...,
+                 sampler: Optional[Sampler[int]]=..., num_workers: int=..., collate_fn: _collate_fn_t=...,
+                 pin_memory: bool=..., drop_last: bool=..., timeout: float=...,
+                 worker_init_fn: _worker_init_fn_t=...) -> None: ...
     @overload
-    def __init__(self, dataset: Dataset[T_co], batch_sampler: Sampler[Sequence[int]]=..., num_workers: int=...,
-                 collate_fn: _collate_fn_t=..., pin_memory: bool=..., timeout: float=...,
+    def __init__(self, dataset: Dataset[T_co], batch_sampler: Optional[Sampler[Sequence[int]]]=...,
+                 num_workers: int=..., collate_fn: _collate_fn_t=..., pin_memory: bool=..., timeout: float=...,
                  worker_init_fn: _worker_init_fn_t=...) -> None: ...
 
     def __len__(self) -> int: ...
