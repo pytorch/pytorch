@@ -188,7 +188,7 @@ void set_num_threads(int nthreads) {
     }
     if (stored_nthreads != nthreads) {
       TORCH_WARN(
-        "Error: cannot set number of intraop threads "
+        "Cannot set number of intraop threads "
         "after parallel work has started or after set_num_threads call "
         "when using native parallel backend");
     }

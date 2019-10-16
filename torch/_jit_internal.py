@@ -521,7 +521,7 @@ def _get_overloaded_methods(method, mod_class):
 
 try:
     import typing
-    from typing import Tuple, List, Dict, Optional
+    from typing import Tuple, List, Dict, Optional, Any
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -607,10 +607,14 @@ except ImportError:
         def __getitem__(self, types):
             return OptionalInstance(types)
 
+    class AnyCls(object):
+        pass
+
     Tuple = TupleCls()  # noqa: T484
     List = ListCls()  # noqa: T484
     Dict = DictCls()  # noqa: T484
     Optional = DictCls()  # noqa: T484
+    Any = AnyCls()  # noqa: T484
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)
