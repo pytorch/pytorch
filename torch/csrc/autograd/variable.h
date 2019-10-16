@@ -349,7 +349,7 @@ struct TORCH_API Variable : public at::Tensor {
 /// metadata fields that are necessary for tracking the Variable's autograd history.
 
 struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
-  std::string name;
+  std::string name_;
 
   Variable grad_;
   std::shared_ptr<Node> grad_fn_;
@@ -740,11 +740,11 @@ inline const Variable& Variable::base() const {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::set_name(const std::string& name) {
-  get_autograd_meta()->name = name;
+  get_autograd_meta()->name_ = name;
 }
 
 inline const std::string& Variable::name() const noexcept {
-  return get_autograd_meta()->name;
+  return get_autograd_meta()->name_;
 }
 
 inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
