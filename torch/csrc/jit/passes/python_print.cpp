@@ -1360,6 +1360,10 @@ const SourceRangeRecords& PythonPrint::ranges() const {
   return pImpl->body_.ranges();
 }
 
+void PythonPrint::LEGACY_printOpVersion() {
+  pImpl->body_ << "op_version_set = 1\n";
+}
+
 PythonPrint::~PythonPrint() = default;
 
 bool printerHasSpecialCaseFor(Symbol sym) {

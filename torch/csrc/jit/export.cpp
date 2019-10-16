@@ -531,11 +531,12 @@ void GraphEncoder::EncodeTensor(
 
 class ScriptModuleSerializer {
  public:
-  ScriptModuleSerializer(const std::string& filename)
-      : writer_(filename.c_str()) {}
+  explicit ScriptModuleSerializer(const std::string& filename)
+      : writer_(filename) {}
 
-  ScriptModuleSerializer(std::ostream* ofs)
-      : ofs_(), writer_(ofs) {}
+  explicit ScriptModuleSerializer(
+      const std::function<size_t(const void *, size_t)>& writer_func)
+      : writer_(writer_func) {}
 
   void serialize(
       const script::Module& module,
@@ -618,7 +619,8 @@ class ScriptModuleSerializer {
     for (auto& item : file_streams_) {
       const std::string filename = qualifierToArchivePath(item.key(), "code/");
 
-      const std::string src = item.value().str();
+      std::string src = item.value().str();
+
       writer_.writeRecord(filename, src.c_str(), src.size(), /*compress=*/true);
 
       // Write out the debug information
@@ -717,11 +719,11 @@ class ScriptModuleSerializer {
           qualifier,
           PythonPrint(
               constant_table_, class_deps_, /*enforce_importable=*/true));
+      pp->LEGACY_printOpVersion();
     }
     pp->printNamedType(class_type);
   }
 
-  std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::Tensor> constant_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
@@ -971,7 +973,11 @@ void ExportModule(
     std::ostream& out,
     const script::ExtraFilesMap& extra_files,
     bool bytecode_format) {
-  ScriptModuleSerializer serializer(&out);
+  ScriptModuleSerializer serializer(
+    [&](const void* buf, size_t nbytes) -> size_t {
+      out.write(static_cast<const char *>(buf), nbytes);
+      return !out ? 0 : nbytes;
+    });
   serializer.serialize(module, extra_files, bytecode_format);
 }
 
@@ -981,6 +987,15 @@ void ExportModule(
     const script::ExtraFilesMap& extra_files,
     bool bytecode_format) {
   ScriptModuleSerializer serializer(filename);
+  serializer.serialize(module, extra_files, bytecode_format);
+}
+
+void ExportModule(
+    const script::Module& module,
+    const std::function<size_t(const void*, size_t)>& writer_func,
+    const script::ExtraFilesMap& extra_files,
+    bool bytecode_format) {
+  ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(module, extra_files, bytecode_format);
 }
 

@@ -71,6 +71,7 @@ import types
 import unittest
 import warnings
 import zipfile
+import re
 
 try:
     import torchvision
@@ -3644,6 +3645,33 @@ def foo(x):
         x = torch.rand(3, 4)
         self.assertEqual(bar(x), (x * x + 3 * x) * (x * x + 3 * x))
 
+    def test_static_methods(self):
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            @staticmethod
+            def my_method(x):
+                return x + 100
+
+            def forward(self, x):
+                return x + M.my_method(x)
+
+        class N(nn.Module):
+            def __init__(self):
+                super(N, self).__init__()
+
+            @staticmethod
+            def my_method(x):
+                return x * 100
+
+            def forward(self, x):
+                return x - M.my_method(x) + N.my_method(x)
+
+        self.checkModule(M(), (torch.ones(2, 2),))
+
+        self.checkModule(N(), (torch.ones(2, 2),))
+
     def test_invalid_prefix_annotation(self):
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
             with self.capture_stdout() as captured:
@@ -3665,6 +3693,44 @@ def foo(x):
                 def invalid_prefix_annotation3(a):
                     #     type: (Int) -> Int
                     return a + 2
+
+    def test_unmatched_type_annotation(self):
+        message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
+        message2 = re.escape("""
+            def invalid2(a):
+            ~~~~~~~~~~~~~~ <--- HERE
+                # type: (Int, Int) -> Int
+                return a + 2
+        """.strip())
+        message3 = re.escape("""
+            def invalid4(a):
+            ~~~~~~~~~~~~~~ <--- HERE
+                # type: (Int, Int) -> Int
+                return a + 2
+        """.strip())
+        with self.assertRaisesRegex(RuntimeError, message1):
+            @torch.jit.script
+            def invalid1(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, message2):
+            @torch.jit.script
+            def invalid2(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, message1):
+            def invalid3(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+            torch.jit.script(invalid3)
+
+        with self.assertRaisesRegex(RuntimeError, message3):
+            def invalid4(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+            torch.jit.script(invalid4)
 
     def test_is_optional(self):
         ann = Union[List[int], List[float]]
@@ -18966,6 +19032,21 @@ class TestClassType(JitTestCase):
             return foo.foo
 
         self.assertEqual(fn(1), 3)
+
+    def test_staticmethod(self):
+        class X(object):
+            def __init__(self, x):
+                # type: (int) -> None
+                self.x = x
+
+            @staticmethod
+            def identity(x):
+                return x
+
+        def fn(x, y):
+            return X.identity(x)
+
+        self.checkScript(fn, (torch.randn(2, 2), torch.randn(2, 2)))
 
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):

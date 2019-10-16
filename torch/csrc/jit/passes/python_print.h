@@ -29,6 +29,8 @@ struct TORCH_API PythonPrint {
 
   ~PythonPrint();
 
+  void LEGACY_printOpVersion();
+
  private:
   std::shared_ptr<PythonPrintImpl> pImpl;
 };
