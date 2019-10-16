@@ -835,10 +835,10 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
 }
 
 Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto result = kl_div_backward(grad, input, target, Reduction::None);
-  if (reduction == Reduction::Mean) {
+  auto result = kl_div_backward(grad, input, target, at::Reduction::None);
+  if (reduction == at::Reduction::Mean) {
     return result.mean();
-  } else if (reduction == Reduction::Sum) {
+  } else if (reduction == at::Reduction::Sum) {
     return result.sum();
   }
   return result;
@@ -847,10 +847,10 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
 // Compute derivatives for targets.
 // Assume targets are given as probabilities (i.e. without taking the logarithm).
 Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) {
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
   }
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
   }
   return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
@@ -868,7 +868,7 @@ Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_outpu
     grad_target.mul_(weight);
   }
 
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     grad_target.div_(target.numel());
   }
 
@@ -913,9 +913,9 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   if (weight.defined()) {
     gI *= weight;
   }
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     return gI / input.numel();
-  } else if (reduction == Reduction::Sum) {
+  } else if (reduction == at::Reduction::Sum) {
     return gI.sum();
   }
   return gI;
@@ -930,19 +930,19 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   if (weight.defined()) {
     ggO *= weight;
   }
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     return ggO / input.numel();
-  } else if (reduction == Reduction::Sum) {
+  } else if (reduction == at::Reduction::Sum) {
     return ggO.sum();
   }
   return ggO;
 }
 
 Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto output = l1_loss_backward(grad, input, target, Reduction::None);
-  if (reduction == Reduction::Mean) {
+  auto output = l1_loss_backward(grad, input, target, at::Reduction::None);
+  if (reduction == at::Reduction::Mean) {
     return output.mean();
-  } else if (reduction == Reduction::Sum) {
+  } else if (reduction == at::Reduction::Sum) {
     return output.sum();
   }
   return output;
@@ -951,14 +951,14 @@ Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & i
 Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto d = (input - target).abs();
   auto grad_input = grad * (d < 1).type_as(grad);
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
 Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     return smooth_l1_loss_backward(grad, input, target, reduction);
   }
   auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction);
@@ -989,14 +989,14 @@ Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t o
 
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64_t reduction) {
   auto grad_input = 2 * grad;
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
 Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     return mse_loss_backward(grad, input, target, reduction);
   }
   auto r = mse_loss_backward(ones_like(grad_output), input, target, reduction);
@@ -1007,14 +1007,14 @@ Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & inpu
   auto z = (input * -target).exp();
   auto zplus1 = z + 1;
   auto grad_input = grad * (target * target) * z / (zplus1 * zplus1);
-  if (reduction == Reduction::Mean) {
+  if (reduction == at::Reduction::Mean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
 Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     return soft_margin_loss_backward(grad, input, target, reduction);
   }
   auto r = soft_margin_loss_backward(ones_like(grad_output), input, target, reduction);
@@ -2321,6 +2321,97 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 }
 
+std::tuple<Tensor, Tensor, Tensor>
+infinitely_differentiable_native_layer_norm_backward(
+    const Tensor& dY,
+    const Tensor& dmean,
+    const Tensor& drstd,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    double eps,
+    std::array<bool, 3> grad_input_mask) {
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+
+  const Tensor X_tensor = X.reshape({M, N});
+  const Tensor mean_tensor = mean.reshape({M, 1});
+  const Tensor rstd_tensor = rstd.reshape({M, 1});
+  const double s = 1.0 / static_cast<double>(N);
+
+  Tensor dY_tensor;
+  if (dY.defined()) {
+    dY_tensor = dY.reshape({M, N});
+  }
+
+  if (grad_input_mask[0]) {
+    Tensor gamma_tensor;
+    if (gamma.defined()) {
+      gamma_tensor = gamma.reshape({1, N});
+    }
+    Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
+    Tensor var;
+    Tensor dvar;
+    if (drstd.defined()) {
+      var = ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
+      dvar = -0.5 * rstd_cube * drstd.view({M, 1});
+    }
+    Tensor ds;
+    Tensor db;
+    if (dY.defined()) {
+      ds = (gamma.defined() ? dY_tensor * X_tensor * gamma_tensor
+                            : dY_tensor * X_tensor)
+               .sum(1)
+               .unsqueeze_(-1);
+      db = (gamma.defined() ? dY_tensor * gamma_tensor : dY_tensor)
+               .sum(1)
+               .unsqueeze_(-1);
+      const Tensor& a = rstd_tensor;
+      const Tensor b = (db * mean_tensor - ds) * rstd_cube * s;
+      const Tensor c = -b * mean_tensor - db * rstd_tensor * s;
+      dX = a * dY_tensor + b * X_tensor + c;
+      if (dmean.defined() && drstd.defined()) {
+        dX += var_std_mean_backward(
+            {dvar, dmean.view({M, 1})},
+            X_tensor,
+            var,
+            mean_tensor,
+            {1},
+            false,
+            true,
+            false);
+      }
+      dX = dX.reshape_as(X);
+    } else if (dmean.defined() && drstd.defined()) {
+      dX = var_std_mean_backward(
+               {dvar, dmean.view({M, 1})},
+               X_tensor,
+               var,
+               mean_tensor,
+               {1},
+               false,
+               true,
+               false)
+               .reshape_as(X);
+    }
+  }
+
+  if (grad_input_mask[1] && dY.defined()) {
+    dgamma = (dY_tensor * (X_tensor - mean_tensor) * rstd_tensor)
+                 .sum(0)
+                 .reshape_as(gamma);
+  }
+  if (grad_input_mask[2] && dY.defined()) {
+    dbeta = dY_tensor.sum(0).reshape_as(gamma);
+  }
+
+  return std::make_tuple(dX, dgamma, dbeta);
+}
+
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
@@ -2380,6 +2471,16 @@ Tensor index_backward(Tensor zeros_like_self, TensorList indices, const Tensor& 
    return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 
+Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, const Tensor& raw_grad, bool zero_infinity) {
+  if (zero_infinity) {
+    return at::where(
+        loss.unsqueeze(0).unsqueeze(2) == 0,
+        at::zeros({0}, raw_grad.options()),
+        raw_grad * grad_out.unsqueeze(0).unsqueeze(2));
+  } else {
+    return raw_grad * grad_out.unsqueeze(0).unsqueeze(2);
+  }
+}
 
 } // anonymous namespace
 
