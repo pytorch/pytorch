@@ -652,10 +652,16 @@ class ScriptModuleSerializer {
       const auto src = item.second.str();
       const auto& debugInfo = fileToDebug.at(filename);
 
+      // Only compress these records if they're not tiny.
+      // The cpu cost of generating zip datastructs and compressing isn't
+      // well-spent for small strings.
+      static constexpr size_t kMinToCompress = 200;
+
       // Prepend the opset_version string
       const auto lib_str = c10::str(opset_string, src);
       writer_.writeRecord(
-          filename, lib_str.c_str(), lib_str.size(), /*compress=*/true);
+          filename, lib_str.c_str(), lib_str.size(),
+          lib_str.size() > kMinToCompress  /*compress*/);
 
       // Write out the debug information
       std::stringstream debugFilename;
@@ -667,7 +673,7 @@ class ScriptModuleSerializer {
           debugFilename.str(),
           range_data.data(),
           range_data.size(),
-          /*compress=*/true);
+          range_data.size() > kMinToCompress /*compress*/);
     }
   }
 
