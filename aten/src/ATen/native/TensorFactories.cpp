@@ -879,12 +879,13 @@ Tensor clone(const Tensor& tensor, c10::optional<c10::MemoryFormat> optional_mem
   auto memory_format =
       optional_memory_format.value_or(MemoryFormat::Preserve);
   Tensor src;
-  if (tensor.dim() <= 1) {
-    src = tensor;
-  } else if (tensor.dim() == 2) {
-    src = tensor.t();
+  if (tensor.dim() >= 2 && tensor.is_contiguous() && memory_format != MemoryFormat::Contiguous) {
+    auto tr = tensor.transpose(0, 1);
+    auto empty = at::empty_like(tr, tensor.options(), memory_format);
+    empty.copy_(tr);
+    src = empty.transpose(0, 1);
   } else {
-    src = tensor.transpose(0, -1).transpose(-1, -2);
+    src = tensor;
   }
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
