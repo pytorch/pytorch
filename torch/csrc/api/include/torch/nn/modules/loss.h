@@ -157,9 +157,11 @@ TORCH_MODULE(MultiLabelSoftMarginLoss);
 /// samples. A triplet is composed by `a`, `p` and `n` (i.e., `anchor`, 
 /// `positive examples` and `negative examples` respectively). The
 /// shapes of all input tensors should be :math:`(N, D)`
-struct TORCH_API TripletMarginLossImpl : Module {
+struct TORCH_API TripletMarginLossImpl : public Cloneable<TripletMarginLossImpl> {
   explicit TripletMarginLossImpl(
       const TripletMarginLossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `TripletMarginLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
