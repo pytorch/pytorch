@@ -1352,6 +1352,22 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    def test_unbind(self):
+        class UnbindModel(torch.nn.Module):
+            def forward(self, input):
+                return input.unbind()
+
+        x = torch.randn(3, 4, 5)
+        self.run_model_test(UnbindModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+        class UnbindModel2(torch.nn.Module):
+            def forward(self, input):
+                _, out, _, _ = input.unbind(1)
+                return out
+
+        x = torch.randn(3, 4, 5)
+        self.run_model_test(UnbindModel2(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):
             def forward(self, x):
