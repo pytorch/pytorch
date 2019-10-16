@@ -6209,14 +6209,19 @@ class TestTorchDeviceType(TestCase):
             expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
             a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
             for other_dtype in torch.testing.get_all_dtypes():
-                # Skip bfloat16 on CUDA
+                b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
+
+                # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
                 if device != 'cpu' and torch.bfloat16 in (dtype, other_dtype):
+                    with self.assertRaises(RuntimeError):
+                        a.logical_xor(b)
                     continue
                 # TODO Remove this skipping after bfloat16 can be handled nicely with other dtypes.
                 # Skip only if either dtype or other_dtype is bfloat16.
                 if (dtype == torch.bfloat16) != (other_dtype == torch.bfloat16):
+                    with self.assertRaises(RuntimeError):
+                        a.logical_xor(b)
                     continue
-                b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
                 # new tensor
                 self.assertEqual(expected_res.bool(), a.logical_xor(b))
                 # out
@@ -6224,11 +6229,15 @@ class TestTorchDeviceType(TestCase):
                 torch.logical_xor(a, b, out=c)
                 self.assertEqual(expected_res.bool(), c.bool())
 
-            # in-place (skip bfloat16 on CUDA)
-            if device == 'cpu' or dtype != torch.bfloat16:
-                b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
-                a.logical_xor_(b)
-                self.assertEqual(expected_res, a)
+            # in-place
+            b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
+            # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
+            if device != 'cpu' and dtype == torch.bfloat16:
+                with self.assertRaises(RuntimeError):
+                    a.logical_xor_(b)
+                continue
+            a.logical_xor_(b)
+            self.assertEqual(expected_res, a)
 
     def test_isinf(self, device):
         t1 = torch.Tensor([1, inf, 2, -inf, nan]).to(device)
@@ -10203,8 +10212,8 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.float, torch.double)
     def test_linspace(self, device, dtype):
-        _from = random.random(dtype=dtype)
-        to = _from + random.random(dtype=dtype)
+        _from = random.random()
+        to = _from + random.random()
         res1 = torch.linspace(_from, to, 137, device=device, dtype=dtype)
         res2 = torch.tensor((), device=device, dtype=dtype)
         torch.linspace(_from, to, 137, out=res2)
@@ -10218,8 +10227,11 @@ class TestTorchDeviceType(TestCase):
                          torch.tensor(list(range(10, 2001)), device=device, dtype=dtype))
 
         self.assertRaises(RuntimeError, lambda: torch.linspace(0, 1, -1, device=device, dtype=dtype))
+        # steps = 1
         self.assertEqual(torch.linspace(0, 1, 1, device=device, dtype=dtype),
                          torch.zeros(1, device=device, dtype=dtype), 0)
+        # steps = 0
+        self.assertEqual(torch.linspace(0, 1, 0, device=device, dtype=dtype).numel(), 0)
 
         # Check linspace for generating with start > end.
         self.assertEqual(torch.linspace(2, 0, 3, device=device, dtype=dtype),
