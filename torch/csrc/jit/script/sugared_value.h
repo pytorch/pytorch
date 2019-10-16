@@ -249,16 +249,9 @@ struct TORCH_API NamedTupleConstructor : public SugaredValue {
 };
 
 struct FunctionValue : public SugaredValue {
-  FunctionValue(Function* callee) : callees_({std::move(callee)}) {}
+  FunctionValue(Function* callee) : callee_(std::move(callee)) {}
   FunctionValue(const StrongFunctionPtr& p)
-      : callees_({p.function_}), cu_(p.cu_) {}
-  FunctionValue(const std::vector<StrongFunctionPtr>& callees) {
-    for (const StrongFunctionPtr& callee : callees) {
-      cu_ = cu_ ? cu_ : callee.cu_;
-      TORCH_INTERNAL_ASSERT(callee.cu_ == cu_);
-      callees_.push_back(callee.function_);
-    }
-  }
+      : callee_(p.function_), cu_(p.cu_) {}
 
   std::string kind() const override {
     return "function";
@@ -270,20 +263,16 @@ struct FunctionValue : public SugaredValue {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
-    std::vector<const FunctionSchema*> schemas;
-    for (Function* callee : callees_) {
-      callee->ensure_defined();
-      schemas.push_back(&callee->getSchema());
-    }
-    auto match = matchSchemas(schemas, loc, *f.graph(), inputs, attributes);
-    Value* output =
-        f.graph()->insertFunctionCall(callees_[match.first], match.second);
+    callee_->ensure_defined();
+    MatchedSchema match =
+        matchSchema(callee_->getSchema(), loc, *f.graph(), inputs, attributes);
+    Value* output = f.graph()->insertFunctionCall(callee_, match);
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);
   }
 
  private:
-  std::vector<Function*> callees_;
+  Function* callee_;
   // TODO holding this thing is creepy
   std::shared_ptr<CompilationUnit> cu_;
 };
@@ -303,10 +292,8 @@ struct TORCH_API ClosureValue : public SugaredValue {
 
 // defines how a method obtained from a module/class/interface behaves in script
 struct MethodValue : public SugaredValue {
-  MethodValue(Value* self, std::vector<std::string> method_names)
-      : self_(std::move(self)), method_names_(std::move(method_names)) {}
   MethodValue(Value* self, std::string method_name)
-      : MethodValue(self, std::vector<std::string>({method_name})) {}
+      : self_(std::move(self)), method_name_(std::move(method_name)) {}
 
   std::string kind() const override {
     return "method";
@@ -320,31 +307,28 @@ struct MethodValue : public SugaredValue {
       size_t n_binders) override {
     std::vector<NamedValue> inputsWithSelf = {self_};
     inputsWithSelf.insert(inputsWithSelf.end(), inputs.begin(), inputs.end());
-    std::vector<const FunctionSchema*> schemas;
-    for (const std::string& method_name : method_names_) {
-      if (auto class_type = self_->type()->cast<ClassType>()) {
-        auto method = class_type->getMethod(method_name);
-        TORCH_INTERNAL_ASSERT(method);
-        method->ensure_defined();
-        schemas.push_back(&method->getSchema());
-      } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
-        schemas.push_back(interface_type->getMethod(method_name));
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            false, "method constructed that is not a class or interface");
-      }
+    const FunctionSchema* schema = nullptr;
+    if (auto class_type = self_->type()->cast<ClassType>()) {
+      auto method = class_type->getMethod(method_name_);
+      TORCH_INTERNAL_ASSERT(method);
+      method->ensure_defined();
+      schema = &method->getSchema();
+    } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
+      schema = interface_type->getMethod(method_name_);
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "method constructed that is not a class or interface");
     }
-    auto match =
-        matchSchemas(schemas, loc, *f.graph(), inputsWithSelf, attributes);
-    Value* output =
-        f.graph()->insertMethodCall(method_names_[match.first], match.second);
+    MatchedSchema match =
+        matchSchema(*schema, loc, *f.graph(), inputsWithSelf, attributes);
+    Value* output = f.graph()->insertMethodCall(method_name_, match);
     output->node()->setSourceRange(loc);
     return std::make_shared<SimpleValue>(output);
   }
 
  private:
   Value* self_;
-  std::vector<std::string> method_names_;
+  std::string method_name_;
 };
 
 struct TORCH_API PrintValue : public SugaredValue {

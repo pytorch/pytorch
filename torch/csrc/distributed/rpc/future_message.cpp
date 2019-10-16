@@ -7,6 +7,12 @@ namespace rpc {
 const Message& FutureMessage::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
   finished_cv_.wait(lock, [this] { return completed_.load(); });
+
+  // Throw an exception if we encounter one.
+  if (message_.type() == MessageType::EXCEPTION) {
+    std::string err(message_.payload().begin(), message_.payload().end());
+    throw std::runtime_error(err);
+  }
   return message_;
 }
 
