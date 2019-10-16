@@ -27,7 +27,7 @@ def requires_process_group_agent(message=""):
 VALUE_FUTURE = concurrent.futures.Future()
 
 
-def stub_init_rpc_backend_handler(self_rank, self_name, init_method):
+def stub_start_rpc_backend_handler(self_rank, self_name, init_method):
     return mock.Mock()  # RpcAgent.
 
 
@@ -225,13 +225,13 @@ class RpcTest(object):
             rpc.rpc_sync(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
     @mock.patch.object(torch.distributed.autograd, "_init")
-    @mock.patch.object(torch.distributed.rpc.api, "_init_rpc_agent")
-    def test_register_rpc_backend_and_init_rpc_backend(
+    @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
+    def test_register_rpc_backend_and_start_rpc_backend(
         self, mock_rpc_agent, mock_dist_autograd_init
     ):
         backend_name = "stub_backend"
         rpc.register_backend(
-            backend_name, stub_init_rpc_backend_handler
+            backend_name, stub_start_rpc_backend_handler
         )
         rpc.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
 
