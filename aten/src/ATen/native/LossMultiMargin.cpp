@@ -55,7 +55,9 @@ static inline void multi_margin_loss_cpu_kernel(
     const int64_t nframe,
     const int64_t dim,
     const int64_t reduction) {
-  if (reduction == Reduction::None) {
+  // dim() != 0 check is for 1d input which produces a scalar output (that
+  // cannot be handeld by TensorAccessor)
+  if (reduction == Reduction::None && output.dim() > 0) {
     auto output_acc = output.accessor<scalar_t, 1>();
     for (int64_t t = 0; t < nframe; t++) {
       const auto idx = target_index_checked(target_data, t, dim);
@@ -110,7 +112,8 @@ void multi_margin_loss_out_cpu_template(
       "inconsistent target size, got: ",
       target.sizes());
 
-  if (reduction == Reduction::None) {
+  // produce a scalar output for 1d input
+  if (reduction == Reduction::None && ndims > 1) {
     output.resize_({nframe});
   } else {
     output.resize_({});
@@ -179,7 +182,10 @@ static void multi_margin_loss_backward_cpu_kernel(
     grad_input_row_data += dim;
   }
 
-  if (reduction != Reduction::None) {
+  if (reduction != Reduction::None || grad_output.dim() == 0) {
+    assert(
+        reduction != Reduction::None || grad_output.dim() > 0 ||
+        nframe == 1); // check 1d scalar fallback-case
     const auto d = *grad_output.data_ptr<scalar_t>();
     for (int64_t t = 0; t < nframe * dim; t++) {
       grad_input_data[t] *= d;
