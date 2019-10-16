@@ -32,6 +32,8 @@ parser.add_argument('--ignore', nargs='+', default=['cudaErrorInvalidDeviceFunct
                          'because cublas does not run error-free under cuda-memcheck')
 parser.add_argument('--nproc', type=int, default=multiprocessing.cpu_count(),
                     help='Number of processes running tests, default to number of cores in the system')
+parser.add_argument('--gpus', default='all',
+                    help='GPU assignments for each process, it could be "all", or : separated list like "1,2:3,4:5,6"')
 args = parser.parse_args()
 
 # Discover tests:
@@ -51,18 +53,28 @@ for line in lines:
 # Run tests:
 # Since running cuda-memcheck on PyTorch unit tests is very slow, these tests must be run in parallel.
 # This is done by using the coroutine feature in new Python versions.  A number of coroutines are created;
-# they create subprocesses and awaiting them to finish. The number of running subprocesses is the same as
-# the number of CPUs in the machine. These subprocesses are balanced across different GPUs on the system.
+# they create subprocesses and awaiting them to finish. The number of running subprocesses could be
+# specified by the user and by default is the same as the number of CPUs in the machine.
+# These subprocesses are balanced across different GPUs on the system by assigning one devices per process,
+# or as specified by the user
 progress = 0
 logfile = open('result.log', 'w')
 progressbar = tqdm.tqdm(total=len(ALL_TESTS))
 
-async def run1():
+async def run1(coroutine_id):
     global progress
+
+    if args.gpus == 'all':
+        gpuid = coroutine_id % GPUS
+    else:
+        gpu_assignments = args.gpus.split(':')
+        assert args.nproc == len(gpu_assignments), 'Please specify GPU assignmnent for each process, separated by :'
+        gpuid = gpu_assignments[coroutine_id]
+
     while progress < len(ALL_TESTS):
         test = ALL_TESTS[progress]
         progress += 1
-        cmd = f'CUDA_VISIBLE_DEVICES={progress % GPUS} cuda-memcheck --error-exitcode 1 python {args.filename} {test}'
+        cmd = f'CUDA_VISIBLE_DEVICES={gpuid} cuda-memcheck --error-exitcode 1 python {args.filename} {test}'
         proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), args.timeout)
@@ -93,7 +105,7 @@ async def run1():
         progressbar.update(1)
 
 async def main():
-    tasks = [asyncio.create_task(run1()) for _ in range(args.nproc)]
+    tasks = [asyncio.create_task(run1(i)) for i in range(args.nproc)]
     for t in tasks:
         await t
 
