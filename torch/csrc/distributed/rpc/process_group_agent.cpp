@@ -27,7 +27,16 @@ std::string serialize(const Message& message) {
   // append id and autograd metadata as a tensor
   tensors.push_back(torch::tensor({message.id()}, {torch::kInt64}));
 
+  // optional: estimate output size, to avoid some unnecessary resizing.
+  static constexpr size_t kBaseOverhead = 1024;
+  static constexpr size_t kPerTensor = 128;
+  size_t estimate = kBaseOverhead;
+  for (const auto& t : tensors) {
+    estimate += t.nbytes() + kPerTensor;
+  }
+
   std::string out;
+  out.reserve(estimate);
   torch::save(tensors, [&](const void* buf, size_t n) -> size_t {
     out.append(static_cast<const char*>(buf), n);
     return n;
@@ -35,10 +44,10 @@ std::string serialize(const Message& message) {
   return out;
 }
 
-Message deserialize(MessageType type, const char* buf, size_t nbytes) {
+Message deserialize(MessageType type, const void* buf, size_t size) {
   std::vector<torch::Tensor> tensors;
 
-  torch::load(tensors, buf, nbytes);
+  torch::load(tensors, static_cast<const char*>(buf), size);
 
   TORCH_CHECK(tensors.size() >= 2, "Failed to deserialize a message.");
   auto idTensor = std::move(tensors.back());
@@ -49,7 +58,7 @@ Message deserialize(MessageType type, const char* buf, size_t nbytes) {
   TORCH_INTERNAL_ASSERT(1, idTensor.numel());
   int64_t id = idTensor.storage().data<int64_t>()[0];
 
-  const char* data = payloadTensor.storage().data<char>();
+  const char* data = static_cast<const char*>(payloadTensor.storage().data());
   std::vector<char> payload(data, data + payloadTensor.numel());
 
   return Message(std::move(payload), std::move(tensors), type, id);
@@ -341,10 +350,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
   threadPool_.run(std::bind(
       [&](RecvWork& work) {
         torch::Tensor& payload = work.payload_;
-        Message message = deserialize(
-            work.type_,
-            (char*)payload.storage().data<signed char>(),
-            payload.numel());
+        Message message =
+            deserialize(work.type_, payload.storage().data(), payload.numel());
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
