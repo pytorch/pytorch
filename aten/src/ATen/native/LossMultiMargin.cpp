@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/AccumulateType.h>
 
 namespace at {
 namespace native {
@@ -55,6 +56,8 @@ static inline void multi_margin_loss_cpu_kernel(
     const int64_t nframe,
     const int64_t dim,
     const int64_t reduction) {
+  using accscalar_t = at::acc_type<scalar_t, false>;
+
   // dim() != 0 check is for 1d input which produces a scalar output (that
   // cannot be handeld by TensorAccessor)
   if (reduction == Reduction::None && output.dim() > 0) {
@@ -67,7 +70,7 @@ static inline void multi_margin_loss_cpu_kernel(
       input_data += dim;
     }
   } else {
-    scalar_t sum = 0;
+    accscalar_t sum = 0;
     auto output_acc = output.data_ptr<scalar_t>();
     for (int64_t t = 0; t < nframe; t++) {
       const auto idx = target_index_checked(target_data, t, dim);
