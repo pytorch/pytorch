@@ -1,3 +1,4 @@
+import collections
 import io
 import tempfile
 import unittest
@@ -23,7 +24,7 @@ from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
 from common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf, default_floating_dtype
+    load_tests, slowTest, skipCUDANonDefaultStreamIf
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -91,6 +92,49 @@ class TestCuda(TestCase):
     _do_cuda_non_default_stream = True
     FIFTY_MIL_CYCLES = 50000000
 
+
+    def _check_memory_stat_consistency(self):
+        snapshot = torch.cuda.memory_snapshot()
+
+        expected_each_device = collections.defaultdict(lambda: collections.defaultdict(int))
+
+        for segment in snapshot:
+            expected = expected_each_device[segment["device"]]
+            pool_str = segment["segment_type"] + "_pool"
+
+            expected["segment.all.current"] += 1
+            expected["segment." + pool_str + ".current"] += 1
+
+            expected["allocated_bytes.all.current"] += segment["allocated_size"]
+            expected["allocated_bytes." + pool_str + ".current"] += segment["allocated_size"]
+
+            expected["reserved_bytes.all.current"] += segment["total_size"]
+            expected["reserved_bytes." + pool_str + ".current"] += segment["total_size"]
+
+            expected["active_bytes.all.current"] += segment["active_size"]
+            expected["active_bytes." + pool_str + ".current"] += segment["active_size"]
+
+            is_split = len(segment["blocks"]) > 1
+            for block in segment["blocks"]:
+                if block["state"] == "active_allocated":
+                    expected["allocation.all.current"] += 1
+                    expected["allocation." + pool_str + ".current"] += 1
+
+                if block["state"].startswith("active_"):
+                    expected["active.all.current"] += 1
+                    expected["active." + pool_str + ".current"] += 1
+
+                if block["state"] == "inactive" and is_split:
+                    expected["inactive_split.all.current"] += 1
+                    expected["inactive_split." + pool_str + ".current"] += 1
+                    expected["inactive_split_bytes.all.current"] += block["size"]
+                    expected["inactive_split_bytes." + pool_str + ".current"] += block["size"]
+
+        for device, expected in expected_each_device.items():
+            stats = torch.cuda.memory_stats(device)
+            for k, v in expected.items():
+                self.assertEqual(v, stats[k])
+
     @staticmethod
     def _test_memory_stats_generator(self, device=None, N=35):
         if device is None:
@@ -99,8 +143,8 @@ class TestCuda(TestCase):
         m0 = torch.cuda.memory_allocated(device)
         last_m_arr = [torch.cuda.memory_allocated(device)]
         max_m_arr = [torch.cuda.max_memory_allocated(device)]
-        last_c_arr = [torch.cuda.memory_cached(device)]
-        max_c_arr = [torch.cuda.max_memory_cached(device)]
+        last_r_arr = [torch.cuda.memory_reserved(device)]
+        max_r_arr = [torch.cuda.max_memory_reserved(device)]
 
         def alloc(*size):
             with torch.cuda.device(device):
@@ -111,7 +155,7 @@ class TestCuda(TestCase):
                 #       memory checks below to fail.
                 return torch.cuda.FloatTensor(*size)
 
-        def assert_change(comp=1, empty_cache=False, reset_max_alloc=False, reset_max_cached=False):
+        def assert_change(comp=1, empty_cache=False, reset_peak=False):
             # comp > 0: increased
             # comp = 0: equal
             # comp < 0: decreased
@@ -128,44 +172,37 @@ class TestCuda(TestCase):
             last_m_arr[0] = new_m
             max_m_arr[0] = new_max_m
 
-            new_c = torch.cuda.memory_cached(device)
-            new_max_c = torch.cuda.max_memory_cached(device)
+            new_r = torch.cuda.memory_reserved(device)
+            new_max_r = torch.cuda.max_memory_reserved(device)
             # emptying cache may happen (due to allocation or empty_cache), so
             # we can't assert new_c >= last_c
-            self.assertLessEqual(new_c, new_max_c)
-            self.assertGreaterEqual(new_max_c, max_c_arr[0])
-            last_c_arr[0] = new_c
-            max_c_arr[0] = new_max_c
+            self.assertLessEqual(new_r, new_max_r)
+            self.assertGreaterEqual(new_max_r, max_r_arr[0])
+            last_r_arr[0] = new_r
+            max_r_arr[0] = new_max_r
 
             if empty_cache:
                 torch.cuda.empty_cache()
-                new_c = torch.cuda.memory_cached(device)
-                new_max_c = torch.cuda.max_memory_cached(device)
-                self.assertLessEqual(new_c, last_c_arr[0])
-                self.assertLessEqual(new_c, new_max_c)
-                self.assertEqual(new_max_c, max_c_arr[0])
-                last_c_arr[0] = new_c
+                new_r = torch.cuda.memory_reserved(device)
+                new_max_r = torch.cuda.max_memory_reserved(device)
+                self.assertLessEqual(new_r, last_r_arr[0])
+                self.assertLessEqual(new_r, new_max_r)
+                self.assertEqual(new_max_r, max_r_arr[0])
+                last_r_arr[0] = new_r
 
-            if reset_max_alloc:
-                torch.cuda.reset_max_memory_allocated(device)
+            if reset_peak:
+                torch.cuda.reset_peak_memory_stats(device)
                 self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
                 self.assertEqual(torch.cuda.max_memory_allocated(device), last_m_arr[0])
                 max_m_arr[0] = last_m_arr[0]
-                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
-                self.assertEqual(torch.cuda.max_memory_cached(device), max_c_arr[0])
-
-            if reset_max_cached:
-                torch.cuda.reset_max_memory_cached(device)
-                self.assertEqual(torch.cuda.memory_allocated(device), last_m_arr[0])
-                self.assertEqual(torch.cuda.max_memory_allocated(device), max_m_arr[0])
-                self.assertEqual(torch.cuda.memory_cached(device), last_c_arr[0])
-                self.assertEqual(torch.cuda.max_memory_cached(device), last_c_arr[0])
-                max_c_arr[0] = last_c_arr[0]
+                self.assertEqual(torch.cuda.memory_reserved(device), last_r_arr[0])
+                self.assertEqual(torch.cuda.max_memory_reserved(device), last_r_arr[0])
+                max_r_arr[0] = last_r_arr[0]
 
         assert_change(0)
-        assert_change(0, reset_max_alloc=True)
+        assert_change(0, reset_peak=True)
         assert_change(0, empty_cache=True)
-        assert_change(0, reset_max_cached=True)
+        assert_change(0, reset_peak=True)
         assert_change(0)
         yield
 
@@ -185,7 +222,7 @@ class TestCuda(TestCase):
         for i in range(5, int(N / 2) + 5):
             # large ones
             tensors2.append(alloc(i, i * 7, i * 9, i * 11))
-            assert_change(1, reset_max_alloc=(i % 2 == 0), reset_max_cached=(i % 2 == 1))
+            assert_change(1, reset_peak=(i % 2 == 0))
             yield
 
         tensors2.append(alloc(0, 0, 0))
@@ -205,7 +242,7 @@ class TestCuda(TestCase):
         assert_change(0)
         yield
         del permute
-        assert_change(0, reset_max_alloc=True)
+        assert_change(0, reset_peak=True)
         yield
 
         for i in range(int(N / 2)):
@@ -220,24 +257,23 @@ class TestCuda(TestCase):
             yield
 
         del tensors2
-        assert_change(-1, reset_max_cached=True)
+        assert_change(-1, reset_peak=True)
         assert_change(0)
         self.assertEqual(torch.cuda.memory_allocated(device), m1)
         yield True
 
         del tensors1
-        assert_change(-1, reset_max_alloc=True)
+        assert_change(-1, reset_peak=True)
         self.assertEqual(torch.cuda.memory_allocated(device), m0)
 
-        # test empty_cache and reset_max_memory_*
+        # test empty_cache and reset_peak
         assert_change(0, empty_cache=True)
-        assert_change(0, reset_max_cached=True)
-        assert_change(0, reset_max_alloc=True)
+        assert_change(0, reset_peak=True)
 
     def test_memory_stats(self):
         torch.cuda.empty_cache()
         for _ in self._test_memory_stats_generator(self):
-            pass
+            self._check_memory_stat_consistency()
 
     def test_cuda_get_device_name(self):
         # Testing the behaviour with None as an argument
@@ -1341,6 +1377,38 @@ class TestCuda(TestCase):
             tmp3 = torch.cuda.FloatTensor(t.size())
             self.assertEqual(tmp3.data_ptr(), ptr[0], 'allocation not re-used')
 
+    def test_record_stream_on_shifted_view(self):
+        # See issue #27366
+
+        # This test detects unexpected block reallocation. For reliable test,
+        # the stream to allocate tensors is isolated. The allocator will not
+        # reuse free blocks which were allocated from another stream.
+        stream_alloc = torch.cuda.Stream()
+        with torch.cuda.stream(stream_alloc):
+            base = torch.cuda.FloatTensor([10, 10])
+
+        # Record another stream on a shifted view tensor.
+        view = base[5:]
+        assert view.storage_offset() > 0
+
+        stream_record = torch.cuda.Stream()
+        with torch.cuda.stream(stream_record):
+            torch.cuda._sleep(int(50 * get_cycles_per_ms()))
+
+        view.record_stream(stream_record)
+
+        # Delete those tensors to make the block free soon.
+        data_ptr = base.data_ptr()
+        del base, view
+
+        # A new tensor should not be allocated to the block above.
+        stream_alloc.synchronize()
+
+        with torch.cuda.stream(stream_alloc):
+            try_realloc = torch.cuda.FloatTensor([10, 10])
+
+        self.assertNotEqual(try_realloc.data_ptr(), data_ptr)
+
     def test_noncontiguous_pinned_memory(self):
         # See issue #3266
         x = torch.arange(0, 10).view((2, 5))
@@ -1641,11 +1709,10 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.mark("bar")
         torch.cuda.nvtx.range_pop()
 
-    @default_floating_dtype(torch.double)
     def test_bincount_ext(self):
         # ensure CUDA code coverage
         input_size = (5000,)
-        w = torch.randn(input_size, device='cuda')
+        w = torch.randn(input_size, dtype=torch.double, device='cuda')
         w_cpu = w.cpu()
         # test shared memory impl
         t = torch.randint(50, input_size, dtype=torch.int8, device='cuda')

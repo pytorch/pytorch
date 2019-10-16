@@ -1,9 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
-#include <torch/csrc/distributed/rpc/future_message.h>
-#include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 
 namespace torch {
 namespace distributed {
@@ -17,8 +15,9 @@ namespace autograd {
 // autograd information for the recipient.
 TORCH_API void addSendRpcBackward(
     DistAutogradContext& autogradContext,
-    const torch::distributed::rpc::AutogradMetadata& autogradMetadata,
-    std::vector<torch::Tensor>& tensors);
+    const AutogradMetadata& autogradMetadata,
+    std::vector<torch::Tensor>& tensors,
+    const rpc::worker_id_t dst);
 
 // This method is used to attach the 'recv' autograd function to the autograd
 // graph when we use RPC. This method creates a new 'recv' autograd function
@@ -29,15 +28,25 @@ TORCH_API void addSendRpcBackward(
 // Returns a pointer to the autograd context created (nullptr in case of no
 // autograd information was needed.)
 TORCH_API DistAutogradContext* addRecvRpcBackward(
-    const torch::distributed::rpc::AutogradMetadata& autogradMetadata,
-    std::vector<torch::Tensor>& tensors);
+    const AutogradMetadata& autogradMetadata,
+    std::vector<torch::Tensor>& tensors,
+    rpc::worker_id_t fromWorkerId);
 
-// This method is a wrapper utility used internally to attach autograd info
-// and autograd function for each type of rpc call, and then send the message
-std::shared_ptr<torch::distributed::rpc::FutureMessage> sendMessageWithAutograd(
-    torch::distributed::rpc::RpcAgent& agent,
-    const torch::distributed::rpc::WorkerInfo& dst,
-    std::unique_ptr<torch::distributed::rpc::RpcCommandBase> rpcCommand);
+// This method is a wrapper utility used internally to wrap autograd info
+// and attached autograd function for each type of rpc call if it has valid
+// context and tensors require grads, in this case, return RpcWithAutograd
+// message; otherwise return original rpc message.
+rpc::Message getMessageWithAutogradCheck(
+    const rpc::worker_id_t dstId,
+    rpc::Message&& wrappedRpcMsg,
+    rpc::MessageType msgType);
+
+// Send message after autograd checking
+std::shared_ptr<torch::distributed::rpc::FutureMessage> sendMessage(
+    rpc::RpcAgent& agent,
+    const rpc::WorkerInfo& dst,
+    rpc::Message&& wrappedRpcMsg,
+    rpc::MessageType msgType);
 
 } // namespace autograd
 } // namespace distributed
