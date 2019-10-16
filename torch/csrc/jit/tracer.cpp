@@ -146,7 +146,7 @@ Value* TracingState::getValue(const IValue& var) {
       }
       return it->second;
     }
-    std::ostringstream oss; 
+    std::ostringstream oss;
     if (var.isFuture()) {
       oss << "Tried to trace Future or Object that the tracer was not aware of.";
     } else {
@@ -285,7 +285,7 @@ static void gatherParametersAndBuffers(
     Value* self_value,
     const script::Module& self) {
   Graph& g = *self_value->owningGraph();
-  
+
   state->setValue(self.module_object(), self_value);
 
   for (script::Slot s : self.get_slots()) {
@@ -304,7 +304,7 @@ static void gatherParametersAndBuffers(
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
 std::pair<std::shared_ptr<TracingState>, Stack> enter(
-    TypedStack inputs,
+    Stack inputs,
     script::Module* self) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
@@ -321,12 +321,10 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(
   }
 
   size_t i = 0;
-  auto input_types = inputs.types()->elements();
-  for (IValue& input : inputs.stack()) {
-    input = addInput(state,
-        input, input_types[i++], state->graph->addInput());
+  for (IValue& input : inputs) {
+    input = addInput(state, input, input.type(), state->graph->addInput());
   }
-  return std::make_pair(state, inputs.stack());
+  return std::make_pair(state, inputs);
 }
 
 // Exit a trace, treating 'outputs' as the outputs of the trace.  These

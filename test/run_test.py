@@ -20,14 +20,12 @@ PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'autograd',
-    'cpp_api_parity',
     'cpp_extensions',
     'c10d',
     'c10d_spawn',
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
-    'dist_autograd_fork',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -75,6 +73,7 @@ if PY36:
         'jit_py3',
         'rpc_fork',
         'rpc_spawn',
+        'dist_autograd_fork',
         'dist_autograd_spawn',
     ])
 
@@ -87,12 +86,9 @@ WINDOWS_BLACKLIST = [
 ]
 
 ROCM_BLACKLIST = [
-    'c10d',
-    'cpp_api_parity',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
-    'nccl',
     'rpc_fork',
     'rpc_spawn',
     'dist_autograd_fork',

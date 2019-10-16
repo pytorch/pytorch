@@ -257,14 +257,14 @@ def cumsum(g, input, dim, dtype):
 
 
 def _sample_dirichlet(g, self, generator):
-    if not generator.node().mustBeNone():
+    if not sym_help._is_none(generator):
         return _unimplemented('_sample_dirichlet',
                               'We are not able to export generator')
     return g.op("ATen", self, operator_s="_sample_dirichlet")
 
 
 def _standard_gamma(g, self, generator):
-    if not generator.node().mustBeNone():
+    if not sym_help._is_none(generator):
         return _unimplemented('_standard_gamma',
                               'We are not able to export generator')
     return g.op("ATen", self, operator_s="_standard_gamma")
@@ -299,7 +299,7 @@ def embedding_bag(g,
                   mode,
                   sparse,
                   per_sample_weights):
-    if not per_sample_weights.node().mustBeNone():
+    if not sym_help._is_none(per_sample_weights):
         raise RuntimeError('Unsupported: ONNX export of embedding_bag '
                            'with per_sample_weights')
     return g.op("ATen",
@@ -319,8 +319,7 @@ def size(g, self, dim):
         if rank:
             dim = sym_help._maybe_get_const(dim, 'i') + rank
             dim = g.op("Constant", value_t=torch.tensor(dim))
-    full_shape = g.op("Shape", self)
-    return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
+    return sym_help._size_helper(g, self, dim)
 
 
 @parse_args('v', 'i', 'i')
@@ -390,6 +389,13 @@ def split(g, self, split_size, dim):
 @parse_args('v', 'is', 'i')
 def split_with_sizes(g, self, split_sizes, dim):
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
+
+
+@parse_args('v', 'i')
+def unbind(g, self, dim=0):
+    # NOTE: This conversion of this node is handled in onnx peephole pass.
+    # Due to that an additional Squeeze node needs to be inserted for each output from unbind.
+    return g.op("aten::unbind", self, axis_i=dim)
 
 
 @parse_args('v', 'i', 'v')
@@ -735,6 +741,12 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
+def __interpolate(g, input, size, scale_factor, mode , align_corners):
+    scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
+                                                             mode , align_corners)
+    return g.op("Upsample", input, scales, mode_s=mode)
+
+
 def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         def wrap_with_cast(g, input, other):
@@ -829,7 +841,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     args = [input, weight]
     # ONNX only supports 1D bias
-    if not bias.node().mustBeNone() and bias.type().dim() == 1:
+    if not sym_help._is_none(bias) and bias.type().dim() == 1:
         args.append(bias)
 
     kwargs = {"kernel_shape_i": weight_size[2:],
@@ -850,7 +862,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
-    if not bias.node().mustBeNone() and bias.type().dim() != 1:
+    if not sym_help._is_none(bias) and bias.type().dim() != 1:
         return g.op("Add", n, bias)
     else:
         return n
@@ -863,12 +875,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
         input = g.op("Unsqueeze", input, axes_i=[2])
 
-    if weight is None or weight.node().mustBeNone():
+    if weight is None or sym_help._is_none(weight):
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().mustBeNone():
+    if bias is None or sym_help._is_none(bias):
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -911,9 +923,9 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 
     layer_norm = div(g, numerator, denominator)
 
-    if not (weight is None or weight.node().mustBeNone()):
+    if not (weight is None or sym_help._is_none(weight)):
         layer_norm = mul(g, layer_norm, weight)
-    if not (bias is None or bias.node().mustBeNone()):
+    if not (bias is None or sym_help._is_none(bias)):
         layer_norm = add(g, layer_norm, bias)
 
     return layer_norm
@@ -922,12 +934,12 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
     input_sizes = input.type().sizes()
-    if weight is None or weight.node().mustBeNone():
+    if weight is None or sym_help._is_none(weight):
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().mustBeNone():
+    if bias is None or sym_help._is_none(bias):
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -1001,19 +1013,7 @@ def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, 'i')
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, index, value, dim_i=dim_value, operator_s="index_fill")
-    # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
-    # 2. expand index => [..., dim, ...], same shape as self except for dim.
-    # 3. expand value as well.
-    # 4. apply onnx::scatter.
-
-    if self.type().dim() is None:
-        return _unimplemented("index_fill", "input rank not accesible")
-    self_dim = self.type().dim()
-    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
-    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
-                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
-    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
-
+    expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, self)
     expanded_value = expand(g, value, expanded_index_shape, None)
@@ -1025,16 +1025,7 @@ def index_copy(g, self, dim, index, source):
     dim_value = sym_help._parse_arg(dim, 'i')
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
-    # Similar to index_fill, apply reshape + expand to index.
-
-    if self.type().dim() is None:
-        return _unimplemented("index_copy", "input rank not accesible")
-    self_dim = self.type().dim()
-    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
-    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
-                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
-    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
-
+    expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
 
 
@@ -1079,9 +1070,9 @@ def pow(g, self, exponent):
 def clamp(g, self, min, max):
     # min or max may be None that we need to dispatch to
     # Clip separately, as ONNX does not have None syntax
-    if min.node().mustBeNone():
+    if sym_help._is_none(min):
         return clamp_max(g, self, max)
-    elif max.node().mustBeNone():
+    elif sym_help._is_none(max):
         return clamp_min(g, self, min)
     else:
         min = _parse_arg(min, 'f')
@@ -1215,6 +1206,8 @@ def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
@@ -1222,12 +1215,16 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros_like(g, input, dtype, layout, device, pin_memory=False):
     shape = g.op("Shape", input)
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v', 'v')
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
@@ -1235,11 +1232,15 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
 @parse_args('v', 'i', 'v', 'v', 'v')
 def ones_like(g, input, dtype, layout, device, pin_memory=False):
     shape = g.op("Shape", input)
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+    if dtype is None:
+        dtype = 6  # float
     const_value = sym_help._maybe_get_const(value, 't')
     if sym_help._is_value(const_value):
         tmp = zeros(g, sizes, dtype, layout, device)
@@ -1253,6 +1254,8 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
 @parse_args('v', 'f', 'i', 'v', 'v', 'v')
 def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
     shape = g.op("Shape", input)
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
@@ -1322,27 +1325,29 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 def to(g, self, *args):
     # ONNX doesn't have a concept of a device, so we ignore device casts
-    if len(args) == 3:
+    if len(args) == 4:
         if args[0].type().isSubtypeOf(ListType.ofInts()):
-            # aten::to(Tensor, Device, bool, bool)
+            # aten::to(Tensor, Device, bool, bool, memory_format)
             return self
         else:
-            # aten::to(Tensor, ScalarType, bool, bool)
+            # aten::to(Tensor, ScalarType, bool, bool, memory_format)
             dtype = sym_help._get_const(args[0], 'i', 'dtype')
+            # memory_format is ignored
             return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
-    elif len(args) == 4:
-        # aten::to(Tensor, Device, ScalarType, bool, bool)
-        dtype = sym_help._get_const(args[1], 'i', 'dtype')
-        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 5:
-        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
-        dtype = sym_help._get_const(args[0], 'i', 'dtype')
-        # Layout and device are ignored
+        # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
+        dtype = sym_help._get_const(args[1], 'i', 'dtype')
+        # memory_format is ignored
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 6:
-        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, memory_format) -> Tensor
         dtype = sym_help._get_const(args[0], 'i', 'dtype')
-        # Layout and device are ignored
+        # Layout, device and memory_format are ignored
+        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 7:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool, memory_format) -> Tensor
+        dtype = sym_help._get_const(args[0], 'i', 'dtype')
+        # Layout, device and memory_format are ignored
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     else:
         raise NotImplementedError("Unknown aten::to signature")
@@ -1690,7 +1695,7 @@ def narrow(g, input, dim, start, length):
 
 
 def argmax(g, input, dim, keepdim):
-    if dim.node().mustBeNone():
+    if sym_help._is_none(dim):
         flattened = reshape(g, input, (-1,))
         return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False)
     else:
@@ -1700,7 +1705,7 @@ def argmax(g, input, dim, keepdim):
 
 
 def argmin(g, input, dim, keepdim):
-    if dim.node().mustBeNone():
+    if sym_help._is_none(dim):
         flattened = reshape(g, input, (-1,))
         return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False)
     else:
@@ -1845,7 +1850,7 @@ def index(g, self, index):
         indices = [index]
 
     def try_mask_to_index(index):
-        if not index.node().mustBeNone() and index.type().scalarType() == "Byte":
+        if not sym_help._is_none(index) and index.type().scalarType() == "Byte":
             warnings.warn("Exporting aten::index operator with indices of type Byte. "
                           "Only 1-D indices are supported. In any other case, "
                           "this will produce an incorrect ONNX graph.")
@@ -1874,7 +1879,7 @@ def index(g, self, index):
         #       t: [x_1 * x_2 * ... * x_m, y_1 * y_2 * ... * y_n]
         #       tensor index = \sum_{i=1}^m (ind_i * \prod_{j=i+1}^m (x_j))
         # After gather, reshape and transpose back.
-        adv_idx_indices = [i for i, idx in enumerate(indices) if not idx.node().mustBeNone()]
+        adv_idx_indices = [i for i, idx in enumerate(indices) if not sym_help._is_none(idx)]
 
         if len(adv_idx_indices) == 0:
             return self
@@ -1954,7 +1959,7 @@ def frobenius_norm(g, self, dim=None, keepdim=False):
 
 @parse_args('v', 'i', 'b', 'v')
 def multinomial(g, input, num_samples, replacement=False, generator=None):
-    if generator is not None and not generator.node().mustBeNone():
+    if generator is not None and not sym_help._is_none(generator):
         _unimplemented("Multinomial", "generator is not supported for multinomial")
     if not replacement and num_samples > 1:
         _unimplemented("Multinomial", "replacement=False when num_samples > 1 is not supported for multinomial")
