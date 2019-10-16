@@ -4,8 +4,16 @@ from __future__ import absolute_import, division, print_function
 import os
 import subprocess
 import argparse
+import sys
+sys.path.append(os.path.realpath(os.path.join(
+    __file__,
+    os.path.pardir,
+    os.path.pardir,
+    os.path.pardir,
+    'torch',
+    'utils')))
 
-from pyHIPIFY import hipify_python
+from hipify import hipify_python
 
 parser = argparse.ArgumentParser(description='Top-level script for HIPifying, filling in most common parameters')
 parser.add_argument(
