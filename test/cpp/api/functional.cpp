@@ -600,13 +600,13 @@ TEST_F(FunctionalTest, Bilinear) {
   auto y_with_bias = F::bilinear(input1, input2, weight, bias);
   ASSERT_EQ(y_with_bias.ndimension(), 2);
   ASSERT_EQ(y_with_bias.sizes(), torch::IntArrayRef({2, 1}));
-  auto y_with_bias_exp = torch::tensor({{449}, {1702}});
+  auto y_with_bias_exp = torch::tensor({{449}, {1702}}).reshape({2, 1});
   ASSERT_TRUE(torch::allclose(y_with_bias, y_with_bias_exp, 1e-4, 1e-7));
 
   auto y_no_bias = F::bilinear(input1, input2, weight);
   ASSERT_EQ(y_no_bias.ndimension(), 2);
   ASSERT_EQ(y_no_bias.sizes(), torch::IntArrayRef({2, 1}));
-  auto y_no_bias_exp = torch::tensor({{448, 1701}});
+  auto y_no_bias_exp = torch::tensor({{448, 1701}}).reshape({2, 1});
   ASSERT_TRUE(torch::allclose(y_no_bias, y_no_bias_exp, 1e-4, 1e-7));
 }
 
