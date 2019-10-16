@@ -7,6 +7,7 @@
 #include <cmath>
 #include <type_traits>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Complex.h>
 #include <c10/macros/Macros.h>
 
 namespace at {
@@ -29,6 +30,12 @@ inline C10_HOST_DEVICE bool _isnan(T val) {
 #else
   return std::isnan(val);
 #endif
+}
+
+template <typename T,
+          typename std::enable_if<std::is_complex_t<T>::value, int>::type = 0>
+inline bool _isnan(T val) {
+  return std::isnan(std::real(val)) || std::isnan(std::imag(val));
 }
 
 inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {

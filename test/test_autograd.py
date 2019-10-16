@@ -27,7 +27,6 @@ from torch.utils.checkpoint import checkpoint
 from common_utils import (TEST_MKL, TestCase, run_tests, skipIfNoLapack,
                           suppress_warnings, slowTest,
                           load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
-from common_cuda import TEST_CUDA
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
@@ -40,7 +39,8 @@ from common_methods_invocations import (method_tests,
                                         mask_not_all_zeros,
                                         S)
 from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                onlyCUDA, dtypes, dtypesIfCUDA)
+                                onlyCUDA, dtypes, dtypesIfCUDA,
+                                deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1142,24 +1142,6 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             b.add_(5)
 
-    def test_requires_grad_factory(self):
-        x = torch.randn(2, 3)
-        fns = [torch.ones_like, torch.testing.randn_like]
-        dtypes = [torch.float32, torch.float64]
-        for fn in fns:
-            for requires_grad in [True, False]:
-                for dtype in dtypes:
-                    for use_cuda in [True, False]:
-                        if not use_cuda:
-                            output = fn(x, dtype=dtype, requires_grad=requires_grad)
-                            self.assertEqual(requires_grad, output.requires_grad)
-                            self.assertIs(dtype, output.dtype)
-                        elif torch.cuda.is_available() and torch.cuda.device_count() > 1:
-                            output = fn(x, dtype=dtype, device=1, requires_grad=requires_grad)
-                            self.assertEqual(requires_grad, output.requires_grad)
-                            self.assertIs(dtype, output.dtype)
-                            self.assertEqual(1, output.get_device())
-
     def test_attribute_deletion(self):
         x = torch.randn((5, 5), requires_grad=True)
         del x.grad
@@ -1174,29 +1156,6 @@ class TestAutograd(TestCase):
             del x._grad_fn
         with self.assertRaises(RuntimeError):
             del x._backward_hooks
-
-    def test_grad_assignment(self):
-        x = torch.randn(5, 5)
-
-        with self.assertRaises(RuntimeError):
-            x.grad = torch.randn(2, 2)
-        with self.assertRaises(RuntimeError):
-            x.grad = Variable(torch.randn(5, 5).long())
-        with self.assertRaises(RuntimeError):
-            x.grad = x
-
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("CUDA not available")
-        with self.assertRaises(RuntimeError):
-            x.grad = Variable(torch.randn(5, 5).cuda())
-        x = x.cuda().half()
-        x.grad = torch.zeros_like(x)  # would raise an error unless sparse type is properly handled
-
-        if torch.cuda.device_count() < 2:
-            raise unittest.SkipTest("At least 2 CUDA devices needed")
-        x = Variable(torch.randn(5, 5).cuda(0))
-        with self.assertRaises(RuntimeError):
-            x.grad = Variable(torch.randn(5, 5).cuda(1))
 
     def test_duplicate_backward_root(self):
         a = torch.randn(5, 5, requires_grad=True)
@@ -1808,40 +1767,6 @@ class TestAutograd(TestCase):
         y = double2(x)
         torch.autograd.grad(y, x, create_graph=True)
         torch.autograd.grad(y, x)  # should not error!
-
-    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    def test_unused_output_gpu(self):
-        from torch.nn.parallel._functions import Broadcast
-        x = Variable(torch.randn(5, 5).float().cuda(), requires_grad=True)
-        outputs = Broadcast.apply(list(range(torch.cuda.device_count())), x)
-        y = outputs[-1] * 2
-        y.sum().backward()
-        self.assertEqual(x.grad.data, torch.ones(5, 5) * 2)
-
-    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    def test_backward_device(self):
-        # check that current device matches the variable's device
-        device = [None]
-
-        class Identity(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x.clone()
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                device[0] = torch.cuda.current_device()
-                return grad_output.clone()
-
-        v = Variable(torch.randn(1).cuda(1), requires_grad=True)
-        Identity.apply(v).backward()
-        self.assertEqual(device[0], 1)
-
-    @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    def test_inputbuffer_add_multigpu(self):
-        input = torch.randn(1).cuda(0).requires_grad_()
-        output = input.cuda(1) + input.cuda(1)
-        output.backward()
 
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
@@ -3175,36 +3100,6 @@ class TestAutograd(TestCase):
         gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp, nondet_tol=1e-5)
         gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp, nondet_tol=1e-5)
 
-    @unittest.skipIf(not TEST_CUDA, "Requires cuda for multi device")
-    def test_multi_device_reentrant_autograd(self):
-        # Output on gpu so that this task will be associated with the gpu thread
-        def fn_on_gpu(inp):
-            # Artificially increase the priority of the next op to make sure it runs
-            # as soon as we reach it before the ops of branch1.
-            dummy = inp * 2 * 2 * 2 * 2
-            return inp.cuda()
-
-        def parent_on_cpu(inp):
-            # Slow branch of ops on gpu so that the work queue for the gpu thread
-            # won't empty too quickly. They also have smaller priorities than the
-            # ones created by fn_on_gpu
-            branch1 = inp.cuda()
-            branch1 = branch1 / branch1
-            branch1 = branch1 / branch1
-            branch1 = branch1 / branch1
-            # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
-            # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
-            # So the cpu thread will notify the gpu thread with an empty NodeTask.
-            branch2 = checkpoint(fn_on_gpu, inp)
-            out = branch2 + branch1
-            return out
-
-        inp = torch.rand(2, requires_grad=True)
-        out = parent_on_cpu(inp)
-        # This will segfault if the empty NodeTask is not handled properly in the
-        # gpu thread ReadyQueue
-        out.sum().backward()
-
     def test_version_counter(self):
         x = torch.randn(1, 2)
 
@@ -3838,6 +3733,31 @@ class TestAutogradDeviceType(TestCase):
             gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
 
     @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfCudnnVersionLessThan(7600)
+    def test_ctc_loss_cudnn(self, device):
+        batch_size = 16
+        input_length = 30
+        num_labels = 101
+        target_length = 15
+        targets = torch.randint(1, num_labels, (batch_size * target_length,),
+                                device='cuda', dtype=torch.long)
+        log_probs = torch.log_softmax(torch.randn(input_length, batch_size, num_labels, device='cuda', dtype=torch.float), 2)
+        log_probs.requires_grad_()
+
+        input_lengths = batch_size * [input_length]
+        target_lengths = batch_size * [target_length]
+        grad_out = torch.randn(batch_size, device='cuda', dtype=torch.float)
+        with torch.backends.cudnn.flags(enabled=False):
+            loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+            grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
+        loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cpu', torch.int32),
+                                                  input_lengths, target_lengths, reduction='none')
+        self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
+        grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
+        self.assertEqual(grad_cudnn, grad_native, prec=1e-4)
+
+    @onlyCUDA
     def test_free_unneeded_tensor(self, device):
         x = torch.randn(2, 3, 10, 10, device=device, requires_grad=True)
         m = torch.randn(1, 3, 1, 1, device=device)
@@ -3920,6 +3840,117 @@ class TestAutogradDeviceType(TestCase):
         for bias in [True, False]:
             mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(torch.float64)
             self._test_rnn_mod(mod, inp)
+
+    @deviceCountAtLeast(1)
+    def test_grad_assignment(self, devices):
+        x = torch.randn(5, 5, device=devices[0])
+
+        # Tests that the wrong shape raises
+        with self.assertRaises(RuntimeError):
+            x.grad = torch.randn(2, 2, device=devices[0])
+
+        # Tests that the wrong dtype raises
+        with self.assertRaises(RuntimeError):
+            x.grad = torch.randn(5, 5, dtype=torch.long, device=devices[0])
+
+        # Tests that self-assignment raises
+        with self.assertRaises(RuntimeError):
+            x.grad = x
+
+        # Tests device -> cpu grad assignment raises
+        if self.device_type != 'cpu':
+            with self.assertRaises(RuntimeError):
+                t_cpu = torch.rand(5, 5)
+                t_cpu.grad = torch.randn(5, 5, device=devices[0])
+
+        # Tests half type on CUDA
+        if self.device_type == 'cuda':
+            x = x.to(dtype=torch.half, device=devices[0])
+            x.grad = torch.zeros_like(x)
+
+        # Tests cross-device assignment raises
+        if len(devices) > 1:
+            x = torch.randn(5, 5, device=devices[0])
+            with self.assertRaises(RuntimeError):
+                x.grad = torch.randn(5, 5, device=devices[1])
+
+    @deviceCountAtLeast(1)
+    @dtypes(torch.float, torch.double)
+    def test_requires_grad_factory(self, devices, dtype):
+        fns = [torch.ones_like, torch.testing.randn_like]
+        x = torch.randn(2, 3, dtype=dtype, device=devices[0])
+
+        for fn in fns:
+            for requires_grad in [True, False]:
+                output = fn(x, dtype=dtype, device=devices[0], requires_grad=requires_grad)
+                self.assertEqual(requires_grad, output.requires_grad)
+                self.assertIs(dtype, output.dtype)
+                self.assertEqual(devices[0], str(x.device))
+
+    @deviceCountAtLeast(2)
+    def test_unused_output_device(self, devices):
+        from torch.nn.parallel._functions import Broadcast
+        x = torch.randn(5, 5, dtype=torch.float, device=devices[0], requires_grad=True)
+        outputs = Broadcast.apply(list(range(len(devices))), x)
+        y = outputs[-1] * 2
+        y.sum().backward()
+        self.assertEqual(x.grad.data, torch.ones(5, 5) * 2)
+
+    @deviceCountAtLeast(2)
+    def test_backward_device(self, devices):
+        # check that current device matches the variable's device
+        device = [None]
+
+        class Identity(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                device[0] = grad_output.device
+                return grad_output.clone()
+
+        v = torch.randn(1, device=devices[1], requires_grad=True)
+        Identity.apply(v).backward()
+        self.assertEqual(str(device[0]), devices[1])
+
+    @deviceCountAtLeast(2)
+    def test_inputbuffer_add_multidevice(self, devices):
+        input = torch.randn(1, device=devices[0], requires_grad=True)
+        output = input.to(device=devices[1]) + input.to(device=devices[1])
+        output.backward()
+
+    @onlyCUDA
+    def test_cross_device_reentrant_autograd(self, device):
+        # Output on gpu so that this task will be associated with the gpu thread
+        def fn_on_gpu(inp):
+            # Artificially increase the priority of the next op to make sure it runs
+            # as soon as we reach it before the ops of branch1.
+            dummy = inp * 2 * 2 * 2 * 2
+            return inp.to(device=device)
+
+        def parent_on_cpu(inp):
+            # Slow branch of ops on gpu so that the work queue for the gpu thread
+            # won't empty too quickly. They also have smaller priorities than the
+            # ones created by fn_on_gpu
+            branch1 = inp.to(device=device)
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            branch1 = branch1 / branch1
+            # Perform checkpoint on cpu tensors. So the last op performed in the reentrant
+            # autograd is an AccumulateGrad that runs on the cpu thread for the gpu thread.
+            # So the cpu thread will notify the gpu thread with an empty NodeTask.
+            branch2 = checkpoint(fn_on_gpu, inp)
+            out = branch2 + branch1
+            return out
+
+        inp = torch.rand(2, requires_grad=True)
+        out = parent_on_cpu(inp)
+        # This will segfault if the empty NodeTask is not handled properly in the
+        # gpu thread ReadyQueue
+        out.sum().backward()
+
 
 instantiate_device_type_tests(TestAutogradDeviceType, globals())
 

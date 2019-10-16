@@ -150,7 +150,6 @@ ProcessGroupAgent::ProcessGroupAgent(
 
   // construct PythonRpcHandler singleton here
   PythonRpcHandler::getInstance();
-  listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
@@ -245,6 +244,10 @@ void ProcessGroupAgent::sync() {
     // trigger more messages to be sent, we need to wait for the thread pool
     // again.
   } while (hasPendingMessage());
+}
+
+void ProcessGroupAgent::start() {
+  listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
