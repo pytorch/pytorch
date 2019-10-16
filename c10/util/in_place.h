@@ -1,3 +1,7 @@
+#pragma once
+
+#include <cstddef>
+
 namespace c10 {
 
 struct in_place_t { explicit in_place_t() = default; };
