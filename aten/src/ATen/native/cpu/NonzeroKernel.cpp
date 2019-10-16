@@ -30,9 +30,7 @@ static void nonzero_apply(Tensor& subscript, const Tensor& self, bool resize_aft
 
   auto iter = TensorIterator();
   iter.add_input(self);
-  if (!self.is_contiguous()) {
-    iter.reverse_order_dims();
-  }
+  iter.reverse_order_dims();
   iter.build();
   cpu_serial_kernel(iter, [&](scalar_t a) {
     if (a != 0) {
