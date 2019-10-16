@@ -49,10 +49,12 @@ Tensor MSELossImpl::forward(const Tensor& input, const Tensor& target) {
 // ============================================================================
 
 BCELossImpl::BCELossImpl(const BCELossOptions& options_) : options(options_) {
-  register_parameter("weight", options.weight());
+  reset();
 }
 
-void BCELossImpl::reset() {}
+void BCELossImpl::reset() {
+  register_buffer("weight", options.weight());
+}
 
 void BCELossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::BCELoss()";
