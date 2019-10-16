@@ -1015,7 +1015,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       if (module.find_parameter("bias")) {
         b = module.get_parameter("bias").variable_data();
       }
-      auto wrapper_module = packed_params_module.clone();
+      script::Module wrapper_module = packed_params_module.clone();
       auto set_weight_bias = wrapper_module.get_method("set_weight_bias");
       if (is_conv) {
         auto stride = toTwoElementIntList(match_vmap.at(vmap.at("stride")));
