@@ -19,7 +19,7 @@ Decl mergeTypesFromTypeComment(
     expected_num_annotations -= 1;
   }
   if (expected_num_annotations != type_annotation_decl.params().size()) {
-    throw ErrorReport(type_annotation_decl.range())
+    throw ErrorReport(decl.range())
         << "Number of type annotations ("
         << type_annotation_decl.params().size()
         << ") did not match the number of "
