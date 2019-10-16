@@ -35,9 +35,18 @@ inline scalar_t multi_margin_inner_sum_cpu(
   return sum;
 }
 
+inline int64_t target_index_checked(
+    const int64_t* target_data,
+    const int64_t index,
+    const int64_t dim) {
+  const int64_t idx = target_data[index];
+  TORCH_CHECK(idx >= 0 && idx < dim, "target out of range");
+  return idx;
+}
+
 template <typename scalar_t>
 static inline void multi_margin_loss_cpu_kernel(
-    scalar_t* output_data,
+    Tensor& output,
     scalar_t* input_data,
     int64_t* target_data,
     const int p,
@@ -47,23 +56,27 @@ static inline void multi_margin_loss_cpu_kernel(
     const int64_t dim,
     const int64_t reduction) {
   if (reduction == Reduction::None) {
+    auto output_acc = output.accessor<scalar_t, 1>();
     for (int64_t t = 0; t < nframe; t++) {
+      const auto idx = target_index_checked(target_data, t, dim);
       auto sum = multi_margin_inner_sum_cpu(
-          input_data, weight_data, p, margin, dim, target_data[t]);
-      output_data[t] = sum;
+          input_data, weight_data, p, margin, dim, idx);
+      output_acc[t] = sum;
       input_data += dim;
     }
   } else {
     scalar_t sum = 0;
+    auto output_acc = output.data_ptr<scalar_t>();
     for (int64_t t = 0; t < nframe; t++) {
+      const auto idx = target_index_checked(target_data, t, dim);
       sum += multi_margin_inner_sum_cpu(
-          input_data, weight_data, p, margin, dim, target_data[t]);
+          input_data, weight_data, p, margin, dim, idx);
       input_data += dim;
     }
     if (reduction == Reduction::Mean) {
       sum /= nframe;
     }
-    output_data[0] = sum;
+    output_acc[0] = sum;
   }
 }
 
@@ -97,20 +110,10 @@ void multi_margin_loss_out_cpu_template(
       "inconsistent target size, got: ",
       target.sizes());
 
-  if (target.dim() > 0) {
-    for (int64_t i = 0; i < nframe; i++) {
-      int64_t idx = target[i].item().toLong();
-      TORCH_CHECK(idx >= 0 && idx < dim, "target out of range");
-    }
-  } else {
-    int64_t idx = target.item().toLong();
-    TORCH_CHECK(idx >= 0 && idx < dim, "target out of range");
-  }
-
   if (reduction == Reduction::None) {
     output.resize_({nframe});
   } else {
-    output = at::tensor(0, input.options());
+    output.resize_({});
   }
 
   auto input_contiguous = input.contiguous();
@@ -118,13 +121,12 @@ void multi_margin_loss_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "multi_margin_loss_cpu_kernel", [&] {
-        auto output_data = output.data_ptr<scalar_t>();
         auto input_data = input_contiguous.data_ptr<scalar_t>();
         auto target_data = target_contiguous.data_ptr<int64_t>();
         auto weight_data =
             weight.defined() ? weight.data_ptr<scalar_t>() : nullptr;
         multi_margin_loss_cpu_kernel<scalar_t>(
-            output_data,
+            output,
             input_data,
             target_data,
             p,
@@ -149,8 +151,9 @@ static void multi_margin_loss_backward_cpu_kernel(
     int64_t nframe,
     int64_t dim,
     int64_t reduction) {
+  scalar_t* grad_input_row_data = grad_input_data;
   for (int64_t t = 0; t < nframe; t++) {
-    int64_t target_idx = target_data[t];
+    int64_t target_idx = target_index_checked(target_data, t, dim);
     scalar_t input_target = input_data[target_idx];
     scalar_t grad_input_target = 0;
     for (int64_t d = 0; d < dim; d++) {
@@ -165,19 +168,19 @@ static void multi_margin_loss_backward_cpu_kernel(
           h *= weight_data[target_idx];
         }
         grad_input_target -= h;
-        grad_input_data[d] = h;
+        grad_input_row_data[d] = h;
       } else {
-        grad_input_data[d] = 0;
+        grad_input_row_data[d] = 0;
       }
     }
-    grad_input_data[target_idx] = grad_input_target;
+    grad_input_row_data[target_idx] = grad_input_target;
 
     input_data += dim;
-    grad_input_data += dim;
+    grad_input_row_data += dim;
   }
 
   if (reduction != Reduction::None) {
-    const auto d = grad_output.item().to<scalar_t>();
+    const auto d = *grad_output.data_ptr<scalar_t>();
     for (int64_t t = 0; t < nframe * dim; t++) {
       grad_input_data[t] *= d;
     }
