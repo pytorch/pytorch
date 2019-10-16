@@ -1727,22 +1727,22 @@ TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
 TEST_F(ModulesTest, PrettyPrintL1Loss) {
   ASSERT_EQ(
       c10::str(L1Loss()),
-      "torch::nn::L1Loss())");
+      "torch::nn::L1Loss()");
 }
 TEST_F(ModulesTest, PrettyPrintKLDivLoss) {
   ASSERT_EQ(
       c10::str(KLDivLoss()),
-      "torch::nn::KLDivLoss())");
+      "torch::nn::KLDivLoss()");
 }
 TEST_F(ModulesTest, PrettyPrintMSELoss) {
   ASSERT_EQ(
       c10::str(MSELoss()),
-      "torch::nn::MSELoss())");
+      "torch::nn::MSELoss()");
 }
 TEST_F(ModulesTest, PrettyPrintBCELoss) {
   ASSERT_EQ(
       c10::str(BCELoss()),
-      "torch::nn::BCELoss())");
+      "torch::nn::BCELoss()");
 }
 TEST_F(ModulesTest, PrettyPrintHingeEmbeddingLoss) {
   ASSERT_EQ(
