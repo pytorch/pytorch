@@ -13,13 +13,10 @@ int64_t CleanupAutogradContextReq::getContextId() {
 }
 
 rpc::Message CleanupAutogradContextReq::toMessage() && {
-  std::vector<at::IValue> ivalues;
-  ivalues.emplace_back(context_id_);
-
-  // pickle
+  // pickle context_id using JIT pickler.
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> payload =
-      jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
+      jit::pickle(at::IValue(context_id_), &tensorTable);
   return rpc::Message(
       std::move(payload),
       std::move(tensorTable),
@@ -31,12 +28,11 @@ std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::
   // unpickle and get the context_id we need to clean up
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
-  IValue tuple =
+  IValue ivalue_context_id =
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
-  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
-  TORCH_INTERNAL_ASSERT(tupleElements.size() >= 1);
-  int64_t context_id = tupleElements[0].toInt();
 
+  // convert ivalue to int and construct request
+  int64_t context_id = ivalue_context_id.toInt();
   return std::unique_ptr<CleanupAutogradContextReq>(
       new CleanupAutogradContextReq(context_id));
 }
