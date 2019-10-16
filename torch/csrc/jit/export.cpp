@@ -531,12 +531,11 @@ void GraphEncoder::EncodeTensor(
 
 class ScriptModuleSerializer {
  public:
-  explicit ScriptModuleSerializer(const std::string& filename)
-      : writer_(filename) {}
+  ScriptModuleSerializer(const std::string& filename)
+      : writer_(filename.c_str()) {}
 
-  explicit ScriptModuleSerializer(
-      const std::function<size_t(const void *, size_t)>& writer_func)
-      : writer_(writer_func) {}
+  ScriptModuleSerializer(std::ostream* ofs)
+      : ofs_(), writer_(ofs) {}
 
   void serialize(
       const script::Module& module,
@@ -749,13 +748,14 @@ class ScriptModuleSerializer {
     std::vector<c10::NamedTypePtr> class_deps;
     std::ostringstream source_stream;
     SourceRangeRecords source_ranges;
-    PythonPrint(
+    PythonPrint pp(
         source_stream,
         source_ranges,
-        class_type,
         constant_table_,
         class_deps,
         /*enforce_importable=*/true);
+    pp.printNamedType(class_type);
+    pp.finish();
 
     for (const auto& c : class_deps) {
       if (c == class_type) {
@@ -772,6 +772,7 @@ class ScriptModuleSerializer {
     converted_types_.insert(class_type, std::move(info));
   }
 
+  std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::Tensor> constant_table_;
 
@@ -1022,11 +1023,7 @@ void ExportModule(
     std::ostream& out,
     const script::ExtraFilesMap& extra_files,
     bool bytecode_format) {
-  ScriptModuleSerializer serializer(
-    [&](const void* buf, size_t nbytes) -> size_t {
-      out.write(static_cast<const char *>(buf), nbytes);
-      return !out ? 0 : nbytes;
-    });
+  ScriptModuleSerializer serializer(&out);
   serializer.serialize(module, extra_files, bytecode_format);
 }
 
@@ -1036,15 +1033,6 @@ void ExportModule(
     const script::ExtraFilesMap& extra_files,
     bool bytecode_format) {
   ScriptModuleSerializer serializer(filename);
-  serializer.serialize(module, extra_files, bytecode_format);
-}
-
-void ExportModule(
-    const script::Module& module,
-    const std::function<size_t(const void*, size_t)>& writer_func,
-    const script::ExtraFilesMap& extra_files,
-    bool bytecode_format) {
-  ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(module, extra_files, bytecode_format);
 }
 
