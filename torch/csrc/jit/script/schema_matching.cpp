@@ -260,13 +260,13 @@ static bool varargsCanBeUsedAsList(
       !typevar_list;
 }
 
-c10::optional<MatchedSchema> tryMatchSchema(
+static c10::optional<MatchedSchema> tryMatchSchema(
     const FunctionSchema& schema,
     const SourceRange& loc,
     Graph& graph,
-    c10::optional<NamedValue> self,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
+    c10::optional<NamedValue> self,
     std::ostream* failure_messages,
     bool allow_conversions) {
   auto err = [&]() -> std::ostream& {
@@ -423,19 +423,83 @@ MatchedSchema matchSchema(
     const SourceRange& loc,
     Graph& graph,
     at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwargs) {
+    at::ArrayRef<NamedValue> kwargs,
+    const c10::optional<NamedValue>& self) {
   std::stringstream failure_messages;
   if (auto result = tryMatchSchema(
           schema,
           loc,
           graph,
-          c10::nullopt,
           args,
           kwargs,
+          self,
           &failure_messages,
           /*allow_conversions=*/true)) {
     return *result;
   }
+  throw ErrorReport(loc) << failure_messages.str();
+}
+
+static std::string prefixLine(
+    const std::string& str,
+    const std::string& prefix) {
+  std::stringstream ss;
+  bool was_newline = true;
+  for (auto c : str) {
+    if (was_newline)
+      ss << prefix;
+    ss.put(c);
+    was_newline = c == '\n';
+  }
+  return ss.str();
+}
+
+std::pair<size_t, MatchedSchema> matchSchemas(
+    const std::vector<const FunctionSchema*>& schemas,
+    const SourceRange& loc,
+    Graph& graph,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    const c10::optional<NamedValue>& self,
+    bool render_errors) {
+  TORCH_INTERNAL_ASSERT(schemas.size() > 0);
+  // if there is only one schema, we do not need to try without conversions
+  // first. this is faster and puts less dead code in the graph.
+  if (schemas.size() == 1) {
+    return std::make_pair(
+        0, matchSchema(*schemas.at(0), loc, graph, args, kwargs, self));
+  }
+  std::stringstream failure_messages;
+  for (bool allow_conversions : {false, true}) {
+    // clear previous error messages
+    failure_messages.str("");
+    for (size_t i = 0; i < schemas.size(); ++i) {
+      const auto matched_schema = tryMatchSchema(
+          *schemas[i],
+          loc,
+          graph,
+          args,
+          kwargs,
+          self,
+          render_errors ? &failure_messages : nullptr,
+          allow_conversions);
+      if (matched_schema) {
+        return std::make_pair(i, std::move(*matched_schema));
+      }
+    }
+  }
+  // we optimistically assume this call will not error, and avoid formatting the
+  // error strings. If we discover it did error, then we replay it, recording
+  // the errors.
+  if (!render_errors) {
+    return matchSchemas(
+        schemas, loc, graph, args, kwargs, self, /*render_errors=*/true);
+  }
+
+  throw ErrorReport(loc) << "Arguments for call are not valid.\n"
+                         << "The following variants are available:\n"
+                         << prefixLine(failure_messages.str(), "  ")
+                         << "\nThe original call is";
   throw ErrorReport(loc) << failure_messages.str();
 }
 
@@ -479,95 +543,30 @@ static Value* emitBuiltinNode(
   return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
 }
 
-static std::string prefixLine(
-    const std::string& str,
-    const std::string& prefix) {
-  std::stringstream ss;
-  bool was_newline = true;
-  for (auto c : str) {
-    if (was_newline)
-      ss << prefix;
-    ss.put(c);
-    was_newline = c == '\n';
-  }
-  return ss.str();
-}
-
 // Search for operators matching the provided symbol name and input types.
 // If one is found, emit a node to the graph for that operator.
 Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    const c10::optional<NamedValue>& self,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
-    // if true, emitBuiltinCall will throw an exception if this builtin does not
-    // exist, otherwise it will return nullptr if the builtin is not found.
-    bool required,
-    bool render_errors) {
+    const c10::optional<NamedValue>& self) {
   const auto& variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
   std::stringstream failure_messages;
-  // first we try to match the schema without any conversion
-  // if no schema matches then insert ImplicitTensorToNum
-  for (bool allow_conversions : {false, true}) {
-    // clear previous error messages
-    failure_messages.str("");
-    for (const std::shared_ptr<Operator>& op : variants) {
-      const auto matched_schema = tryMatchSchema(
-          op->schema(),
-          loc,
-          graph,
-          self,
-          inputs,
-          attributes,
-          render_errors ? &failure_messages : nullptr,
-          allow_conversions);
-      if (matched_schema) {
-        return emitBuiltinNode(*matched_schema, loc, graph, name);
-      }
-    }
-    for (const auto method : builtin_functions) {
-      method->ensure_defined();
-      if (auto result = tryMatchSchema(
-              method->getSchema(),
-              loc,
-              graph,
-              self,
-              inputs,
-              attributes,
-              render_errors ? &failure_messages : nullptr,
-              allow_conversions)) {
-        // we inline builtin calls because they are normally very small
-        // wrappers and are not useful for keeping around to debug
-        return insertGraph(graph, *method->graph(), result->inputs).at(0);
-      }
-    }
+  std::vector<const FunctionSchema*> schemas;
+  for (const std::shared_ptr<Operator>& op : variants) {
+    schemas.push_back(&op->schema());
   }
-
-  // none of the options worked
-  if (!required) {
-    return nullptr;
-  }
-
-  // If errors were required, but we didn't eagerly render error strings,
-  // then replay schema matching with error strings eagerly rendered.
-  if (!render_errors) {
-    return emitBuiltinCall(
-        loc,
-        graph,
-        name,
-        self,
-        inputs,
-        attributes,
-        required,
-        /*render_errors=*/true);
+  for (const auto method : builtin_functions) {
+    method->ensure_defined();
+    schemas.push_back(&method->getSchema());
   }
 
   // no operators found with the same name, print out similarly named operators
-  if (variants.size() == 0) {
+  if (schemas.size() == 0) {
     const auto close_symbols = findSimilarOperators(name);
     auto error = ErrorReport(loc);
     const auto& user_function_name = name.toQualString();
@@ -586,11 +585,18 @@ Value* emitBuiltinCall(
     throw error;
   }
 
-  throw ErrorReport(loc) << "Arguments for call are not valid.\n"
-                         << "The following operator variants are available:\n"
-                         << prefixLine(failure_messages.str(), "  ")
-                         << "\nThe original call is";
+  auto matched = matchSchemas(schemas, loc, graph, inputs, attributes, self);
+
+  if (matched.first < variants.size()) {
+    return emitBuiltinNode(matched.second, loc, graph, name);
+  } else {
+    Function* fn = builtin_functions[matched.first - variants.size()];
+    // we inline builtin calls because they are normally very small
+    // wrappers and are not useful for keeping around to debug
+    return insertGraph(graph, *fn->graph(), matched.second.inputs).at(0);
+  }
 }
+
 } // namespace script
 } // namespace jit
 } // namespace torch

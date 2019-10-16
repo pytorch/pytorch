@@ -30,7 +30,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
             " but got weight tensor of shape: %s", n_classes, s1.str);
   }
 
-  if (reduction == Reduction::None && n_dims == 2) {
+  if (reduction == at::Reduction::None && n_dims == 2) {
     int batch_size = THTensor_(size)(input, 0);
     THTensor_(resize1d)(output, batch_size);
 
@@ -104,7 +104,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     }
   }
 
-  if (reduction == Reduction::Mean && total_weight_data[0]) {
+  if (reduction == at::Reduction::Mean && total_weight_data[0]) {
     output_data[0] /= total_weight_data[0];
   }
 
@@ -148,7 +148,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     THError("weight tensor should be defined either for all or no classes");
   }
 
-  if (reduction == Reduction::None && n_dims == 2) {
+  if (reduction == at::Reduction::None && n_dims == 2) {
     int batch_size = THTensor_(size)(input, 0);
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, batch_size);
 
@@ -188,7 +188,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     if (cur_target != ignore_index) {
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
-      gradInput_data[cur_target] = (reduction != Reduction::Mean && weights)
+      gradInput_data[cur_target] = (reduction != at::Reduction::Mean && weights)
                                        ? -weights_data[cur_target]
                                        : (scalar_t)-1;
       gradInput_data[cur_target] *= gradOutput_value;
@@ -211,7 +211,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
             -(weights ? weights_data[cur_target] : (scalar_t)1.0f) *
             gradOutput_value;
 
-        if (reduction == Reduction::Mean && *total_weight_data) {
+        if (reduction == at::Reduction::Mean && *total_weight_data) {
           gradInput_data[i * n_target + cur_target] /= *total_weight_data;
         }
       }
