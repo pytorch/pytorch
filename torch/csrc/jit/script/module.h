@@ -109,6 +109,7 @@ struct TORCH_API Method {
 
 struct TORCH_API Module {
   explicit Module(c10::QualifiedName class_name);
+  Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,

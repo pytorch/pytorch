@@ -67,7 +67,17 @@ struct TORCH_API LeakyReLUOptions {
 struct TORCH_API SoftmaxOptions {
   SoftmaxOptions(int64_t dim);
 
-  // Dimension along which Softmax will be computed.
+  /// Dimension along which Softmax will be computed.
+  TORCH_ARG(int64_t, dim);
+};
+
+// ============================================================================
+
+/// Options for the Softmin functional and module.
+struct TORCH_API SoftminOptions {
+  SoftminOptions(int64_t dim);
+
+  /// Dimension along which Softmin will be computed.
   TORCH_ARG(int64_t, dim);
 };
 
@@ -147,6 +157,33 @@ struct TORCH_API SoftplusOptions {
 
   /// values above this revert to a linear function. Default: 20
   TORCH_ARG(double, threshold) = 20.0;
+};
+
+// ============================================================================
+
+/// Options for Softshrink functional and module.
+struct TORCH_API SoftshrinkOptions {
+  /* implicit */ SoftshrinkOptions(double lambda = 0.5);
+
+  /// the `lambda` value for the Softshrink formulation. Default: 0.5
+  TORCH_ARG(double, lambda);
+};
+
+// ============================================================================
+
+/// Options for Threshold functional and module.
+struct ThresholdOptions {
+  ThresholdOptions(double threshold, double value)
+   : threshold_(threshold), value_(value) {}
+
+  /// The value to threshold at
+  TORCH_ARG(double, threshold);
+
+  /// The value to replace with
+  TORCH_ARG(double, value);
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
 };
 
 } // namespace nn
