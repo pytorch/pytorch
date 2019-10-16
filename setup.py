@@ -197,7 +197,6 @@ except NameError:
 
 VERBOSE_SCRIPT = True
 RUN_BUILD_DEPS = True
-OPTIMIZE_DEBUG = False
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
@@ -221,11 +220,6 @@ for i, arg in enumerate(sys.argv):
         break
     if arg == '-q' or arg == '--quiet':
         VERBOSE_SCRIPT = False
-    if arg == '--optimize_debug':
-        if not build_type.is_debug():
-            raise RuntimeError("--optimize_debug passed but build is not debug!")
-        OPTIMIZE_DEBUG = True
-        continue
     if arg == 'clean':
         RUN_BUILD_DEPS = False
     filtered_args.append(arg)
@@ -651,11 +645,8 @@ def configure_extension_build():
         if IS_WINDOWS:
             extra_link_args.append('/DEBUG:FULL')
         else:
-            if not OPTIMIZE_DEBUG:
-                extra_compile_args += ['-O0']
-                extra_link_args += ['-O0']
-            extra_compile_args += ['-g']
-            extra_link_args += ['-g']
+            extra_compile_args += ['-O0', '-g']
+            extra_link_args += ['-O0', '-g']
 
     if build_type.is_rel_with_deb_info():
         if IS_WINDOWS:
