@@ -8,8 +8,8 @@ graph {
     attribute {
       name: "value"
       t {
-        data_type: 7
-        raw_data: "\001\000\000\000\000\000\000\000"
+        data_type: 6
+        raw_data: "\001\000\000\000"
       }
       type: TENSOR
     }

@@ -12,7 +12,7 @@
         name: Build
         no_output_timeout: "1h"
         command: |
-          set -e
+          set -ex
           cat >/home/circleci/project/ci_build_script.sh \<<EOL
           # =================== The following code will be executed inside Docker container ===================
           set -ex
@@ -40,8 +40,8 @@
           chmod +x /home/circleci/project/ci_build_script.sh
 
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          time docker pull ${DOCKER_IMAGE} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -55,8 +55,15 @@
               export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
             fi
             docker commit "$id" ${COMMIT_DOCKER_IMAGE}
-            docker push ${COMMIT_DOCKER_IMAGE}
+            docker images --digests
+            time docker save "${COMMIT_DOCKER_IMAGE}" | gzip -1 > built_image.tgz
+          else
+            # Shut up CircleCI about missing image for BUILD_ONLY jobs
+            touch built_image.tgz
           fi
+    - persist_to_workspace:
+        root: .
+        paths: built_image.tgz
 
   caffe2_linux_test:
     <<: *caffe2_params
@@ -65,13 +72,15 @@
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
+    - attach_workspace:
+        at: ~/workspace
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
         name: Test
         no_output_timeout: "1h"
         command: |
-          set -e
+          set -ex
           # TODO: merge this into Caffe2 test.sh
           cat >/home/circleci/project/ci_test_script.sh \<<EOL
           # =================== The following code will be executed inside Docker container ===================
@@ -110,11 +119,11 @@
             export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+          gunzip --stdout ~/workspace/built_image.tgz | time docker load
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
           docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
 
@@ -146,12 +155,7 @@
             # Reinitialize path (see man page for path_helper(8))
             eval `/usr/libexec/path_helper -s`
 
-            # Use Homebrew Python if configured to do so
-            if [ "${PYTHON_INSTALLATION}" == "homebrew" ]; then
-              export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
-            fi
-
-            pip -q install numpy
+            export PATH=/usr/local/opt/python/libexec/bin:/usr/local/bin:$PATH
 
             # Install Anaconda if we need to
             if [ -n "${CAFFE2_USE_ANACONDA}" ]; then
@@ -163,6 +167,8 @@
               export PATH="${TMPDIR}/anaconda/bin:${PATH}"
               source ${TMPDIR}/anaconda/bin/activate
             fi
+
+            pip -q install numpy
 
             # Install sccache
             sudo curl https://s3.amazonaws.com/ossci-macos/sccache --output /usr/local/bin/sccache
@@ -201,4 +207,3 @@
             if which sccache > /dev/null; then
               sccache --show-stats
             fi
-

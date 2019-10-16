@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 
@@ -8,25 +6,19 @@ CONFIG_TREE_DATA = [
         (None, [
             XImportant("2.7.9"),
             X("2.7"),
-            X("3.5"),
+            XImportant("3.5"),  # Not run on all PRs, but should be included on [test all]
             X("nightly"),
         ]),
         ("gcc", [
-            ("4.8", [X("3.6")]),
             ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
-                ("3.6", [
-                    ("namedtensor", [XImportant(True)]),
-                ]),
             ]),
+            # TODO: bring back libtorch test
             ("7", [X("3.6")]),
         ]),
         ("clang", [
             ("5", [
                 XImportant("3.6"),  # This is actually the ASAN build
-                ("3.6", [
-                    ("namedtensor", [XImportant(True)]),  # ASAN
-                ]),
             ]),
             ("7", [
                 ("3.6", [
@@ -45,23 +37,13 @@ CONFIG_TREE_DATA = [
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
                 X("2.7"),
                 XImportant("3.6"),
-                ("2.7", [
-                    ("namedtensor", [XImportant(True)]),
+                ("3.6", [
+                    ("libtorch", [XImportant(True)])
                 ]),
             ]),
             ("9.2", [X("3.6")]),
             ("10", [X("3.6")]),
             ("10.1", [X("3.6")]),
-        ]),
-        ("android", [
-            ("r19c", [
-                ("3.6", [
-                    ("android_abi", [XImportant("x86_32")]),
-                    ("android_abi", [X("x86_64")]),
-                    ("android_abi", [X("arm-v7a")]),
-                    ("android_abi", [X("arm-v8a")]),
-                ])
-            ]),
         ]),
     ]),
 ]
@@ -129,7 +111,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
 
         next_nodes = {
             "xla": XlaConfigNode,
-            "namedtensor": NamedTensorConfigNode,
+            "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "android_abi": AndroidAbiConfigNode,
         }
@@ -147,12 +129,12 @@ class XlaConfigNode(TreeConfigNode):
         return ImportantConfigNode
 
 
-class NamedTensorConfigNode(TreeConfigNode):
+class LibTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):
-        return "NAMEDTENSOR=" + str(label)
+        return "BUILD_TEST_LIBTORCH=" + str(label)
 
     def init2(self, node_name):
-        self.props["is_namedtensor"] = node_name
+        self.props["is_libtorch"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
