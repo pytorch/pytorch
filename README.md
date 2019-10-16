@@ -44,7 +44,7 @@ At a granular level, PyTorch is a library that consists of the following compone
 | [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
 | [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
 
-Usually one uses PyTorch either as:
+Usually PyTorch is used either as:
 
 - a replacement for NumPy to use the power of GPUs.
 - a deep learning research platform that provides maximum flexibility and speed.
@@ -150,7 +150,7 @@ They require JetPack 4.2 and above, and @dusty-nv maintains them
 
 ### From Source
 
-If you are installing from source, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
+If you are installing from source, you will need a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
 You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.

@@ -430,6 +430,23 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "numel(Tensor input)",
+  }, /*traceable=*/false);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+    return wrap(r.tensor(0).numel());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // generated methods start here
 
 ${py_methods}
@@ -448,6 +465,7 @@ static PyMethodDef torch_functions[] = {
   {"spmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"tensor", (PyCFunction)(void(*)(void))THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"get_device", (PyCFunction)(void(*)(void))THPVariable_get_device, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"numel", (PyCFunction)(void(*)(void))THPVariable_numel, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
   {NULL}
 };
