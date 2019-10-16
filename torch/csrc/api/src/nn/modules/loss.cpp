@@ -110,6 +110,8 @@ TripletMarginLossImpl::TripletMarginLossImpl(
     const TripletMarginLossOptions& options_)
     : options(options_) {}
 
+void TripletMarginLossImpl::reset() {}
+
 void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::TripletMarginLoss(margin=" << options.margin() << 
             ", p=" << options.p() <<
