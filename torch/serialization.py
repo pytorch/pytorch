@@ -341,17 +341,32 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         "sys_info": sys_info
     }
 
-    with zip_file.open('metadata.pkl', 'w') as metadata_file:
-        pickle_module.dump(metadata, metadata_file, protocol=pickle_protocol)
+    out = torch._C.PyTorchFileWriter()
+    def write_buf(name, buf):
+        out.write_record(name, buf.getvalue(), len(buf.getvalue()))
 
-    with zip_file.open('data.pkl', 'w') as data_file:
-        pickler = pickle_module.Pickler(data_file, protocol=pickle_protocol)
-        pickler.persistent_id = persistent_id
-        pickler.dump(obj)
 
-    for key in sorted(serialized_storages.keys()):
-        with zip_file.open('tensors/{}'.format(key), 'w') as tensor_file:
-            serialized_storages[key]._write_file(tensor_file, _should_read_directly(tensor_file))
+    metadata_buf = io.BytesIO()
+    pickle_module.dump(metadata, metadata_buf)
+    write_buf('metadata.pkl', metadata_buf)
+
+    # with zip_file.open('metadata.pkl', 'w') as metadata_file:
+    #     pickle_module.dump(metadata, metadata_file, protocol=pickle_protocol)
+
+    data_buf = io.BytesIO()
+    pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
+    pickler.persistent_id = persistent_id
+    pickler.dump(obj)
+    write_buf('data.pkl', data_buf)
+
+    # with zip_file.open('data.pkl', 'w') as data_file:
+    #     pickler = pickle_module.Pickler(data_file, protocol=pickle_protocol)
+    #     pickler.persistent_id = persistent_id
+    #     pickler.dump(obj)
+
+    # for key in sorted(serialized_storages.keys()):
+    #     with zip_file.open('tensors/{}'.format(key), 'w') as tensor_file:
+    #         serialized_storages[key]._write_file(tensor_file, _should_read_directly(tensor_file))
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
