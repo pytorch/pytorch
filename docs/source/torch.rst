@@ -214,6 +214,7 @@ Pointwise Ops
 .. autofunction:: frac
 .. autofunction:: imag
 .. autofunction:: lerp
+.. autofunction:: lgamma
 .. autofunction:: log
 .. autofunction:: log10
 .. autofunction:: log1p
@@ -223,6 +224,7 @@ Pointwise Ops
 .. autofunction:: mul
 .. autofunction:: mvlgamma
 .. autofunction:: neg
+.. autofunction:: polygamma
 .. autofunction:: pow
 .. autofunction:: real
 .. autofunction:: reciprocal
