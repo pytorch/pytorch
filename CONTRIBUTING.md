@@ -216,10 +216,10 @@ To build the documentation:
 cd docs
 pip install -r requirements.txt
 # `katex` must also be available in your PATH.
-# If you are using Ubuntu or Debian, you can install it with:
-# sudo apt install katex
-# If you are using MacOS, you can install it through npm (install Node.js first):
+# You can either install katex globally if you have properly configured npm:
 # npm install -g katex
+# Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
+# npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
 ```
 
 3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
