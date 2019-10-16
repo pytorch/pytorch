@@ -31,7 +31,6 @@ class Conf:
     gpu_resource: Optional[str] = None
     dependent_tests: List = field(default_factory=list)
     parent_build: Optional['Conf'] = None
-    is_namedtensor: bool = False
     is_libtorch: bool = False
     is_important: bool = False
 
@@ -46,8 +45,6 @@ class Conf:
         leading.append("pytorch")
         if self.is_xla and not for_docker:
             leading.append("xla")
-        if self.is_namedtensor and not for_docker:
-            leading.append("namedtensor")
         if self.is_libtorch and not for_docker:
             leading.append("libtorch")
 
@@ -225,7 +222,6 @@ def instantiate_configs():
             # TODO The gcc version is orthogonal to CUDA version?
             parms_list.append("gcc7")
 
-        is_namedtensor = fc.find_prop("is_namedtensor") or False
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
 
@@ -242,7 +238,6 @@ def instantiate_configs():
             is_xla,
             restrict_phases,
             gpu_resource,
-            is_namedtensor=is_namedtensor,
             is_libtorch=is_libtorch,
             is_important=is_important,
         )
@@ -252,14 +247,12 @@ def instantiate_configs():
 
         if (compiler_name == "gcc"
                 and compiler_version == "5.4"
-                and not is_namedtensor
                 and not is_libtorch):
             bc_breaking_check = Conf(
                 "backward-compatibility-check",
                 [],
                 is_xla=False,
                 restrict_phases=["test"],
-                is_namedtensor=False,
                 is_libtorch=False,
                 is_important=True,
                 parent_build=c,

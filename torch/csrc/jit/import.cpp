@@ -101,26 +101,27 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
 
   size_t bytes_read = 0;
   auto data = reinterpret_cast<const char*>(pickle_ptr.get());
-  auto reader = [&](char* buffer, size_t len) {
-    if (bytes_read + len > pickle_size) {
-      return false;
+  auto reader = [&](char* buffer, size_t len) -> size_t {
+    if (bytes_read >= pickle_size) {
+      return 0;
     }
+    len = std::min(pickle_size - bytes_read, len);
     // Copy len bytes into buffer
     const char* start = data + bytes_read;
     std::memcpy(buffer, start, len);
     bytes_read += len;
-    return true;
+    return len;
   };
 
   auto class_resolver = [&](const c10::QualifiedName& qn) {
-    auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
-    return c10::StrongTypePtr(compilation_unit_, std::move(cls));
+    return source_importer_.loadNamedType(qn)->expect<ClassType>();
   };
 
   // Decouple how to get obj from type. In this file it's dependent on
   // Method.run() and graph executor, etc.
   // For bytecode import we need to decouple these dependencies.
-  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+  auto obj_loader = [&](c10::ClassTypePtr typePtr, IValue input) {
+    c10::StrongTypePtr type(compilation_unit_, std::move(typePtr));
     auto cls = type.type_->expect<at::ClassType>();
     size_t n = cls->numAttributes();
     if (checkHasValidSetGetState(type.type_)) {

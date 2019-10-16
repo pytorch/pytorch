@@ -137,23 +137,30 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
 
   size_t bytes_read = 0;
   auto data = reinterpret_cast<const char*>(pickle_ptr.get());
-  auto reader = [&](char* buffer, size_t len) {
-    if (bytes_read + len > pickle_size) {
-      return false;
+  auto reader = [&](char* buffer, size_t len) -> size_t {
+    if (bytes_read >= pickle_size) {
+      return 0;
     }
+    len = std::min(pickle_size - bytes_read, len);
     // Copy len bytes into buffer
     const char* start = data + bytes_read;
     std::memcpy(buffer, start, len);
     bytes_read += len;
-    return true;
+    return len;
   };
 
   auto class_resolver = [&](const c10::QualifiedName& qn) {
-    return c10::StrongTypePtr(
-        compilation_unit_, nullptr);
+    return nullptr;
+//    return c10::StrongTypePtr(
+//        compilation_unit_, nullptr);
   };
 
-  auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+  auto obj_loader = [&](c10::ClassTypePtr typePtr, IValue input) {
+    if (typePtr == nullptr) {
+      c10::QualifiedName qn("dummy");
+      typePtr = at::ClassType::create(qn, compilation_unit_);
+    }
+    c10::StrongTypePtr type(compilation_unit_, std::move(typePtr));
     auto dict = std::move(input).toGenericDict();
     size_t ndict = dict.size();
     auto obj = c10::ivalue::Object::create(type, ndict);

@@ -546,12 +546,12 @@ PickleOpCode Unpickler::readInstruction() {
         TORCH_CHECK(false, "class name not understood: torch.", class_name);
       } else {
         AT_ASSERT(class_resolver_);
-        at::StrongTypePtr type =
+        c10::ClassTypePtr typePtr =
             class_resolver_(c10::QualifiedName(module_name, class_name));
-        globals_.emplace_back([this, type] {
+        globals_.emplace_back([this, typePtr] {
           auto val = stack_.back();
           stack_.pop_back();
-          auto obj = obj_loader_(type, val);
+          auto obj = obj_loader_(typePtr, val);
           stack_.emplace_back(std::move(obj));
         });
       }
@@ -623,12 +623,55 @@ PickleOpCode Unpickler::readInstruction() {
   return opcode;
 }
 
+void Unpickler::readSlowWithBuffer(char *dest, size_t sz) {
+  // First, read any partial from buffer (may be 0).
+  // We explicitly assume that sz > buffer_remaining_,
+  // and that sz is never bigger than buffer_.size().
+  AT_ASSERT(sz > buffer_remaining_);
+  const size_t from_old_buf = buffer_remaining_;
+  if (from_old_buf != 0) {
+    memcpy(dest, buffer_.data() + buffer_pos_, from_old_buf);
+  }
+  const size_t needed = sz - from_old_buf;
+  // Full read into the buffer. The calls here all explicitly
+  // assume that one buffer will be enough for any sz.
+  AT_ASSERT(sz <= buffer_.size());
+  buffer_remaining_ = reader_(buffer_.data(), buffer_.size());
+  if (buffer_remaining_ < needed) {
+    AT_ERROR("Unexpected end of pickler archive.");
+  }
+  memcpy(dest + from_old_buf, buffer_.data(), needed);
+  buffer_pos_ = needed;  // assignment (0'ed from read)
+  buffer_remaining_ -= needed;
+}
+
 // Read a number of bytes from the input stream
 std::string Unpickler::readBytes(size_t length) {
   std::string data(length, 0);
-  // This is fine since C++11 has contiguous strings
-  if (!reader_(&data[0], length)) {
-    AT_ERROR("Unexpected end of pickler archive.");
+  static const size_t kSmallString = 64;
+  if (length <= buffer_remaining_) {
+    // Fast-path: entirely in buffer.
+    memcpy(&data[0], buffer_.data() + buffer_pos_, length);
+    buffer_pos_ += length;
+    buffer_remaining_ -= length;
+  } else if (length <= kSmallString) {
+    // If the string is smallish, do a full buffer read,
+    // and read out of that buffer.
+    readSlowWithBuffer(&data[0], length);
+  } else {
+    // Otherwise, for larger strings, read what we can from
+    // the buffer, and then read directly to the destination.
+    const size_t from_old_buf = buffer_remaining_;
+    if (from_old_buf != 0) {
+      memcpy(&data[0], buffer_.data() + buffer_pos_, from_old_buf);
+    }
+    const size_t needed = length - from_old_buf;
+    size_t nread = reader_(&data[from_old_buf], needed);
+    if (nread != needed) {
+      AT_ERROR("Unexpected end of pickler archive.");
+    }
+    buffer_remaining_ = 0;
+    // buffer_pos_ has no meaning with buffer_remaining_ == 0.
   }
   return data;
 }
@@ -702,10 +745,6 @@ std::string Unpickler::readString() {
         "strings must be qualified Python identifiers");
   }
   return ss.str();
-}
-
-PickleOpCode Unpickler::readOpCode() {
-  return static_cast<PickleOpCode>(read<uint8_t>());
 }
 
 } // namespace jit

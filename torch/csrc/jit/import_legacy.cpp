@@ -137,8 +137,7 @@ IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
       reinterpret_cast<const char*>(attributes_ptr.get()),
       attributes_size,
       [&](const c10::QualifiedName& qn) {
-        auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
-        return c10::StrongTypePtr(compilation_unit_, std::move(cls));
+        return source_importer_.loadNamedType(qn)->expect<ClassType>();
       },
       &constants_table_);
   return ivalue;
