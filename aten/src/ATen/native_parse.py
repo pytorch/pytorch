@@ -129,10 +129,10 @@ def type_argument_translations(arg):
     elif default == 'None':
         default = 'c10::nullopt'
     # The JIT signature schema uses Mean, but in particular C++ needs
-    # the legacy Reduction::Mean. So we'll continue emiting that until
+    # the legacy at::Reduction::Mean. So we'll continue emiting that until
     # we change this at either a JIT schema or C++ level.
     elif default == 'Mean':
-        default = 'Reduction::Mean'
+        default = 'at::Reduction::Mean'
     elif default == 'contiguous_format':
         default = 'MemoryFormat::Contiguous'
     elif default == 'per_tensor_affine':
@@ -413,7 +413,9 @@ def run(paths):
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['supports_named_tensor'] = func.get('supports_named_tensor', False)
-                declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', False)
+                declaration['use_c10_dispatcher'] = func.get('use_c10_dispatcher', 'no')
+                assert declaration['use_c10_dispatcher'] in ['no', 'unboxed_only', 'full']
+                declaration['category_override'] = func.get('category_override', '')
                 declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['python_module'] = func.get('python_module', '')

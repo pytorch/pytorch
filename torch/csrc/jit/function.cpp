@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/function.h>
+#include <torch/csrc/jit/passes/inliner.h>
 
 #include <torch/csrc/jit/script/error_report.h>
 
@@ -28,6 +29,22 @@ void placeholderCreator(Function&) {
   throw RecursiveMethodCallError();
 }
 
+void Function::run(Stack& stack) {
+  get_executor().run(stack);
+}
+
+void Function::run(Stack&& stack) {
+  run(stack);
+}
+
+IValue Function::operator()(
+    std::vector<IValue> stack,
+    const Kwargs& kwargs) {
+  getSchema().checkAndNormalizeInputs(stack, kwargs);
+  run(stack);
+  return stack.front();
+}
+
 void Function::ensure_defined() {
   try {
     if (function_creator_) {
@@ -52,5 +69,12 @@ const FunctionSchema& Function::getSchema() const {
   }
   return *schema_;
 }
+
+void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
+  // TODO: Invoke cleanup passes before and after inlining to reduce amount of
+  // code we're copying.
+  Inline(*graph);
+}
+
 } // namespace jit
 } // namespace torch

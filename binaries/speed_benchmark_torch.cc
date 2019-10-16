@@ -82,10 +82,15 @@ int main(int argc, char** argv) {
     }
   }
 
+  auto qengines = at::globalContext().supportedQEngines();
+  if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) != qengines.end()) {
+    at::globalContext().setQEngine(at::QEngine::QNNPACK);
+  }
   torch::autograd::AutoGradMode guard(false);
   auto module = torch::jit::load(FLAGS_model);
 
   at::AutoNonVariableTypeMode non_var_type_mode(true);
+  module.eval();
   if (FLAGS_print_output) {
     std::cout << module.forward(inputs) << std::endl;
   }

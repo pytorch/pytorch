@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/jit/source_range_serialization.h>
+#include <torch/csrc/jit/instruction.h>
 
 #include <caffe2/core/types.h>
 #include <caffe2/proto/caffe2_pb.h>
@@ -31,6 +32,7 @@
 
 namespace torch {
 namespace jit {
+char const * toString(OpCode op);
 
 namespace {
 namespace onnx_torch = ::torch::onnx;
@@ -153,7 +155,7 @@ class EncoderBase {
 
   virtual void EncodeIntermediateValueInfo(
       onnx::GraphProto* graph_proto,
-      const Value* n){};
+      const Value* n){}
 
   virtual void EncodeValueInfo(
       onnx::GraphProto* graph_proto,
@@ -211,7 +213,7 @@ EncoderBase::EncoderBase(
   // stable. only bump it when it's necessary
   model_proto_.set_ir_version(4);
   // TODO: set the producer version using appropriate function call
-  model_proto_.set_producer_version("1.2");
+  model_proto_.set_producer_version("1.3");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -529,34 +531,44 @@ void GraphEncoder::EncodeTensor(
 
 class ScriptModuleSerializer {
  public:
-  ScriptModuleSerializer(const std::string& filename)
-      : writer_(filename.c_str()) {}
+  explicit ScriptModuleSerializer(const std::string& filename)
+      : writer_(filename) {}
 
-  ScriptModuleSerializer(std::ostream* ofs) : ofs_(), writer_(ofs) {}
+  explicit ScriptModuleSerializer(
+      const std::function<size_t(const void *, size_t)>& writer_func)
+      : writer_(writer_func) {}
+
   void serialize(
       const script::Module& module,
-      const script::ExtraFilesMap& extra_files) {
+      const script::ExtraFilesMap& extra_files,
+      bool bytecode_format) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
-    // Serialize all code info.
+    // Serialize the model object
+    writeArchive("data", module.module_object());
+    // Then we werialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
-    // finally we serialize the model
-    writeArchive("data", module.module_object());
+    if (bytecode_format) {
+      writeByteCode(module);
+    }
   }
 
  private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
+    // Vector to capture the run-time class types during pickling the IValues
+    std::vector<c10::ClassTypePtr> memorizedClassTypes;
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
         },
-        nullptr);
+        nullptr,
+        &memorizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -569,6 +581,11 @@ class ScriptModuleSerializer {
     std::stringstream fname;
     fname << archive_name << ".pkl";
     writer_.writeRecord(fname.str(), data.data(), data.size());
+
+    // serialize all the captured run-time class types
+    for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
+      convertNamedType(wroteType);
+    }
   }
 
   void writeExtraFiles(
@@ -605,8 +622,8 @@ class ScriptModuleSerializer {
       auto& type_info = item.value();
 
       // For the type, foo.bar.Baz
-      const std::string filename = ImportExportHelpers::qualifierToPath(
-          converted_type->name()->prefix(), "code/");
+      const std::string filename =
+          qualifierToArchivePath(converted_type->name()->prefix(), "code/");
       // End state: filename is "foo/bar.py", in which we will define a class
       // named Baz
       auto& stream = fileToSrc[filename];
@@ -653,6 +670,77 @@ class ScriptModuleSerializer {
           /*compress=*/true);
     }
   }
+
+  void writeByteCode(const script::Module& module) {
+    auto methods = module.get_methods();
+    std::vector<c10::IValue> elements;
+    for (const auto& method : methods) {
+      const auto& func = method.function();
+      torch::jit::Code code(func.graph());
+      // Make a copy of opnames. Some of them may be changed for mobile later.
+      std::vector<c10::OperatorName> opnames;
+      for (size_t i = 0; i < code.instructions().size(); ++i) {
+        Instruction ins = code.instructions()[i];
+        if (ins.op == OP) {
+          auto node = code.instructions_source()[i];
+          opnames.emplace_back(node->schema().operator_name());
+        }
+      }
+
+      // instructions
+      std::vector<IValue> inss;
+      for (size_t i = 0; i < code.instructions().size(); ++i) {
+        Instruction ins = code.instructions()[i];
+        TORCH_CHECK(isOpSupportedInMobile(ins.op), toString(ins.op),
+                    " is not supported in mobile module.");
+        if (ins.op == OP) {
+          if (opnames[ins.X].name == "prim::ListConstruct") {
+            auto node = code.instructions_source()[i];
+            ins.op = OPN;
+            ins.N = node->inputs().size();
+            ListTypePtr lt = node->output()->type()->expect<ListType>();
+            if (lt->getElementType() == IntType::get()) {
+              opnames[ins.X].overload_name = "int";
+            } else if (lt->getElementType() == FloatType::get()) {
+              opnames[ins.X].overload_name = "float";
+            } else if (lt->getElementType() == BoolType::get()) {
+              opnames[ins.X].overload_name = "bool";
+            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
+              opnames[ins.X].overload_name = "Tensor";
+            } else {
+              opnames[ins.X].overload_name = "generic";
+            }
+          }
+        }
+        std::vector<IValue> insv{toString(ins.op), ins.X, ins.N};
+        inss.emplace_back(c10::ivalue::Tuple::create(std::move(insv)));
+      }
+      auto instructions = c10::ivalue::Tuple::create(std::move(inss));
+      auto named_ins = c10::ivalue::Tuple::create({"instructions", instructions});
+
+      // operators
+      std::vector<IValue> opss;
+      for (const auto& opname : opnames) {
+        opss.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
+      }
+      auto operators = c10::ivalue::Tuple::create(std::move(opss));
+      auto named_ops = c10::ivalue::Tuple::create({"operators", operators});
+
+      // constants
+      auto constants = c10::ivalue::Tuple::create(code.constant_table());
+      auto named_consts = c10::ivalue::Tuple::create({"constants", constants});
+
+      // since the register location is embedded into the bytecode, pass the register size
+      auto named_regsize = c10::ivalue::Tuple::create({"register_size",
+                                                       static_cast<int>(code.register_size())});
+
+      auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts, named_regsize});
+      elements.push_back(c10::ivalue::Tuple::create({func.qualname().qualifiedName(), element}));
+    }
+    auto telements = c10::ivalue::Tuple::create(std::move(elements));
+    writeArchive("bytecode", telements);
+  }
+
   void convertNamedType(const c10::NamedTypePtr& class_type) {
     if (converted_types_.contains(class_type)) {
       return;
@@ -661,13 +749,14 @@ class ScriptModuleSerializer {
     std::vector<c10::NamedTypePtr> class_deps;
     std::ostringstream source_stream;
     SourceRangeRecords source_ranges;
-    PythonPrint(
+    PythonPrint pp(
         source_stream,
         source_ranges,
-        class_type,
         constant_table_,
         class_deps,
         /*enforce_importable=*/true);
+    pp.printNamedType(class_type);
+    pp.finish();
 
     for (const auto& c : class_deps) {
       if (c == class_type) {
@@ -684,7 +773,6 @@ class ScriptModuleSerializer {
     converted_types_.insert(class_type, std::move(info));
   }
 
-  std::ofstream ofs_;
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::Tensor> constant_table_;
 
@@ -694,6 +782,7 @@ class ScriptModuleSerializer {
     SourceRangeRecords debug_info;
   };
   OrderedDict<c10::NamedTypePtr, TypeInfo> converted_types_;
+  bool bytecode_format_;
 };
 
 // Pretty printing for ONNX
@@ -932,17 +1021,32 @@ std::tuple<std::string, RawDataExportMap> export_onnx(
 void ExportModule(
     const script::Module& module,
     std::ostream& out,
-    const script::ExtraFilesMap& extra_files) {
-  ScriptModuleSerializer serializer(&out);
-  serializer.serialize(module, extra_files);
+    const script::ExtraFilesMap& extra_files,
+    bool bytecode_format) {
+  ScriptModuleSerializer serializer(
+    [&](const void* buf, size_t nbytes) -> size_t {
+      out.write(static_cast<const char *>(buf), nbytes);
+      return !out ? 0 : nbytes;
+    });
+  serializer.serialize(module, extra_files, bytecode_format);
 }
 
 void ExportModule(
     const script::Module& module,
     const std::string& filename,
-    const script::ExtraFilesMap& extra_files) {
+    const script::ExtraFilesMap& extra_files,
+    bool bytecode_format) {
   ScriptModuleSerializer serializer(filename);
-  serializer.serialize(module, extra_files);
+  serializer.serialize(module, extra_files, bytecode_format);
+}
+
+void ExportModule(
+    const script::Module& module,
+    const std::function<size_t(const void*, size_t)>& writer_func,
+    const script::ExtraFilesMap& extra_files,
+    bool bytecode_format) {
+  ScriptModuleSerializer serializer(writer_func);
+  serializer.serialize(module, extra_files, bytecode_format);
 }
 
 } // namespace jit

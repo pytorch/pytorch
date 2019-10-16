@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/util/FunctionRef.h>
 #include <c10/util/SmallVector.h>
 #include <ATen/core/Range.h>
 #include <ATen/detail/ScalarTypeConversions.h>
@@ -51,7 +52,8 @@
 // (See https://github.com/pytorch/pytorch/issues/9515)
 //
 // Note that TensorIterator currently supports type conversions on 0-dim
-// tensors. Other type conversions will raise an exception.
+// tensors and arithmetic operators. Other type conversions will raise an
+// exception.
 
 namespace at {
 
@@ -69,6 +71,7 @@ struct DimCounter {
 };
 
 struct CAFFE2_API OperandInfo {
+  using StrideVector = SmallVector<int64_t, 6>;
   OperandInfo() {}
   explicit OperandInfo(const Tensor& t) : tensor(t) {
     if (t.defined()) {
@@ -83,7 +86,7 @@ struct CAFFE2_API OperandInfo {
   }
 
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
-  DimVector stride_bytes;
+  StrideVector stride_bytes;
 
   /// The tensor operand. Note that the strides, data pointer, and
   /// other attributes may differ due to dimension reordering and
@@ -132,6 +135,7 @@ enum class CommonDTypeStrategy : uint8_t {
 struct CAFFE2_API TensorIterator {
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
+  using StrideVector = SmallVector<int64_t, 6>;
 
   TensorIterator() {}
 
@@ -145,14 +149,16 @@ struct CAFFE2_API TensorIterator {
   //
   // The `size` often matches shape[0], but may be smaller due to
   // parallelization of the inner loop.
-  using loop_t = std::function<void(char** data, const int64_t* strides, int64_t size)>;
-  using loop2d_t = std::function<void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
+  using loop_t = c10::function_ref<void(char** data, const int64_t* strides, int64_t size)>;
+  using loop2d_t = c10::function_ref<void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
 
-  using loop_subiter_t = std::function<void(TensorIterator& subiter)>;
+  using loop_subiter_t = c10::function_ref<void(TensorIterator& subiter)>;
 
-  void foreach_reduced_elt(const loop_subiter_t& loop, bool parallelize=true);
+  void foreach_reduced_elt(loop_subiter_t loop, bool parallelize=true);
 
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b,
+    bool check_mem_overlap = false);
+  static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b,
     bool check_mem_overlap = false);
   static TensorIterator unary_op(Tensor& out, const Tensor& a,
     bool check_mem_overlap = false);
@@ -239,27 +245,27 @@ struct CAFFE2_API TensorIterator {
     return at::detail::load<T>(op.data, op.tensor.scalar_type());
   }
 
-  void for_each(const loop_t& loop);
-  void for_each(const loop2d_t& loop);
+  void for_each(loop_t loop);
+  void for_each(loop2d_t loop);
 
-  void parallel_reduce(const loop2d_t& loop);
+  void parallel_reduce(loop2d_t loop);
 
-  void serial_for_each(const loop_t& loop, Range range) const;
-  void serial_for_each(const loop2d_t& loop, Range range) const;
+  void serial_for_each(loop_t loop, Range range) const;
+  void serial_for_each(loop2d_t loop, Range range) const;
 
   /// Create a strides array for a Tensor with shape of this iterator. The
   /// parameter `element_size` specifies the size of Tensor's data type in
   /// bytes (e.g. `4` for `float`)
-  DimVector compatible_stride(int element_size) const;
+  StrideVector compatible_stride(int element_size) const;
 
   /// Inverts the re-ordering done by reorder_dimensions. This can only be
   /// called *before* coalesce_dimensions() is called.
   DimVector invert_perm(IntArrayRef input) const;
 
   /// Helper functions for CPU iteration
-  DimVector get_dim_strides(int dim) const;
-  DimVector get_strides() const;
-  DimVector get_inner_strides() const { return get_dim_strides(0); }
+  StrideVector get_dim_strides(int dim) const;
+  StrideVector get_strides() const;
+  StrideVector get_inner_strides() const { return get_dim_strides(0); }
   PtrVector get_data_ptrs(ArrayRef<char*> base, IntArrayRef counter) const;
   PtrVector get_base_ptrs() const;
 
@@ -324,7 +330,7 @@ protected:
   void reorder_dimensions();
   void permute_dimensions(IntArrayRef perm);
   void compute_types();
-  std::tuple<Device, ScalarType> compute_common_type();
+  std::tuple<Device, ScalarType, bool> compute_common_type();
   void allocate_outputs();
 #ifdef BUILD_NAMEDTENSOR
   void compute_names();
