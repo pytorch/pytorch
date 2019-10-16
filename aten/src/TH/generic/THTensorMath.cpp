@@ -360,9 +360,11 @@ static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTen
   if(r_ != t)
   {
     THTensor_(resizeAs)(r_, t);
-    at::Tensor r__wrap = THTensor_wrap(r_);
-    at::Tensor t_wrap = THTensor_wrap(t);
-    at::native::copy_(r__wrap, t_wrap);
+    if (beta != 0.0) {
+      at::Tensor r__wrap = THTensor_wrap(r_);
+      at::Tensor t_wrap = THTensor_wrap(t);
+      at::native::copy_(r__wrap, t_wrap);
+    }
   }
 
   auto r_stride = THTensor_strideLegacyNoScalars(r_, 0);
