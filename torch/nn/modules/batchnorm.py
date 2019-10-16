@@ -8,8 +8,6 @@ from .. import functional as F
 from .. import init
 
 
-# TODO: check contiguous in THNN
-# TODO: use separate backend functions?
 class _BatchNorm(Module):
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',

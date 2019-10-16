@@ -87,51 +87,53 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       return std::make_shared<SimpleValue>(r);
     }
   }
-  if (value_->type()->isSubtypeOf(NumberType::get())) {
-    throw ErrorReport(loc) << "Cannot call methods on numbers";
-  }
+
+  // accessing fields of named tuples
   if (auto tuple_type = value_->type()->cast<TupleType>()) {
-    if (!tuple_type->schema()) {
-      throw ErrorReport(loc) << "Getting attributes of tuples is not supported";
-    }
-    auto attrs = tuple_type->schema()->arguments();
-    for (size_t i = 0; i < attrs.size(); i++) {
-      if (attrs[i].name() == field) {
-        auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
-        auto out_type = tuple_type->elements().at(i);
-        auto r =
-            m.graph()
-                ->insertNode(m.graph()->createTupleIndex(value_, idx, out_type))
-                ->output();
-        return std::make_shared<SimpleValue>(r);
+    if (tuple_type->schema()) {
+      auto attrs = tuple_type->schema()->arguments();
+      for (size_t i = 0; i < attrs.size(); i++) {
+        if (attrs[i].name() == field) {
+          auto idx = m.graph()->insertConstant(IValue(static_cast<int64_t>(i)));
+          auto out_type = tuple_type->elements().at(i);
+          auto r = m.graph()
+                       ->insertNode(
+                           m.graph()->createTupleIndex(value_, idx, out_type))
+                       ->output();
+          return std::make_shared<SimpleValue>(r);
+        }
       }
     }
-    throw ErrorReport(loc) << "Unknown attribute to named tuple";
-  }
-
-  if (auto classType = value_->type()->cast<ClassType>()) {
+  } else if (auto classType = value_->type()->cast<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (auto method = classType->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
-    if (!classType->hasAttribute(field)) {
-      throw ErrorReport(loc)
-          << "Tried to access nonexistent attribute " << field
-          << ". Did you forget to initialize it in __init__()?";
+    if (classType->hasAttribute(field)) {
+      auto& g = *m.graph();
+      auto n = g.insertNode(g.createGetAttr(value_, field));
+      return std::make_shared<SimpleValue>(n->output());
     }
-    auto& g = *m.graph();
-    auto n = g.insertNode(g.createGetAttr(value_, field));
-    return std::make_shared<SimpleValue>(n->output());
-  }
-
-  if (auto iface = value_->type()->cast<InterfaceType>()) {
+  } else if (auto iface = value_->type()->cast<InterfaceType>()) {
+    // accessing methods of interfaces
     if (auto schema = iface->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
   }
 
-  return std::make_shared<BuiltinFunction>(
-      Symbol::aten(field), NamedValue(loc, "self", value_));
+  // none of the more-specific cases worked, so see if this is a builtin method
+  if (auto builtin = BuiltinFunction::tryCreate(
+          Symbol::aten(field), NamedValue(loc, "self", value_))) {
+    return builtin;
+  }
+
+  ErrorReport report(loc);
+  report << "Tried to access nonexistent attribute or method '" << field
+         << "' of type '" << value_->type()->python_str() << "'.";
+  if (value_->type()->kind() == ClassType::Kind) {
+    report << " Did you forget to initialize an attribute in __init__()?";
+  }
+  throw report;
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
@@ -474,7 +476,7 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
   }
-  return std::make_shared<ClassNewMethod>(type_);
+  return SpecialFormValue::create(prim::CreateObject);
 }
 
 std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
@@ -499,6 +501,31 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
   self->setType(type_);
 
   return std::make_shared<SimpleValue>(self);
+}
+
+std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
+    Symbol symbol,
+    c10::optional<NamedValue> self) {
+  for (const std::shared_ptr<Operator>& op : getAllOperatorsFor(symbol)) {
+    if (!self) {
+      return std::make_shared<BuiltinFunction>(symbol, nullptr);
+    }
+    if (auto index = op->schema().argumentIndexWithName("self")) {
+      std::unordered_map<std::string, TypePtr> type_env;
+      TypePtr formal_type = op->schema().arguments().at(*index).type();
+      const MatchTypeReturn matched =
+          matchTypeVariables(formal_type, self->type(), type_env);
+      if (!matched.success()) {
+        continue;
+      }
+      const auto concrete_type = tryEvalTypeVariables(formal_type, type_env);
+      if (!concrete_type || !self->type()->isSubtypeOf(concrete_type)) {
+        continue;
+      }
+      return std::make_shared<BuiltinFunction>(symbol, self);
+    }
+  }
+  return nullptr;
 }
 
 } // namespace script

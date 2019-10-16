@@ -168,6 +168,13 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
       at::ArrayRef<NamedValue> attributes,
       at::ArrayRef<NamedValue> inputs,
       size_t n_binders) override;
+
+  // try to create this builtin but if it doesn't exist or the self argument
+  // cannot possibly match, then return nullptr. Use in situations where it is
+  // not clear if it is a valid builtin
+  static std::shared_ptr<BuiltinFunction> tryCreate(
+      Symbol symbol,
+      c10::optional<NamedValue> self);
 };
 
 struct TORCH_API BuiltinModule : public SugaredValue {
@@ -283,7 +290,7 @@ struct TORCH_API ClosureValue : public SugaredValue {
   Value* value_;
 };
 
-// defines how a method obtained from a module behaves in script
+// defines how a method obtained from a module/class/interface behaves in script
 struct MethodValue : public SugaredValue {
   MethodValue(Value* self, std::string method_name)
       : self_(std::move(self)), method_name_(std::move(method_name)) {}
@@ -386,53 +393,27 @@ struct TORCH_API MagicMethod : public SugaredValue {
   std::string desugared_name_;
 };
 
-// These SugaredValues have special handling in the compiler because they
-// change the normal evalution order of the expression they participate in.
-// They are exposed here so that the python frontend can inject them
-// when it sees the equivalent thing in python
+// things that look like function applications, but
+// perform non-standard evaluation are represented
+// with SpecialFormValues, e.g.
+//   isinstance(x, int)
+//   fork(fn)
+//   annotate(int, 3)
+// The implementation of each value is handled by a case inside emitApplyExpr
+struct TORCH_API SpecialFormValue : public SugaredValue {
+  SpecialFormValue(Symbol form) : form_(form) {}
+  std::string kind() const override {
+    return form_.toUnqualString();
+  }
+  Symbol form() const {
+    return form_;
+  }
+  static std::shared_ptr<SpecialFormValue> create(Symbol form) {
+    return std::make_shared<SpecialFormValue>(form);
+  }
 
-struct TORCH_API ForkValue : public SugaredValue {
-  ForkValue() = default;
-  std::string kind() const override {
-    return "fork";
-  }
-};
-struct TORCH_API AnnotateValue : public SugaredValue {
-  AnnotateValue() = default;
-  std::string kind() const override {
-    return "annotate";
-  }
-};
-
-struct TORCH_API UninitializedValue : public SugaredValue {
-  UninitializedValue() = default;
-  std::string kind() const override {
-    return "uninitialized";
-  }
-};
-
-// matched against for special handling of getattr expressions
-struct TORCH_API GetAttrValue : SugaredValue {
-  GetAttrValue() = default;
-  std::string kind() const override {
-    return "getattr";
-  }
-};
-
-// matched against for special handling of isinstance expressions
-struct TORCH_API IsInstanceValue : SugaredValue {
-  IsInstanceValue() = default;
-  std::string kind() const override {
-    return "isinstance";
-  }
-};
-
-// matched against for special handling of tuple() call
-struct TORCH_API TupleCallValue : SugaredValue {
-  TupleCallValue() = default;
-  std::string kind() const override {
-    return "tuple";
-  }
+ private:
+  Symbol form_;
 };
 
 // matched against for special handling of range expressions
@@ -453,15 +434,6 @@ struct TORCH_API RangeValue : SugaredValue {
   // derivation nodes to simplify the graph and enable more possible
   // optimizations
   bool has_only_end_;
-};
-
-// matched against for special handling of iterables like zip(), enumerate()
-struct TORCH_API IterableValue : SugaredValue {
-  IterableValue(Symbol symbol) : symbol_(symbol) {}
-  std::string kind() const override {
-    return "iterable";
-  }
-  Symbol symbol_;
 };
 
 // Specialized Tree structure to matched against for special handling
@@ -499,28 +471,6 @@ struct TORCH_API IterableTree : SugaredValue {
 
  private:
   std::vector<SugaredValuePtr> children_;
-};
-
-// This represents the "__new__" method on classes, which can't be a MethodValue
-// because it takes a ClassValue as input.
-// So if we see:
-//   Foo.__new__(Foo)
-// Foo is a ClassValue, calling `attr("__new__")` will return a ClassNewMethod.
-struct TORCH_API ClassNewMethod : public SugaredValue {
-  ClassNewMethod(ClassTypePtr type) : type_(type) {}
-  std::string kind() const override {
-    return "class.__new__";
-  }
-
-  std::shared_ptr<SugaredValue> createObject(
-      const SourceRange& loc,
-      Function& m) {
-    auto& g = *m.graph();
-    auto createNode = g.insertNode(g.createObject(type_));
-    return std::make_shared<SimpleValue>(createNode->output());
-  }
-
-  ClassTypePtr type_;
 };
 
 static inline std::vector<Value*> toValues(

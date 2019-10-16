@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
+#include <torch/csrc/jit/instruction.h>
 
 
 #include <fstream>
@@ -54,20 +55,23 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
     TORCH_CHECK(ins_name == "instructions",
                 "instruction is expected, but get", ins_name);
     auto ins_list = named_ins[1].toTuple()->elements();
-    for (const auto& ins : ins_list) {
-      auto ins_item = ins.toTuple()->elements();
-      TORCH_CHECK(ins_item.size() == 3,
-                  "There should be three parts in an instruction.");
-      OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
-      function->append_instruction(op_code, ins_item[1].toInt(),
-                                ins_item[2].toInt());
-    }
 
     auto named_ops = comps[1].toTuple()->elements();
     auto ops_name = named_ops[0].toString()->string();
     TORCH_CHECK(ops_name == "operators",
                 "operator is expected, but get", ops_name);
     auto ops_list = named_ops[1].toTuple()->elements();
+
+    for (const auto& ins : ins_list) {
+      auto ins_item = ins.toTuple()->elements();
+      TORCH_CHECK(ins_item.size() == 3,
+                  "There should be three parts in an instruction.");
+      OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
+      int X = ins_item[1].toInt();
+      int N = ins_item[2].toInt();
+      function->append_instruction(op_code, X, N);
+    }
+
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(op_item.size() == 2,
@@ -75,6 +79,9 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
       function->append_operator(op_item[0].toString()->string(),
                            op_item[1].toString()->string());
     }
+
+    // vararg operators are stored in a separate table.
+    function->build_vararg_operator_table();
 
     auto named_consts = comps[2].toTuple()->elements();
     auto consts_name = named_consts[0].toString()->string();

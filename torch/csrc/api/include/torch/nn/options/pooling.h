@@ -117,5 +117,32 @@ using AdaptiveAvgPool2dOptions = AdaptiveAvgPoolOptions<2>;
 /// `AdaptiveAvgPoolOptions` specialized for 3-D adaptive avgpool.
 using AdaptiveAvgPool3dOptions = AdaptiveAvgPoolOptions<3>;
 
+// ============================================================================
+
+/// Options for a `D`-dimensional maxunpool functional and module.
+template <size_t D>
+struct MaxUnpoolOptions {
+  MaxUnpoolOptions(ExpandingArray<D> kernel_size)
+      : kernel_size_(kernel_size), stride_(kernel_size) {}
+
+  /// the size of the window to take a max over
+  TORCH_ARG(ExpandingArray<D>, kernel_size);
+
+  /// the stride of the window. Default value is `kernel_size
+  TORCH_ARG(ExpandingArray<D>, stride);
+
+  /// implicit zero padding to be added on both sides
+  TORCH_ARG(ExpandingArray<D>, padding) = 0;
+};
+
+/// `MaxUnpoolOptions` specialized for 1-D maxunpool.
+using MaxUnpool1dOptions = MaxUnpoolOptions<1>;
+
+/// `MaxUnpoolOptions` specialized for 2-D maxunpool.
+using MaxUnpool2dOptions = MaxUnpoolOptions<2>;
+
+/// `MaxUnpoolOptions` specialized for 3-D maxunpool.
+using MaxUnpool3dOptions = MaxUnpoolOptions<3>;
+
 } // namespace nn
 } // namespace torch

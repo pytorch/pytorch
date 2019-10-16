@@ -3,7 +3,6 @@
 
 #include <TH/THGeneral.h>
 #include <TH/THAllocator.h>
-#undef log10
 #undef log1p
 #undef log2
 
