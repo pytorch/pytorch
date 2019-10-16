@@ -7,8 +7,10 @@ namespace nn {
 
 L1LossImpl::L1LossImpl(const L1LossOptions& options_) : options(options_) {}
 
+void L1LossImpl::reset() {}
+
 void L1LossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::L1Loss";
+  stream << "torch::nn::L1Loss()";
 }
 
 Tensor L1LossImpl::forward(const Tensor& input, const Tensor& target) {
@@ -20,8 +22,10 @@ Tensor L1LossImpl::forward(const Tensor& input, const Tensor& target) {
 KLDivLossImpl::KLDivLossImpl(const KLDivLossOptions& options_)
     : options(options_) {}
 
+void KLDivLossImpl::reset() {}
+
 void KLDivLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::KLDivLoss";
+  stream << "torch::nn::KLDivLoss()";
 }
 
 Tensor KLDivLossImpl::forward(const Tensor& input, const Tensor& target) {
@@ -32,8 +36,10 @@ Tensor KLDivLossImpl::forward(const Tensor& input, const Tensor& target) {
 
 MSELossImpl::MSELossImpl(const MSELossOptions& options_) : options(options_) {}
 
+void MSELossImpl::reset() {}
+
 void MSELossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::MSELoss";
+  stream << "torch::nn::MSELoss()";
 }
 
 Tensor MSELossImpl::forward(const Tensor& input, const Tensor& target) {
@@ -46,8 +52,10 @@ BCELossImpl::BCELossImpl(const BCELossOptions& options_) : options(options_) {
   register_parameter("weight", options.weight());
 }
 
+void BCELossImpl::reset() {}
+
 void BCELossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::BCELoss";
+  stream << "torch::nn::BCELoss()";
 }
 
 Tensor BCELossImpl::forward(const Tensor& input, const Tensor& target) {
@@ -59,6 +67,8 @@ Tensor BCELossImpl::forward(const Tensor& input, const Tensor& target) {
 HingeEmbeddingLossImpl::HingeEmbeddingLossImpl(
     const HingeEmbeddingLossOptions& options_)
     : options(options_) {}
+
+void HingeEmbeddingLossImpl::reset() {}
 
 void HingeEmbeddingLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::HingeEmbeddingLoss(margin=" << options.margin() << ")";

@@ -17,8 +17,10 @@ namespace nn {
 
 /// Creates a criterion that measures the mean absolute error (MAE) between each
 /// element in the input : math :`x` and target : `y`.
-struct TORCH_API L1LossImpl : Module {
+struct TORCH_API L1LossImpl : Cloneable<L1LossImpl> {
   explicit L1LossImpl(const L1LossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `L1Loss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -49,8 +51,10 @@ TORCH_MODULE(L1Loss);
 ///
 /// This criterion expects a `target` `Tensor` of the same size as the
 /// `input` `Tensor`.
-struct TORCH_API KLDivLossImpl : Module {
+struct TORCH_API KLDivLossImpl : Cloneable<KLDivLossImpl> {
   explicit KLDivLossImpl(const KLDivLossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `KLDivLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -71,8 +75,10 @@ TORCH_MODULE(KLDivLoss);
 
 /// Creates a criterion that measures the mean squared error (squared L2 norm)
 /// between each element in the input :math:`x` and target :math:`y`.
-struct TORCH_API MSELossImpl : Module {
+struct TORCH_API MSELossImpl : Cloneable<MSELossImpl> {
   explicit MSELossImpl(const MSELossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `MSELoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -93,8 +99,10 @@ TORCH_MODULE(MSELoss);
 
 /// Creates a criterion that measures the Binary Cross Entropy
 /// between the target and the output.
-struct TORCH_API BCELossImpl : Module {
+struct TORCH_API BCELossImpl : Cloneable<BCELossImpl> {
   explicit BCELossImpl(const BCELossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `BCELoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -118,9 +126,11 @@ TORCH_MODULE(BCELoss);
 /// measuring whether two inputs are similar or dissimilar, e.g. using the L1
 /// pairwise distance as :math:`x`, and is typically used for learning nonlinear
 /// embeddings or semi-supervised learning.
-struct TORCH_API HingeEmbeddingLossImpl : Module {
+struct TORCH_API HingeEmbeddingLossImpl : Cloneable<HingeEmbeddingLossImpl> {
   explicit HingeEmbeddingLossImpl(
       const HingeEmbeddingLossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `HingeEmbeddingLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;

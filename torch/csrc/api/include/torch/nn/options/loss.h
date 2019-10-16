@@ -42,16 +42,10 @@ struct TORCH_API MSELossOptions {
 
 /// Options for a BCE loss module.
 struct TORCH_API BCELossOptions {
-  BCELossOptions(
-      Tensor weight = {},
-      Reduction::Reduction reduction = Reduction::Mean)
-      : weight_(weight), reduction_(reduction) {}
-
   /// A manual rescaling weight given to the loss of each batch element.
-  TORCH_ARG(Tensor, weight);
-
+  TORCH_ARG(Tensor, weight) = {};
   /// Specifies the reduction to apply to the output.
-  TORCH_ARG(Reduction::Reduction, reduction);
+  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
 };
 
 // ============================================================================
