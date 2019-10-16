@@ -117,6 +117,20 @@ class Conf:
             job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
         job_def.update(self.gen_workflow_params(phase))
 
+        if job_def['name'] == 'pytorch_linux_xenial_py3_6_gcc5_4_build':
+            job_def.update({'resource_class' : 'xlarge'})
+
+        if job_def['name'] == 'pytorch_linux_xenial_py3_6_gcc5_4_test':
+            job_def.update({'resource_class' : 'xlarge'})
+
+        if job_def['name'] == 'pytorch_linux_xenial_py3_clang5_asan_build':
+            job_def.update({'resource_class' : 'xlarge'})
+
+        if job_def['name'] == 'pytorch_linux_xenial_py3_clang5_asan_test':
+            job_def.update({'resource_class' : 'xlarge'})
+
+
+
         return {job_name : job_def}
 
 
