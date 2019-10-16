@@ -624,8 +624,9 @@ void initJitScriptBindings(PyObject* module) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
             SourceRangeRecords source_ranges;
-            PythonPrint(
-                ss, source_ranges, self.type(), tensors, deps, false);
+            PythonPrint pp(ss, source_ranges, tensors, deps, false);
+            pp.printNamedType(self.type());
+            pp.finish();
             return ss.str();
           })
       .def("apply", &Module::apply)
@@ -724,14 +725,9 @@ void initJitScriptBindings(PyObject* module) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
             SourceRangeRecords source_ranges;
-            PythonPrint(
-                ss,
-                source_ranges,
-                *self.function_,
-                false,
-                tensors,
-                deps,
-                false);
+            PythonPrint pp(ss, source_ranges, tensors, deps, false);
+            pp.printFunction(*self.function_);
+            pp.finish();
             return ss.str();
           })
       .def(
@@ -766,8 +762,9 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<at::Tensor> tensors;
         std::vector<c10::NamedTypePtr> deps;
         SourceRangeRecords source_ranges;
-        PythonPrint(
-            ss, source_ranges, self.function(), true, tensors, deps, false);
+        PythonPrint pp(ss, source_ranges, tensors, deps, false);
+        pp.printMethod(self.function());
+        pp.finish();
         return ss.str();
       });
   m.def(
