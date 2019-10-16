@@ -40,7 +40,7 @@ from common_methods_invocations import (method_tests,
                                         S)
 from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                 onlyCUDA, dtypes, dtypesIfCUDA,
-                                deviceCountAtLeast)
+                                deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -3731,6 +3731,31 @@ class TestAutogradDeviceType(TestCase):
                 return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
             gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfCudnnVersionLessThan(7600)
+    def test_ctc_loss_cudnn(self, device):
+        batch_size = 16
+        input_length = 30
+        num_labels = 101
+        target_length = 15
+        targets = torch.randint(1, num_labels, (batch_size * target_length,),
+                                device='cuda', dtype=torch.long)
+        log_probs = torch.log_softmax(torch.randn(input_length, batch_size, num_labels, device='cuda', dtype=torch.float), 2)
+        log_probs.requires_grad_()
+
+        input_lengths = batch_size * [input_length]
+        target_lengths = batch_size * [target_length]
+        grad_out = torch.randn(batch_size, device='cuda', dtype=torch.float)
+        with torch.backends.cudnn.flags(enabled=False):
+            loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+            grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
+        loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cpu', torch.int32),
+                                                  input_lengths, target_lengths, reduction='none')
+        self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
+        grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
+        self.assertEqual(grad_cudnn, grad_native, prec=1e-4)
 
     @onlyCUDA
     def test_free_unneeded_tensor(self, device):
