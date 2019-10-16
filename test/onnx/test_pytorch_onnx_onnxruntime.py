@@ -1092,6 +1092,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_masked_scatter(self):
+        class MaskedScatterModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.masked_scatter(x, x.ge(0.5), torch.ones(100, 100) * 5)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(MaskedScatterModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_masked_select(self):
+        class MaskedSelectModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.masked_select(x, x.ge(0.5))
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(MaskedSelectModel(), x)
+
     @unittest.skip("Enable this once depthToSpace attr 'mode' is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
