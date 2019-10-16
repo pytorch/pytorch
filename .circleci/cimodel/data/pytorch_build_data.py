@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 
@@ -8,7 +6,7 @@ CONFIG_TREE_DATA = [
         (None, [
             XImportant("2.7.9"),
             X("2.7"),
-            X("3.5"),
+            XImportant("3.5"),  # Not run on all PRs, but should be included on [test all]
             X("nightly"),
         ]),
         ("gcc", [
@@ -19,6 +17,7 @@ CONFIG_TREE_DATA = [
                     ("namedtensor", [XImportant(True)]),
                 ]),
             ]),
+            # TODO: bring back libtorch test
             ("7", [X("3.6")]),
         ]),
         ("clang", [
@@ -45,6 +44,9 @@ CONFIG_TREE_DATA = [
                 # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453144)
                 X("2.7"),
                 XImportant("3.6"),
+                ("3.6", [
+                    ("libtorch", [XImportant(True)])
+                ]),
                 ("2.7", [
                     ("namedtensor", [XImportant(True)]),
                 ]),
@@ -130,6 +132,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         next_nodes = {
             "xla": XlaConfigNode,
             "namedtensor": NamedTensorConfigNode,
+            "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "android_abi": AndroidAbiConfigNode,
         }
@@ -153,6 +156,16 @@ class NamedTensorConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_namedtensor"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+class LibTorchConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "BUILD_TEST_LIBTORCH=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_libtorch"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

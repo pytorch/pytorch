@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/cpp_hook.h>
 
 #include <ATen/ATen.h>
+#include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 
 #include <memory>
@@ -633,6 +634,9 @@ inline std::shared_ptr<Node> Variable::try_get_grad_accumulator() const {
 
 inline Variable Variable::detach() const {
   auto var = make_variable_view(*this, *this, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false, Edge());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(var, *this);
+#endif
   return var;
 }
 

@@ -18,20 +18,12 @@ foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
    endforeach()
 endforeach()
 
-foreach(THC_FILE TensorMathCompareT TensorMathPointwise TensorMathCompare TensorMathReduce TensorMasked)
+foreach(THC_FILE TensorMathCompareT TensorMathCompare TensorMathReduce TensorMasked TensorMathPointwise)
    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
       FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu"
         "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBoolType.h>\n")
    endif()
    LIST(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
-endforeach()
-
-foreach(THC_FILE TensorMathCompareT TensorMathCompare TensorMathReduce TensorMasked)
-   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu")
-      FILE(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu"
-        "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBFloat16Type.h>\n")
-   endif()
-   LIST(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}BFloat16.cu")
 endforeach()
 
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
@@ -139,10 +131,6 @@ INSTALL(FILES
           generic/THCTensorMath.cu
           generic/THCTensorMathBlas.cu
           generic/THCTensorMathBlas.h
-          generic/THCTensorMathCompare.h
-          generic/THCTensorMathCompare.cu
-          generic/THCTensorMathCompareT.h
-          generic/THCTensorMathCompareT.cu
           generic/THCTensorMathMagma.h
           generic/THCTensorMathMagma.cu
           generic/THCTensorMathPairwise.h

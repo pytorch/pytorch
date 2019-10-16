@@ -313,7 +313,7 @@ static inline bool isSignedType(ScalarType t) {
       return std::numeric_limits<ctype>::is_signed;
 
     switch (t) {
-      AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, CASE_SIGNED)
+      AT_FORALL_SCALAR_TYPES_AND(Half, CASE_SIGNED)
       default:
         AT_ERROR("Unknown ScalarType");
     }
@@ -365,10 +365,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   if (a == ud || b == ud) {
     return ScalarType::Undefined;
   }
-  if (isComplexType(a) || isComplexType(b)) {
-    AT_ERROR(
-        "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be for ", toString(a), " and ", toString(b));
-  }
 
   // For QInt types, we only allow exact match
   if (isQIntType(a) && a == b) {
@@ -377,7 +373,10 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
 
   if (isQIntType(a) || isQIntType(b)) {
     AT_ERROR(
-        "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be");
+        "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be, offending types: ",
+        toString(a),
+        " ",
+        toString(b));
   }
 
   // this matrix has to be consistent with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX

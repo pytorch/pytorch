@@ -92,6 +92,12 @@ make_unique(Args&&...) = delete;
 
 #endif
 
+template <typename Base, typename Child, typename... Args>
+typename std::enable_if<!std::is_array<Base>::value && !std::is_array<Base>::value && std::is_base_of<Base, Child>::value, std::unique_ptr<Base>>::type
+make_unique_base(Args&&... args) {
+  return std::unique_ptr<Base>(new Child(c10::guts::forward<Args>(args)...));
+}
+
 
 
 #ifdef __cpp_lib_integer_sequence
@@ -228,18 +234,6 @@ constexpr auto apply(F&& f, Tuple&& t) -> decltype(detail::apply_impl(
 
 
 
-
-#if defined(_MSC_VER) && defined(__CUDACC__) && \
-    (__CUDACC_VER_MAJOR__ >= 10 || (__CUDACC_VER_MAJOR__ == 9 && __CUDACC_VER_MINOR__ >= 2))
-// workaround: CUDA >= v9.2 compiler cannot compile correctly on Windows.
-#  define AT_CPP14_CONSTEXPR
-#else
-#if defined(__cpp_constexpr) && __cpp_constexpr >= 201304
-#  define AT_CPP14_CONSTEXPR constexpr
-#else
-#  define AT_CPP14_CONSTEXPR
-#endif
-#endif
 
 template <typename Functor, typename... Args>
 typename std::enable_if<

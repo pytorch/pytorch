@@ -138,7 +138,14 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         jit::tracer::setTracingState(nullptr);
       }
 
+#ifdef USE_STATIC_DISPATCH
+      {
+        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        c10::Dispatcher::singleton().callBoxed(op, &stack);
+      }
+#else
       c10::Dispatcher::singleton().callBoxed(op, &stack);
+#endif // USE_STATIC_DISPATCH
 
       // wrap tensor outputs as variable
       for (auto iter = stack.end() - output_size; iter != stack.end(); ++iter) {

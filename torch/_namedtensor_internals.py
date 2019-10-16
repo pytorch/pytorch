@@ -19,7 +19,7 @@ def check_serializing_named_tensor(tensor):
     if torch._C._BUILD_NAMEDTENSOR and tensor.has_names():
         raise RuntimeError(
             "NYI: Named tensors don't support serialization. Please drop "
-            "names before serialization and/or serialize them seperately.")
+            "names via `tensor = tensor.rename(None)` before serialization.")
 
 
 def build_dim_map(tensor):
@@ -54,22 +54,33 @@ def is_ellipsis(item):
     else:
         return item == Ellipsis or item == '...'
 
-
-def expand_single_ellipsis(numel_pre_glob, numel_post_glob, names):
-    return names[numel_pre_glob:len(names) - numel_post_glob]
-
-
-def resolve_ellipsis(names, tensor_names, fn_name):
+def single_ellipsis_index(names, fn_name):
     ellipsis_indices = [i for i, name in enumerate(names) if is_ellipsis(name)]
     if len(ellipsis_indices) >= 2:
         raise RuntimeError('{}: More than one Ellipsis (\'...\') found in names ('
                            '{}). This function supports up to one Ellipsis.'
                            .format(fn_name, names))
-    if len(ellipsis_indices) == 0:
-        return names
-    ellipsis_idx = ellipsis_indices[0]
+    if len(ellipsis_indices) == 1:
+        return ellipsis_indices[0]
+    return None
+
+def expand_single_ellipsis(numel_pre_glob, numel_post_glob, names):
+    return names[numel_pre_glob:len(names) - numel_post_glob]
+
+
+def replace_ellipsis_by_position(ellipsis_idx, names, tensor_names):
     globbed_names = expand_single_ellipsis(ellipsis_idx, len(names) - ellipsis_idx - 1, tensor_names)
     return names[:ellipsis_idx] + globbed_names + names[ellipsis_idx + 1:]
+
+
+def resolve_ellipsis(names, tensor_names, fn_name):
+    """
+    Expands ... inside `names` to be equal to a list of names from `tensor_names`.
+    """
+    ellipsis_idx = single_ellipsis_index(names, fn_name)
+    if ellipsis_idx is None:
+        return names
+    return replace_ellipsis_by_position(ellipsis_idx, names, tensor_names)
 
 
 def update_names_with_list(tensor, names, inplace):

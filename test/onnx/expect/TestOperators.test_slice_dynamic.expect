@@ -1,6 +1,6 @@
 ir_version: 4
 producer_name: "pytorch"
-producer_version: "1.2"
+producer_version: "1.3"
 graph {
   node {
     input: "0"
@@ -131,17 +131,31 @@ graph {
     }
   }
   node {
+    output: "14"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
     input: "0"
     input: "11"
     input: "12"
     input: "13"
-    output: "14"
-    op_type: "DynamicSlice"
+    input: "14"
+    output: "15"
+    op_type: "Slice"
   }
   node {
-    input: "14"
+    input: "15"
     input: "8"
-    output: "15"
+    output: "16"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -167,7 +181,7 @@ graph {
     }
   }
   output {
-    name: "15"
+    name: "16"
     type {
       tensor_type {
         elem_type: 1
@@ -181,5 +195,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 10
 }

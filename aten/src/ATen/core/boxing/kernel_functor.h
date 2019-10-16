@@ -270,9 +270,9 @@ namespace detail {
     explicit constexpr KernelFactory(Args... args)
     : constructor_parameters_(std::move(args)...) {}
 
-    std::shared_ptr<KernelFunctor> operator()() const {
+    std::unique_ptr<OperatorKernel> operator()() const {
       return guts::apply(
-        [] (const Args&... params) {return std::make_shared<KernelFunctor>(params...); },
+        [] (const Args&... params) -> std::unique_ptr<OperatorKernel> {return guts::make_unique_base<OperatorKernel, KernelFunctor>(params...); },
         constructor_parameters_);
     }
 
@@ -280,11 +280,17 @@ namespace detail {
     std::tuple<Args...> constructor_parameters_;
   };
 
+  template<class FuncType>
+  std::unique_ptr<FunctionSchema> inferFunctionSchema_() {
+    return guts::make_unique<FunctionSchema>(inferFunctionSchema<FuncType>("", ""));
+  }
+
   template<class KernelFunctor>
   class FunctionSchemaInferer final {
   public:
+    using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
     std::unique_ptr<FunctionSchema> operator()() const {
-      return guts::make_unique<FunctionSchema>(inferFunctionSchema<KernelFunctor>("", ""));
+      return inferFunctionSchema_<func_type>();
     }
   };
 }

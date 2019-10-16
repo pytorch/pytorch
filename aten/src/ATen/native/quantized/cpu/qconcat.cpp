@@ -2,6 +2,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 
 #include <algorithm>
 #include <vector>
@@ -9,6 +10,19 @@
 namespace at {
 namespace native {
 namespace {
+
+DEFINE_DISPATCH(qcat_nhwc_stub);
+DEFINE_DISPATCH(qcat_relu_nhwc_stub);
+
+bool is_cat_nhwc_fast_path(const c10::List<Tensor>& qxs, int dim) {
+  TORCH_CHECK(qxs.size() > 0);
+  bool is_fast_path = dim == 1;
+  for (const at::Tensor& qx : qxs) {
+    is_fast_path &= qx.dim() == 4;
+    is_fast_path &= qx.is_contiguous(c10::MemoryFormat::ChannelsLast);
+  }
+  return is_fast_path;
+}
 
 bool is_valid_quantization_scheme(const Tensor& t) {
   const auto qtype = t.qscheme();
@@ -25,10 +39,19 @@ Tensor quantized_cat(
     int64_t dim,
     double scale,
     int64_t zero_point) {
-  const auto x_dtype = qxs.get(0).scalar_type();
   TORCH_CHECK(
       is_valid_quantization_scheme(qxs[0]),
       "Only per-tensor quantization is supported in 'cat'!")
+
+  if (is_cat_nhwc_fast_path(qxs, dim)) {
+    if (ReLUFused) {
+      return qcat_relu_nhwc_stub(at::kCPU, qxs, dim, scale, zero_point);
+    } else {
+      return qcat_nhwc_stub(at::kCPU, qxs, dim, scale, zero_point);
+    }
+  }
+
+  const auto x_dtype = qxs.get(0).scalar_type();
   const auto x_qscheme = qxs.get(0).qscheme();
   std::vector<Tensor> xs;
   xs.reserve(qxs.size());

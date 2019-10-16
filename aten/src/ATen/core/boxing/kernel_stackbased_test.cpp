@@ -62,6 +62,26 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenC
   expectCallsIncrement(TensorTypeId::CPUTensorId);
 }
 
+TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredAsLambda_thenCanBeCalled) {
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId,
+    [] (OperatorKernel*, Stack* stack) {
+      int input = torch::jit::pop(*stack).toInt();
+      torch::jit::pop(*stack); // pop the dummy tensor
+      torch::jit::push(*stack, input + 1);
+    }));
+  expectCallsIncrement(TensorTypeId::CPUTensorId);
+}
+
+TEST(OperatorRegistrationTest_StackBasedKernel, givenCatchAllKernel_whenRegisteredAsLambda_thenCanBeCalled) {
+  auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().catchAllKernel(
+    [] (OperatorKernel*, Stack* stack) {
+      int input = torch::jit::pop(*stack).toInt();
+      torch::jit::pop(*stack); // pop the dummy tensor
+      torch::jit::push(*stack, input + 1);
+    }));
+  expectCallsIncrement(TensorTypeId::CPUTensorId);
+}
+
 TEST(OperatorRegistrationTest_StackBasedKernel, givenMultipleOperatorsAndKernels_whenRegisteredInOneRegistrar_thenCallsRightKernel) {
   auto registrar = RegisterOperators()
       .op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId, &incrementKernel))

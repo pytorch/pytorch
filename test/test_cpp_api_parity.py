@@ -206,7 +206,7 @@ void ${module_variant_name}_test_backward(
 
 TORCH_NN_MODULE_IGNORED_ATTRS = {
     '_backend', '_parameters', '_buffers', '_backward_hooks', '_forward_hooks', '_forward_pre_hooks',
-    '_state_dict_hooks', '_load_state_dict_pre_hooks', '_modules', 'training', 'has_parity',
+    '_state_dict_hooks', '_load_state_dict_pre_hooks', '_modules', 'training',
 }
 
 class TestCppApiParity(common.TestCase):
@@ -306,7 +306,9 @@ class TestCppApiParity(common.TestCase):
         cpp_default_constructor_args_str = module_metadata.cpp_default_constructor_args
         init_arg_spec = self._get_python_module_init_arg_spec(module_name)
         init_kwargs_defaults = init_arg_spec.defaults
-        python_default_constructor_arg_names = [x for x in init_arg_spec.args[1:-len(init_kwargs_defaults)] if x != 'has_parity']
+        python_default_constructor_arg_names = [
+            x for x in init_arg_spec.args[1:-len(init_kwargs_defaults)]
+            if x not in module_metadata.python_ignored_constructor_args]
         # NOTE: the regex is used here to split up e.g. `(1, {2, 3}, 4)` into `['1', '{2, 3}', '4']`
         cpp_default_constructor_arg_values = re.findall(r'{[^}]*}|[^,\s()]+', cpp_default_constructor_args_str)
 
@@ -332,13 +334,13 @@ class TestCppApiParity(common.TestCase):
             # specify it, which means we can't test that the options arg exists).
             # Instead, we test that all options args exist by calling their accessors after constructing the
             # C++ module with the options.
-            if arg_name not in module_metadata.python_legacy_constructor_args and python_default_value is not None:
+            if arg_name not in module_metadata.python_ignored_constructor_args and python_default_value is not None:
                 cpp_module_option += '.{}({})'.format(arg_name, self._python_arg_to_cpp_arg(python_default_value).value)
 
         # Step 3: Generate code to check existence of all Python module constructor args in the C++ module options.
         extra_stmts = [TORCH_NN_MODULE_TEST_OPTIONS_ARG.substitute(options_arg_name=arg_name)
                        for arg_name in python_default_constructor_arg_names + init_kwargs
-                       if arg_name not in module_metadata.python_legacy_constructor_args]
+                       if arg_name not in module_metadata.python_ignored_constructor_args]
 
         # Step 4: Compile the test code and run the tests.
         cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + module_metadata.cpp_sources
@@ -354,6 +356,9 @@ class TestCppApiParity(common.TestCase):
         getattr(cpp_module, cpp_test_name)()
 
     def _test_torch_nn_module_variant(self, test_params):
+        def get_python_ignored_attrs(module_metadata):
+            return list(TORCH_NN_MODULE_IGNORED_ATTRS) + module_metadata.python_ignored_attrs
+
         def generate_test_cpp_sources(test_params, template, extra_stmts):
             input_args = self._get_forward_input_args(test_params)
             input_arg_types = [self._python_arg_to_cpp_arg(arg).type for arg in list(input_args)]
@@ -369,6 +374,8 @@ class TestCppApiParity(common.TestCase):
             return test_cpp_sources
 
         def setup_init_test(test_params):
+            module_metadata = torch_nn_modules.module_metadata_map[test_params.module_name]
+
             # We are generating the attribute equality checks manually here,
             # because it is not possible to have a `.attributes()` API that returns
             # non-parameter / non-buffer attributes in a C++ torch::nn module.
@@ -393,9 +400,10 @@ class TestCppApiParity(common.TestCase):
 
                 init_arg_spec = self._get_python_module_init_arg_spec(module.__class__.__name__)
                 # NOTE: `init_arg_spec.args[0]` is `self`, which is not counted as a constructor arg in the API parity test.
-                python_constructor_arg_names = [x for x in init_arg_spec.args[1:] if x != 'has_parity']
+                python_constructor_arg_names = [
+                    x for x in init_arg_spec.args[1:] if x not in module_metadata.python_ignored_constructor_args]
                 for name, attr in module.__dict__.items():
-                    if name not in TORCH_NN_MODULE_IGNORED_ATTRS:
+                    if name not in get_python_ignored_attrs(module_metadata):
                         # Every constructor arg of the Python module must have
                         # a corresponding C++ module options arg.
                         if name in python_constructor_arg_names:
@@ -417,7 +425,7 @@ class TestCppApiParity(common.TestCase):
             module = python_constructor(*python_constructor_args).to(device)
 
             extra_stmts = generate_attr_equality_checks(module)
-            assert len(extra_stmts) == test_params.num_attrs_recursive
+            assert len(extra_stmts) == module_metadata.num_attrs_recursive
             extra_stmts_str = ''.join(extra_stmts)
             return (([module], device),
                     generate_test_cpp_sources(
@@ -472,7 +480,7 @@ class TestCppApiParity(common.TestCase):
                 for sub_module, sub_script_module in zip(module.children(), script_module.children()):
                     register_attrs(sub_module, sub_script_module)
                 for key, value in module.__dict__.items():
-                    if key not in TORCH_NN_MODULE_IGNORED_ATTRS:
+                    if key not in get_python_ignored_attrs(module_metadata):
                         if value is None:
                             value_type = module_metadata.python_optional_attribute_to_jit_type[key]
                         elif type(value) == tuple:
@@ -499,12 +507,13 @@ class TestCppApiParity(common.TestCase):
             return module_file.name
 
         def test_methods(test_params):
+            module_metadata = torch_nn_modules.module_metadata_map[test_params.module_name]
             module_variant_name = test_params.module_variant_name
             input_args = self._get_forward_input_args(test_params)
 
             args_map = {}
 
-            cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + test_params.cpp_sources
+            cpp_sources = TORCH_NN_MODULE_COMMON_TEST_HARNESS + module_metadata.cpp_sources
 
             torch_nn_test_methods = [
                 ('init', setup_init_test),
@@ -585,8 +594,6 @@ def _process_test_params(test_params_dict, module_metadata, device, is_criterion
         test_instance=test,
         cpp_constructor_args=test_params_dict.get('cpp_constructor_args'),
         has_parity=test_params_dict.get('has_parity', True),
-        cpp_sources=module_metadata.cpp_sources,
-        num_attrs_recursive=module_metadata.num_attrs_recursive,
         device=device,
     )
 

@@ -81,7 +81,7 @@ struct PythonResolver : public Resolver {
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
       Function& m,
-      const SourceRange& loc) const override {
+      const SourceRange& loc) override {
     AutoGIL ag;
     py::object obj = rcb_(name);
     if (obj.is(py::none())) {
@@ -97,7 +97,7 @@ struct PythonResolver : public Resolver {
   }
 
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
-      const override {
+      override {
     if (classType_ && name == classname_) {
       return classType_;
     }
@@ -262,20 +262,20 @@ static StrongFunctionPtr script_compile_function(
 }
 
 struct VISIBILITY_HIDDEN ModuleSelf : public Self {
-  ModuleSelf(const Module& m, py::object& py_m)
-      : Self(), module_(m), pyModule_(py_m) {}
+  ModuleSelf(std::shared_ptr<ConcreteModuleType> concreteType)
+      : Self(), concreteType_(std::move(concreteType)) {}
 
   std::shared_ptr<SugaredValue> makeSugared(Value* v) const override {
-    v->setType(module_.type());
-    return std::make_shared<ModuleValue>(v, module_, pyModule_);
+    v->setType(getClassType());
+    return std::make_shared<ModuleValue>(v, concreteType_);
   }
+
   ClassTypePtr getClassType() const override {
-    return module_.type();
+    return concreteType_->getJitType();
   }
 
  private:
-  const Module& module_;
-  const py::object& pyModule_;
+  std::shared_ptr<ConcreteModuleType> concreteType_;
 };
 
 static TypePtr getTensorType(const at::Tensor& t, bool complete) {
@@ -468,56 +468,30 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
-          "_dump",
+          "dump",
           &Module::dump,
           py::arg("code") = true,
           py::arg("attrs") = true,
           py::arg("params") = true)
       .def(
+          "dump_to_str",
+          &Module::dump_to_str,
+          py::arg("code") = true,
+          py::arg("attrs") = true,
+          py::arg("params") = true,
+          py::arg("indent") = 0)
+      .def(
           "_define",
           [](Module& m,
-             py::object py_m,
+             std::shared_ptr<ConcreteModuleType> concreteType,
              const std::string& script,
              ResolutionCallback rcb) {
-            const auto self = ModuleSelf(m, py_m);
+            const auto self = ModuleSelf(std::move(concreteType));
             m.class_compilation_unit()->define(
                 m.name(), script, pythonResolver(rcb), &self);
             didFinishEmitModule(m);
           })
-      .def(
-          "_create_methods",
-          [](Module& m,
-             py::object py_m,
-             const std::vector<Def>& defs,
-             const std::vector<ResolutionCallback>& rcbs,
-             const std::vector<FunctionDefaults>& defaults) {
-            TORCH_INTERNAL_ASSERT(defs.size() == rcbs.size());
-            std::vector<ResolverPtr> resolvers;
-            resolvers.reserve(rcbs.size());
-            for (auto& callback : rcbs) {
-              resolvers.push_back(pythonResolver(callback));
-            }
-            const auto& prefix = m.name();
-            const auto self = ModuleSelf(m, py_m);
-            m.class_compilation_unit()->define(prefix, defs, resolvers, &self);
-            // Stitch in default arguments for each Def if provided
-            auto defaults_it = defaults.begin();
-            auto defs_it = defs.begin();
-            while (defs_it != defs.end()) {
-              const auto method_name =
-                  QualifiedName(m.name(), (*defs_it).name().name());
-              auto& method =
-                  m.class_compilation_unit()->get_function(method_name);
-              method.setSchema(getSchemaWithNameAndDefaults(
-                  defs_it->range(),
-                  method.getSchema(),
-                  at::nullopt,
-                  *defaults_it));
-              ++defs_it;
-              ++defaults_it;
-            }
-            didFinishEmitModule(m);
-          })
+      .def("_type", [](Module& m) { return m.type(); })
       .def(
           "_get_method",
           [](Module& self, const std::string& name) -> Method {
@@ -685,7 +659,7 @@ void initJitScriptBindings(PyObject* module) {
             cu.define(c10::nullopt, src, pythonResolver(rcb), nullptr);
           });
 
-  py::class_<StrongFunctionPtr>(m, "Function", py::dynamic_attr())
+  py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
@@ -709,6 +683,14 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             Module module("__torch__.PlaceholderModule");
+            // [issue 27343]
+            // Modules have 'training' attributes by defualt, but due to
+            // https://github.com/pytorch/pytorch/issues/27343, functions end
+            // up having a training attribute when they are loaded. This adds
+            // a fake 'training' attribute that shouldn't be used, but prevents
+            // jitter on saving and loading. Once that issue is fixed this can
+            // be deleted.
+            module.register_attribute("training", BoolType::get(), true);
             addFunctionToModule(module, self);
             module.save(filename, _extra_files);
           },
@@ -720,6 +702,8 @@ void initJitScriptBindings(PyObject* module) {
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             std::ostringstream buf;
             Module module("__torch__.PlaceholderModule");
+            // see [issue 27343]
+            module.register_attribute("training", BoolType::get(), true);
             addFunctionToModule(module, self);
             module.save(buf, _extra_files);
             return py::bytes(buf.str());
@@ -875,6 +859,10 @@ void initJitScriptBindings(PyObject* module) {
             c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb));
       });
 
+  m.def("_parse_source_def", [](const std::string& src) {
+    Parser p(std::make_shared<Source>(src));
+    return Def(p.parseFunction(/*is_method=*/true));
+  });
   m.def("parse_type_comment", [](const std::string& comment) {
     Parser p(std::make_shared<Source>(comment));
     return Decl(p.parseTypeComment());
@@ -994,11 +982,87 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
 
+  m.def("_create_module_with_type", [](const ClassTypePtr& type) {
+    return Module(get_python_cu(), type);
+  });
+
+  py::class_<ConcreteModuleType, std::shared_ptr<ConcreteModuleType>>(
+      m, "ConcreteModuleType")
+      .def(py::init<>())
+      .def_property_readonly("py_class", &ConcreteModuleType::getPyClass)
+      .def_property_readonly("jit_type", &ConcreteModuleType::getJitType)
+      .def("get_constants", &ConcreteModuleType::getConstantsPy)
+      .def("get_attributes", &ConcreteModuleType::getAttributesPy)
+      .def("get_module_names", &ConcreteModuleType::getModuleNamesPy)
+      .def("add_constant", &ConcreteModuleType::addConstant)
+      .def("add_attribute", &ConcreteModuleType::addAttribute)
+      .def("add_module", &ConcreteModuleType::addModule)
+      .def("add_pyclass", &ConcreteModuleType::addPyClass)
+      .def("add_overload", &ConcreteModuleType::addOverload)
+      .def("add_jit_type", &ConcreteModuleType::addJitType)
+      .def("set_poisoned", &ConcreteModuleType::setPoisoned)
+      .def(
+          "set_module_dict",
+          [](ConcreteModuleType& self) {
+            self.setIterableModuleKind(IterableModuleKind::DICT);
+          })
+      .def(
+          "set_module_list",
+          [](ConcreteModuleType& self) {
+            self.setIterableModuleKind(IterableModuleKind::LIST);
+          })
+      .def(
+          "create_new_type_from_this",
+          &ConcreteModuleType::createNewTypeFromThis)
+      .def("add_failed_attribute", &ConcreteModuleType::addFailedAttribute)
+      .def("dump", &ConcreteModuleType::dump)
+      .def(
+          "equals",
+          [](const ConcreteModuleType& self, const ConcreteModuleType& other) {
+            return self == other;
+          })
+      .def(
+          "_create_methods",
+          [](std::shared_ptr<ConcreteModuleType> concreteType,
+             const std::vector<Def>& defs,
+             const std::vector<ResolutionCallback>& rcbs,
+             const std::vector<FunctionDefaults>& defaults) {
+            TORCH_INTERNAL_ASSERT(defs.size() == rcbs.size());
+            std::vector<ResolverPtr> resolvers;
+            resolvers.reserve(rcbs.size());
+            for (auto& callback : rcbs) {
+              resolvers.push_back(pythonResolver(callback));
+            }
+            const auto& selfType = concreteType->getJitType();
+            const auto& prefix = selfType->name().value();
+            const auto self = ModuleSelf(std::move(concreteType));
+            auto cu = selfType->compilation_unit();
+            cu->define(prefix, defs, resolvers, &self);
+            // Stitch in default arguments for each Def if provided
+            auto defaults_it = defaults.begin();
+            auto defs_it = defs.begin();
+            while (defs_it != defs.end()) {
+              const auto method_name =
+                  QualifiedName(prefix, (*defs_it).name().name());
+              auto& method = cu->get_function(method_name);
+              method.setSchema(getSchemaWithNameAndDefaults(
+                  defs_it->range(),
+                  method.getSchema(),
+                  at::nullopt,
+                  *defaults_it));
+              ++defs_it;
+              ++defaults_it;
+            }
+          });
+
   m.def(
       "_resolve_type",
       [](const std::string& name, SourceRange range, ResolutionCallback rcb) {
         return pythonResolver(rcb)->resolveType(name, range);
       });
+
+  m.def(
+      "_run_emit_module_hook", [](const Module& m) { didFinishEmitModule(m); });
 
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");

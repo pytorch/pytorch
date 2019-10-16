@@ -36,6 +36,9 @@ class ReLU(torch.nn.ReLU):
     def forward(self, input):
         return torch.nn.quantized.functional.relu(input)
 
+    def _get_name(self):
+        return 'QuantizedReLU'
+
     @staticmethod
     def from_float(mod):
         return ReLU(mod.inplace)
@@ -70,6 +73,9 @@ class ReLU6(torch.nn.ReLU):
 
     def forward(self, input):
         return torch.ops.quantized.relu6(input)
+
+    def _get_name(self):
+        return 'QuantizedReLU6'
 
     @staticmethod
     def from_float(mod):
