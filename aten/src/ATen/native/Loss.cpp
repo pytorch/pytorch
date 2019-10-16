@@ -148,10 +148,4 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
 
     return apply_loss_reduction(loss, reduction);
 }
-
-Tensor soft_margin_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  Tensor loss = at::log(1. + at::exp(-input * target));
-  return apply_loss_reduction(loss, reduction);
-}
-
 }}  // namespace at::native
