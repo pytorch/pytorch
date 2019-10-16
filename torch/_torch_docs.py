@@ -145,21 +145,20 @@ add_docstr(torch.add,
            r"""
 .. function:: add(input, other, out=None)
 
-Adds the scalar :attr:`other` to each element of the input :attr:`input`
-and returns a new resulting tensor.
+Each element of the tensor ``other`` is added to each element of the
+tensor ``input``.
 
 .. math::
     \text{{out}} = \text{{input}} + \text{{other}}
 
-If :attr:`input` is of type FloatTensor or DoubleTensor, :attr:`other` must be
-a real number, otherwise it should be an integer.
-
-Args:
-    {input}
-    value (Number): the number to be added to each element of :attr:`input`
-
-Keyword arguments:
-    {out}
+The shapes of ``input`` and ``other`` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+If the :class:`torch.dtype` of ``input`` and ``other`` differ,
+the :class:`torch.dtype` of the result tensor is determined following
+rules described in the type promotion :ref:`documentation <type-promotion-doc>`.
+If ``out`` is specified, the result must be
+:ref:`castable <type-promotion-doc>` to the :class:`torch.dtype`
+of the specified output tensor.
 
 Example::
 
@@ -169,27 +168,25 @@ Example::
     >>> torch.add(a, 20)
     tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
 
-.. function:: add(input, alpha=1, other, out=None)
+.. function:: add(input, other, alpha=1, out=None)
 
-Each element of the tensor :attr:`other` is multiplied by the scalar
-:attr:`alpha` and added to each element of the tensor :attr:`input`.
-The resulting tensor is returned.
-
-The shapes of :attr:`input` and :attr:`other` must be
-:ref:`broadcastable <broadcasting-semantics>`.
+Each element of the tensor ``other`` is multiplied by the scalar
+``alpha`` and added to each element of the tensor ``input``.
 
 .. math::
     \text{{out}} = \text{{input}} + \text{{alpha}} \times \text{{other}}
 
-If :attr:`other` is of type FloatTensor or DoubleTensor, :attr:`alpha` must be
-a real number, otherwise it should be an integer.
+If the result of the addition between ``input`` and ``other`` is:
+- floating point, ``alpha`` must be floating point or integral (but not Boolean)
+- integral, ``alpha`` must be integral (but not Boolean)
+- Boolean, ``alpha` must be integral or Boolean
 
 Args:
     input (Tensor): the first input tensor
-    alpha (Number): the scalar multiplier for :attr:`other`
     other (Tensor): the second input tensor
 
-Keyword arguments:
+Keyword args:
+    alpha (Number): the scalar multiplier for :attr:`other`
     {out}
 
 Example::
@@ -203,7 +200,7 @@ Example::
             [-1.7724],
             [-0.5811],
             [-0.8017]])
-    >>> torch.add(a, 10, b)
+    >>> torch.add(a, b, alpha=10)
     tensor([[  2.7695,   3.3930,   4.3672,   4.1450],
             [-18.6971, -18.0736, -17.0994, -17.3216],
             [ -6.7845,  -6.1610,  -5.1868,  -5.4090],
@@ -3482,8 +3479,13 @@ Multiplies each element of the input :attr:`input` with the scalar
 .. math::
     \text{out}_i = \text{other} \times \text{input}_i
 """ + r"""
-If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, :attr:`other`
-should be a real number, otherwise it should be an integer
+If the :class:`torch.dtype` of ``input`` and ``other`` differ,
+the :class:`torch.dtype` of the result tensor is determined following
+rules described in the type promotion :ref:`documentation <type-promotion-doc>`.
+
+If ``out`` is specified, the result must be
+:ref:`castable <type-promotion-doc>` to the :class:`torch.dtype`
+of the specified output tensor.
 
 Args:
     {input}
@@ -5095,6 +5097,72 @@ Example::
     >>> torch.std_mean(a, 1)
     (tensor([0.9110, 0.8197, 1.2552, 1.0608]), tensor([-0.6871,  0.6229,  0.2169, -0.9058]))
 """.format(**multi_dim_common))
+
+add_docstr(torch.sub,
+           r"""
+.. function:: sub(input, other, out=None)
+
+Each element of the tensor ``other`` is subtracted from each element of the
+tensor ``input``.
+
+.. math::
+    \text{{out}} = \text{{input}} - \text{{other}}
+
+The shapes of ``input`` and ``other`` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+If the :class:`torch.dtype` of ``input`` and ``other`` differ,
+the :class:`torch.dtype` of the result tensor is determined following
+rules described in the type promotion :ref:`documentation <type-promotion-doc>`.
+If ``out`` is specified, the result must be
+:ref:`castable <type-promotion-doc>` to the :class:`torch.dtype`
+of the specified output tensor.
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([ 0.0202,  1.0985,  1.3506, -0.6056])
+    >>> torch.sub(a, 20)
+    tensor([-19.9798, -18.9015, -18.6494, -20.6056])
+
+.. function:: sub(input, other, alpha=1, out=None)
+
+Each element of the tensor ``other`` is multiplied by the scalar
+``alpha`` and subtracted from each element of the tensor ``input``.
+
+.. math::
+    \text{{out}} = \text{{input}} + \text{{alpha}} \times \text{{other}}
+
+If the result of the subition between ``input`` and ``other`` is:
+- floating point, ``alpha`` must be floating point or integral (but not Boolean)
+- integral, ``alpha`` must be integral (but not Boolean)
+- Boolean, ``alpha` must be integral or Boolean
+
+Args:
+    input (Tensor): the first input tensor
+    other (Tensor): the second input tensor
+
+Keyword args:
+    alpha (Number): the scalar multiplier for :attr:`other`
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-0.9732, -0.3497,  0.6245,  0.4022])
+    >>> b = torch.randn(4, 1)
+    >>> b
+    tensor([[ 0.3743],
+            [-1.7724],
+            [-0.5811],
+            [-0.8017]])
+    >>> torch.sub(a, b, alpha=10)
+    tensor([[-4.7162, -4.0927, -3.1185, -3.3408],
+            [16.7508, 17.3743, 18.3485, 18.1262],
+            [ 4.8378,  5.4613,  6.4355,  6.2132],
+            [ 7.0438,  7.6673,  8.6415,  8.4192]])
+""".format(**common_args))
 
 add_docstr(torch.sum,
            r"""
