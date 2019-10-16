@@ -420,6 +420,7 @@ void Pickler::pushLong(const std::string& data) {
     "Cannot pickle a long with a size larger than 256 bytes");
   push<PickleOpCode>(PickleOpCode::LONG1);
   push<uint8_t>(size);
+  pushBytes(data);
 }
 
 void Pickler::pushTensorReference(const IValue& ivalue) {
