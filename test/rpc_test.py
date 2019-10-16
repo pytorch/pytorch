@@ -384,7 +384,7 @@ class RpcTest(object):
         dist.init_process_group(backend="gloo", init_method=self.init_method)
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
-            backend=TEST_CONFIG.backend,
+            backend=TEST_CONFIG.rpc_backend,
             self_rank=self.rank,
             init_method=self.init_method,
         )
