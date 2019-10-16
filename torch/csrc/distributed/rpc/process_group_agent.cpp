@@ -28,7 +28,7 @@ std::string serialize(const Message& message) {
   tensors.push_back(torch::tensor({message.id()}, {torch::kInt64}));
 
   // optional: estimate output size, to avoid some unnecessary resizing.
-  static constexpr size_t kBaseOverhead = 1024;
+  static constexpr size_t kBaseOverhead = 2048;
   static constexpr size_t kPerTensor = 128;
   size_t estimate = kBaseOverhead;
   for (const auto& t : tensors) {

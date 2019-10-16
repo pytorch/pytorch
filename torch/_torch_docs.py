@@ -2751,8 +2751,8 @@ Example::
     tensor([ True,  True, False, False])
     >>> torch.logical_xor(a.double(), b)
     tensor([ True,  True, False, False])
-    >>> torch.logical_xor(a, b, out=torch.empty(4, dtype=torch.int8))
-    tensor([1, 1, 0, 0], dtype=torch.int8)
+    >>> torch.logical_xor(a, b, out=torch.empty(4, dtype=torch.bool))
+    tensor([ True,  True, False, False])
 """.format(**common_args))
 
 add_docstr(torch.logspace,
