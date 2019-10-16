@@ -67,6 +67,8 @@ Tensor autograd functions
 .. autoclass:: torch.Tensor
    :members: grad, requires_grad, is_leaf, backward, detach, detach_, register_hook, retain_grad
 
+   :noindex:
+
 :hidden:`Function`
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

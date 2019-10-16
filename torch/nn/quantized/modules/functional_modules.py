@@ -13,7 +13,7 @@ class FloatFunctional(torch.nn.Module):
         This class does not provide a ``forward`` hook. Instead, you must use
         one of the underlying functions (e.g. ``add``).
 
-    .. Examples::
+    Examples::
 
         >>> f_add = FloatFunctional()
         >>> a = torch.tensor(3.0)
@@ -91,7 +91,7 @@ class QFunctional(torch.nn.Module):
         This class does not provide a ``forward`` hook. Instead, you must use
         one of the underlying functions (e.g. ``add``).
 
-    .. Examples::
+    Examples::
 
         >>> q_add = QFunctional('add')
         >>> a = torch.quantize_per_tensor(torch.tensor(3.0), 1.0, 0, torch.qint32)
