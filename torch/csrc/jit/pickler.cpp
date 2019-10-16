@@ -405,10 +405,10 @@ void Pickler::pushLong(const std::string& data) {
     push<uint8_t>(size);
   } else {
     TORCH_INTERNAL_ASSERT(
-        data.size() > std::numeric_limits<uint32_t>::max(),
+        data.size() > std::numeric_limits<int32_t>::max(),
         "Cannot pickle a long with a size larger than 4 bytes")
     push<PickleOpCode>(PickleOpCode::LONG4);
-    push<uint64_t>(size);
+    push<int32_t>(size);
   }
   pushBytes(data);
 }

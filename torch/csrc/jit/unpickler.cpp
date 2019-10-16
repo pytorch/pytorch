@@ -320,6 +320,9 @@ PickleOpCode Unpickler::readInstruction() {
       TORCH_CHECK(length == 8, "Expected length to be 8, got ", int(length));
       stack_.emplace_back(int64_t(read<int64_t>()));
     } break;
+    case PickleOpCode::LONG4: {
+      stack_.emplace_back(int32_t(read<int32_t>()));
+    } break;
     case PickleOpCode::BINUNICODE: {
       uint32_t length = read<uint32_t>();
       stack_.emplace_back(readBytes(length));
