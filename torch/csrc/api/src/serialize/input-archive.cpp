@@ -112,7 +112,7 @@ void InputArchive::load_from(
       if (pos >= size_) {
         return 0;
       }
-      size_t nread = std::min(pos + n, size_) - pos;
+      size_t nread = std::min(static_cast<size_t>(pos) + n, size_) - pos;
       memcpy(buf, data_ + pos, nread);
       return nread;
     }
