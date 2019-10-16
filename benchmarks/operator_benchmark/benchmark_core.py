@@ -73,7 +73,10 @@ class BenchmarkRunner(object):
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
         self.print_per_iter = False
-        if self.args.iterations:
+        # 100 is the default warmup iterations 
+        if self.args.warmup_iterations == -1: 
+            self.args.warmup_iterations = 100
+        if self.args.iterations and self.args.iterations != -1:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
         # when a specific test is selected by a user, we don't need

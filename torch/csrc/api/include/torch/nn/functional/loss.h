@@ -58,11 +58,11 @@ inline Tensor multilabel_soft_margin_loss(
 
   Tensor ret;
 
-  if (options.reduction() == Reduction::None) {
+  if (options.reduction() == torch::Reduction::None) {
       ret = loss;
-  } else if (options.reduction() == Reduction::Mean) {
+  } else if (options.reduction() == torch::Reduction::Mean) {
       ret = loss.mean();
-  } else if (options.reduction() == Reduction::Sum) {
+  } else if (options.reduction() == torch::Reduction::Sum) {
       ret = loss.sum();
   } else {
       ret = input;
