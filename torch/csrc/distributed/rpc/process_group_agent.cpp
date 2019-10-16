@@ -147,8 +147,6 @@ ProcessGroupAgent::ProcessGroupAgent(
   for (int rank = 0; rank < (int)tmpWorkerIds.size(); ++rank) {
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
-
-  listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
@@ -243,6 +241,10 @@ void ProcessGroupAgent::sync() {
     // trigger more messages to be sent, we need to wait for the thread pool
     // again.
   } while (hasPendingMessage());
+}
+
+void ProcessGroupAgent::start() {
+  listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(

@@ -731,6 +731,22 @@ TEST_F(ModulesTest, Linear) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
+TEST_F(ModulesTest, Bilinear) {
+  Bilinear model(5, 3, 2);
+  auto x1 = torch::randn({10, 5}, torch::requires_grad());
+  auto x2 = torch::randn({10, 3}, torch::requires_grad());
+  auto y = model(x1, x2);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  ASSERT_EQ(y.size(0), 10);
+  ASSERT_EQ(y.size(1), 2);
+
+  ASSERT_EQ(model->weight.grad().numel(), 2 * 5 * 3);
+}
+
 TEST_F(ModulesTest, Fold) {
   Fold model(FoldOptions({4, 5}, {2, 2}));
   auto x = torch::randn({1, 3 * 2 * 2, 12}, torch::requires_grad());
@@ -1097,7 +1113,7 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
-  auto options = MultiLabelSoftMarginLossOptions().reduction(Reduction::None).weight(weight);
+  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::Reduction::None).weight(weight);
   MultiLabelSoftMarginLoss loss = MultiLabelSoftMarginLoss(options);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
@@ -1502,6 +1518,13 @@ TEST_F(ModulesTest, PrettyPrintIdentity) {
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintBilinear) {
+  ASSERT_EQ(
+      c10::str(Bilinear(3, 2, 4)), "torch::nn::Bilinear(in1_features=3, in2_features=2, out_features=4, bias=true)");
+  ASSERT_EQ(
+      c10::str(Bilinear(BilinearOptions(3, 2, 4).bias(false))), "torch::nn::Bilinear(in1_features=3, in2_features=2, out_features=4, bias=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintConv) {

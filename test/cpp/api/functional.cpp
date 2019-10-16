@@ -90,7 +90,7 @@ TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
-  auto options = MultiLabelSoftMarginLossOptions().reduction(Reduction::None).weight(weight);
+  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::Reduction::None).weight(weight);
   auto output =
       F::multilabel_soft_margin_loss(input, target, options);
   auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
@@ -589,6 +589,25 @@ TEST_F(FunctionalTest, PReLU) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({42, 24}));
   const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
   ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Bilinear) {
+  auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
+  auto input2 = torch::tensor({{7, 4}, {8 ,9}});
+  auto weight = torch::tensor({{{2, 3}, {9, 7}, {8, 6}}});
+  auto bias = torch::tensor({1});
+ 
+  auto y_with_bias = F::bilinear(input1, input2, weight, bias);
+  ASSERT_EQ(y_with_bias.ndimension(), 2);
+  ASSERT_EQ(y_with_bias.sizes(), torch::IntArrayRef({2, 1}));
+  auto y_with_bias_exp = torch::tensor({{449}, {1702}}).reshape({2, 1});
+  ASSERT_TRUE(torch::allclose(y_with_bias, y_with_bias_exp, 1e-4, 1e-7));
+
+  auto y_no_bias = F::bilinear(input1, input2, weight);
+  ASSERT_EQ(y_no_bias.ndimension(), 2);
+  ASSERT_EQ(y_no_bias.sizes(), torch::IntArrayRef({2, 1}));
+  auto y_no_bias_exp = torch::tensor({{448, 1701}}).reshape({2, 1});
+  ASSERT_TRUE(torch::allclose(y_no_bias, y_no_bias_exp, 1e-4, 1e-7));
 }
 
 TEST_F(FunctionalTest, Normalize) {
