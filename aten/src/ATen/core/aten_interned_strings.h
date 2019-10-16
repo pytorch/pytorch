@@ -597,6 +597,8 @@ _(aten, smooth_l1_loss) \
 _(aten, smooth_l1_loss_backward) \
 _(aten, smooth_l1_loss_forward) \
 _(aten, soft_margin_loss) \
+_(aten, soft_margin_loss_backward) \
+_(aten, soft_margin_loss_forward) \
 _(aten, softmax) \
 _(aten, _softmax) \
 _(aten, _softmax_backward_data) \
