@@ -64,6 +64,7 @@ class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
 /// module storage semantics.
 TORCH_MODULE(Linear);
 
+// ============================================================================
 
 /// Applies a billinear transformation with optional bias.
 class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {

@@ -18,6 +18,8 @@ struct TORCH_API LinearOptions {
   TORCH_ARG(bool, with_bias) = true;
 };
 
+// ============================================================================
+
 /// Options for the `Bilinear` module.
 struct TORCH_API BilinearOptions {
   BilinearOptions(int64_t in1_features, int64_t in2_features, int64_t out_features);

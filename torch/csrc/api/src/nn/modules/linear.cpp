@@ -54,7 +54,7 @@ Tensor LinearImpl::forward(const Tensor& input) {
   return torch::linear(input, weight, bias);
 }
 
-BilinearOptions::BilinearOptions(int64_t in1_features, int64_t in2_features, int64_t out_features) : in1_features_(in1_features), in2_features_(in2_features), out_features_(out_features) {}
+// ============================================================================
 
 BilinearImpl::BilinearImpl(const BilinearOptions& options_) : options(options_) {
   reset();
