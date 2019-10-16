@@ -36,7 +36,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
     at the moment, it supports a limited set of dynamic models (e.g., RNNs.)
-    See also: :ref:`onnx-export`
+
     Arguments:
         model (torch.nn.Module): the model to be exported.
         args (tuple of arguments): the inputs to
@@ -72,8 +72,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
         operator_export_type (enum, default OperatorExportTypes.ONNX):
             OperatorExportTypes.ONNX: all ops are exported as regular ONNX ops.
             OperatorExportTypes.ONNX_ATEN: all ops are exported as ATen ops.
-            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing,
-                                                    fall back on ATen op.
+            OperatorExportTypes.ONNX_ATEN_FALLBACK: if symbolic is missing, fall back on ATen op.
             OperatorExportTypes.RAW: export raw ir.
         opset_version (int, default is 9): by default we export the model to the
             opset version of the onnx submodule. Since ONNX's latest opset may
@@ -103,7 +102,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             OR (2). An inner dictionary that specifies a mapping FROM the index of dynamic axis in
             corresponding input/output TO the name that is desired to be applied on such axis of
             such input/output during export.
+
             Example. if we have the following shape for inputs and outputs:
+
+            .. code-block:: none
+
                 shape(input_1) = ('b', 3, 'w', 'h')
                 and shape(input_2) = ('b', 4)
                 and shape(output)  = ('b', 'd', 5)
