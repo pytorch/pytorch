@@ -82,12 +82,35 @@ Tensor CosineEmbeddingLossImpl::forward(
     const Tensor& target) {
   return F::cosine_embedding_loss(input1, input2, target, options);
 }
+// ============================================================================
+
+MultiLabelSoftMarginLossImpl::MultiLabelSoftMarginLossImpl(
+    const torch::nn::MultiLabelSoftMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
+    : options(options_) {
+  reset();
+}
+
+void MultiLabelSoftMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::MultiLabelSoftMarginLoss()";
+}
+
+void MultiLabelSoftMarginLossImpl::reset() {
+  register_buffer("weight", options.weight());
+}
+
+Tensor MultiLabelSoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
+  return F::multilabel_soft_margin_loss(input,
+    target,
+    options);
+}
 
 // ============================================================================
 
 TripletMarginLossImpl::TripletMarginLossImpl(
     const TripletMarginLossOptions& options_)
     : options(options_) {}
+
+void TripletMarginLossImpl::reset() {}
 
 void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::TripletMarginLoss(margin=" << options.margin() << 
