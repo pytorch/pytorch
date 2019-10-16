@@ -52,6 +52,13 @@ inline Tensor multilabel_margin_loss(
   return torch::multilabel_margin_loss(input, target, options.reduction());
 }
 
+inline Tensor soft_margin_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const SoftMarginLossOptions& options = {}) {
+  return torch::soft_margin_loss(input, target, options.reduction());
+}
+
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
     const Tensor& target,

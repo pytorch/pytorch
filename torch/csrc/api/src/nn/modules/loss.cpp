@@ -142,5 +142,20 @@ Tensor MultiLabelMarginLossImpl::forward(const Tensor& input, const Tensor& targ
   return F::multilabel_margin_loss(input, target, options);
 }
 
+// ============================================================================
+
+SoftMarginLossImpl::SoftMarginLossImpl(
+    const torch::nn::SoftMarginLossOptions& options_) : options(options_) {}
+
+void SoftMarginLossImpl::reset() {}
+
+void SoftMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::SoftMarginLoss()";
+}
+
+Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
+  return F::soft_margin_loss(input, target, options);
+}
+
 } // namespace nn
 } // namespace torch
