@@ -70,7 +70,7 @@ class TORCH_API FlattenImpl : public Cloneable<FlattenImpl> {
  public:
   void reset() override;
 
-  /// Pretty prints the `Identity` module into the given `stream`.
+  /// Pretty prints the `Flatten` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
   Tensor forward(const Tensor& input);
