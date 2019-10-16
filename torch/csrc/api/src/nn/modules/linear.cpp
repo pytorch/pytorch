@@ -49,5 +49,18 @@ Tensor LinearImpl::forward(const Tensor& input) {
   AT_ASSERT(!options.with_bias() || bias.defined());
   return torch::linear(input, weight, bias);
 }
+
+// ============================================================================
+
+void FlattenImpl::reset() {}
+
+void FlattenImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Flatten()";
+}
+
+Tensor FlattenImpl::forward(const Tensor& input) {
+  return input.flatten();
+}
+
 } // namespace nn
 } // namespace torch

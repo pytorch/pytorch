@@ -266,6 +266,18 @@ TEST_F(ModulesTest, Identity) {
   ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
 }
 
+TEST_F(ModulesTest, Flatten) {
+  Flatten flatten;
+  auto input = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::requires_grad());
+  auto output = flatten->forward(input);
+  auto expected = torch::tensor({1, 3, 4, 2, 5, 6}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(torch::equal(output, expected));
+  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
+}
+
 TEST_F(ModulesTest, AdaptiveMaxPool1d) {
   AdaptiveMaxPool1d model(3);
   auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::requires_grad());
@@ -1497,6 +1509,10 @@ TEST_F(ModulesTest, Threshold) {
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
+}
+
+TEST_F(ModulesTest, PrettyPrintFlatten) {
+  ASSERT_EQ(c10::str(Flatten()), "torch::nn::Flatten()");
 }
 
 TEST_F(ModulesTest, PrettyPrintLinear) {
