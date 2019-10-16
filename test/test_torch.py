@@ -6331,11 +6331,6 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.cat([empty, x], dim=1)
         self.assertEqual(res1, res2)
 
-        conv = torch.nn.Conv2d(3, 3, kernel_size=1).float().to(device)
-        res1 = torch.cat([conv(x), empty], dim=1)
-        res2 = torch.cat([empty, conv(x)], dim=1)
-        self.assertEqual(res1, res2)
-
         res1 = torch.cat([empty, empty], dim=1)
         self.assertEqual(res1, empty)
 
@@ -6351,11 +6346,6 @@ class TestTorchDeviceType(TestCase):
 
         res1 = torch.cat([x, empty], dim=1)
         res2 = torch.cat([empty, x], dim=1)
-        self.assertEqual(res1, res2)
-
-        conv = torch.nn.Conv2d(3, 3, kernel_size=1).float().to(device)
-        res1 = torch.cat([conv(x), empty], dim=1)
-        res2 = torch.cat([empty, conv(x)], dim=1)
         self.assertEqual(res1, res2)
 
         res1 = torch.cat([empty, empty], dim=1)
