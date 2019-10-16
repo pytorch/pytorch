@@ -394,7 +394,7 @@ class deviceCountAtLeast(object):
 # Specifies per-dtype precision overrides.
 # Ex.
 #
-# @overridePrecision(torch.half : 1e-2, torch.float : 1e-4)
+# @precisionOverride(torch.half : 1e-2, torch.float : 1e-4)
 # @dtypes(torch.half, torch.float, torch.double)
 # def test_X(self, device, dtype):
 #   ...
@@ -403,12 +403,17 @@ class deviceCountAtLeast(object):
 # corresponding override, if it exists.
 # self.precision can be accessed directly, and it also controls the behavior of
 # functions like self.assertEqual().
-class overridePrecision(object):
+#
+# Note that self.precision is a scalar value, so if you require multiple
+# precisions (or are working with multiple dtypes) they should be specified
+# explicitly and computed using self.precision (e.g.
+# self.precision *2, max(1, self.precision)).
+class precisionOverride(object):
 
     def __init__(self, d):
-        assert isinstance(d, dict), "overridePrecision not given a dtype : precision dict!"
+        assert isinstance(d, dict), "precisionOverride not given a dtype : precision dict!"
         for dtype, prec in d.items():
-            assert isinstance(dtype, torch.dtype), "overridePrecision given unknown dtype {0}".format(dtype)
+            assert isinstance(dtype, torch.dtype), "precisionOverride given unknown dtype {0}".format(dtype)
 
         self.d = d
 

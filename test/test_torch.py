@@ -35,7 +35,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, overridePrecision
+    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride
 import torch.backends.quantized
 
 
@@ -12534,7 +12534,7 @@ class TestTorchDeviceType(TestCase):
             run_test(m, v2, v1, lambda x: x.transpose(0, 1))
 
     @onlyCPU
-    @overridePrecision({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8})
+    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8})
     @dtypes(torch.bfloat16, torch.float, torch.double)
     def test_addmv(self, device, dtype):
         t = torch.randn(10, device=device).to(dtype)
