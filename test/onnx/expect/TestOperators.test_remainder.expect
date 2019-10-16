@@ -1,0 +1,89 @@
+ir_version: 4
+producer_name: "pytorch"
+producer_version: "1.3"
+graph {
+  node {
+    input: "0"
+    input: "1"
+    output: "2"
+    op_type: "Div"
+  }
+  node {
+    input: "2"
+    output: "3"
+    op_type: "Floor"
+  }
+  node {
+    input: "3"
+    input: "1"
+    output: "4"
+    op_type: "Mul"
+  }
+  node {
+    input: "0"
+    input: "4"
+    output: "5"
+    op_type: "Sub"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "5"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

@@ -95,7 +95,6 @@ static inline void push(Stack& stack, Types&&... args) {
 }
 template <class T>
 static inline void push_list_elements(Stack& stack, const c10::List<T>& elements) {
-  stack.reserve(stack.size() + elements.size());
   for (T elem : elements) {
     stack.push_back(std::move(elem));
   }
