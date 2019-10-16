@@ -253,7 +253,7 @@ void initJITBindings(PyObject* module) {
             auto g_inputs = graph->inputs();
             for (size_t i = 0; i < inputs.size(); ++i) {
               if (stack[i].isTensor()) {
-                g_inputs[i]->setType(incompleteInferTypeFrom(stack[i]));
+                g_inputs[i]->setType(stack[i].type());
               }
             }
             PropagateInputShapes(graph);
