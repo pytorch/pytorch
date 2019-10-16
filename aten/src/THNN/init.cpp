@@ -91,6 +91,9 @@
 #include <THNN/generic/MSECriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
+#include <THNN/generic/SoftMarginCriterion.c>
+#include <TH/THGenerateFloatTypes.h>
+
 #include <THNN/generic/MultiLabelMarginCriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 

@@ -600,7 +600,7 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            auto typed_inputs = toTypedStack(input_tuple);
+            auto typed_inputs = toTraceableStack(input_tuple);
             auto graph = tracer::createGraphByTracing(
                 func, typed_inputs, var_lookup_fn, force_outplace, &self);
             const auto method_name = QualifiedName(self.name(), name);
@@ -625,8 +625,9 @@ void initJitScriptBindings(PyObject* module) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
             SourceRangeRecords source_ranges;
-            PythonPrint(
-                ss, source_ranges, self.type(), tensors, deps, false);
+            PythonPrint pp(ss, source_ranges, tensors, deps, false);
+            pp.printNamedType(self.type());
+            pp.finish();
             return ss.str();
           })
       .def("apply", &Module::apply)
@@ -725,14 +726,9 @@ void initJitScriptBindings(PyObject* module) {
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
             SourceRangeRecords source_ranges;
-            PythonPrint(
-                ss,
-                source_ranges,
-                *self.function_,
-                false,
-                tensors,
-                deps,
-                false);
+            PythonPrint pp(ss, source_ranges, tensors, deps, false);
+            pp.printFunction(*self.function_);
+            pp.finish();
             return ss.str();
           })
       .def(
@@ -767,8 +763,9 @@ void initJitScriptBindings(PyObject* module) {
         std::vector<at::Tensor> tensors;
         std::vector<c10::NamedTypePtr> deps;
         SourceRangeRecords source_ranges;
-        PythonPrint(
-            ss, source_ranges, self.function(), true, tensors, deps, false);
+        PythonPrint pp(ss, source_ranges, tensors, deps, false);
+        pp.printMethod(self.function());
+        pp.finish();
         return ss.str();
       });
   m.def(
@@ -809,7 +806,7 @@ void initJitScriptBindings(PyObject* module) {
          py::tuple input_tuple,
          py::function var_lookup_fn,
          bool force_outplace) {
-        auto typed_inputs = toTypedStack(input_tuple);
+        auto typed_inputs = toTraceableStack(input_tuple);
         auto graph = tracer::createGraphByTracing(
             func, typed_inputs, var_lookup_fn, force_outplace);
         auto cu = get_python_cu();

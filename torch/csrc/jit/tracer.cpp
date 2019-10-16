@@ -307,7 +307,7 @@ static void gatherParametersAndBuffers(
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
 std::pair<std::shared_ptr<TracingState>, Stack> enter(
-    TypedStack inputs,
+    Stack inputs,
     script::Module* self) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
@@ -324,12 +324,10 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(
   }
 
   size_t i = 0;
-  auto input_types = inputs.types()->elements();
-  for (IValue& input : inputs.stack()) {
-    input = addInput(state,
-        input, input_types[i++], state->graph->addInput());
+  for (IValue& input : inputs) {
+    input = addInput(state, input, input.type(), state->graph->addInput());
   }
-  return std::make_pair(state, inputs.stack());
+  return std::make_pair(state, inputs);
 }
 
 // Exit a trace, treating 'outputs' as the outputs of the trace.  These
