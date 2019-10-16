@@ -18,7 +18,8 @@
 // could be able to support initialization of optionals from convertible type U, also
 // remove two old constructors optional(const T&) and optional(T&&) as it could be
 // handled by the template<U=T> case with default template argument.
-// - yf225 TODO: talk about in_place_t
+// - `constexpr struct in_place_t {} in_place{}` is moved to `c10/util/in_place.h`,
+// so that it can also be used in `c10/util/variant.h`.
 
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_

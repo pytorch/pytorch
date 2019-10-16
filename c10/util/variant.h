@@ -15,7 +15,19 @@
 //   `detail_::best_match<Arg, Ts...>::value` to work around gcc 7.3.1 bug.
 //   However, this workaround also limits the use cases of `c10::variant`.
 //   Please see NOTE [gcc 7.3.1 bug workaround] for details.
-// - yf225 TODO: talk about in_place_t
+// - The following code is moved to `c10/util/in_place.h`:
+//   ```
+//   struct in_place_t { explicit in_place_t() = default; };
+//
+//   template <std::size_t I>
+//   struct in_place_index_t { explicit in_place_index_t() = default; };
+//
+//   template <typename T>
+//   struct in_place_type_t { explicit in_place_type_t() = default; };
+//
+//   constexpr in_place_t in_place{};
+//   ```
+//   so that they can also be used in `c10/util/Optional.h`.
 
 #ifndef C10_UTIL_VARIANT_H_
 #define C10_UTIL_VARIANT_H_
