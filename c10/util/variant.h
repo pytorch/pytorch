@@ -11,15 +11,11 @@
 // - Move to `c10` namespace.
 // - Rename namespace `detail` to `detail_`, to not conflict with existing
 //   c10 implementations in `detail` namespace.
-// - `struct in_place_t` is renamed to `struct variant_in_place_t`, to not
-//   conflict with `struct in_place_t` in c10/util/Optional.h.
-// - `constexpr variant_in_place_t in_place{}` is renamed to
-//   `constexpr variant_in_place_t variant_in_place{}`, to not conflict with
-//   `constexpr struct in_place_t {} in_place{}` in c10/util/Optional.h.
 // - In two functions, the template name reference `I` is changed to
 //   `detail_::best_match<Arg, Ts...>::value` to work around gcc 7.3.1 bug.
 //   However, this workaround also limits the use cases of `c10::variant`.
 //   Please see NOTE [gcc 7.3.1 bug workaround] for details.
+// - yf225 TODO: talk about in_place_t
 
 #ifndef C10_UTIL_VARIANT_H_
 #define C10_UTIL_VARIANT_H_
@@ -325,12 +321,12 @@ namespace std {
 #ifndef MPARK_IN_PLACE_HPP
 #define MPARK_IN_PLACE_HPP
 
+#include <c10/util/in_place.h>
+
 #include <cstddef>
 
 
 namespace c10 {
-
-  struct variant_in_place_t { explicit variant_in_place_t() = default; };
 
   template <std::size_t I>
   struct in_place_index_t { explicit in_place_index_t() = default; };
@@ -339,8 +335,6 @@ namespace c10 {
   struct in_place_type_t { explicit in_place_type_t() = default; };
 
 #ifdef MPARK_VARIABLE_TEMPLATES
-  constexpr variant_in_place_t variant_in_place{};
-
   template <std::size_t I> constexpr in_place_index_t<I> in_place_index{};
 
   template <typename T> constexpr in_place_type_t<T> in_place_type{};
