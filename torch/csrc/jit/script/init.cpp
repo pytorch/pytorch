@@ -554,7 +554,7 @@ void initJitScriptBindings(PyObject* module) {
               py::tuple r(3);
               IValue v = attr.value;
               result[i++] = std::make_tuple(
-                  attr.name, v.type(), toPyObject(std::move(v)));
+                  attr.name, attr.value.type(), toPyObject(std::move(v)));
             }
             return result;
           })
