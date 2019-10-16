@@ -45,7 +45,6 @@ struct Refinement {
   TypePtr type() const {
     return type_;
   }
-
  private:
   std::string identifier_;
   TypePtr type_;
@@ -487,9 +486,7 @@ struct Environment {
 
     if (!retval) {
       if (auto type = resolver->resolveType(ident, range)) {
-        if (auto class_type = type->cast<ClassType>()) {
-          retval = std::make_shared<script::ClassValue>(class_type);
-        } else if (auto tuple_type = type->cast<TupleType>()) {
+        if (auto tuple_type = type->cast<TupleType>()) {
           retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
         }
       }
@@ -497,6 +494,14 @@ struct Environment {
 
     if (!retval) {
       retval = resolver->resolveValue(ident, method, range);
+    }
+
+    if (!retval) {
+      if (auto type = resolver->resolveType(ident, range)) {
+        if (auto class_type = type->cast<ClassType>()) {
+          retval = std::make_shared<script::ClassValue>(class_type);
+        }
+      }
     }
 
     if (!retval && required) {
@@ -997,13 +1002,7 @@ struct to_ir {
       case TK_NOT: {
         CondValue v = emitCondExpr(Expr(expr.tree()->trees()[0]));
         Value* result = emitBuiltinCall(
-            expr.range(),
-            *graph,
-            aten::__not__,
-            c10::nullopt,
-            {v.value()},
-            {},
-            /*required=*/true);
+            expr.range(), *graph, aten::__not__, {v.value()}, {});
         c10::optional<bool> static_if;
         if (v.staticIf()) {
           static_if = !*v.staticIf();
@@ -1039,10 +1038,8 @@ struct to_ir {
               expr.get()->range(),
               *method.graph(),
               kind,
-              c10::nullopt,
               {lhs_val, rhs_val},
-              {},
-              /*required=*/true);
+              {});
           auto refinements = RefinementSet(findIsNoneRefinements(
               cond_op.lhs(), lhs_val, cond_op.rhs(), rhs_val, expr.kind()));
           return CondValue(cond_value, refinements, c10::nullopt);
@@ -1169,8 +1166,8 @@ struct to_ir {
   void insertRefinements(const SourceRange& loc, const RefinementSet& ref) {
     for (const Refinement& r : ref.activeRefinements()) {
       Value* v = environment_stack->getVar(r.identifier(), loc);
-      Value* output = graph->insert(prim::unchecked_unwrap_optional, {v});
-      environment_stack->setVar(loc, r.identifier(), output);
+      Value* new_v = graph->insertUncheckedCast(v, r.type());
+      environment_stack->setVar(loc, r.identifier(), new_v);
     }
   }
 
@@ -1816,10 +1813,9 @@ struct to_ir {
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhsValue->type()),
-          self,
           {rhs},
           {},
-          /*required=*/true);
+          self);
 
     } else {
       throw ErrorReport(stmt.lhs())
@@ -1842,10 +1838,9 @@ struct to_ir {
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhsValue->type()),
-          self,
           {rhs},
           {},
-          /*required=*/true);
+          self);
 
       environment_stack->setVar(lhs.range(), lhs.name().name(), output);
     } else {
@@ -1926,10 +1921,9 @@ struct to_ir {
             stmt.range(),
             *method.graph(),
             getAugOp(stmt, sliceable->type()),
-            slicedArg,
             {rhs},
             {},
-            /*required=*/true);
+            slicedArg);
       } else {
         // Special case: we tried to do "advanced indexing". Lower this expr
         // into `index` and `index_put_` ops with tensordices of Tensor?[]
@@ -1943,10 +1937,9 @@ struct to_ir {
             stmt.range(),
             *method.graph(),
             getAugOp(stmt, sliceable->type()),
-            indexed,
             {rhs},
             {},
-            /*required=*/true);
+            indexed);
         graph->insert(
             aten::index_put_,
             {slicedArg, indices, augmented},
@@ -2407,6 +2400,17 @@ struct to_ir {
 
         return std::make_shared<SimpleValue>(expr);
       }
+      case prim::unchecked_cast: {
+        checkApplyNumInputs(apply, 2);
+        TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+        Value* v = emitExpr(apply.inputs()[1]);
+        // avoid generating nested unchecked_casts because they are already
+        // inserted during serialization
+        if (v->node()->kind() != prim::unchecked_cast || *v->type() != *type) {
+          v = graph->insertUncheckedCast(v, type);
+        }
+        return std::make_shared<SimpleValue>(v);
+      } break;
       case prim::GetAttr: {
         checkApplyNumInputs(apply, 2);
         auto obj = emitSugaredExpr(apply.inputs()[0], 1);
@@ -2653,13 +2657,7 @@ struct to_ir {
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
         return emitBuiltinCall(
-            tree->range(),
-            *method.graph(),
-            kind,
-            c10::nullopt,
-            named_values,
-            {},
-            /*required=*/true);
+            tree->range(), *method.graph(), kind, named_values, {});
       }
       case TK_IN:
       case TK_POW:
@@ -2832,8 +2830,7 @@ struct to_ir {
       Value* input,
       Value* dim,
       Value* index) {
-    return emitBuiltinCall(
-        loc, *graph, aten::select, c10::nullopt, {input, dim, index}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::select, {input, dim, index}, {});
   }
 
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
@@ -2879,13 +2876,11 @@ struct to_ir {
 
     auto step = emitExpr(Expr(slice.stepOr(1)));
     NamedValue step_nv = NamedValue(loc, "step", step);
-    return emitBuiltinCall(
-        loc, *graph, aten::slice, c10::nullopt, args, {step_nv}, true);
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
   }
 
   Value* emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
-    return emitBuiltinCall(
-        loc, *graph, aten::unsqueeze, c10::nullopt, {input, dim_val}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::unsqueeze, {input, dim_val}, {});
   }
 
   Value* emitIndex(
@@ -2898,8 +2893,7 @@ struct to_ir {
     auto* index =
         graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
             ->output();
-    return emitBuiltinCall(
-        loc, *graph, aten::index, c10::nullopt, {input, index}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {});
   }
 
   // Emits multidimensional slicing with int and slice indices.

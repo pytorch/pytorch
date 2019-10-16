@@ -11,7 +11,7 @@ void THNN_(AbsCriterion_updateOutput)(
 {
   THNN_CHECK_SHAPE(input, target);
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     THTensor_(resizeAs)(output, input);
     TH_TENSOR_APPLY3(scalar_t, input, scalar_t, target, scalar_t, output,
       *output_data = fabs(*input_data - *target_data);
@@ -25,7 +25,7 @@ void THNN_(AbsCriterion_updateOutput)(
     sum += fabs(*input_data - *target_data);
   );
 
-  if (reduction == Reduction::Mean)
+  if (reduction == at::Reduction::Mean)
     sum /= THTensor_(nElement)(input);
 
   THTensor_(set0d)(output, sum);
@@ -42,7 +42,7 @@ void THNN_(AbsCriterion_updateGradInput)(
   THNN_CHECK_SHAPE(input, target);
   THTensor_(resizeAs)(gradInput, input);
 
-  if (reduction == Reduction::None) {
+  if (reduction == at::Reduction::None) {
     THNN_CHECK_SHAPE(gradOutput, input);
     TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
       *gradInput_data = ((*input_data - *target_data) >= 0 ? 1 : -1);
@@ -54,7 +54,7 @@ void THNN_(AbsCriterion_updateGradInput)(
   }
 
   THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-  scalar_t norm = (reduction == Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.) * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
+  scalar_t norm = (reduction == at::Reduction::Mean ? 1./((scalar_t)THTensor_(nElement)(input)) : 1.) * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, 0);
 
   TH_TENSOR_APPLY3(scalar_t, gradInput, scalar_t, input, scalar_t, target,
     *gradInput_data = (*input_data - *target_data) >= 0 ? norm : -norm;
