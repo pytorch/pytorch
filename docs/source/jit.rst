@@ -245,7 +245,6 @@ Functions don't change much, they can be decorated with :func:`@torch.jit.ignore
     def some_fn4():
         return 2
 
-
 TorchScript Classes
 ~~~~~~~~~~~~~~~~~~~
 Everything in a user defined `TorchScript Class`_ is exported by default, functions
@@ -1625,6 +1624,7 @@ Frequently Asked Questions
 
 Q: I would like to train a model on GPU and do inference on CPU. What are the
 best practices?
+
    First convert your model from GPU to CPU and then save it, like so: ::
 
       cpu_model = gpu_model.cpu()
@@ -1696,6 +1696,7 @@ Q: I would like to trace module's method but I keep getting this error:
 
     This error usually means that the method you are tracing uses a module's parameters and
     you are passing the module's method instead of the module instance (e.g. ``my_module_instance.forward`` vs ``my_module_instance``).
+
       - Invoking ``trace`` with a module's method captures module parameters (which may require gradients) as **constants**.
       - On the other hand, invoking ``trace`` with module's instance (e.g. ``my_module``) creates a new module and correctly copies parameters into the new module, so they can accumulate gradients if required.
 
