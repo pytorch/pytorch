@@ -502,6 +502,7 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
+                       elements=st.floats(-100, 100, allow_nan=False),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            kernel=st.sampled_from((3, 5)),
            stride=st.sampled_from((None, 1, 2)),
@@ -515,23 +516,21 @@ class TestQuantizedOps(TestCase):
         within range. However, the float op will not.
         """
         X, (scale, zero_point, torch_type) = X
-
+        print(zero_point)
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
         oH = pool_output_shape(iH, kernel, padding, stride, 0)
         assume(oH > 0)
         oW = pool_output_shape(iW, kernel, padding, stride, 0)
         assume(oW > 0)
-
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
-
+        X = qX.dequantize()
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.avg_pool2d(
-            qX.int_repr().to(torch.float), kernel_size=kernel, stride=stride, padding=padding,
-            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
-
+            X, kernel_size=kernel, stride=stride, padding=padding,
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
         ops_under_test = {
             "nn.functional": torch.nn.functional.avg_pool2d,
             "nn.quantized.functional": torch.nn.quantized.functional.avg_pool2d
@@ -540,7 +539,10 @@ class TestQuantizedOps(TestCase):
         for name, op in ops_under_test.items():
             qX_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
                         count_include_pad=count_include_pad, divisor_override=divisor_override)
-            self.assertEqual(X_ref, qX_hat.int_repr(), prec=1.0,
+            qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
+                                       dtype=torch_type)
+
+            self.assertEqual(qX_ref.int_repr(), qX_hat.int_repr(), prec=1.0,
                              message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
             self.assertEqual(scale, qX_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
@@ -550,6 +552,7 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
+                       elements=st.floats(-100, 100, allow_nan=False),
                        qparams=hu.qparams(dtypes=torch.qint8)),
            kernel=st.sampled_from((4, 5)),
            stride=st.sampled_from((None, 1, 2)),
@@ -574,11 +577,12 @@ class TestQuantizedOps(TestCase):
 
         qX = torch.quantize_per_tensor(torch.from_numpy(X_nchw), scale=scale,
                                        zero_point=zero_point, dtype=torch_type).permute([0, 3, 1, 2])
+        X = qX.dequantize()
 
         # Run reference on int_repr + round to avoid double rounding error.
         X_ref = torch.nn.functional.avg_pool2d(
-            qX.int_repr().to(torch.double), kernel_size=kernel, stride=stride, padding=padding,
-            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override).round()
+            X, kernel_size=kernel, stride=stride, padding=padding,
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
 
         self.assertTrue(qX.stride() != sorted(qX.stride()))
         ops_under_test = {
@@ -590,7 +594,10 @@ class TestQuantizedOps(TestCase):
             X_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
                        count_include_pad=count_include_pad, divisor_override=divisor_override)
             self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
-            self.assertEqual(X_ref, X_hat.int_repr().to(torch.double), prec=1.0,
+            qX_ref = torch.quantize_per_tensor(X_ref, scale=X_hat.q_scale(), zero_point=X_hat.q_zero_point(),
+                                       dtype=torch_type)
+
+            self.assertEqual(qX_ref.int_repr(), X_hat.int_repr().to(torch.double), prec=1.0,
                              message="{} results are off".format(name))
             self.assertEqual(scale, X_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, X_hat.q_scale()))
