@@ -45,6 +45,20 @@ inline Tensor cosine_embedding_loss(
       input1, input2, target, options.margin(), options.reduction());
 }
 
+inline Tensor multilabel_margin_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const MultiLabelMarginLossOptions& options = {}) {
+  return torch::multilabel_margin_loss(input, target, options.reduction());
+}
+
+inline Tensor soft_margin_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const SoftMarginLossOptions& options = {}) {
+  return torch::soft_margin_loss(input, target, options.reduction());
+}
+
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
@@ -58,11 +72,11 @@ inline Tensor multilabel_soft_margin_loss(
 
   Tensor ret;
 
-  if (options.reduction() == Reduction::None) {
+  if (options.reduction() == torch::Reduction::None) {
       ret = loss;
-  } else if (options.reduction() == Reduction::Mean) {
+  } else if (options.reduction() == torch::Reduction::Mean) {
       ret = loss.mean();
-  } else if (options.reduction() == Reduction::Sum) {
+  } else if (options.reduction() == torch::Reduction::Sum) {
       ret = loss.sum();
   } else {
       ret = input;

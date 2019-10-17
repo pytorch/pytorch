@@ -552,7 +552,7 @@ class TestAvgPool(TestCase):
 
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
-    _do_cuda_non_default_stream = False
+    _do_cuda_non_default_stream = True
 
     def _forward(self, module, input):
         with freeze_rng_state():
@@ -8949,7 +8949,7 @@ class TestNNDeviceType(NNTestCase):
                 self._test_rnn_retain_variables(device, dtype)
 
     @onlyCUDA
-    @skipCUDAIfCudnnVersionLessThan(7000)
+    @skipCUDAIfCudnnVersionLessThan(7600)
     def test_CTCLoss_cudnn(self, device):
         target_lengths = [30, 25, 20]
         input_lengths = [50, 50, 50]
