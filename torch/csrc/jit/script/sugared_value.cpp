@@ -298,32 +298,64 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   }
 }
 
-Value* SimpleValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
+SugaredValuePtr SimpleValue::getitem(
+    const SourceRange& loc,
+    Function& m,
+    Value* idx) {
   Value* val = getValue();
   TypePtr val_type = val->type();
   Graph& g = *m.graph();
 
   // if it's a List/String/Dict, emit a regular __getitem__ op
   if (val_type->cast<ListType>() || val_type->cast<StringType>()) {
-    return g.insert(aten::__getitem__, {val, idx}, {}, loc);
+    return std::make_shared<SimpleValue>(
+        g.insert(aten::__getitem__, {val, idx}, {}, loc));
   } else if (auto dict_type = val_type->cast<DictType>()) {
-    if (!idx->type()->isSubtypeOf(dict_type->getKeyType())) {
-      throw ErrorReport(loc)
-          << "Expected key type '" << idx->type()->python_str()
-          << "' to subtype the key type '"
-          << dict_type->getKeyType()->python_str() << "' of the dict '"
-          << dict_type->python_str() << "'";
-    }
-    return g.insert(aten::__getitem__, {val, idx}, {}, loc);
+    return std::make_shared<SimpleValue>(
+        g.insert(aten::__getitem__, {val, idx}, {}, loc));
   } else if (val_type->isSubtypeOf(TensorType::get())) {
-    return g.insert(aten::select, {val, 0, idx}, {}, loc);
+    return std::make_shared<SimpleValue>(
+        g.insert(aten::select, {val, 0, idx}, {}, loc));
   } else if (auto class_type = val_type->cast<ClassType>()) {
-    return attr(loc, m, "__getitem__")
-        ->call(loc, m, {idx}, {}, 1)
-        ->asValue(loc, m);
+    return attr(loc, m, "__getitem__")->call(loc, m, {idx}, {}, 1);
   } else {
     throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
                            << " object is not subscriptable";
+  }
+}
+
+IterableValuePtr SimpleValue::asIterable(const SourceRange& loc, Function& m) {
+  auto value = getValue();
+  auto type = value->type();
+  // built-in iterable types
+  if (type->cast<ListType>() || type->cast<StringType>() ||
+      type->cast<TensorType>()) {
+    return std::make_shared<IterableValue>(
+        std::make_shared<SimpleValue>(value));
+  }
+  // dicts iterate over keys
+  if (type->cast<DictType>()) {
+    return std::make_shared<IterableValue>(std::make_shared<SimpleValue>(
+        m.graph()->insert(aten::keys, {value}, {}, loc)));
+  }
+  // we allow iteration over tuples if their types can be unified
+  if (auto tup = type->cast<TupleType>()) {
+    auto tuple_type = unifyTypeList(tup->elements());
+    if (!tuple_type) {
+      throw ErrorReport(loc)
+          << "Heterogenous tuples cannot be iterated over. Found "
+          << type->python_str();
+    }
+    int64_t static_len = tup->elements().size();
+    return std::make_shared<IterableValue>(
+        std::make_shared<SimpleValue>(
+            m.graph()
+                ->createList(*tuple_type, createTupleUnpack(value))
+                ->output()),
+        static_len);
+  } else {
+    throw ErrorReport(loc) << "'" << type->python_str() << "'"
+                           << " object is not iterable";
   }
 }
 
@@ -362,7 +394,18 @@ RangeValue::RangeValue(
     throw ErrorReport(loc) << "range expected at most 3 arguments, got "
                            << inputs.size();
   }
+
+  // TODO: !has_only_end calculation
+  if (has_only_end_ && toIValue(end_)) {
+    static_len_ = toIValue(end_)->toInt();
+  } else {
+    static_len_ = c10::nullopt;
+  }
 }
+
+IterableValuePtr RangeValue::asIterable(const SourceRange& loc, Function& m) {
+  return std::make_shared<IterableValue>(shared_from_this(), static_len_);
+};
 
 Value* RangeValue::len(const SourceRange& loc, Function& m) {
   if (has_only_end_) {
@@ -373,12 +416,16 @@ Value* RangeValue::len(const SourceRange& loc, Function& m) {
   }
 }
 
-Value* RangeValue::getitem(const SourceRange& loc, Function& m, Value* idx) {
+SugaredValuePtr RangeValue::getitem(
+    const SourceRange& loc,
+    Function& m,
+    Value* idx) {
   if (has_only_end_) {
-    return idx;
+    return std::make_shared<SimpleValue>(idx);
   } else {
     auto& g = *m.graph();
-    return g.insert(aten::__derive_index, {idx, start_, step_}, {}, loc);
+    return std::make_shared<SimpleValue>(
+        g.insert(aten::__derive_index, {idx, start_, step_}, {}, loc));
   }
 }
 
@@ -418,15 +465,39 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
   return g.insert(prim::min, {list_node->output()}, {}, loc);
 }
 
-Value* IterableTree::getitem(const SourceRange& loc, Function& m, Value* idx) {
-  std::vector<Value*> child_items;
+SugaredValuePtr IterableTree::getitem(
+    const SourceRange& loc,
+    Function& m,
+    Value* idx) {
+  std::vector<SugaredValuePtr> child_items;
   for (const SugaredValuePtr& child : children_) {
     child_items.emplace_back(child->getitem(loc, m, idx));
   }
-  // If you call getitem() on a IterableTree sugared value, we will create Tuple
-  // from the children items, and make the Tuple value as the element
-  Graph& g = *m.graph();
-  return g.insertNode(g.createTuple(child_items))->output();
+  return std::make_shared<SugaredTupleValue>(child_items, emit_unrolled_);
+}
+
+void IterableTree::addChild(
+    const SourceRange& range,
+    IterableValuePtr iter_value) {
+  auto child_len = iter_value->getLen();
+  auto child_unrolled = iter_value->emitUnrolled();
+  if (children_.size() == 0) {
+    static_len_ = child_len;
+    emit_unrolled_ = child_unrolled;
+  } else {
+    if ((emit_unrolled_ && !child_len) || (child_unrolled && !static_len_)) {
+      throw ErrorReport(range)
+          << "Can not iterate over a module list with a value "
+             "that does not have a statically determinable length\n";
+    }
+    if (child_len && static_len_) {
+      // iterables run for the minimum length of all its leaves
+      static_len_ = std::min(*child_len, *static_len_);
+    }
+    emit_unrolled_ = emit_unrolled_ || child_unrolled;
+  }
+
+  children_.push_back(iter_value->getValue());
 }
 
 std::shared_ptr<SugaredValue> MagicMethod::call(

@@ -215,29 +215,6 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
-std::vector<std::shared_ptr<SugaredValue>> ConstantPythonTupleValue::asTuple(
-    const SourceRange& loc,
-    Function& m,
-    const c10::optional<size_t>& size_hint) {
-  py::tuple tup = self;
-  std::vector<std::shared_ptr<SugaredValue>> result;
-  result.reserve(tup.size());
-  for (py::handle t : tup) {
-    py::object obj = py::reinterpret_borrow<py::object>(t);
-    result.push_back(toSugaredValue(obj, m, loc, true));
-  }
-  return result;
-}
-
-Value* ConstantPythonTupleValue::asValue(const SourceRange& loc, Function& m) {
-  std::vector<Value*> values;
-  for (const auto& sugared_item : asTuple(loc, m)) {
-    values.push_back(sugared_item->asValue(loc, m));
-  }
-  auto node = m.graph()->createTuple(values);
-  return m.graph()->insertNode(node)->output();
-}
-
 std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
     const SourceRange& loc,
     Function& caller,
@@ -314,13 +291,11 @@ static bool isModuleType(const TypePtr& type) {
   return false;
 }
 
-std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
+IterableValuePtr ModuleValue::desugarModuleContainer(
     bool get_keys,
     bool get_values,
     const SourceRange& loc,
     Function& m) {
-  std::vector<std::shared_ptr<SugaredValue>> result;
-
   std::vector<std::string> submoduleNames;
   const auto& selfType = concreteType_->getJitType();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
@@ -334,6 +309,8 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
     }
   }
 
+  std::vector<SugaredValuePtr> keys;
+  std::vector<SugaredValuePtr> values;
   for (const auto& name : submoduleNames) {
     auto name_v =
         std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
@@ -341,21 +318,37 @@ std::vector<std::shared_ptr<SugaredValue>> ModuleValue::desugarModuleContainer(
     auto mod_v = std::make_shared<ModuleValue>(
         module_v, concreteType_->findSubmoduleConcreteType(name));
 
-    if (get_keys && get_values) {
-      std::vector<std::shared_ptr<SugaredValue>> tup;
-      tup.push_back(name_v);
-      tup.push_back(mod_v);
-      result.push_back(
-          std::make_shared<ConstantTupleValue>(ConstantTupleValue(tup)));
-    } else if (get_keys) {
-      result.push_back(name_v);
-    } else if (get_values) {
-      result.push_back(mod_v);
-    } else {
-      TORCH_INTERNAL_ASSERT(false);
+    if (get_keys) {
+      keys.push_back(name_v);
+    }
+    if (get_values) {
+      values.push_back(mod_v);
     }
   }
-  return result;
+
+  bool contains_module_list = true;
+  int64_t len = submoduleNames.size();
+  if (get_keys && !get_values) {
+    return std::make_shared<SugaredTupleValue>(keys, true)->asIterable(loc, m);
+  } else if (get_values && !get_keys) {
+    return std::make_shared<SugaredTupleValue>(values, true)
+        ->asIterable(loc, m);
+  } else if (get_values && get_keys) {
+    auto key_list = std::make_shared<IterableValue>(
+        std::make_shared<SugaredTupleValue>(keys, true),
+        len,
+        contains_module_list);
+    auto value_list = std::make_shared<IterableValue>(
+        std::make_shared<SugaredTupleValue>(values, true),
+        len,
+        contains_module_list);
+    auto iterator = std::make_shared<IterableTree>();
+    iterator->addChild(loc, key_list);
+    iterator->addChild(loc, value_list);
+    return iterator->asIterable(loc, m);
+  } else {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 }
 
 // This method controls how we desugar attribute lookups on ScriptModules.
@@ -399,7 +392,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
       } else {
         get_keys = true;
       }
-      return std::make_shared<ConstantTupleMethod>(
+      return std::make_shared<ModuleDictMethod>(
           desugarModuleContainer(get_keys, get_values, loc, m), field);
     }
   }
@@ -463,13 +456,11 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
                          << " has no attribute '" << field << "' " << hint;
 }
 
-std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
-    const SourceRange& loc,
-    Function& m,
-    const c10::optional<size_t>& size_hint) {
+IterableValuePtr ModuleValue::asIterable(const SourceRange& loc, Function& m) {
   const auto iterableModuleKind = concreteType_->getIterableModuleKind();
   if (iterableModuleKind == IterableModuleKind::NONE) {
-    return SugaredValue::asTuple(loc, m, size_hint);
+    throw ErrorReport(loc)
+        << "Only constant Sequential, ModueList, or ModuleDict can be used as an iterable";
   }
 
   // iterating over a dictionary returns the keys, iterating over a
@@ -573,7 +564,16 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       const auto l = static_cast<int8_t>(layout->layout);
       return toSimple(g.insertConstant(l, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
-      return std::make_shared<ConstantPythonTupleValue>(obj);
+      py::tuple tup = obj;
+      std::vector<std::shared_ptr<SugaredValue>> result;
+      result.reserve(tup.size());
+      for (py::handle t : tup) {
+        py::object obj = py::reinterpret_borrow<py::object>(t);
+        result.push_back(toSugaredValue(obj, m, loc, true));
+      }
+      bool contains_module_list =
+          false; // Python Tuples can't contain module list
+      return std::make_shared<SugaredTupleValue>(result, contains_module_list);
     }
   }
 
