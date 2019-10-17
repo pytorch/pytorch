@@ -35,7 +35,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf
+    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride
 import torch.backends.quantized
 
 
@@ -6209,14 +6209,19 @@ class TestTorchDeviceType(TestCase):
             expected_res = torch.tensor([0, 0, 1, 1], dtype=dtype, device=device)
             a = torch.tensor([10, 0, 1, 0], dtype=dtype, device=device)
             for other_dtype in torch.testing.get_all_dtypes():
-                # Skip bfloat16 on CUDA
+                b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
+
+                # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
                 if device != 'cpu' and torch.bfloat16 in (dtype, other_dtype):
+                    with self.assertRaises(RuntimeError):
+                        a.logical_xor(b)
                     continue
                 # TODO Remove this skipping after bfloat16 can be handled nicely with other dtypes.
                 # Skip only if either dtype or other_dtype is bfloat16.
                 if (dtype == torch.bfloat16) != (other_dtype == torch.bfloat16):
+                    with self.assertRaises(RuntimeError):
+                        a.logical_xor(b)
                     continue
-                b = torch.tensor([1, 0, 0, 10], dtype=other_dtype, device=device)
                 # new tensor
                 self.assertEqual(expected_res.bool(), a.logical_xor(b))
                 # out
@@ -6224,11 +6229,15 @@ class TestTorchDeviceType(TestCase):
                 torch.logical_xor(a, b, out=c)
                 self.assertEqual(expected_res.bool(), c.bool())
 
-            # in-place (skip bfloat16 on CUDA)
-            if device == 'cpu' or dtype != torch.bfloat16:
-                b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
-                a.logical_xor_(b)
-                self.assertEqual(expected_res, a)
+            # in-place
+            b = torch.tensor([1, 0, 0, 10], dtype=dtype, device=device)
+            # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
+            if device != 'cpu' and dtype == torch.bfloat16:
+                with self.assertRaises(RuntimeError):
+                    a.logical_xor_(b)
+                continue
+            a.logical_xor_(b)
+            self.assertEqual(expected_res, a)
 
     def test_isinf(self, device):
         t1 = torch.Tensor([1, inf, 2, -inf, nan]).to(device)
@@ -6331,11 +6340,6 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.cat([empty, x], dim=1)
         self.assertEqual(res1, res2)
 
-        conv = torch.nn.Conv2d(3, 3, kernel_size=1).float().to(device)
-        res1 = torch.cat([conv(x), empty], dim=1)
-        res2 = torch.cat([empty, conv(x)], dim=1)
-        self.assertEqual(res1, res2)
-
         res1 = torch.cat([empty, empty], dim=1)
         self.assertEqual(res1, empty)
 
@@ -6351,11 +6355,6 @@ class TestTorchDeviceType(TestCase):
 
         res1 = torch.cat([x, empty], dim=1)
         res2 = torch.cat([empty, x], dim=1)
-        self.assertEqual(res1, res2)
-
-        conv = torch.nn.Conv2d(3, 3, kernel_size=1).float().to(device)
-        res1 = torch.cat([conv(x), empty], dim=1)
-        res2 = torch.cat([empty, conv(x)], dim=1)
         self.assertEqual(res1, res2)
 
         res1 = torch.cat([empty, empty], dim=1)
@@ -10946,7 +10945,7 @@ class TestTorchDeviceType(TestCase):
             ("log1p", positives, True, True, 'cpu'),
             ("log1p", positives, False, True, 'cuda'),
             ("log2", positives, True, True, 'cpu'),
-            ("log2", positives, False, True, 'cuda'),
+            ("log2", positives, True, True, 'cuda'),
             ("neg", doubles, True, True, 'cpu'),
             ("neg", doubles, True, True, 'cuda'),
             ("reciprocal", doubles, True, True, 'cpu'),
@@ -12615,38 +12614,33 @@ class TestTorchDeviceType(TestCase):
             run_test(m, v2, v1, lambda x: x.transpose(0, 1))
 
     @onlyCPU
-    def test_addmv(self, device):
-        types = {
-            'torch.DoubleTensor': 1e-8,
-            'torch.FloatTensor': 1e-4,
-            'torch.BFloat16Tensor': 1e-0,
-        }
-        for tname, prec in types.items():
-            t = torch.randn(10, device=device).type(tname)
-            m = torch.randn(10, 100, device=device).type(tname)
-            v = torch.randn(100, device=device).type(tname)
-            res1 = torch.addmv(t, m, v)
-            res2 = torch.zeros(10, device=device).type(tname)
-            res2 += t
-            for i in range(10):
-                for j in range(100):
-                    res2[i] += m[i, j] * v[j]
+    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8})
+    @dtypes(torch.bfloat16, torch.float, torch.double)
+    def test_addmv(self, device, dtype):
+        t = torch.randn(10, device=device).to(dtype)
+        m = torch.randn(10, 100, device=device).to(dtype)
+        v = torch.randn(100, device=device).to(dtype)
+        res1 = torch.addmv(t, m, v)
+        res2 = torch.zeros(10, dtype=dtype, device=device)
+        res2 += t
+        for i in range(10):
+            for j in range(100):
+                res2[i] += m[i, j] * v[j]
 
-            self.assertEqual(res1, res2, prec)
+        self.assertEqual(res1, res2)
 
         # Test 0-strided
-        for tname, prec in types.items():
-            t = torch.randn(1, device=device).type(tname).expand(10)
-            m = torch.randn(10, 1, device=device).type(tname).expand(10, 100)
-            v = torch.randn(100, device=device).type(tname)
-            res1 = torch.addmv(t, m, v)
-            res2 = torch.zeros(10, device=device).type(tname)
-            res2 += t
-            for i in range(10):
-                for j in range(100):
-                    res2[i] += m[i, j] * v[j]
+        t = torch.randn(1, device=device).to(dtype).expand(10)
+        m = torch.randn(10, 1, device=device).to(dtype).expand(10, 100)
+        v = torch.randn(100, device=device).to(dtype)
+        res1 = torch.addmv(t, m, v)
+        res2 = torch.zeros(10, dtype=dtype, device=device)
+        res2 += t
+        for i in range(10):
+            for j in range(100):
+                res2[i] += m[i, j] * v[j]
 
-            self.assertEqual(res1, res2, prec)
+        self.assertEqual(res1, res2)
 
     @onlyCPU
     def test_addmm(self, device):
