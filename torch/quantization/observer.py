@@ -559,6 +559,7 @@ class HistogramObserver(_ObserverBase):
 
     @torch.jit.ignore
     def _forward(self, x):
+        # type: (Tensor) -> Tensor
         with torch.no_grad():
             min_val = self.min_val
             max_val = self.max_val
