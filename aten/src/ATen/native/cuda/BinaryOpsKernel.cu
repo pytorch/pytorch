@@ -21,7 +21,7 @@ void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
           using scalar_t = decltype(input0_t(0) + input1_t(0) + output_t(0));
           scalar_t alpha = alpha_scalar.to<scalar_t>();
           gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(input0_t a, input1_t b) -> output_t {
-            return output_t(a + alpha * b);
+            return output_t(scalar_t(a) + alpha * scalar_t(b));
           });
         }()
       )
