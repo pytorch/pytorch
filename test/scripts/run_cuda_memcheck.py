@@ -28,24 +28,24 @@ GPUS = torch.cuda.device_count()
 parser = argparse.ArgumentParser(description="Run isolated cuda-memcheck on unit tests")
 parser.add_argument('filename', help="the python file for a test, such as test_torch.py")
 parser.add_argument('timeout', type=int, help='kill the test if it does not terminate in a certain amount of seconds')
-parser.add_argument('--cublas', action='store_true',
-                    help='Whether to show cublas errors. These errors are ignored by default because'
-                         'cublas does not run error-free under cuda-memcheck')
+parser.add_argument('--strict', action='store_true',
+                    help='Whether to show cublas/cudnn errors. These errors are ignored by default because'
+                         'cublas/cudnn does not run error-free under cuda-memcheck, and ignoring these errors')
 parser.add_argument('--nproc', type=int, default=multiprocessing.cpu_count(),
                     help='Number of processes running tests, default to number of cores in the system')
 parser.add_argument('--gpus', default='all',
                     help='GPU assignments for each process, it could be "all", or : separated list like "1,2:3,4:5,6"')
 args = parser.parse_args()
 
-# Filters that ignores cublas errors
-# TODO (@zasdfgbnm): When can we remove this? Will cublas run error-free under cuda-memcheck?
-def is_cublas_only(output):
+# Filters that ignores cublas/cudnn errors
+# TODO (@zasdfgbnm): When can we remove this? Will cublas/cudnn run error-free under cuda-memcheck?
+def is_ignored_only(output):
     report = cmc.parse(output)
-    count_cublas_errors = 0
+    count_ignored_errors = 0
     for e in report.errors:
-        if 'cudaErrorInvalidDeviceFunction' in e.message and 'libcublas' in ''.join(e.stack):
-            count_cublas_errors += 1
-    return count_cublas_errors == report.num_errors
+        if 'libcublas' in ''.join(e.stack) or 'libcudnn' in ''.join(e.stack):
+            count_ignored_errors += 1
+    return count_ignored_errors == report.num_errors
 
 # Discover tests:
 # To get a list of tests, run:
@@ -98,7 +98,7 @@ async def run1(coroutine_id):
             else:
                 stdout = stdout.decode()
                 stderr = stderr.decode()
-                should_display = args.cublas or not is_cublas_only(stdout)
+                should_display = args.strict or not is_ignored_only(stdout)
                 if should_display:
                     print('Fail:', test, file=logfile)
                     print(stdout, file=logfile)
