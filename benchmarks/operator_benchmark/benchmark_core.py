@@ -197,6 +197,9 @@ class BenchmarkRunner(object):
                 iters, run_time_sec, curr_test_total_time, self.has_explicit_iteration_count)
 
             if results_are_significant:
+                # Print out the last 50 values when running with AI PEP
+                if self.args.ai_pep_format:
+                    test_case._print_per_iter()
                 break
 
             # Re-estimate the hopefully-sufficient
