@@ -620,14 +620,7 @@ class ScriptModuleSerializer {
 
       std::string src = item.value().str();
 
-      // Only compress these records if they're not tiny.
-      // The cpu cost of generating zip datastructs and compressing isn't
-      // well-spent for very small records.
-      static constexpr size_t kMinToCompress = 200;
-
-      writer_.writeRecord(
-          filename, src.c_str(), src.size(),
-          src.size() > kMinToCompress /*compress*/);
+      writer_.writeRecord(filename, src.c_str(), src.size(), /*compress=*/true);
 
       // Write out the debug information
       std::ostringstream debugFilename;
@@ -639,7 +632,7 @@ class ScriptModuleSerializer {
           debugFilename.str(),
           range_data.data(),
           range_data.size(),
-          range_data.size() > kMinToCompress /*compress*/);
+          /*compress=*/true);
     }
   }
 
