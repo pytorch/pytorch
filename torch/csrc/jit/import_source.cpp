@@ -111,6 +111,7 @@ struct SourceImporterImpl : public Resolver,
         {"CONSTANTS", std::make_shared<ConstantTableValue>(tensor_table)},
         {"fork", SpecialFormValue::create(prim::fork)},
         {"annotate", SpecialFormValue::create(prim::annotate)},
+        {"unchecked_cast", SpecialFormValue::create(prim::unchecked_cast)},
         {"uninitialized", SpecialFormValue::create(prim::Uninitialized)},
         {"inf",
          std::make_shared<ConstantValue>(

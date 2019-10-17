@@ -1656,7 +1656,8 @@ class TestQNNPackOps(TestCase):
             import torch.nn.functional as F
             X_init = torch.from_numpy(np.random.randint(
                 0, 50, (batch_size, channels, height, width)))
-            zero_point = 0
+
+            padding = 0
             X = scale * (X_init - zero_point).to(dtype=torch.float)
 
             # Check constraints

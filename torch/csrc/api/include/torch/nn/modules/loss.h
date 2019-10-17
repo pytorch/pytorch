@@ -125,15 +125,94 @@ TORCH_MODULE(CosineEmbeddingLoss);
 
 // ============================================================================
 
+/// Creates a criterion that optimizes a multi-class multi-classification
+/// hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
+/// and output :math:`y` (which is a 2D `Tensor` of target class indices).
+struct TORCH_API MultiLabelMarginLossImpl : public Cloneable<MultiLabelMarginLossImpl> {
+  explicit MultiLabelMarginLossImpl(
+    const MultiLabelMarginLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `L1Loss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  MultiLabelMarginLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `MultiLabelMarginLossImpl`.
+/// See the documentation for `MultiLabelMarginLossImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(MultiLabelMarginLoss);
+
+// ============================================================================
+
+/// Creates a criterion that optimizes a two-class classification
+/// logistic loss between input tensor :math:`x` and target tensor :math:`y`
+/// (containing 1 or -1).
+struct TORCH_API SoftMarginLossImpl : public Cloneable<SoftMarginLossImpl> {
+  explicit SoftMarginLossImpl(const SoftMarginLossOptions& options_ = {});
+
+  /// Pretty prints the `SoftMarginLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  void reset() override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  SoftMarginLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `SoftMarginLossImpl`.
+/// See the documentation for `SoftMarginLossImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(SoftMarginLoss);
+
+// ============================================================================
+
+/// Creates a criterion that optimizes a multi-label one-versus-all
+/// loss based on max-entropy, between input :math:`x` and target :math:`y` of size
+/// :math:`(N, C)`.
+struct TORCH_API MultiLabelSoftMarginLossImpl : public Cloneable<MultiLabelSoftMarginLossImpl> {
+  explicit MultiLabelSoftMarginLossImpl(
+    const MultiLabelSoftMarginLossOptions& options_ = {});
+
+  /// Pretty prints the `MultiLabelSoftMarginLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  void reset() override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  MultiLabelSoftMarginLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `MultiLabelSoftMarginLossImpl`.
+/// See the documentation for `MultiLabelSoftMarginLossImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(MultiLabelSoftMarginLoss);
+
+// ============================================================================
+
 /// Creates a criterion that measures the triplet loss given an input
 /// tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater 
 /// than :math:`0`. This is used for measuring a relative similarity between
 /// samples. A triplet is composed by `a`, `p` and `n` (i.e., `anchor`, 
 /// `positive examples` and `negative examples` respectively). The
 /// shapes of all input tensors should be :math:`(N, D)`
-struct TORCH_API TripletMarginLossImpl : Module {
+struct TORCH_API TripletMarginLossImpl : public Cloneable<TripletMarginLossImpl> {
   explicit TripletMarginLossImpl(
       const TripletMarginLossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `TripletMarginLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
