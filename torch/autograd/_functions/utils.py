@@ -22,25 +22,6 @@ def maybe_unexpand(tensor, old_size, check_same_size=True):
     return tensor
 
 
-# Generate paddings in ONNX order based on pad in pytorch.
-# Arguments:
-#     dim: the dimension of the tensor.
-#     pad: the paddings in pytorch.
-#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
-def prepare_onnx_paddings(dim, pad):
-    assert isinstance(dim, int)
-    # The desired order of paddings is
-    # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
-    # n is the dimension of input.
-    assert len(pad) <= dim * 2
-    # assume zero-dimensions in the beginning
-    paddings = list(pad[:]) + [0] * (dim * 2 - len(pad))
-    # reverse order and collate first beginnings and then ends
-    paddings = paddings[-2::-2] + paddings[-1::-2]
-    assert len(paddings) == dim * 2
-    return paddings
-
-
 # Check whether the op enable broadcasting, and whether it is supported by ONNX.
 # If dims1 and dims2 are different, then broadcast is True.
 # We always assume the combination of dims1 and dims2 is broadcastable.

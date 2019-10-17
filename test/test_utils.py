@@ -12,7 +12,6 @@ import torch.utils.data
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
-from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
 from common_utils import skipIfRocm, load_tests, IS_SANDCASTLE
 
@@ -452,12 +451,6 @@ class TestCollectEnv(TestCase):
 
 
 class TestONNXUtils(TestCase):
-    def test_prepare_onnx_paddings(self):
-        sizes = [2, 3, 4]
-        pad = [1, 2, 3, 4]
-        paddings = prepare_onnx_paddings(len(sizes), pad)
-        self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
-
     def test_check_onnx_broadcast(self):
 
         def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
