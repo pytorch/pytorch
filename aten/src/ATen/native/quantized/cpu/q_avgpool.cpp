@@ -96,7 +96,6 @@ static void avg_pool2d_out_frame(
                       std::nearbyint(sum * multiplier + output.q_zero_point()),
                       minimum),
                   maximum));
-          std::cout << "Value is " << sum * multiplier + output.q_zero_point() << std::endl;
           ptr_output++;
         }
       }

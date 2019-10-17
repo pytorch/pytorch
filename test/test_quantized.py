@@ -516,7 +516,7 @@ class TestQuantizedOps(TestCase):
         within range. However, the float op will not.
         """
         X, (scale, zero_point, torch_type) = X
-        print(zero_point)
+
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
         oH = pool_output_shape(iH, kernel, padding, stride, 0)
