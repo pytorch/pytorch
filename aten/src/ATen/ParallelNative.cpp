@@ -178,10 +178,21 @@ void set_num_threads(int nthreads) {
 #ifndef C10_MOBILE
   TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
   int no_value = NOT_SET;
-  TORCH_CHECK(num_intraop_threads.compare_exchange_strong(no_value, nthreads),
-      "Error: cannot set number of intraop threads "
-      "after parallel work has started or after set_num_threads call "
-      "when using native parallel backend");
+  if (!num_intraop_threads.compare_exchange_strong(no_value, nthreads)) {
+    // num_intraop_threads either stores a positive integer or CONSUMED,
+    // check that requested size is the same as the current one
+    int stored_nthreads = num_intraop_threads.load();
+    if (stored_nthreads <= 0) {
+      // plus one because of master thread
+      stored_nthreads = _get_intraop_pool().size() + 1;
+    }
+    if (stored_nthreads != nthreads) {
+      TORCH_WARN(
+        "Cannot set number of intraop threads "
+        "after parallel work has started or after set_num_threads call "
+        "when using native parallel backend");
+    }
+  }
 #else
   TORCH_CHECK(false, "set_num_threads is not supported for mobile.");
 #endif // C10_MOBILE
