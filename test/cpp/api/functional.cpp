@@ -593,11 +593,10 @@ TEST_F(FunctionalTest, PReLU) {
 
 TEST_F(FunctionalTest, LayerNorm) {
   const auto input = torch::randn({2, 2});
-  const LayerNormOptions& options = LayerNormOptions({2, 2});
   const auto weight = torch::randn({2, 2});
   const auto bias = torch::randn({2, 2});
-  auto y = F::layer_norm(input, options, weight, bias);
-  auto y_exp = torch::layer_norm(input, torch::IntArrayRef(options.normalized_shape()), weight, bias, options.eps());
+  auto y = F::layer_norm(input, LayerNormOptions({2, 2}).eps(2e-5), weight, bias);
+  auto y_exp = torch::layer_norm(input, {2, 2}, weight, bias, 2e-5);
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
