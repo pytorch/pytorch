@@ -20,6 +20,10 @@ class _PartialWrapper(object):
     def __repr__(self):
         return self.p.__repr__()
 
+    @staticmethod
+    def with_args(cls, **kwargs):
+        return _PartialWrapper(partial(cls_or_self, **kwargs))
+
 
 def _with_args(cls_or_self, **kwargs):
     """
@@ -33,13 +37,11 @@ def _with_args(cls_or_self, **kwargs):
     r = _PartialWrapper(partial(cls_or_self, **kwargs))
     return r
 
-_PartialWrapper.with_args = _with_args
-
 
 ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
 
 
-class Observer(ABC, nn.Module):
+class ObserverBase(ABC, nn.Module):
     r"""
     Observer base Module. Any observer implementation should derive from this class.
 
@@ -49,7 +51,7 @@ class Observer(ABC, nn.Module):
     the collected statistics.
     """
     def __init__(self, dtype):
-        super(Observer, self).__init__()
+        super(ObserverBase, self).__init__()
         self.dtype = dtype
 
     @abstractmethod
@@ -63,7 +65,7 @@ class Observer(ABC, nn.Module):
     with_args = classmethod(_with_args)
 
 
-class _ObserverBase(Observer):
+class _ObserverBase(ObserverBase):
     r"""
     Common base for all qint/quint8 observers
     """
@@ -647,7 +649,7 @@ class RecordingObserver(_ObserverBase):
         return self.tensor_val
 
 
-class NoopObserver(Observer):
+class NoopObserver(ObserverBase):
     r"""
     Observer that doesn't do anything and just passes its configuration to the
     quantized module's ``.from_float()``.
