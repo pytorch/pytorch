@@ -175,6 +175,9 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 init_exception = None
             else:
                 try:
+                    if hasattr(dataset, 'hint'):
+                        index = list(index)
+                        dataset.hint(index)
                     data = fetcher.fetch(index)
                 except Exception as e:
                     if isinstance(e, StopIteration) and dataset_kind == _DatasetKind.Iterable:
