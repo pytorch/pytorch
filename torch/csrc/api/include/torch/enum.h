@@ -70,7 +70,7 @@ struct enum_name {
   TORCH_ENUM_PRETTY_PRINT(Sum)
 };
 
-inline at::Reduction _convert_reduction_variant_type_to_enum(
+inline at::Reduction::Reduction _convert_reduction_variant_type_to_enum(
     c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_variant) {
   if (c10::get_if<enumtype::kNone>(&reduction_variant)) {
     return at::Reduction::None;
