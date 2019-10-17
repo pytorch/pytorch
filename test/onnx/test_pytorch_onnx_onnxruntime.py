@@ -328,17 +328,9 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
-        model = torch.nn.AvgPool1d(2, stride=1)
-        x = torch.randn(20, 16, 50)
-        self.run_test(model, x)
-
     # enable when supported in ORT for opset 11
     @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_1d_ceil(self):
-        model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
-        x = torch.randn(1, 1, 7)
-        self.run_test(model, x)
-
         model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
@@ -348,7 +340,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_avgpool_2d_ceil(self):
         model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 32)
-        self.run_test(model, x,)
+        self.run_test(model, x)
 
     # enable when supported in ORT for opset 11
     @skipIfUnsupportedOpsetVersion([11])

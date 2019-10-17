@@ -351,7 +351,6 @@ def _index_fill_reshape_helper(g, self, dim, index):
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 
-
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
