@@ -1523,8 +1523,14 @@
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
 - func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_cpu
+    CUDA: layer_norm_cuda
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_backward_cpu
+    CUDA: layer_norm_backward_cuda
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -1629,15 +1635,12 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _log2__cpu
-    CUDA: _log2__cuda
 
 - func: log2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log2_out_cpu
-    CUDA: _log2_out_cuda
+    CPU: log2_out
+    CUDA: log2_out
 
 - func: logdet(Tensor self) -> Tensor
   use_c10_dispatcher: full
