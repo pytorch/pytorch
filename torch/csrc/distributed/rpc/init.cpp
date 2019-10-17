@@ -37,6 +37,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
   auto rpcAgent =
       shared_ptr_class_<RpcAgent>(module, "RpcAgent")
           .def(
+              "start",
+              &RpcAgent::start,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "stop", &RpcAgent::stop, py::call_guard<py::gil_scoped_release>())
+          .def(
               "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
           .def(
               "sync",
@@ -87,6 +93,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
           py::arg("name"),
           py::arg("process_group"),
           py::arg("num_send_recv_threads") = 4)
+      .def(
+          "start",
+          &ProcessGroupAgent::start,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "stop",
+          &ProcessGroupAgent::stop,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &

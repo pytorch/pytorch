@@ -58,6 +58,7 @@ def sync_rpc():
 
     _agent.sync()
 
+
 class RpcBackend(Enum):
     PROCESS_GROUP = 1
 
