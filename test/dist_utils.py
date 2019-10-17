@@ -4,7 +4,8 @@ from functools import wraps
 from os import getenv
 
 import torch.distributed as dist
-from torch.distributed.rpc_api import RpcBackend
+import torch.distributed.rpc as rpc
+from torch.distributed.rpc.api import RpcBackend
 
 
 if not dist.is_available():
@@ -13,7 +14,7 @@ if not dist.is_available():
 
 
 class TestConfig:
-    __slots__ = ['backend']
+    __slots__ = ['rpc_backend']
 
     def __init__(self, *args, **kwargs):
         assert len(args) == 0, "TestConfig only takes kwargs."
@@ -21,7 +22,7 @@ class TestConfig:
             setattr(self, k, v)
 
 
-TEST_CONFIG = TestConfig(backend=getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP))
+TEST_CONFIG = TestConfig(rpc_backend=getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP))
 INIT_METHOD_TEMPLATE = "file://{file_name}?rank={rank}&world_size={world_size}"
 
 
@@ -37,13 +38,15 @@ def dist_init(test_method):
     def wrapper(self, *arg, **kwargs):
         self.worker_id = self.rank
         dist.init_process_group(backend="gloo", init_method=self.init_method)
-        dist.init_model_parallel(
+        # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
+        rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
-            backend=TEST_CONFIG.backend,
+            backend=TEST_CONFIG.rpc_backend,
             self_rank=self.rank,
             init_method=self.init_method,
+            num_send_recv_threads=16
         )
         test_method(self, *arg, **kwargs)
-        dist.join_rpc()
+        rpc.join_rpc()
 
     return wrapper

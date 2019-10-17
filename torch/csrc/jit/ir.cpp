@@ -272,7 +272,13 @@ std::ostream &Node::print(std::ostream &out, size_t level,
 
   // In debug print, append file:line:col as a comment after each node
   if (print_source_locations) {
-    if (auto file_line_col = sourceRange().file_line_col()) {
+    SourceRange r = sourceRange();
+    if (sourceRange().source()) {
+      if (auto orig = sourceRange().source()->findSourceRangeThatGenerated(r)) {
+        r = *orig;
+      }
+    }
+    if (auto file_line_col = r.file_line_col()) {
       std::string filename;
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
@@ -834,10 +840,15 @@ bool Node::matches(
 }
 
 bool Node::mustBeNone() const {
-  return kind_ == prim::AutogradZero ||
+  // We can statically deduce this Node has returning None if:
+  return
+      // It's an AutogradZero node, or ...
+      kind_ == prim::AutogradZero ||
+      // It has only one output and that output is NoneType, or ...
+      (outputs().size() == 1 && output()->type() == NoneType::get()) ||
+      // It's a constant optional with no value in the attributes.
       (kind_ == prim::Constant && !this->hasAttributes() &&
-       (output()->type()->cast<OptionalType>() ||
-        output()->type() == NoneType::get()));
+       output()->type()->cast<OptionalType>());
 }
 
 void Node::dump() const {
@@ -1328,13 +1339,7 @@ Value* Graph::insert(
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<SourceRange>& range) {
   return script::emitBuiltinCall(
-      range.value_or(fakeRange()),
-      *this,
-      opname,
-      c10::nullopt,
-      args,
-      kwargs,
-      /*required=*/true);
+      range.value_or(fakeRange()), *this, opname, args, kwargs);
 }
 
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
@@ -1534,6 +1539,11 @@ Node* Graph::createIsInstance(
   n->tys_(attr::types, types.vec());
   n->output()->setType(BoolType::get());
   return n;
+}
+Value* Graph::insertUncheckedCast(Value* v, TypePtr type) {
+  Node* n = insertNode(create(prim::unchecked_cast, {v}));
+  n->output()->setType(std::move(type));
+  return n->output();
 }
 
 Value* Graph::insertFunctionCall(
