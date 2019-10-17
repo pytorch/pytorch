@@ -1994,6 +1994,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
                     eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
 
     input_sizes = input.type().sizes()
+    assert input_sizes[1] % num_groups == 0
     # 0 in the shape list keeps dimension value unchanged.
     shape = [0, num_groups, -1]
     input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(shape)))

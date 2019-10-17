@@ -1497,6 +1497,8 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         model = nn.GroupNorm(3, 6, eps=0.0002)
         self.run_model_test(model, train=True, input=c, batch_size=BATCH_SIZE)
 
+    # InstanceNorm model (used in the subgraph) includes unused weights,
+    # so skip this in TestCaffe2BackendEmbed
     @skipIfEmbed
     def test_group_norm_noaffine(self):
         c = torch.randn(BATCH_SIZE, 6, 224, 224)
