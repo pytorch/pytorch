@@ -158,8 +158,8 @@ void GroupNormBackwardKernelImplInternal(
   std::array<T, K> db_arr;
   for (int64_t i = 0; i < N; ++i) {
     for (int64_t j = 0; j < C; ++j) {
-      const T* dY_ptr = dY_data + i * C * HxW + j * HxW;
-      const T* X_ptr = X_data + i * C * HxW + j * HxW;
+      const T* dY_ptr = dY_data + (i * C + j) * HxW;
+      const T* X_ptr = X_data + (i * C + j) * HxW;
       vec256::Vec256<T> ds_vec(0);
       vec256::Vec256<T> db_vec(0);
       for (int64_t k = 0; k < inner_size; k += K) {
@@ -188,7 +188,7 @@ void GroupNormBackwardKernelImplInternal(
         vec256::Vec256<T> db_vec(0);
         for (int64_t k = 0; k < d; k += K) {
           const vec256::Vec256<T> gamma_vec = gamma_null
-              ? vec256::Vec256<T>(0)
+              ? vec256::Vec256<T>(1)
               : vec256::Vec256<T>::loadu(gamma_data + j * D + k);
           ds_vec = ds_vec + vec256::Vec256<T>::loadu(ds_ptr + k) * gamma_vec;
           db_vec = db_vec + vec256::Vec256<T>::loadu(db_ptr + k) * gamma_vec;
@@ -203,17 +203,17 @@ void GroupNormBackwardKernelImplInternal(
           db_val += db_ptr[k] * gamma_v;
         }
         const int64_t ng = i * G + j;
-        const T b = (db_val * mean_data[ng] - ds_val) * rstd_data[ng] *
+        const T c2 = (db_val * mean_data[ng] - ds_val) * rstd_data[ng] *
             rstd_data[ng] * rstd_data[ng] * s;
-        const T c = -b * mean_data[ng] - db_val * rstd_data[ng] * s;
+        const T c3 = -c2 * mean_data[ng] - db_val * rstd_data[ng] * s;
         for (int64_t k = 0; k < D; ++k) {
-          const T* dY_ptr = dY_data + (i * C + j * D + k) * HxW;
-          const T* X_ptr = X_data + (i * C + j * D + k) * HxW;
-          T* dX_ptr = dX_data + (i * C + j * D + k) * HxW;
-          const T a =
-              rstd_data[ng] * (gamma_null ? T(1) : gamma_data[j * D + k]);
+          const int64_t c = j * D + k;
+          const T* dY_ptr = dY_data + (i * C + c) * HxW;
+          const T* X_ptr = X_data + (i * C + c) * HxW;
+          T* dX_ptr = dX_data + (i * C + c) * HxW;
+          const T c1 = rstd_data[ng] * (gamma_null ? T(1) : gamma_data[c]);
           for (int64_t x = 0; x < HxW; ++x) {
-            dX_ptr[x] = a * dY_ptr[x] + b * X_ptr[x] + c;
+            dX_ptr[x] = c1 * dY_ptr[x] + c2 * X_ptr[x] + c3;
           }
         }
       }
