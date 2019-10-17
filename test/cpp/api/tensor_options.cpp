@@ -1,10 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/types.h>
-
-#include <ATen/Context.h>
-#include <ATen/Functions.h>
-#include <c10/core/TensorOptions.h>
+#include <torch/torch.h>
 
 #include <string>
 #include <vector>

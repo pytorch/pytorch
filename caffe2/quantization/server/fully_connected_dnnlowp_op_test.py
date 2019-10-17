@@ -24,7 +24,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
     @given(
         input_channels=st.sampled_from([3, 4, 5, 8, 16, 32]),
         output_channels=st.integers(2, 16),
-        batch_size=st.integers(1, 16),
+        batch_size=st.integers(0, 16),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         weight_quantized=st.booleans(),
@@ -59,7 +59,8 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         # input channels 0 and 1 are all X_min to avoid overflow from vpmaddubsw
         # when multiplied with W_min and W_max
         X[:, 0] = X_min
-        X[0, 1] = X_max
+        if batch_size != 0:
+            X[0, 1] = X_max
 
         if preserve_weight_sparsity:
             W_min = -128
@@ -93,13 +94,9 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
         Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
         outputs = []
 
-        op_engine_list = [
-            ("FC", ""),
-        ]
+        op_engine_list = [("FC", "")]
         if fuse_relu:
-            op_engine_list += [
-                ("Int8FCRelu", "DNNLOWP"),
-            ]
+            op_engine_list += [("Int8FCRelu", "DNNLOWP")]
         else:
             op_engine_list += [
                 ("FC", "DNNLOWP"),
@@ -129,8 +126,10 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 )
                 net.Proto().op.extend([quantize])
 
+            X_min = 0 if X.size == 0 else X.min()
+            X_max = 0 if X.size == 0 else X.max()
             x_q_param = dnnlowp_utils.choose_quantization_params(
-                X.min(), X.max(), preserve_activation_sparsity
+                X_min, X_max, preserve_activation_sparsity
             )
             if do_quantize_weight:
                 int8_given_tensor_fill, w_q_param = dnnlowp_utils.create_int8_given_tensor_fill(
