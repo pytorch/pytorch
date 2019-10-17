@@ -205,7 +205,7 @@ struct CAFFE2_API TensorIterator {
   }
 
   void cast_outputs() {
-    if (compute_common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE) {
+    if (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE) {
       for(int i=0; i < noutputs(); i++) {
         if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
           operands_[i].original_tensor.copy_(operands_[i].tensor);
@@ -308,15 +308,15 @@ struct CAFFE2_API TensorIterator {
   }
 
   void promote_common_dtype() {
-    compute_common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE;
+    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE;
   }
 
   void dont_compute_common_dtype() {
-    compute_common_dtype_strategy_ = CommonDTypeStrategy::NONE;
+    common_dtype_strategy_ = CommonDTypeStrategy::NONE;
   }
 
   void compute_common_dtype_only_for_inputs() {
-    compute_common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE_INPUTS;
+    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE_INPUTS;
   }
 
   void dont_resize_outputs() {
@@ -349,7 +349,7 @@ protected:
 #endif
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
-  CommonDTypeStrategy compute_common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
+  CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
   bool resize_outputs_ = true;
