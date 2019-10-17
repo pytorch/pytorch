@@ -98,7 +98,8 @@ Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   }
 
   for (int64_t i = 0; i < start; i++) {
-    vec[index++] = tensors[i];
+    // `tensors` is dead after this, so we can avoid refcount bumps by moving.
+    vec[index++] = std::move(tensors[i]);
   }
 
   return at::stack(vec, dim);
