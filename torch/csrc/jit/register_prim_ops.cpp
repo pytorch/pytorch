@@ -3386,16 +3386,35 @@ at::Tensor interpolate(
     }
   }
 
+  // if (scale_factors.isNone())
+  float scale_factors_1 = -1;
+  float scale_factors_2 = -1;
+  float scale_factors_3 = -1;
+  if (scale_factors.isDouble()) {
+    scale_factors_1 = (float) scale_factors.toDouble();
+    scale_factors_2 = (float) scale_factors.toDouble();
+    scale_factors_3 = (float) scale_factors.toDouble();
+  } else if (scale_factors.isDoubleList()) {
+    auto scale_factors_list_ref = scale_factors.toDoubleListRef();
+    std::vector<double> scale_factors_vec(scale_factors_list_ref.begin(), scale_factors_list_ref.end());
+    auto scale_factors_list = c10::impl::toList(scale_factors_vec);
+    scale_factors_1 = (float) scale_factors_list[0];
+    // if len >= 2
+    scale_factors_2 = (float) scale_factors_list[1];
+    // if len >= 3
+    scale_factors_3 = (float) scale_factors_list[2];
+  }
+
   auto input_dim = input.dim();
   if (input_dim == 3 && mode == "nearest")
     return at::upsample_nearest1d(
-        input, _output_size(input, 1, size, scale_factors));
+        input, _output_size(input, 1, size, scale_factors), scale_factors_1);
   if (input_dim == 4 && mode == "nearest")
     return at::upsample_nearest2d(
-        input, _output_size(input, 2, size, scale_factors));
+        input, _output_size(input, 2, size, scale_factors), scale_factors_1, scale_factors_2);
   if (input_dim == 5 && mode == "nearest")
     return at::upsample_nearest3d(
-        input, _output_size(input, 3, size, scale_factors));
+        input, _output_size(input, 3, size, scale_factors), scale_factors_1, scale_factors_2, scale_factors_3);
   if (input_dim == 3 && mode == "area")
     return at::adaptive_avg_pool1d(
         input, _output_size(input, 1, size, scale_factors));

@@ -263,6 +263,25 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
     return scales
 
 
+def _get_scales_if_available(g, scales):
+    available_scales = sym_help._maybe_get_const(scales[0], 'f') != -1
+
+    if not available_scales:
+        return None
+
+    from torch.onnx.symbolic_opset9 import unsqueeze
+    scales_list = []
+    for scale in scales:
+        unsqueezed_scale = unsqueeze(g, scale, 0)
+        # ONNX only supports float for the scales. double -> float.
+        unsqueezed_scale = g.op("Cast", unsqueezed_scale,
+                           to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        scales_list.append(unsqueezed_scale)
+    offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
+    scales = g.op("Concat", offsets, *scales_list, axis_i=0)
+    return scales
+
+
 def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:
         from torch.onnx.symbolic_opset9 import scatter

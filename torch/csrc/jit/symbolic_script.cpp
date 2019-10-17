@@ -1231,11 +1231,11 @@ const std::vector<std::string> functions = {
             input_size = input.size()
             input_dim = len(input_size)
             if input_dim == 3 and mode == 'nearest':
-                grad_input = torch.upsample_nearest1d_backward(grad, output_size, input_size)
+                grad_input = torch.upsample_nearest1d_backward(grad, output_size, -1, input_size)
             elif input_dim == 4 and mode == 'nearest':
-                grad_input = torch.upsample_nearest2d_backward(grad, output_size, input_size)
+                grad_input = torch.upsample_nearest2d_backward(grad, output_size, -1, None, input_size)
             elif input_dim == 5 and mode == 'nearest':
-                grad_input = torch.upsample_nearest3d_backward(grad, output_size, input_size)
+                grad_input = torch.upsample_nearest3d_backward(grad, output_size, -1, -1, -1, input_size)
             elif input_dim == 3 and mode == 'linear':
                 grad_input = torch.upsample_linear1d_backward(grad, output_size, input_size, align_corners)
             elif input_dim == 4 and mode == 'bilinear':

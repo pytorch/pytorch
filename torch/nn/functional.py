@@ -2498,11 +2498,14 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             align_corners = False
 
     if input.dim() == 3 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest1d(input, _output_size(1))
+        scale_factor = _ntuple(1)(-1) if scale_factor is None else _ntuple(1)(scale_factor)
+        return torch._C._nn.upsample_nearest1d(input, _output_size(1), scale_factor[0])
     elif input.dim() == 4 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest2d(input, _output_size(2))
+        scale_factor = _ntuple(2)(scale_factor) if scale_factor is None else _ntuple(2)(scale_factor)
+        return torch._C._nn.upsample_nearest2d(input, _output_size(2), scale_factor[0], scale_factor[1])
     elif input.dim() == 5 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest3d(input, _output_size(3))
+        scale_factor = _ntuple(3)(scale_factor) if scale_factor is None else _ntuple(3)(scale_factor)
+        return torch._C._nn.upsample_nearest3d(input, _output_size(3), scale_factor[0], scale_factor[1], scale_factor[2])
     elif input.dim() == 3 and mode == 'area':
         return adaptive_avg_pool1d(input, _output_size(1))
     elif input.dim() == 4 and mode == 'area':

@@ -110,23 +110,53 @@ avg_pool2d = _avg_pool('avg_pool2d', _pair)
 avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
-def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, align_corners=None):
-        sym_help._interpolate_warning(interpolate_mode)
-        align_corners = sym_help._maybe_get_scalar(align_corners)
-        if align_corners:
-            return _unimplemented(name, "align_corners == True")
+def _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners=None):
+    sym_help._interpolate_warning(interpolate_mode)
+    align_corners = sym_help._maybe_get_scalar(align_corners)
+    if align_corners:
+        return _unimplemented(name, "align_corners == True")
+    if scales is None:
         scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
-        return g.op("Resize", input, scales, mode_s=interpolate_mode)
+    return g.op("Resize", input, scales, mode_s=interpolate_mode)
+
+def _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners=None):
+    sym_help._interpolate_warning(interpolate_mode)
+    align_corners = sym_help._maybe_get_scalar(align_corners)
+    if align_corners:
+        return _unimplemented(name, "align_corners == True")
+    if scales is None:
+        scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
+    r = g.op("Upsample", input, scales, mode_s=interpolate_mode)
+    return r
+
+
+def _interpolate1d(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, scales_1, scales_2, align_corners=None):
+        scales = sym_help._interpolate_get_scales_if_available(g, [scales_1])
+        return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
     return symbolic_fn
 
-upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
-upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
-upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
-upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
-upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
-upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
+def _interpolate2d(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, scales_1, scales_2, align_corners=None):
+        scales = sym_help._interpolate_get_scales_if_available(g, [scales_1, scales_2])
+        return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
+    return symbolic_fn
+
+
+def _interpolate3d(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, scales_1, scales_2, scale_3, align_corners=None):
+        scales = sym_help._interpolate_get_scales_if_available(g, [scales_1, scales_2, scale_3])
+        return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
+    return symbolic_fn
+
+
+upsample_nearest1d = _interpolate1d('upsample_nearest1d', 3, "nearest")
+upsample_nearest2d = _interpolate2d('upsample_nearest2d', 4, "nearest")
+upsample_nearest3d = _interpolate3d('upsample_nearest3d', 5, "nearest")
+upsample_linear1d = _interpolate1d('upsample_linear1d', 3, "linear")
+upsample_bilinear2d = _interpolate2d('upsample_bilinear2d', 4, "linear")
+upsample_trilinear3d = _interpolate3d('upsample_trilinear3d', 5, "linear")
 
 def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:

@@ -108,7 +108,9 @@ __global__ void upsample_nearest2d_backward_out_frame(
 static void upsample_nearest2d_out_cuda_template(
     Tensor& output,
     const Tensor& input_,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    double scales_1,
+    double scales_2) {
   TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
   checkAllSameGPU(
       "upsample_nearest2d_out_cuda_template", {input_arg, output_arg});
@@ -191,6 +193,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
     IntArrayRef input_size) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
@@ -261,14 +265,16 @@ static void upsample_nearest2d_backward_out_cuda_template(
 Tensor& upsample_nearest2d_out_cuda(
     Tensor& output,
     const Tensor& input,
-    IntArrayRef output_size) {
-  upsample_nearest2d_out_cuda_template(output, input, output_size);
+    IntArrayRef output_size,
+    double scales_1,
+    double scales_2) {
+  upsample_nearest2d_out_cuda_template(output, input, output_size, scales_1, scales_2);
   return output;
 }
 
-Tensor upsample_nearest2d_cuda(const Tensor& input, IntArrayRef output_size) {
+Tensor upsample_nearest2d_cuda(const Tensor& input, IntArrayRef output_size, double scales_1, double scales_2,) {
   Tensor output = at::empty_like(input);
-  upsample_nearest2d_out_cuda_template(output, input, output_size);
+  upsample_nearest2d_out_cuda_template(output, input, output_size, scales_1, scales_2);
   return output;
 }
 
@@ -276,19 +282,23 @@ Tensor& upsample_nearest2d_backward_out_cuda(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
     IntArrayRef input_size) {
   upsample_nearest2d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size);
+      grad_input, grad_output, output_size, scales_1, scales_2, input_size);
   return grad_input;
 }
 
 Tensor upsample_nearest2d_backward_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
     IntArrayRef input_size) {
   Tensor grad_input = at::empty_like(grad_output);
   upsample_nearest2d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size);
+      grad_input, grad_output, output_size, scales_1, scales_2, input_size);
   return grad_input;
 }
 

@@ -49,29 +49,48 @@ for black_listed_op in black_listed_operators:
     vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
 
 
-def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, align_corners=None):
-        sym_help._interpolate_warning(interpolate_mode)
-        align_corners = sym_help._maybe_get_scalar(align_corners)
-        if align_corners:
-            return _unimplemented(name, "align_corners == True")
-        output_size = sym_help._maybe_get_const(output_size, 'is')
-        if sym_help._is_value(output_size):
-            return _unimplemented(name, "torch._C.Value (output_size) indexing")
-        else:
-            scales = [1. if i < 2 else
-                      float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
-                      for i in range(0, dim)]
-        return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)
+
+def _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners=None):
+    sym_help._interpolate_warning(interpolate_mode)
+    align_corners = sym_help._maybe_get_scalar(align_corners)
+    if align_corners:
+        return _unimplemented(name, "align_corners == True")
+    output_size = sym_help._maybe_get_const(output_size, 'is')
+    if sym_help._is_value(output_size):
+        return _unimplemented(name, "torch._C.Value (output_size) indexing")
+    if scales is None:
+        scales = [1. if i < 2 else
+                    float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
+                    for i in range(0, dim)]
+    return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)
+
+def _interpolate1d(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, scales_1, scales_2, align_corners=None):
+        scales = sym_help._interpolate_get_scales_if_available(g, [scales_1])
+        return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
     return symbolic_fn
 
 
-upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
-upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
-upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
-upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
-upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
-upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
+def _interpolate2d(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, scales_1, scales_2, align_corners=None):
+        scales = sym_help._interpolate_get_scales_if_available(g, [scales_1, scales_2])
+        return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
+    return symbolic_fn
+
+
+def _interpolate3d(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, scales_1, scales_2, scale_3, align_corners=None):
+        scales = sym_help._interpolate_get_scales_if_available(g, [scales_1, scales_2, scale_3])
+        return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
+    return symbolic_fn
+
+
+upsample_nearest1d = _interpolate1d('upsample_nearest1d', 3, "nearest")
+upsample_nearest2d = _interpolate2d('upsample_nearest2d', 4, "nearest")
+upsample_nearest3d = _interpolate3d('upsample_nearest3d', 5, "nearest")
+upsample_linear1d = _interpolate1d('upsample_linear1d', 3, "linear")
+upsample_bilinear2d = _interpolate2d('upsample_bilinear2d', 4, "linear")
+upsample_trilinear3d = _interpolate3d('upsample_trilinear3d', 5, "linear")
 
 
 # NOTE: We should create a wrapper for this kind of operation, after resolving the shape/type propagation
