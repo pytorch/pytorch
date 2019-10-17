@@ -296,7 +296,7 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
-        nullptr
+        nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
       );
     }
 
@@ -310,7 +310,7 @@ public:
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
-        nullptr
+        nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
       );
     }
 
