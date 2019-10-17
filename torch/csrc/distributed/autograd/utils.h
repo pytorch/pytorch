@@ -33,7 +33,7 @@ TORCH_API DistAutogradContext* addRecvRpcBackward(
     rpc::worker_id_t fromWorkerId);
 
 // This method is a wrapper utility used internally to wrap autograd info
-// and attached autograd function for each type of rpc call if it has valid
+// and attach autograd function for each type of rpc call if it has valid
 // context and tensors require grads, in this case, return RpcWithAutograd
 // message; otherwise return original rpc message.
 rpc::Message getMessageWithAutogradCheck(

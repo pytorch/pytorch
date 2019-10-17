@@ -132,7 +132,6 @@ Message RequestCallbackImpl::processRpc(
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
-      const auto& autogradMetadata = rpcWithAutograd.autogradMetadata();
 
       // Attach 'recv' autograd function.
       DistAutogradContext* autogradContext = addRecvRpcBackward(
