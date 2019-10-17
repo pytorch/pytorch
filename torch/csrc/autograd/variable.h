@@ -408,7 +408,8 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   AutogradMeta(
     at::TensorImpl* self_impl,
     bool requires_grad = false,
-    Edge gradient_edge = Edge());
+    std::shared_ptr<Node> grad_fn = nullptr,
+    uint32_t output_nr = 0);
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -497,7 +498,9 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
-  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge);
+  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
+    std::shared_ptr<Node> grad_fn = nullptr,
+    uint32_t output_nr = 0);
   ~DifferentiableViewMeta();
 };
 
@@ -529,7 +532,7 @@ inline Variable make_variable_view(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::DifferentiableViewMeta>(
-        data_impl_copy.get(), std::move(base), std::move(gradient_edge)));
+        data_impl_copy.get(), std::move(base), std::move(gradient_edge.function), /*output_nr*/gradient_edge.input_nr));
       return Variable(data_impl_copy);
     } else {
       /// Non-differentiable view. Just share version counter.
@@ -537,7 +540,7 @@ inline Variable make_variable_view(
         /*version_counter=*/base.version_counter(),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
-        data_impl_copy.get(), false, std::move(gradient_edge)));
+        data_impl_copy.get(), false, std::move(gradient_edge.function), /*output_nr*/gradient_edge.input_nr));
       return Variable(data_impl_copy);
     }
   }
@@ -581,7 +584,7 @@ inline Variable make_variable(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
-      data_impl_copy.get(), false, std::move(gradient_edge)));
+      data_impl_copy.get(), false, std::move(gradient_edge.function), /*output_nr*/ gradient_edge.input_nr));
     return Variable(data_impl_copy);
   }
   return Variable();

@@ -21,11 +21,12 @@
 
 namespace torch {
 namespace autograd {
-Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge gradient_edge) {
-  grad_fn_ = std::move(gradient_edge.function);
+// NB: output_nr is input_nr on an Edge!
+Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, std::shared_ptr<Node> grad_fn, uint32_t output_nr) {
+  grad_fn_ = std::move(grad_fn);
   requires_grad_ = false;
   is_view_ = false;
-  output_nr_ = gradient_edge.input_nr;
+  output_nr_ = output_nr;
 
   // set_requires_grad also checks error conditions.
   set_requires_grad(requires_grad, self_impl);
@@ -106,8 +107,8 @@ void Variable::set_data(const at::Tensor &new_data) const {
   get()->shallow_copy_from(new_data.getIntrusivePtr());
 }
 
-Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
-    : Variable::AutogradMeta(self_impl, false, std::move(gradient_edge)) {
+Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, std::shared_ptr<Node> grad_fn, uint32_t output_nr)
+    : Variable::AutogradMeta(self_impl, false, std::move(grad_fn), output_nr) {
   base_ = std::move(base);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
