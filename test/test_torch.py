@@ -10945,7 +10945,7 @@ class TestTorchDeviceType(TestCase):
             ("log1p", positives, True, True, 'cpu'),
             ("log1p", positives, False, True, 'cuda'),
             ("log2", positives, True, True, 'cpu'),
-            ("log2", positives, False, True, 'cuda'),
+            ("log2", positives, True, True, 'cuda'),
             ("neg", doubles, True, True, 'cpu'),
             ("neg", doubles, True, True, 'cuda'),
             ("reciprocal", doubles, True, True, 'cpu'),
@@ -12441,6 +12441,43 @@ class TestTorchDeviceType(TestCase):
         res2 = torch.tensor((), dtype=dtype, device=device)
         torch.sum(x, (2, 1), out=res2)
         self.assertEqual(res1, res2)
+
+    def test_memory_format_type_shortcuts(self, device):
+        def input_generator_fn(device):
+            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).clamp(0, 1).round().contiguous(memory_format=torch.channels_last)
+
+        def get_fn(fn_name):
+            def transformation_fn(tensor, **kwargs):
+                fn = getattr(tensor, fn_name)
+                return fn(**kwargs)
+            return transformation_fn
+
+        shortcuts = ['byte', 'char', 'double', 'bool', 'half', 'int', 'long', 'short']
+        if device == 'cpu':
+            shortcuts += ['bfloat16']
+
+        for fn_name in shortcuts:
+            self._test_memory_format_transformations(device, input_generator_fn, get_fn(fn_name))
+
+        # Test 'float' separately to avoid float->float no-op.
+        def input_generator_fn_double(device):
+            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float64).clamp(0, 1).round().contiguous(memory_format=torch.channels_last)
+
+        self._test_memory_format_transformations(device, input_generator_fn_double, get_fn('float'))
+
+    @onlyCUDA
+    def test_memory_format_cpu_and_cuda_ops(self, device):
+        def input_generator_fn(device):
+            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
+
+        def transformation_cpu_fn(tensor, **kwargs):
+            return tensor.cpu(**kwargs)
+
+        def transformation_cuda_fn(tensor, **kwargs):
+            return tensor.cuda(**kwargs)
+
+        self._test_memory_format_transformations('cuda', input_generator_fn, transformation_cpu_fn)
+        self._test_memory_format_transformations('cpu', input_generator_fn, transformation_cuda_fn)
 
     @onlyCPU
     @skipCPUIfNoLapack

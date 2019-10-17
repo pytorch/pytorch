@@ -4,7 +4,6 @@
 #include <TH/THGeneral.h>
 #include <TH/THAllocator.h>
 #undef log1p
-#undef log2
 
 #include <c10/cuda/CUDAStream.h>
 
