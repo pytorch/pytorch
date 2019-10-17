@@ -223,12 +223,12 @@ __global__ void indexAddLargeIndex24(TensorInfo<T, IndexType> dst,
        linearIndex += gridDim.x * blockDim.x) {
     IndexType srcIndex, elementInSlice;
     if (IndexIsMajor) {
-      srcIndex = linearIndex / innerSize;
-      elementInSlice = linearIndex % innerSize;
+      srcIndex = linearIndex / innerSize; //TODO div24
+      elementInSlice = linearIndex % innerSize; //TODO mod24
     }
     else {
-      elementInSlice = linearIndex / innerSize;
-      srcIndex = linearIndex % innerSize;
+      elementInSlice = linearIndex / innerSize; //TODO div24
+      srcIndex = linearIndex % innerSize; //TODO mod24
     }
 
     // Lua indices begin at 1
@@ -238,11 +238,11 @@ __global__ void indexAddLargeIndex24(TensorInfo<T, IndexType> dst,
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get24(elementInSlice, dst);
-    dstOffset += dstIndex * dst.strides[dstAddDim];
+    dstOffset += dstIndex * dst.strides[dstAddDim]; //TODO fma24
 
     IndexType srcOffset =
       IndexToOffset<T, IndexType, SrcDim>::get24(elementInSlice, src);
-    srcOffset += srcIndex * src.strides[srcAddDim];
+    srcOffset += srcIndex * src.strides[srcAddDim]; //TODO fma24
 
     atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
   }
@@ -420,6 +420,52 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
     dst.data[dstOffset] = src.data[srcOffset];
   }
 }
+
+#ifdef __HIP_PLATFORM_HCC__
+// this is a specialization of the indexSelectLargeIndex kernel for ROCm which
+// uses fast unsigned int24 computations
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+	  bool IndexIsMajor>
+__global__ void indexSelectLargeIndex24(TensorInfo<T, IndexType> dst,
+                                      TensorInfo<T, IndexType> src,
+                                      TensorInfo<int64_t, IndexType> indices,
+                                      int dstSelectDim,
+                                      int srcSelectDim,
+                                      IndexType totalSize,
+                                      IndexType innerSize,
+                                      int64_t srcSelectDimSize) {
+  // We stride over the output including the indexed dimension
+  // (totalSize), and calculate the destination index point based on that
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalSize;
+       linearIndex += gridDim.x * blockDim.x) {
+    IndexType dstIndex, elementInSlice;
+    if (IndexIsMajor) {
+      dstIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      dstIndex = linearIndex % innerSize;
+    }
+
+    // Lua indices begin at 1
+    IndexType srcIndex =
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get24(dstIndex, indices)];
+    assert(srcIndex < srcSelectDimSize);
+
+    IndexType dstOffset =
+      IndexToOffset<T, IndexType, DstDim>::get24(elementInSlice, dst);
+    dstOffset += dstIndex * dst.strides[dstSelectDim]; // TODO fma24
+
+    IndexType srcOffset =
+      IndexToOffset<T, IndexType, SrcDim>::get24(elementInSlice, src);
+    srcOffset += srcIndex * src.strides[srcSelectDim]; // TODO fma24
+
+    dst.data[dstOffset] = src.data[srcOffset];
+  }
+}
+#endif
 
 template <int Dims, typename T, typename IndexType>
 __device__ __forceinline__ IndexType indexToOffset(
