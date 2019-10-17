@@ -9,6 +9,7 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeSet.h>
+#include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/core/CopyBytes.h>
 
 #include <c10/util/Exception.h>
@@ -136,11 +137,6 @@ struct C10_API AutogradMetaInterface {
   virtual at::Tensor& grad() = 0;
   virtual const at::Tensor& grad() const = 0;
   virtual ~AutogradMetaInterface();
-};
-
-struct C10_API NonVariableTypeMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
 };
 
 struct C10_API NamedTensorMetaInterface {
@@ -808,14 +804,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const {
-    return autograd_meta_ != nullptr && !at::NonVariableTypeMode::is_enabled();
+    return autograd_meta_ != nullptr && !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
   }
 
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
-  virtual void set_allow_tensor_metadata_change(bool value) {
+  void set_allow_tensor_metadata_change(bool value) {
     allow_tensor_metadata_change_ = value;
   }
 
@@ -823,7 +819,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
-  virtual bool allow_tensor_metadata_change() const {
+  bool allow_tensor_metadata_change() const {
     return allow_tensor_metadata_change_;
   }
 
@@ -1390,6 +1386,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_contiguous_ = false;
     is_channels_last_contiguous_ = false;
     is_channels_last_ = false;
+    is_non_overlapping_and_dense_ = false;
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         strides_.resize(sizes_.size(), 0);
@@ -1401,6 +1398,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           }
         }
         is_contiguous_ = true;
+        is_non_overlapping_and_dense_ = true;
         return;
       }
       case MemoryFormat::ChannelsLast: {
@@ -1410,6 +1408,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
         is_channels_last_contiguous_ = true;
         is_channels_last_ = true;
+        is_non_overlapping_and_dense_ = true;
         return;
       }
       case MemoryFormat::Preserve:
@@ -1419,6 +1418,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_strides_like_channels_last() const {
     return is_channels_last_;
+  }
+
+  bool is_non_overlapping_and_dense() const {
+    return is_non_overlapping_and_dense_;
   }
 
 private:
@@ -1501,6 +1504,8 @@ private:
 
   bool compute_strides_like_channels_last() const;
 
+  bool compute_non_overlapping_and_dense() const;
+
 protected:
   /**
    * Recompute the cached numel of a tensor.  Call this if you modify sizes.
@@ -1517,6 +1522,7 @@ protected:
     is_contiguous_ = compute_contiguous();
     is_channels_last_contiguous_ = compute_channels_last_contiguous();
     is_channels_last_ = is_channels_last_contiguous_ || compute_strides_like_channels_last();
+    is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
   }
 
   /**
@@ -1546,6 +1552,9 @@ protected:
       dest_impl->type_set_ = dest_impl->type_set_.remove(TensorTypeId::VariableTensorId);
     }
     dest_impl->is_contiguous_ = src_impl->is_contiguous_;
+    dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
+    dest_impl->is_channels_last_ = src_impl->is_channels_last_;
+    dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
     dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
     dest_impl->reserved_ = src_impl->reserved_;
     dest_impl->set_version_counter(version_counter);
@@ -1640,6 +1649,11 @@ protected:
   // Channels last contiguous tensor is channel last tensor which occupies
   // contiguous memory block.
   bool is_channels_last_contiguous_ = false;
+
+  // Dense tensor is the tensor that store values in a contiguous block of memory.
+  // Non-overlapping tensor is the tensor in which elements occupy individual
+  // non-repetitive memory.
+  bool is_non_overlapping_and_dense_ = false;
 
   bool is_wrapped_number_ = false;
 

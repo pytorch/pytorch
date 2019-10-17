@@ -45,7 +45,6 @@ struct Refinement {
   TypePtr type() const {
     return type_;
   }
-
  private:
   std::string identifier_;
   TypePtr type_;
@@ -421,7 +420,7 @@ struct Environment {
     if (!retval) {
       static std::unordered_map<std::string, SugaredValuePtr> globals = {
           {"print", std::make_shared<PrintValue>()},
-          {"tuple", std::make_shared<TupleCallValue>()},
+          {"tuple", SpecialFormValue::create(prim::TupleConstruct)},
           {"float",
            makeMagic(
                "__float__",
@@ -438,8 +437,8 @@ struct Environment {
            makeMagic(
                "__str__",
                std::make_shared<CastValue>(StringType::get(), aten::str))},
-          {"getattr", std::make_shared<GetAttrValue>()},
-          {"isinstance", std::make_shared<IsInstanceValue>()},
+          {"getattr", SpecialFormValue::create(prim::GetAttr)},
+          {"isinstance", SpecialFormValue::create(prim::isinstance)},
           // todo(zach): remove when we can correctly export torch.full via ONNX
           // or we have implicit conversion that can convert numbers to tensors
           {"_to_tensor",
@@ -471,9 +470,9 @@ struct Environment {
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
-          {"range", std::make_shared<IterableValue>(prim::range)},
-          {"zip", std::make_shared<IterableValue>(prim::zip)},
-          {"enumerate", std::make_shared<IterableValue>(prim::enumerate)},
+          {"range", SpecialFormValue::create(prim::range)},
+          {"zip", SpecialFormValue::create(prim::zip)},
+          {"enumerate", SpecialFormValue::create(prim::enumerate)},
           {"rangelist",
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
           {"sorted",
@@ -487,9 +486,7 @@ struct Environment {
 
     if (!retval) {
       if (auto type = resolver->resolveType(ident, range)) {
-        if (auto class_type = type->cast<ClassType>()) {
-          retval = std::make_shared<script::ClassValue>(class_type);
-        } else if (auto tuple_type = type->cast<TupleType>()) {
+        if (auto tuple_type = type->cast<TupleType>()) {
           retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
         }
       }
@@ -497,6 +494,14 @@ struct Environment {
 
     if (!retval) {
       retval = resolver->resolveValue(ident, method, range);
+    }
+
+    if (!retval) {
+      if (auto type = resolver->resolveType(ident, range)) {
+        if (auto class_type = type->cast<ClassType>()) {
+          retval = std::make_shared<script::ClassValue>(class_type);
+        }
+      }
     }
 
     if (!retval && required) {
@@ -997,13 +1002,7 @@ struct to_ir {
       case TK_NOT: {
         CondValue v = emitCondExpr(Expr(expr.tree()->trees()[0]));
         Value* result = emitBuiltinCall(
-            expr.range(),
-            *graph,
-            aten::__not__,
-            c10::nullopt,
-            {v.value()},
-            {},
-            /*required=*/true);
+            expr.range(), *graph, aten::__not__, {v.value()}, {});
         c10::optional<bool> static_if;
         if (v.staticIf()) {
           static_if = !*v.staticIf();
@@ -1039,10 +1038,8 @@ struct to_ir {
               expr.get()->range(),
               *method.graph(),
               kind,
-              c10::nullopt,
               {lhs_val, rhs_val},
-              {},
-              /*required=*/true);
+              {});
           auto refinements = RefinementSet(findIsNoneRefinements(
               cond_op.lhs(), lhs_val, cond_op.rhs(), rhs_val, expr.kind()));
           return CondValue(cond_value, refinements, c10::nullopt);
@@ -1135,8 +1132,9 @@ struct to_ir {
       list_type = getListCompType(lc, IntType::get());
     } else {
       throw ErrorReport(lc.range())
-          << "iterator expression is expected to be a list, iterable, or range, found "
-          << (siv ? siv->getValue()->type()->python_str() : siv->kind());
+          << "iterator expression is expected to be a list, iterable, or "
+             "range, found "
+          << sv->kind();
     }
 
     // given `[x*2 for x in my_list]` this generates the following AST:
@@ -1168,8 +1166,8 @@ struct to_ir {
   void insertRefinements(const SourceRange& loc, const RefinementSet& ref) {
     for (const Refinement& r : ref.activeRefinements()) {
       Value* v = environment_stack->getVar(r.identifier(), loc);
-      Value* output = graph->insert(prim::unchecked_unwrap_optional, {v});
-      environment_stack->setVar(loc, r.identifier(), output);
+      Value* new_v = graph->insertUncheckedCast(v, r.type());
+      environment_stack->setVar(loc, r.identifier(), new_v);
     }
   }
 
@@ -1815,10 +1813,9 @@ struct to_ir {
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhsValue->type()),
-          self,
           {rhs},
           {},
-          /*required=*/true);
+          self);
 
     } else {
       throw ErrorReport(stmt.lhs())
@@ -1841,10 +1838,9 @@ struct to_ir {
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhsValue->type()),
-          self,
           {rhs},
           {},
-          /*required=*/true);
+          self);
 
       environment_stack->setVar(lhs.range(), lhs.name().name(), output);
     } else {
@@ -1925,10 +1921,9 @@ struct to_ir {
             stmt.range(),
             *method.graph(),
             getAugOp(stmt, sliceable->type()),
-            slicedArg,
             {rhs},
             {},
-            /*required=*/true);
+            slicedArg);
       } else {
         // Special case: we tried to do "advanced indexing". Lower this expr
         // into `index` and `index_put_` ops with tensordices of Tensor?[]
@@ -1942,10 +1937,9 @@ struct to_ir {
             stmt.range(),
             *method.graph(),
             getAugOp(stmt, sliceable->type()),
-            indexed,
             {rhs},
             {},
-            /*required=*/true);
+            indexed);
         graph->insert(
             aten::index_put_,
             {slicedArg, indices, augmented},
@@ -2345,104 +2339,197 @@ struct to_ir {
   std::shared_ptr<SugaredValue> emitApplyExpr(Apply& apply, size_t n_binders) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
-    if (auto fork_value = dynamic_cast<ForkValue*>(sv.get())) {
-      auto& trees = apply.inputs().tree()->trees();
-      if (trees.size() < 1) {
-        throw ErrorReport(loc) << "Expected at least one argument to fork()";
-      }
-      auto forked = emitSugaredExpr(Expr(trees[0]), 1);
-      TreeList sliced_trees(trees.begin() + 1, trees.end());
-      auto inputs = getNamedValues(sliced_trees, true);
-      auto attributes = emitAttributes(apply.attributes());
-      return emitForkExpr(loc, forked, inputs, attributes);
-    } else if (auto annotate_value = dynamic_cast<AnnotateValue*>(sv.get())) {
-      checkApplyNumInputs(apply, 2);
-      TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
-      Value* expr = tryConvertToType(
-          apply.range(),
-          *graph,
-          type,
-          emitExpr(apply.inputs()[1], type),
-          /*allow_conversions=*/true);
+    if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
+      return emitApplySpecialForm(special_form->form(), apply);
+    }
+    auto inputs = getNamedValues(apply.inputs(), true);
+    auto attributes = emitAttributes(apply.attributes());
+    return sv->call(loc, method, inputs, attributes, n_binders);
+  }
 
-      std::stringstream why_not;
-      if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
-        throw ErrorReport(apply.inputs())
-            << "expected an expression of type " << type->python_str()
-            << " but found " << expr->type()->python_str() << "\n"
-            << why_not.str();
+  // this function handles expressions that look like apply statements
+  // but have special evaluation rules for the arguments.
+  // when adding a new case, only add a special form if it cannot be expressed
+  // using the standard SugaredValue::call function, which enforces normal
+  // evaluation order.
+  std::shared_ptr<SugaredValue> emitApplySpecialForm(
+      Symbol form,
+      Apply& apply) {
+    switch (form) {
+      case prim::fork: {
+        auto& trees = apply.inputs().tree()->trees();
+        if (trees.size() < 1) {
+          throw ErrorReport(apply)
+              << "Expected at least one argument to fork()";
+        }
+        auto forked = emitSugaredExpr(Expr(trees[0]), 1);
+        TreeList sliced_trees(trees.begin() + 1, trees.end());
+        auto inputs = getNamedValues(sliced_trees, true);
+        auto attributes = emitAttributes(apply.attributes());
+        return emitForkExpr(apply.range(), forked, inputs, attributes);
       }
+      case prim::annotate: {
+        checkApplyNumInputs(apply, 2);
+        TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+        Value* expr = tryConvertToType(
+            apply.range(),
+            *graph,
+            type,
+            emitExpr(apply.inputs()[1], type),
+            /*allow_conversions=*/true);
 
-      // None is a subtype of Optional[T], but we want to remember what T is,
-      // after annotation so that variables assigned to this None will still
-      // get the right type. To do this, we make a None constant that
-      // has the type Optional[T]
-      if (type->kind() == OptionalType::Kind &&
-          expr->type()->isSubtypeOf(NoneType::get())) {
-        Node* none = graph->createNone();
-        none->output()->setType(type);
-        graph->insertNode(none);
-        expr = none->output();
-      }
+        std::stringstream why_not;
+        if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
+          throw ErrorReport(apply.inputs())
+              << "expected an expression of type " << type->python_str()
+              << " but found " << expr->type()->python_str() << "\n"
+              << why_not.str();
+        }
 
-      return std::make_shared<SimpleValue>(expr);
-    } else if (auto getattr = dynamic_cast<GetAttrValue*>(sv.get())) {
-      checkApplyNumInputs(apply, 2);
-      auto obj = emitSugaredExpr(apply.inputs()[0], 1);
-      auto selector = apply.inputs()[1];
-      if (selector.kind() != TK_STRINGLITERAL) {
-        throw ErrorReport(loc)
-            << "getattr's second argument must be a string literal";
-      }
-      const std::string& name = StringLiteral(selector).text();
-      return obj->attr(apply.range(), method, name);
-    } else if (
-        auto uninitialized_value =
-            dynamic_cast<UninitializedValue*>(sv.get())) {
-      checkApplyNumInputs(apply, 1);
-      TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
-      auto out = graph->insertNode(graph->createUninitialized(type))
-                     ->setSourceRange(loc);
-      return std::make_shared<SimpleValue>(out->output());
-    } else if (auto tuple_call = dynamic_cast<TupleCallValue*>(sv.get())) {
-      checkApplyNumInputs(apply, 1);
-      auto arg = emitSugaredExpr(apply.inputs()[0], 1);
-      auto inputs = arg->asTuple(apply.range(), method);
-      auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
-        return sv->asValue(loc, method);
-      });
-      return std::make_shared<SimpleValue>(
-          graph->insertNode(graph->createTuple(inp_values))->output());
-    } else if (auto isinstance = dynamic_cast<IsInstanceValue*>(sv.get())) {
-      checkApplyNumInputs(apply, 2);
-      auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
-      return std::make_shared<SimpleValue>(result.value());
-    } else if (auto classNew = dynamic_cast<ClassNewMethod*>(sv.get())) {
-      if (apply.inputs().size() != 1) {
-        throw ErrorReport(loc) << "Only one argument to __new__ allowed";
-      }
-      auto arg = emitSugaredExpr(apply.inputs()[0], 1);
-      auto class_arg = dynamic_cast<ClassValue*>(arg.get());
-      if (!class_arg) {
-        throw ErrorReport(loc)
-            << "Expected class value as argument to __new__, got "
-            << arg->kind() << " instead";
-      }
-      if (class_arg->type_ != classNew->type_) {
-        throw ErrorReport(loc)
-            << "Argument to __new__() must match the class "
-            << "you are calling __new__() on. "
-            << "Got: " << class_arg->type_->python_str()
-            << ", expected: " << classNew->type_->python_str();
-      }
+        // None is a subtype of Optional[T], but we want to remember what T is,
+        // after annotation so that variables assigned to this None will still
+        // get the right type. To do this, we make a None constant that
+        // has the type Optional[T]
+        if (type->kind() == OptionalType::Kind &&
+            expr->type()->isSubtypeOf(NoneType::get())) {
+          Node* none = graph->createNone();
+          none->output()->setType(type);
+          graph->insertNode(none);
+          expr = none->output();
+        }
 
-      return classNew->createObject(apply.range(), method);
-    } else if (auto iterable = std::dynamic_pointer_cast<IterableValue>(sv)) {
-      return emitIterableTree(loc, apply.inputs(), iterable);
-    } else {
-      auto inputs = getNamedValues(apply.inputs(), true);
-      auto attributes = emitAttributes(apply.attributes());
-      return sv->call(loc, method, inputs, attributes, n_binders);
+        return std::make_shared<SimpleValue>(expr);
+      }
+      case prim::unchecked_cast: {
+        checkApplyNumInputs(apply, 2);
+        TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+        Value* v = emitExpr(apply.inputs()[1]);
+        // avoid generating nested unchecked_casts because they are already
+        // inserted during serialization
+        if (v->node()->kind() != prim::unchecked_cast || *v->type() != *type) {
+          v = graph->insertUncheckedCast(v, type);
+        }
+        return std::make_shared<SimpleValue>(v);
+      } break;
+      case prim::GetAttr: {
+        checkApplyNumInputs(apply, 2);
+        auto obj = emitSugaredExpr(apply.inputs()[0], 1);
+        auto selector = apply.inputs()[1];
+        if (selector.kind() != TK_STRINGLITERAL) {
+          throw ErrorReport(apply)
+              << "getattr's second argument must be a string literal";
+        }
+        const std::string& name = StringLiteral(selector).text();
+        return obj->attr(apply.range(), method, name);
+      }
+      case prim::Uninitialized: {
+        checkApplyNumInputs(apply, 1);
+        TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+        auto out = graph->insertNode(graph->createUninitialized(type))
+                       ->setSourceRange(apply.range());
+        return std::make_shared<SimpleValue>(out->output());
+      }
+      case prim::TupleConstruct: {
+        checkApplyNumInputs(apply, 1);
+        auto arg = emitSugaredExpr(apply.inputs()[0], 1);
+        auto inputs = arg->asTuple(apply.range(), method);
+        auto inp_values = fmap(inputs, [&](const SugaredValuePtr& sv) {
+          return sv->asValue(apply.range(), method);
+        });
+        return std::make_shared<SimpleValue>(
+            graph->insertNode(graph->createTuple(inp_values))->output());
+      }
+      case prim::isinstance: {
+        checkApplyNumInputs(apply, 2);
+        auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
+        return std::make_shared<SimpleValue>(result.value());
+      }
+      // This represents the "__new__" method on classes
+      // because it takes a ClassValue as input.
+      // So if we see:
+      //   Foo.__new__(Foo)
+      // Foo is a ClassValue, calling `attr("__new__")` will return a
+      // CreateObject special form.
+      case prim::CreateObject: {
+        if (apply.inputs().size() != 1) {
+          throw ErrorReport(apply) << "Only one argument to __new__ allowed";
+        }
+        auto arg = emitSugaredExpr(apply.inputs()[0], 1);
+        auto class_arg = dynamic_cast<ClassValue*>(arg.get());
+        if (!class_arg) {
+          throw ErrorReport(apply)
+              << "Expected class value as argument to __new__, got "
+              << arg->kind() << " instead";
+        }
+        auto createNode =
+            graph->insertNode(graph->createObject(class_arg->type_));
+        return std::make_shared<SimpleValue>(createNode->output());
+      }
+      // We construct the iterable tree here using the IterableTree
+      // SugaredValue, The tree consists of SimpleValue, RangeValue or
+      // IterableValue: For SimpleValues(List, Dict, etc) or RangeValue. We will
+      // make them as tree leaves since we could get the loop information from
+      // len() and get_item(). For IterableValue like zip(), enumerate(), we can
+      // model them as a combination of leaves, and we emit a IterableTree value
+      // to record the tree information
+      case prim::range: {
+        std::vector<Value*> input_vals =
+            getValues(apply.inputs(), /*maybe_unpack=*/true);
+        return std::make_shared<RangeValue>(apply.range(), method, input_vals);
+      }
+      case prim::enumerate: {
+        const SourceRange& loc = apply.range();
+        auto inputs = apply.inputs();
+        auto input_size = apply.inputs().size();
+        // enumerate(x) can be rewrite as subtrees:
+        // IterableTree(RangeValue(0, math.inf), SimpleValue(x))
+        Value* start_index = nullptr;
+        if (input_size == 0) {
+          throw ErrorReport(loc)
+              << "enumerate expected at least 1 arguments, got 0";
+        }
+
+        if (input_size == 2) {
+          start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
+        }
+
+        if (input_size > 2) {
+          throw ErrorReport(loc)
+              << "enumerate expected at most 2 arguments, got " << input_size;
+        }
+        std::vector<Value*> range_inputs;
+        if (start_index != nullptr) {
+          range_inputs.emplace_back(start_index);
+        }
+        Value* end = materializeConstant(
+            std::numeric_limits<int64_t>::max(),
+            *graph,
+            loc,
+            integral_constants);
+        range_inputs.emplace_back(end);
+        SugaredValuePtr range_sv =
+            std::make_shared<RangeValue>(loc, method, range_inputs);
+        SugaredValuePtr expr_sv = emitSugaredExpr(inputs[0], 1);
+        return std::make_shared<IterableTree>(
+            std::vector<SugaredValuePtr>({range_sv, expr_sv}));
+      }
+      case prim::zip: {
+        // zip(x, y) can be rewrite as subtrees:
+        // IterableTree(IterableTree(x), IterableTree(y))
+        auto inputs = apply.inputs();
+        if (inputs.size() == 0) {
+          throw ErrorReport(apply)
+              << "zip expected at least 1 arguments, got 0";
+        }
+        auto iterable_tree = std::make_shared<IterableTree>();
+        for (Expr expr : inputs) {
+          auto expr_sv = emitSugaredExpr(expr, 1);
+          iterable_tree->addChild(expr_sv);
+        }
+        return iterable_tree;
+      }
+      default:
+        TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
     }
   }
 
@@ -2521,69 +2608,6 @@ struct to_ir {
     return graph->insertConstant(stack[0], tree->range());
   }
 
-
-  // We construct the iterable tree here using the IterableTree SugaredValue,
-  // The tree consists of SimpleValue, RangeValue or IterableValue:
-  // For SimpleValues(List, Dict, etc) or RangeValue. We will make them as tree
-  // leaves since we could get the loop information from len() and get_item().
-  // For IterableValue like zip(), enumerate(), we can model them as a
-  // combination of leaves, and we emit a IterableTree value to record the tree
-  // information
-  SugaredValuePtr emitIterableTree(
-      SourceRange& loc,
-      const List<Expr>& inputs,
-      const std::shared_ptr<IterableValue>& iterable) {
-    std::shared_ptr<IterableTree> iterable_tree = nullptr;
-    size_t input_size = inputs.size();
-
-    // Handling different iterable values
-    if (iterable->symbol_ == prim::range) {
-      std::vector<Value*> input_vals = getValues(inputs, /*maybe_unpack=*/true);
-      return std::make_shared<RangeValue>(loc, method, input_vals);
-    } else if (iterable->symbol_ == prim::enumerate) {
-      // enumerate(x) can be rewrite as subtrees:
-      // IterableTree(RangeValue(0, math.inf), SimpleValue(x))
-      Value* start_index = nullptr;
-      if (input_size == 0) {
-        throw ErrorReport(loc)
-            << "enumerate expected at least 1 arguments, got 0";
-      }
-
-      if (input_size == 2) {
-        start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
-      }
-
-      if (input_size > 2) {
-        throw ErrorReport(loc)
-            << "enumerate expected at most 2 arguments, got " << input_size;
-      }
-      std::vector<Value*> range_inputs;
-      if (start_index != nullptr) {
-        range_inputs.emplace_back(start_index);
-      }
-      Value* end = materializeConstant(
-          std::numeric_limits<int64_t>::max(), *graph, loc, integral_constants);
-      range_inputs.emplace_back(end);
-      SugaredValuePtr range_sv =
-          std::make_shared<RangeValue>(loc, method, range_inputs);
-      SugaredValuePtr expr_sv = emitSugaredExpr(inputs[0], 1);
-      iterable_tree = std::make_shared<IterableTree>(
-          std::vector<SugaredValuePtr>({range_sv, expr_sv}));
-    } else if (iterable->symbol_ == prim::zip) {
-      // zip(x, y) can be rewrite as subtrees:
-      // IterableTree(IterableTree(x), IterableTree(y))
-      if (inputs.size() == 0) {
-        throw ErrorReport(loc) << "zip expected at least 1 arguments, got 0";
-      }
-      iterable_tree = std::make_shared<IterableTree>();
-      for (Expr expr : inputs) {
-        auto expr_sv = emitSugaredExpr(expr, 1);
-        iterable_tree->addChild(expr_sv);
-      }
-    }
-    return iterable_tree;
-  }
-
   std::shared_ptr<SugaredValue> emitForkExpr(
       SourceRange loc,
       const std::shared_ptr<SugaredValue>& forked,
@@ -2633,13 +2657,7 @@ struct to_ir {
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
         return emitBuiltinCall(
-            tree->range(),
-            *method.graph(),
-            kind,
-            c10::nullopt,
-            named_values,
-            {},
-            /*required=*/true);
+            tree->range(), *method.graph(), kind, named_values, {});
       }
       case TK_IN:
       case TK_POW:
@@ -2812,8 +2830,7 @@ struct to_ir {
       Value* input,
       Value* dim,
       Value* index) {
-    return emitBuiltinCall(
-        loc, *graph, aten::select, c10::nullopt, {input, dim, index}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::select, {input, dim, index}, {});
   }
 
   // Desugars slice indexing: tensor[begin:end] -> tensor.slice(dim, begin, end,
@@ -2859,13 +2876,11 @@ struct to_ir {
 
     auto step = emitExpr(Expr(slice.stepOr(1)));
     NamedValue step_nv = NamedValue(loc, "step", step);
-    return emitBuiltinCall(
-        loc, *graph, aten::slice, c10::nullopt, args, {step_nv}, true);
+    return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
   }
 
   Value* emitUnsqueeze(const SourceRange& loc, Value* input, Value* dim_val) {
-    return emitBuiltinCall(
-        loc, *graph, aten::unsqueeze, c10::nullopt, {input, dim_val}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::unsqueeze, {input, dim_val}, {});
   }
 
   Value* emitIndex(
@@ -2878,8 +2893,7 @@ struct to_ir {
     auto* index =
         graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
             ->output();
-    return emitBuiltinCall(
-        loc, *graph, aten::index, c10::nullopt, {input, index}, {}, true);
+    return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {});
   }
 
   // Emits multidimensional slicing with int and slice indices.
@@ -3238,6 +3252,7 @@ c10::QualifiedName CompilationUnit::mangle(
       newAtom.reserve(atom.size());
       // Append the part of the name up to the end of the prefix
       newAtom.append(atom, 0, pos);
+      newAtom.append(manglePrefix);
       newAtom.append(std::to_string(mangleIndex_++));
       atom = newAtom;
       return QualifiedName(atoms);
@@ -3269,8 +3284,14 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto creator = [def, _resolver, self](Function& method) {
     // Store the function name so that it can be referenced if there is an error
     // while compiling this function
-    ErrorReport::CallStack call(
-        self ? method.qualname().qualifiedName() : method.qualname().name());
+    std::string call_name = method.qualname().name();
+    if (self) {
+      auto atoms = method.qualname().atoms();
+      // There should be at least a ClassName.method_name
+      TORCH_INTERNAL_ASSERT(atoms.size() >= 2);
+      call_name = atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
+    }
+    ErrorReport::CallStack call(call_name);
     to_ir(def, _resolver, self, method);
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())

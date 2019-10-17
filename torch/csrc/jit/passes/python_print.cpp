@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/python_print.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/attributes.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
@@ -12,65 +13,6 @@ using c10::QualifiedName;
 
 namespace torch {
 namespace jit {
-
-// unix isprint but insensitive to locale
-static bool isPrint(char s) {
-  return s > 0x1f && s < 0x7f;
-}
-
-void printQuotedString(std::ostream& stmt, const std::string& str) {
-  stmt << "\"";
-  for (auto s : str) {
-    switch (s) {
-      case '\\':
-        stmt << "\\\\";
-        break;
-      case '\'':
-        stmt << "\\'";
-        break;
-      case '\"':
-        stmt << "\\\"";
-        break;
-      case '\a':
-        stmt << "\\a";
-        break;
-      case '\b':
-        stmt << "\\b";
-        break;
-      case '\f':
-        stmt << "\\f";
-        break;
-      case '\n':
-        stmt << "\\n";
-        break;
-      case '\r':
-        stmt << "\\r";
-        break;
-      case '\t':
-        stmt << "\\t";
-        break;
-      case '\v':
-        stmt << "\\v";
-        break;
-      default:
-        if (isPrint(s)) {
-          stmt << s;
-        } else {
-          // C++ io has stateful formatting settings. Messing with
-          // them is probably worse than doing this manually.
-          char buf[4] = "000";
-          buf[2] += s % 8;
-          s /= 8;
-          buf[1] += s % 8;
-          s /= 8;
-          buf[0] += s;
-          stmt << "\\" << buf;
-        }
-        break;
-    }
-  }
-  stmt << "\"";
-}
 
 static bool isValidIdentifierChar(char c, size_t pos) {
   return islower(c) || isupper(c) || c == '_' || (pos > 0 && isdigit(c));
@@ -136,9 +78,11 @@ const static std::unordered_set<std::string> reserved_names = {
     "while",
     "with",
     "yield",
+    "uninitialized",
+    "unchecked_cast",
 };
 
-struct PythonPrintPass {
+struct PythonPrintImpl {
   using SourceRangeStack = std::vector<SourceRange>;
   SourceRangeStack source_range_stack_ = {SourceRange()};
 
@@ -236,27 +180,8 @@ struct PythonPrintPass {
     const SourceRangeStack* srs_;
   };
 
-  TaggedStringStream body_;
-
-  // constants are written to this table, and given then named CONSTANTS.cN
-  // where N is the index into this table.
-  std::vector<at::Tensor>& tensor_table_;
-
-  // Any NamedTypes (classes, functions, NamedTuples) used are written to this
-  // table.
-  std::vector<c10::NamedTypePtr>& deps_table_;
   // Helper to avoid duplicating class types
   void registerDependency(const c10::NamedTypePtr& type) {
-    if (legacy_module_printing_) {
-      // we serialize module classes separately.
-      // Including them in the class table as well will cause the code
-      // to get imported twice.
-      if (auto classType = type->cast<ClassType>()) {
-        if (classType->is_module()) {
-          return;
-        }
-      }
-    }
     // Need to do actual equality comparison, not a pointer equality. This is
     // because for some types (e.g. FunctionType), we may have multiple
     // TypePtr's that represent the same underlying thing.
@@ -269,30 +194,6 @@ struct PythonPrintPass {
       deps_table_.push_back(type);
     }
   }
-
-  // When printing this node, is it safe to write it inline (i.e. without
-  // assigning a temporary variable
-  std::unordered_set<Node*> output_inline_;
-
-  // when we print this, should we error if the resulting output would
-  // not be able to be reparsed?
-  bool enforce_importable_;
-
-  // are funcitons being printed considered methods
-  // either of a class or some module?
-  // If true, this will surpress type annotation on their
-  // first (self) argument. And forked functions will
-  // be emitted as method calls (self.__fork...) rather
-  // than as method calls
-  bool is_method_;
-
-  // what valid identifiers are in use for the current function
-  std::unordered_set<std::string> used_names_;
-
-  // used method names
-  std::unordered_set<std::string> used_method_names_;
-
-  bool legacy_module_printing_;
 
   // scanValue, scanNode, scanBlock:
   // decide if it is safe to omit the output of a temporary variable,
@@ -342,6 +243,15 @@ struct PythonPrintPass {
     // subgraph may use this more than once, so disable inlining
     if (use.user->kind() == prim::fork)
       return false;
+
+    // isinstance appearing in an if expression
+    // causes type refinement to occur, but we have
+    // already handled the refinement and inserted cast
+    // expressions. By not inlining it into the if condition,
+    // we prevent it from happening again.
+    if (v->node()->kind() == prim::isinstance) {
+      return false;
+    }
 
     return true;
   }
@@ -446,13 +356,6 @@ struct PythonPrintPass {
   }
   std::string genName(const std::string& candidate) {
     return genNameImpl(candidate, used_names_);
-  }
-
-  // methods self.foo are in a different namespace than
-  // global identifiers, so they have a different procedure for finding a
-  // uniquename
-  std::string genMethodName(const std::string& candidate) {
-    return genNameImpl(candidate, used_method_names_);
   }
 
   // unique names might not be valid identifiers,
@@ -908,12 +811,12 @@ struct PythonPrintPass {
     if (v.isTensor()) {
       ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
     } else if (v.isString()) {
-      printQuotedString(ss, v.toStringRef());
+      c10::printQuotedString(ss, v.toStringRef());
     } else if (v.isDevice()) {
       std::stringstream device_stream;
       device_stream << v.toDevice();
       ss << "torch.device(";
-      printQuotedString(ss, device_stream.str());
+      c10::printQuotedString(ss, device_stream.str());
       ss << ")";
     } else if (v.isTensorList()) {
       ss << "[";
@@ -1095,7 +998,7 @@ struct PythonPrintPass {
         } else {
           stmt << "getattr(" << useOf(obj) << ", ";
           std::stringstream field_stream;
-          printQuotedString(field_stream, field);
+          c10::printQuotedString(field_stream, field);
           stmt << field_stream.str() << ")";
         }
       } break;
@@ -1130,7 +1033,6 @@ struct PythonPrintPass {
         }
 
       } break;
-      case prim::unchecked_unwrap_optional:
       case aten::_unwrap_optional: {
         printOpName(stmt, node->kind());
         stmt << "(";
@@ -1146,6 +1048,15 @@ struct PythonPrintPass {
           stmt << useOf(node->input());
         }
         stmt << ")";
+      } break;
+      // unchecked_unwrap_optional is no longer generated by the compiler,
+      // but may end up here if it was first loaded from a old model and
+      // re-saved. On re-save we upgrade it to an unchecked_cast, which is an
+      // equivalent op
+      case prim::unchecked_unwrap_optional:
+      case prim::unchecked_cast: {
+        stmt << "unchecked_cast(" << node->output()->type()->python_str()
+             << ", " << useOf(node->input()) << ")";
       } break;
       case prim::isinstance: {
         stmt << "isinstance(" << useOf(node->input()) << ", ";
@@ -1273,7 +1184,7 @@ struct PythonPrintPass {
       std::string arg_name = genName(arg.name());
       if (param_it == graph.inputs().begin()) {
         // the first argument may omit its type when it is implied by context
-        // the flag is_method_ determines when to do this
+        // the flag print_first_argument_type determines when to do this
         body_ << arg_name;
         if (print_first_argument_type) {
           body_ << ": " << arg.type()->python_str();
@@ -1309,16 +1220,18 @@ struct PythonPrintPass {
     return ret.str();
   }
 
-  PythonPrintPass(
+  PythonPrintImpl(
+      std::ostream& out,
+      SourceRangeRecords& source_ranges_out,
       std::vector<at::Tensor>& tensor_table,
       std::vector<c10::NamedTypePtr>& deps_table,
-      bool enforce_importable,
-      bool legacy_module_printing)
-      : body_(&source_range_stack_),
+      bool enforce_importable)
+      : out_(out),
+        source_ranges_out_(source_ranges_out),
+        body_(&source_range_stack_),
         tensor_table_(tensor_table),
         deps_table_(deps_table),
-        enforce_importable_(enforce_importable),
-        legacy_module_printing_(legacy_module_printing) {
+        enforce_importable_(enforce_importable) {
     TORCH_INTERNAL_ASSERT(deps_table.empty());
   }
 
@@ -1371,9 +1284,6 @@ struct PythonPrintPass {
       printFunction(*functionType->function());
     } else if (auto classType = type->cast<ClassType>()) {
       bool is_module = classType->is_module();
-      if (legacy_module_printing_) {
-        is_module = false;
-      }
       body_ << "class " << classType->name()->name();
       if (is_module) {
         body_ << "(Module)";
@@ -1437,87 +1347,74 @@ struct PythonPrintPass {
         deps_table_.end());
   }
 
-  void print(std::ostream& out, SourceRangeRecords& source_ranges_out) {
-    out << getImports();
-    int64_t source_offset = out.tellp();
-    body_.print(out, &source_ranges_out, source_offset);
+  void finish() {
+    TORCH_INTERNAL_ASSERT(!finished_);
+    finished_ = true;
+    out_ << getImports();
+    int64_t source_offset = out_.tellp();
+    body_.print(out_, &source_ranges_out_, source_offset);
   }
 
-  void LEGACY_printModuleMethods(const script::Module& module) {
-    for (const auto method : module.type()->methods()) {
-      printMethod(*method);
-    }
-  }
+  ~PythonPrintImpl() {}
+
+ private:
+  // When printing this node, is it safe to write it inline (i.e. without
+  // assigning a temporary variable
+  std::unordered_set<Node*> output_inline_;
+
+  // what valid identifiers are in use for the current function
+  std::unordered_set<std::string> used_names_;
+
+  std::ostream& out_;
+  SourceRangeRecords& source_ranges_out_;
+  TaggedStringStream body_;
+  // constants are written to this table, and given then named CONSTANTS.cN
+  // where N is the index into this table.
+  std::vector<at::Tensor>& tensor_table_;
+
+  // Any NamedTypes (classes, functions, NamedTuples) used are written to this
+  // table.
+  std::vector<c10::NamedTypePtr>& deps_table_;
+
+  // when we print this, should we error if the resulting output would
+  // not be able to be reparsed?
+  bool enforce_importable_;
+
+  // have we already printed to out_? We can't print more because we need
+  // to output imports before everything else
+  bool finished_ = false;
 };
 
-void PythonPrint(
+PythonPrint::PythonPrint(
     std::ostream& out,
     SourceRangeRecords& source_ranges_out,
-    const Function& func,
-    bool is_method,
     std::vector<at::Tensor>& tensor_table,
     std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(
-      tensor_table,
-      deps_table,
-      enforce_importable,
-      /*legacy_module_printing=*/false);
-  if (is_method) {
-    pp.printMethod(func);
-  } else {
-    pp.printFunction(func);
-  }
-  pp.print(out, source_ranges_out);
+    bool enforce_importable)
+    : pImpl(new PythonPrintImpl(
+          out,
+          source_ranges_out,
+          tensor_table,
+          deps_table,
+          enforce_importable)) {}
+
+void PythonPrint::printNamedType(const c10::NamedTypePtr& type) {
+  pImpl->printNamedType(type);
 }
 
-void PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& type,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(
-      tensor_table,
-      deps_table,
-      enforce_importable,
-      /*legacy_module_printing=*/false);
-  pp.printNamedType(type);
-  pp.print(out, source_ranges_out);
+void PythonPrint::printFunction(const Function& func) {
+  pImpl->printFunction(func);
 }
 
-void LEGACY_PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& type,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(
-      tensor_table,
-      deps_table,
-      enforce_importable,
-      /*legacy_module_printing=*/true);
-  pp.printNamedType(type);
-  pp.print(out, source_ranges_out);
+void PythonPrint::printMethod(const Function& func) {
+  pImpl->printMethod(func);
 }
 
-void LEGACY_PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const script::Module& module,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable) {
-  PythonPrintPass pp(
-      tensor_table,
-      deps_table,
-      enforce_importable,
-      /*legacy_module_printing=*/true);
-  pp.LEGACY_printModuleMethods(module);
-  pp.print(out, source_ranges_out);
+void PythonPrint::finish() {
+  pImpl->finish();
 }
+
+PythonPrint::~PythonPrint() = default;
 
 bool printerHasSpecialCaseFor(Symbol sym) {
   // WARNING: by adding a value to this set, you are asserting
@@ -1545,6 +1442,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::SetAttr,
       prim::CallFunction,
       prim::isinstance,
+      prim::unchecked_cast,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
