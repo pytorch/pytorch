@@ -4020,10 +4020,10 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
                 raise NotImplementedError
 
         elif input.dim() == 5:
-            assert len(pad) == 6, "5D tensors expect 6 values for padding"
-            if mode == "reflect":
-                raise NotImplementedError
-            elif mode == "replicate":
+            assert len(pad) == 6, '5D tensors expect 6 values for padding'
+            if mode == 'reflect':
+                return _pad_reflective(input, pad)
+            elif mode == 'replicate':
                 return torch._C._nn.replication_pad3d(input, pad)
             elif mode == "circular":
                 return _pad_circular(input, pad)
@@ -4506,6 +4506,63 @@ def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
             out[:, :, :, :, o0:o1] = out[:, :, :, :, i0:i1]
 
     return out
+
+
+def _pad_reflective(input: Tensor, padding: List[int]) -> Tensor:
+    """Reflectively pads tensor.
+    The first and second dimensions of the tensor are not padded.
+
+    Args:
+        input: Tensor with shape :math:`(N, C, D[, H, W])`.
+        padding: Tuple containing the number of elements to pad each side of
+            the tensor. The length of padding must be twice the number of
+            paddable dimensions. For example, the length of padding should be 4
+            for a tensor of shape :math:`(N, C, H, W)`, and the length should
+            be 6 for a tensor of shape :math:`(N, C, D, H, W)`.
+
+    Returns:
+        Tensor: tensor of shape :math:`(N, C_{\text{in}}, [D + 2 * padding[0],
+            H + 2 * padding[1]], W + 2 * padding[2]))`
+
+    Examples::
+
+        >>> x = torch.tensor([[[[0, 1, 2], [3, 4, 5]]]])  # Create tensor
+        >>> # Example 1
+        >>> padding = (1, 1, 1, 1)
+        >>> y = F.pad(x, padding, mode='reflective')
+        >>> print(y)
+        tensor([[[[0, 0, 1, 2, 2],
+                  [0, 0, 1, 2, 2],
+                  [3, 3, 4, 5, 5],
+                  [3, 3, 4, 5, 5]]]])
+        >>> print(y.shape)
+        torch.Size([1, 1, 4, 5])
+        >>> # Example 2
+        >>> padding = (1, 1, 2, 2)
+        >>> z = F.pad(x, padding, mode='reflective')
+        >>> print(z)
+        tensor([[[[3, 3, 4, 5, 5],
+                  [0, 0, 1, 2, 2],
+                  [0, 0, 1, 2, 2],
+                  [3, 3, 4, 5, 5],
+                  [3, 3, 4, 5, 5],
+                  [0, 0, 1, 2, 2]]]])
+        >>> print(z.shape)
+        torch.Size([1, 1, 6, 5])
+    """
+
+    input = torch.cat([input, input.flip([2])[:, :, 0:padding[-1]]], dim=2)
+    input = torch.cat([input.flip([2])[:, :, -padding[-2]:], input], dim=2)
+
+    if len(padding) > 2:
+        input = torch.cat([input, input.flip([3])[:, :, :, 0:padding[-3]]], dim=3)
+        input = torch.cat([input.flip([3])[:, :, :, -padding[-4]:], input], dim=3)
+
+    if len(padding) > 4:
+        input = torch.cat([input, input.flip([4])[:, :, :, :, 0:padding[-5]]], dim=4)
+        input = torch.cat([input.flip([4])[:, :, :, :, -padding[-6]:], input], dim=4)
+
+    return input
 
 
 def multi_head_attention_forward(
