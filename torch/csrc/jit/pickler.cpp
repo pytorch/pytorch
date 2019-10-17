@@ -14,6 +14,10 @@ using ::c10::IValue;
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
 
+Pickler::~Pickler() {
+  flush();
+}
+
 const char* getClassName(PicklerClass cls) {
   switch (cls) {
     case PicklerClass::TENSOR:
@@ -48,6 +52,7 @@ void Pickler::endTuple() {
 
 void Pickler::stop() {
   push<PickleOpCode>(PickleOpCode::STOP);
+  flush();
 }
 
 // unmemoized version called by pushIValue
@@ -61,11 +66,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isInt()) {
     pushInt(ivalue.toInt());
   } else if (ivalue.isBool()) {
-    if (ivalue.toBool()) {
-      push<PickleOpCode>(PickleOpCode::NEWTRUE);
-    } else {
-      push<PickleOpCode>(PickleOpCode::NEWFALSE);
-    }
+    pushBool(ivalue.toBool());
   } else if (ivalue.isString()) {
     pushString(ivalue.toStringRef());
   } else if (ivalue.isGenericList()) {
@@ -78,7 +79,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushSpecializedList(
         ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
           for (const int64_t item : ivalue.toIntListRef()) {
-            pushIValue(item);
+            pushInt(item);
           }
         });
   } else if (ivalue.isTensorList()) {
@@ -92,14 +93,14 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushSpecializedList(
         ivalue, PicklerClass::DOUBLELIST, [=](const IValue& ivalue) {
           for (double item : ivalue.toDoubleListRef()) {
-            pushIValue(item);
+            pushDouble(item);
           }
         });
   } else if (ivalue.isBoolList()) {
     pushSpecializedList(
         ivalue, PicklerClass::BOOLLIST, [=](const IValue& ivalue) {
           for (bool item : ivalue.toBoolList()) {
-            pushIValue(item);
+            pushBool(item);
           }
         });
   } else if (ivalue.isObject()) {
@@ -186,6 +187,10 @@ void Pickler::pushInt(int64_t n) {
   }
 }
 
+void Pickler::pushBool(bool value) {
+  push<PickleOpCode>(value ? PickleOpCode::NEWTRUE : PickleOpCode::NEWFALSE);
+}
+
 void Pickler::pushBinGet(uint32_t memo_id) {
   if (memo_id <= std::numeric_limits<uint8_t>::max()) {
     push<PickleOpCode>(PickleOpCode::BINGET);
@@ -250,7 +255,17 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
 }
 
 void Pickler::pushBytes(const std::string& string) {
-  writer_(string.data(), string.size());
+  static const size_t kSmallStr = 32;
+  if (string.size() <= kSmallStr &&
+      bufferPos_ + string.size() <= buffer_.size()) {
+    // Small string that fits: buffer the data.
+    memcpy(buffer_.data() + bufferPos_, string.data(), string.size());
+    bufferPos_ += string.size();
+  } else {
+    // Otherwise, first flush, then write directly.
+    flush();
+    writer_(string.data(), string.size());
+  }
 }
 
 void Pickler::pushGlobal(
@@ -400,16 +415,11 @@ void Pickler::pushDouble(double value) {
 void Pickler::pushLong(const std::string& data) {
   uint64_t size = data.size();
 
-  if (size <= std::numeric_limits<uint8_t>::max()) {
-    push<PickleOpCode>(PickleOpCode::LONG1);
-    push<uint8_t>(size);
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        data.size() > std::numeric_limits<uint32_t>::max(),
-        "Cannot pickle a long with a size larger than 4 bytes")
-    push<PickleOpCode>(PickleOpCode::LONG4);
-    push<uint64_t>(size);
-  }
+  TORCH_INTERNAL_ASSERT(
+    size <= std::numeric_limits<uint8_t>::max(),
+    "Cannot pickle a long larger than 255 bytes");
+  push<PickleOpCode>(PickleOpCode::LONG1);
+  push<uint8_t>(size);
   pushBytes(data);
 }
 
