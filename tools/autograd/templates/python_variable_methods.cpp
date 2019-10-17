@@ -356,12 +356,17 @@ static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, 
   return self.to(device, dtype, non_blocking, copy, optional_memory_format);
 }
 
-static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
+static PyObject * THPVariable_cpu(PyObject* self, PyObject* args, PyObject* kwargs)
 {
    HANDLE_TH_ERRORS
+   static PythonArgParser parser({
+     "cpu(*, MemoryFormat? memory_format=None)"
+   });
    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-   // Setting to MemoryFormat::Contiguous now, will change to accept memory_format in next PR
-   return THPVariable_Wrap(dispatch_to(self_, at::Device(at::DeviceType::CPU), false, false, MemoryFormat::Contiguous));
+   ParsedArgs<1> parsed_args;
+   auto r = parser.parse(args, kwargs, parsed_args);
+   auto opt_memory_format = r.memoryformatOptional(0);
+   return THPVariable_Wrap(dispatch_to(self_, at::Device(at::DeviceType::CPU), false, false, opt_memory_format));
    END_HANDLE_TH_ERRORS
 }
 
@@ -399,17 +404,17 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "cuda(Device? device=None, bool non_blocking=False)",
-    "cuda(Device? device=None, bool async=False)|deprecated"
+    "cuda(Device? device=None, bool non_blocking=False, *, MemoryFormat? memory_format=None)",
+    "cuda(Device? device=None, bool async=False, *, MemoryFormat? memory_format=None)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
+  auto opt_memory_format = r.memoryformatOptional(2);
   TORCH_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
   torch::utils::cuda_lazy_init();
-  // Setting to MemoryFormat::Contiguous now, will change to accept memory_format in next PR
-  return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, MemoryFormat::Contiguous));
+  return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
 
@@ -769,7 +774,7 @@ PyMethodDef variable_methods[] = {
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)(void(*)(void))THPVariable_contiguous, METH_VARARGS | METH_KEYWORDS, NULL},
   {"copy_", (PyCFunction)(void(*)(void))THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
+  {"cpu", (PyCFunction)(void(*)(void))THPVariable_cpu, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cuda", (PyCFunction)(void(*)(void))THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
   {"data_ptr", (PyCFunction)THPVariable_data_ptr, METH_NOARGS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
