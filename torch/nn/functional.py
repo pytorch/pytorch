@@ -4551,16 +4551,16 @@ def _pad_reflective(input: Tensor, padding: List[int]) -> Tensor:
         torch.Size([1, 1, 6, 5])
     """
 
-    input = torch.cat([input, input.flip([2])[:, :, 0:padding[-1]]], dim=2)
-    input = torch.cat([input.flip([2])[:, :, -padding[-2]:], input], dim=2)
+    input = torch.cat([input, input.flip([2])[:, :, 1:(padding[-1] + 1)]], dim=2)
+    input = torch.cat([input.flip([2])[:, :, -(padding[-2] + 1):-1], input], dim=2)
 
     if len(padding) > 2:
-        input = torch.cat([input, input.flip([3])[:, :, :, 0:padding[-3]]], dim=3)
-        input = torch.cat([input.flip([3])[:, :, :, -padding[-4]:], input], dim=3)
+        input = torch.cat([input, input.flip([3])[:, :, :, 1:(padding[-3] + 1)]], dim=3)
+        input = torch.cat([input.flip([3])[:, :, :, -(padding[-4] + 1):-1], input], dim=3)
 
     if len(padding) > 4:
-        input = torch.cat([input, input.flip([4])[:, :, :, :, 0:padding[-5]]], dim=4)
-        input = torch.cat([input.flip([4])[:, :, :, :, -padding[-6]:], input], dim=4)
+        input = torch.cat([input, input.flip([4])[:, :, :, :, 1:(padding[-5] + 1)]], dim=4)
+        input = torch.cat([input.flip([4])[:, :, :, :, -(padding[-6] + 1):-1], input], dim=4)
 
     return input
 
