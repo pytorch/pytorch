@@ -348,11 +348,8 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
 
     def test_indexing(self):
-        expected = torch.ones(5, 2, dtype=torch.double)
-        expected[:, 1] = 0
-        self.assertEqual(expected[4, 1], 0)
-        b = torch.zeros(5, dtype=torch.int)
         a = torch.ones(5, 2, dtype=torch.double)
+        b = torch.zeros(5, dtype=torch.int)
 
         # lambda cannot contain assignment
         def f():
