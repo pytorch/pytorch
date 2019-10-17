@@ -50,14 +50,15 @@ Message RequestCallbackImpl::processRpc(
           "size ",
           stack.size());
 
-      return ScriptResp(std::move(stack.front())).toMessage();
+      return std::move(ScriptResp(std::move(stack.front()))).toMessage();
     }
     case MessageType::PYTHON_CALL: {
       auto& pyCall = static_cast<PythonUDFCall&>(rpc);
       std::vector<torch::Tensor> responseTensorTable;
       auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
           pyCall.pickledPayload(), pyCall.tensors(), responseTensorTable);
-      return PythonUDFResp(std::move(payload), std::move(responseTensorTable))
+      return std::move(PythonUDFResp(
+                           std::move(payload), std::move(responseTensorTable)))
           .toMessage();
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
@@ -79,7 +80,7 @@ Message RequestCallbackImpl::processRpc(
 
       ownerRRef->setValue(std::move(stack.front()));
       ctx.addForkOfOwner(src.retRRefId(), src.retForkId());
-      return RemoteRet(src.retRRefId(), src.retForkId()).toMessage();
+      return std::move(RemoteRet(src.retRRefId(), src.retForkId())).toMessage();
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -92,7 +93,7 @@ Message RequestCallbackImpl::processRpc(
       ownerRRef->setValue(
           PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
       ctx.addForkOfOwner(rrefId, forkId);
-      return RemoteRet(rrefId, forkId).toMessage();
+      return std::move(RemoteRet(rrefId, forkId)).toMessage();
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
@@ -100,7 +101,8 @@ Message RequestCallbackImpl::processRpc(
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return RRefFetchRet(RRefFetchRet({rref->getValue()})).toMessage();
+      return std::move(RRefFetchRet(RRefFetchRet({rref->getValue()})))
+          .toMessage();
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
@@ -110,25 +112,26 @@ Message RequestCallbackImpl::processRpc(
           ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
       SerializedPyObj result =
           PythonRpcHandler::getInstance().serialize(rref->getValue());
-      return RRefFetchRet(RRefFetchRet(result.toIValues())).toMessage();
+      return std::move(RRefFetchRet(RRefFetchRet(result.toIValues())))
+          .toMessage();
     }
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
-      return RRefAck().toMessage();
+      return std::move(RRefAck()).toMessage();
     }
     case MessageType::RREF_CHILD_ACCEPT: {
       auto& rca = static_cast<RRefChildAccept&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.delPendingChild(rca.forkId());
-      return RRefAck().toMessage();
+      return std::move(RRefAck()).toMessage();
     }
     case MessageType::RREF_FORK_REQUEST: {
       auto& rfr = static_cast<RRefForkRequest&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
-      return RRefAck().toMessage();
+      return std::move(RRefAck()).toMessage();
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
@@ -154,7 +157,7 @@ Message RequestCallbackImpl::processRpc(
       auto wrappedRpcResponse =
           processRpc(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
 
-      return getMessageWithAutogradCheck(
+      return getMessageWithAutograd(
           rpcWithAutograd.fromWorkerId(),
           std::move(wrappedRpcResponse),
           MessageType::FORWARD_AUTOGRAD_RESP);
@@ -180,7 +183,7 @@ Message RequestCallbackImpl::processRpc(
       DistEngine::getInstance().executeSendFunction(
           autogradContext, sendFunction);
 
-      return PropagateGradientsResp().toMessage();
+      return std::move(PropagateGradientsResp()).toMessage();
     }
     default: {
       TORCH_INTERNAL_ASSERT(

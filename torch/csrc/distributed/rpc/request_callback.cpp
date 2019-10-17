@@ -20,10 +20,11 @@ Message createException(const Message& request, const std::exception& e) {
       request.id());
 }
 
+// When request message has autograd info, processMessage() will set up valid
+// current context id properly. This struct is used to clean up current context
+// id after processMessage() is done.
 struct ClearAutogradContextGuard {
-  ClearAutogradContextGuard() {
-    clear();
-  }
+  ClearAutogradContextGuard() {}
   ~ClearAutogradContextGuard() {
     clear();
   }
@@ -38,7 +39,6 @@ struct ClearAutogradContextGuard {
 
 Message RequestCallback::operator()(Message& request) const {
   // For a rev thread, current context id should be invalid outside
-  // processMessage(). Clear current context id before and after
   // processMessage().
   ClearAutogradContextGuard guard;
   try {

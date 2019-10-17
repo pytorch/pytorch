@@ -669,14 +669,14 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
-Tensor batch_norm_elemt_cuda_template(const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
+void batch_norm_elemt_cuda_template(Tensor& output_, const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
                                                                   const Tensor& mean_, const Tensor& invstd_,
                                                                   double epsilon) {
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
-  auto output_reshaped = at::empty_like(input_reshaped);
+  auto output_reshaped = output_.view({input_.size(0), input_.size(1), -1});
 
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
@@ -705,7 +705,6 @@ Tensor batch_norm_elemt_cuda_template(const Tensor& input_, const Tensor& weight
   batch_norm_transform_input_kernel<input_scalar_t, stat_scalar_t, stat_accscalar_t, true, index_t> <<<blocks_trans, threads_trans, 0, stream>>>
     (input, output, mean, invstd, weight, bias, epsilon);
   THCudaCheck(cudaGetLastError());
-  return output_reshaped.view(input_.sizes());
 }
 
 template<typename scalar_t, typename accscalar_t, typename index_t>

@@ -124,11 +124,8 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   auto scriptCall = c10::guts::make_unique<ScriptCall>(op, std::move(stack));
-  return sendMessage(
-      agent,
-      dst,
-      std::move(*scriptCall).toMessage(),
-      MessageType::FORWARD_AUTOGRAD_REQ);
+  return sendMessageWithAutograd(
+      agent, dst, std::move(*scriptCall).toMessage());
 }
 
 PyRRef pyRemoteBuiltin(
@@ -165,11 +162,8 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
   auto pythonUDFCall = c10::guts::make_unique<PythonUDFCall>(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
-  return sendMessage(
-      agent,
-      dst,
-      std::move(*pythonUDFCall).toMessage(),
-      MessageType::FORWARD_AUTOGRAD_REQ);
+  return sendMessageWithAutograd(
+      agent, dst, std::move(*pythonUDFCall).toMessage());
 }
 
 PyRRef pyRemotePythonUdf(

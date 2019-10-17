@@ -12,15 +12,10 @@ from dist_utils import INIT_METHOD_TEMPLATE, dist_init
 import threading
 
 # Right now we test up to 3-layer nested rpc calls.
-# rpc_done[RankDistance.PREV] and ctx_ids[RankDistance.PREV]
-# represent rpc is done in prev rank, and context id sent from prev rank
-# respectively.
-# [RankDistance.PREV_PREV] represents for prev of prev rank.
-# [RankDistance.PREV_PREV_PREV] represents for prev of prev of prev rank.
-class RankDistance(IntEnum):
-    PREV = 1
-    PREV_PREV = 2
-    PREV_PREV_PREV = 3
+# rpc_done[1] and ctx_ids[1] represent rpc is done in prev rank, and context id
+# sent from prev rank respectively.
+# rpc_done[2] and ctx_ids[2] represents for prev of prev rank.
+# rpc_done[3] and ctx_ids[3] represents for prev of prev of prev rank.
 rpc_done = [False, False, False, False]
 ctx_ids = [-1, -1, -1, -1]
 
@@ -38,11 +33,11 @@ def my_py_add(t1, t2):
     return torch.add(t1, t2)
 
 
-def my_py_nested_call(t1, t2, dst, world_size, ttl):
+def my_py_nested_call(t1, t2, dst, world_size, hops):
     next_dst = (dst + 1) % world_size
-    if ttl > 0:
+    if hops > 0:
         return rpc.rpc_sync("worker{}".format(next_dst), my_py_nested_call,
-                            args=(t1, t2, next_dst, world_size, ttl - 1))
+                            args=(t1, t2, next_dst, world_size, hops - 1))
     else:
         return rpc.rpc_sync("worker{}".format(next_dst), torch.add, args=(t1, t2))
 
@@ -243,7 +238,7 @@ class DistAutogradTest(object):
             t2 = torch.zeros(3, 3, requires_grad=True)
             ret = rpc.rpc_sync("worker{}".format(dst_rank), fn, args=(t1, t2))
             rpc.rpc_sync("worker{}".format(dst_rank),
-                         _set_rpc_done, args=(context_id, RankDistance.PREV))
+                         _set_rpc_done, args=(context_id, 1))
 
             # Verify graph for current context id.
             ctx = dist_autograd._current_context()
@@ -257,9 +252,9 @@ class DistAutogradTest(object):
                                                   t1, t2, ret)
 
             # Wait for the prev rank to be done with rpc.
-            self._check_rpc_done(RankDistance.PREV)
+            self._check_rpc_done(1)
             # Verify graph for previous context id.
-            ctx = dist_autograd._retrieve_context(ctx_ids[RankDistance.PREV])
+            ctx = dist_autograd._retrieve_context(ctx_ids[1])
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
             self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
@@ -290,7 +285,7 @@ class DistAutogradTest(object):
             nest_dst_rank = (dst_rank + 1) % self.world_size
             ret = rpc.rpc_sync("worker{}".format(dst_rank),
                                my_py_nested_call, args=(t1, t2, dst_rank, self.world_size, 1))
-            for rd in RankDistance:
+            for rd in [1, 2, 3]:
                 rpc.rpc_sync("worker{}".format((self.rank + rd) % self.world_size),
                              _set_rpc_done, args=(context_id, rd))
 
@@ -315,18 +310,18 @@ class DistAutogradTest(object):
                                                   t1, t2, ret)
 
             # Verify second graph for 1st nested call.
-            self._check_rpc_done(RankDistance.PREV)
-            ctx = dist_autograd._retrieve_context(ctx_ids[RankDistance.PREV])
+            self._check_rpc_done(1)
+            ctx = dist_autograd._retrieve_context(ctx_ids[1])
             self._verify_graph_for_nested_rpc_call(ctx)
 
             # Verify third graph for 2nd nested call.
-            self._check_rpc_done(RankDistance.PREV_PREV)
-            ctx = dist_autograd._retrieve_context(ctx_ids[RankDistance.PREV_PREV])
+            self._check_rpc_done(2)
+            ctx = dist_autograd._retrieve_context(ctx_ids[2])
             self._verify_graph_for_nested_rpc_call(ctx)
 
             # verify last graph for rpc call execution.
-            self._check_rpc_done(RankDistance.PREV_PREV_PREV)
-            ctx = dist_autograd._retrieve_context(ctx_ids[RankDistance.PREV_PREV_PREV])
+            self._check_rpc_done(3)
+            ctx = dist_autograd._retrieve_context(ctx_ids[3])
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
             self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
@@ -341,8 +336,8 @@ class DistAutogradTest(object):
             ret = rpc.rpc_sync("worker{}".format(dst_rank),
                                my_py_nested_call,
                                args=(t1, t2, (self.rank - 1 + self.world_size) % self.world_size, self.world_size, 0))
-            rpc.rpc_sync("worker{}".format((self.rank + RankDistance.PREV) % self.world_size),
-                         _set_rpc_done, args=(context_id, RankDistance.PREV))
+            rpc.rpc_sync("worker{}".format((self.rank + 1) % self.world_size),
+                         _set_rpc_done, args=(context_id, 1))
 
             # For self.rank, it has 2 graphs to verify.
             # One is for current context id when this rank send first rpc
@@ -362,8 +357,8 @@ class DistAutogradTest(object):
 
             # Verify two pairs of send and recv functions for nested
             # call
-            self._check_rpc_done(RankDistance.PREV)
-            ctx = dist_autograd._retrieve_context(ctx_ids[RankDistance.PREV])
+            self._check_rpc_done(1)
+            ctx = dist_autograd._retrieve_context(ctx_ids[1])
             self._verify_graph_for_nested_rpc_call(ctx)
 
 
@@ -411,12 +406,21 @@ class DistAutogradTest(object):
             for dst_rank in dst_ranks:
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
                 rpc.rpc_sync(
-                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, RankDistance.PREV)
+                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
             # no worker ids should be recorded.
+            # no send and recv functions are attached.
             ctx = dist_autograd._current_context()
             worker_ids = ctx._known_worker_ids()
             self.assertEqual(len(worker_ids), 0)
+            send_functions = ctx._send_functions()
+            self.assertEqual(len(send_functions), 0)
+            recv_functions = ctx._recv_functions()
+            self.assertEqual(len(recv_functions), 0)
+            # prev context id is not passed over as tensors do not require grads
+            with self.assertRaises(RuntimeError):
+                ctx = dist_autograd._retrieve_context(ctx_ids[1])
+
 
             # worker_ids should be recorded when tensors do require grad
             t1.requires_grad = True
@@ -424,7 +428,7 @@ class DistAutogradTest(object):
             for dst_rank in dst_ranks:
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
                 rpc.rpc_sync(
-                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, RankDistance.PREV)
+                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
             # all worker_ids in dst_ranks should be recorded.
             worker_ids = ctx._known_worker_ids()
