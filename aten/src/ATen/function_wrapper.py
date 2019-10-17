@@ -272,6 +272,32 @@ static inline ${return_type} ${api_name}(${formals}) {
 #endif
 }
 """)
+C10_UNBOXEDONLY_FACTORY_DEFINITION = CodeTemplate("""\
+static inline ${return_type} ${api_name}(${formals}) {
+#ifdef USE_STATIC_DISPATCH
+    ${static_dispatch_function_body}
+#else
+    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
+    static c10::OperatorHandle op = c10::Dispatcher::singleton()
+        .findSchema({"aten::${name}", "${overload_name}"}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
+        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+#endif
+}
+""")
+C10_FACTORY_DEFINITION = CodeTemplate("""\
+static inline ${return_type} ${api_name}(${formals}) {
+#ifdef USE_STATIC_DISPATCH
+    ${static_dispatch_function_body}
+#else
+    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
+    static c10::OperatorHandle op = c10::Dispatcher::singleton()
+        .findSchema({"aten::${name}", "${overload_name}"}).value();
+    return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
+        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+#endif
+}
+""")
 
 ZERO_DIM_CHECK = CodeTemplate("""\
 if (${check_name}.dim() == 0) {
@@ -1263,8 +1289,16 @@ def create_generic(top_env, declarations):
                     option, native_arguments=option['native_actuals'])
 
             if is_factory_method:
-                fn_definition = FACTORY_DEFINITION.substitute(
-                    option, static_dispatch_function_body=static_dispatch_function_body)
+                if option['use_c10_dispatcher'] == 'no':
+                    fn_definition = FACTORY_DEFINITION.substitute(
+                        option, static_dispatch_function_body=static_dispatch_function_body)
+                elif option['use_c10_dispatcher'] == 'unboxed_only':
+                    fn_definition = C10_UNBOXEDONLY_FACTORY_DEFINITION.substitute(
+                        option, static_dispatch_function_body=static_dispatch_function_body)
+                else:
+                    assert option['use_c10_dispatcher'] == 'full'
+                    fn_definition = C10_FACTORY_DEFINITION.substitute(
+                        option, static_dispatch_function_body=static_dispatch_function_body)
             else:
                 if option['use_c10_dispatcher'] == 'no':
                     fn_definition = FUNCTION_DEFINITION.substitute(
