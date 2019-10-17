@@ -365,9 +365,11 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
     #     pickler.persistent_id = persistent_id
     #     pickler.dump(obj)
 
-    # for key in sorted(serialized_storages.keys()):
-    #     with zip_file.open('tensors/{}'.format(key), 'w') as tensor_file:
-    #         serialized_storages[key]._write_file(tensor_file, _should_read_directly(tensor_file))
+    for key in sorted(serialized_storages.keys()):
+        # with zip_file.open('tensors/{}'.format(key), 'w') as tensor_file:
+        tensor_buf = io.BytesIO()
+        serialized_storages[key]._write_file(tensor_buf, _should_read_directly(tensor_buf))
+        write_buf('tensors/{}'.format(key), tensor_buf)
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
