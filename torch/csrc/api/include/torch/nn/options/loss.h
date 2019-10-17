@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/variant.h>
 #include <torch/arg.h>
 #include <torch/enum.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -10,12 +11,14 @@ namespace nn {
 
 /// Options for a L1 loss module.
 struct TORCH_API L1LossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
   L1LossOptions(
-    c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction = torch::kMean)
+    reduction_t reduction = torch::kMean)
       : reduction_(reduction) {}
 
   /// Specifies the reduction to apply to the output.
-  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+  
   TORCH_ARG(reduction_t, reduction);
 };
 
