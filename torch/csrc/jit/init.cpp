@@ -263,6 +263,11 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
       .def("_jit_pass_inline", Inline)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
+      .def(
+          "_jit_pass_onnx_lower_graph",
+          [](std::shared_ptr<Graph>& graph, const script::Module& self) {
+            return ONNXLowerGraph(*graph, self.module_object());
+          })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
           "_jit_pass_constant_propagation",
