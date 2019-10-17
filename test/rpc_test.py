@@ -380,16 +380,8 @@ class RpcTest(object):
             self.assertEqual(ret1, torch.ones(n, n) * 2)
             self.assertEqual(ret2, torch.ones(n, n) * 3)
 
+    @dist_init
     def test_join_rpc(self):
-        # Initialize RPC.
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
-        rpc.init_model_parallel(
-            self_name="worker%d" % self.rank,
-            backend=TEST_CONFIG.rpc_backend,
-            self_rank=self.rank,
-            init_method=self.init_method,
-        )
-
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
@@ -860,7 +852,7 @@ class RpcTest(object):
         if TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP:
             self.assertEqual(test_func(), "expected result")
 
-    def test_process_group_agent_exit(self):
+    def test_process_group_agent_destructor(self):
         dist.init_process_group(backend="gloo", init_method=self.init_method, timeout=timedelta(seconds=10))
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
@@ -868,4 +860,4 @@ class RpcTest(object):
             self_rank=self.rank,
             init_method=self.init_method,
         )
-        # allow workers to exit without joining, and ensure that exceptions aren't raised.
+        # exception would be raised here if process group agent exited without detaching/joining threads.

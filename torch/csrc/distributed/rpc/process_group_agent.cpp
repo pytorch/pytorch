@@ -147,10 +147,14 @@ ProcessGroupAgent::ProcessGroupAgent(
   for (int rank = 0; rank < (int)tmpWorkerIds.size(); ++rank) {
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
+
+  // construct PythonRpcHandler singleton here
+  PythonRpcHandler::getInstance();
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() {
-  // TODO: when futures handle failures
+  LOG(INFO) << "Shutting down process group agent without joining" << std::endl;
+  // TODO: when futures are cleaned up as described in
   // (https://github.com/pytorch/pytorch/issues/25531), this should mark
   // existing futures as completed with an exception.
   if (listenerThread_.joinable()) {
