@@ -13,28 +13,32 @@ namespace nn {
 
 LayerNormImpl::LayerNormImpl(const LayerNormOptions& options_) : options(options_) {
   reset();
+  if (options.elementwise_affine()) {
+    torch::nn::init::ones_(weight);
+    torch::nn::init::zeros_(bias);
+  }
 }
 
 void LayerNormImpl::reset() {
   if (options.elementwise_affine()) {
-    weight = register_parameter("weight", torch::ones(torch::IntArrayRef(options.normalized_shape())));
-    bias = register_parameter("bias", torch::zeros(torch::IntArrayRef(options.normalized_shape())));
+    weight = register_parameter("weight", torch::empty(options.normalized_shape()));
+    bias = register_parameter("bias", torch::empty(options.normalized_shape()));
   } else {
-    weight = register_parameter("weight", torch::empty(torch::IntArrayRef(options.normalized_shape())));
-    bias = register_parameter("bias", torch::empty(torch::IntArrayRef(options.normalized_shape())));
+    weight = register_parameter("weight", torch::Tensor(), /*requires_grad=*/false);
+    bias = register_parameter("bias", torch::Tensor(), /*requires_grad=*/false);
   }
 }
 
 void LayerNormImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
-         << "torch::nn::LayerNorm(normalized_shape=" << torch::IntArrayRef(options.normalized_shape())
-         << ", elementwise_affine=" << options.elementwise_affine() << ", eps=" << options.eps()
+         << "torch::nn::LayerNorm(" << torch::IntArrayRef(options.normalized_shape())
+         << ", eps=" << options.eps()
+         << ", elementwise_affine=" << options.elementwise_affine()
          << ")";
 }
 
 torch::Tensor LayerNormImpl::forward(const Tensor& input) {
-  return torch::layer_norm(input, torch::IntArrayRef(options.normalized_shape()), weight, bias, options.eps(),
-                          at::globalContext().userEnabledCuDNN());
+  return F::layer_norm(input, options, weight, bias);
 }
 } // namespace nn
 } // namespace torch

@@ -23,12 +23,12 @@ struct TORCH_API LayerNormOptions {
   /* implicit */ LayerNormOptions(std::vector<int64_t> normalized_shape);
   /// input shape from an expected input.
   TORCH_ARG(std::vector<int64_t>, normalized_shape);
+  /// a value added to the denominator for numerical stability. ``Default: 1e-5``.
+  TORCH_ARG(double, eps) = 1e-5;
   /// a boolean value that when set to ``True``, this module
   /// has learnable per-element affine parameters initialized to ones (for weights)
-  /// and zeros (for biases).
+  /// and zeros (for biases). ``Default: true``.
   TORCH_ARG(bool, elementwise_affine) = true;
-  /// a value added to the denominator for numerical stability.
-  TORCH_ARG(double, eps) = 1e-5;
 };
 
 } // namespace nn

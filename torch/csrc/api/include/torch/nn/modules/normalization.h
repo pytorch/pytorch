@@ -42,13 +42,12 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
   /// The learned bias.
   /// Initialized to zeros `elementwise_affine` option is set to `true` upon construction.
   Tensor bias;
-
-  /// A `ModuleHolder` subclass for `LayerNormImpl`.
-  /// See the documentation for `LayerNormImpl` class to learn what methods it
-  /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
-  /// module storage semantics.
 };
 
+/// A `ModuleHolder` subclass for `LayerNorm`.
+/// See the documentation for `LayerNorm` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
 TORCH_MODULE(LayerNorm);
 
 } // namespace nn

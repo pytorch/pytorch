@@ -1663,10 +1663,10 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm) {
 
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {
   ASSERT_EQ(
-    c10::str(LayerNorm(LayerNormOptions(std::vector<int64_t>({2, 2})))),
+    c10::str(LayerNorm(LayerNormOptions({2, 2}))),
       "torch::nn::LayerNorm(normalized_shape=[2, 2], elementwise_affine=true, eps=1e-05)");
       ASSERT_EQ(
-        c10::str(LayerNorm(LayerNormOptions(std::vector<int64_t>({2, 2})).elementwise_affine(false).eps(2e-5))),
+        c10::str(LayerNorm(LayerNormOptions({2, 2}).elementwise_affine(false).eps(2e-5))),
           "torch::nn::LayerNorm(normalized_shape=[2, 2], elementwise_affine=false, eps=2e-05)");
 }
 
