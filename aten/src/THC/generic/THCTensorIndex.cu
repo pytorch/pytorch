@@ -507,21 +507,21 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
       bool indexIsMajor = THCTensor_(indexShouldBeMajor)(dstInfo, dstSelectDim);
 
       if (dstInfo.dims == 1 && srcInfo.dims == 1 && indContig) {
-        LARGE_INDEX(scalar_t, unsigned int, 1, 1, -2, true);
+        LARGE_INDEX24(scalar_t, unsigned int, 1, 1, -2, true);
       } else if (dstInfo.dims == 2 && srcInfo.dims == 2 && indContig) {
         if (indexIsMajor) {
-          LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, true);
+          LARGE_INDEX24(scalar_t, unsigned int, 2, 2, -2, true);
         } else {
-          LARGE_INDEX(scalar_t, unsigned int, 2, 2, -2, false);
+          LARGE_INDEX24(scalar_t, unsigned int, 2, 2, -2, false);
         }
       } else if (dstInfo.dims == 3 && srcInfo.dims == 3 && indContig) {
         if (indexIsMajor) {
-          LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, true);
+          LARGE_INDEX24(scalar_t, unsigned int, 3, 3, -2, true);
         } else {
-          LARGE_INDEX(scalar_t, unsigned int, 3, 3, -2, false);
+          LARGE_INDEX24(scalar_t, unsigned int, 3, 3, -2, false);
         }
       } else {
-        LARGE_INDEX(scalar_t, unsigned int, -1, -1, -1, true);
+        LARGE_INDEX24(scalar_t, unsigned int, -1, -1, -1, true);
       }
     }
   } else if (THCTensor_canUse32BitIndexMath(state, dst) &&
