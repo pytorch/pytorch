@@ -266,6 +266,23 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+
+    def test_squeeze(self):
+        class Squeeze(torch.nn.Module):
+            def forward(self, x):
+                return torch.torch.squeeze(x, dim=-2)
+
+        x = torch.randn(2, 1, 4)
+        self.run_test(Squeeze(), x)
+
+    def test_unsqueeze(self):
+        class Unsqueeze(torch.nn.Module):
+            def forward(self, x):
+                return torch.unsqueeze(x, dim=-2)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Unsqueeze(), x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_adaptive(self):
         model = torch.nn.AdaptiveMaxPool1d((5), return_indices=False)
@@ -304,21 +321,29 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    # enable when supported in ORT for opset 11
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool(self):
         model = torch.nn.AvgPool1d(2, stride=1)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    # enable when supported in ORT for opset 11
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_1d_ceil(self):
         model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
+    # enable when supported in ORT for opset 11
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_2d_ceil(self):
         model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
+    # enable when supported in ORT for opset 11
+    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
@@ -466,6 +491,41 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(MyModel(), x)
 
+    def _interpolate_script(self, x, mode, use_size, is_upsample):
+
+        class MyModel(torch.jit.ScriptModule):
+            __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array']
+
+            def __init__(self, mode, use_size, is_upsample):
+                super(MyModel, self).__init__()
+                self.mode = mode
+                self.use_size = use_size
+                self.is_upsample = is_upsample
+                self.scale = 2.0 if self.is_upsample else 0.5
+                self.size = 24 if self.is_upsample else 1
+                if x.dim() == 3:
+                    self.scale_array = [2.]
+                    self.size_array = [16]
+                elif x.dim() == 4:
+                    self.scale_array = [2., 3.]
+                    self.size_array = [16, 32]
+                else:
+                    self.scale_array = [2., 3., 4.]
+                    self.size_array = [16, 32, 64]
+
+            @torch.jit.script_method
+            def forward(self, x):
+                if self.use_size:
+                    out = torch.nn.functional.interpolate(x, mode=self.mode, size=self.size)
+                    out_array = torch.nn.functional.interpolate(x, mode=self.mode, size=self.size_array)
+                    return out, out_array
+                out = torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale)
+                out_array = torch.nn.functional.interpolate(x, mode=self.mode, scale_factor=self.scale_array)
+                return out, out_array
+
+        model = MyModel(mode, use_size, is_upsample)
+        self.run_test(model, x)
+
     def _interpolate_tests(self, is_upsample):
         # - cubic mode is not supported for opsets below 11;
         # - linear mode does not match for opsets below 11;
@@ -494,8 +554,12 @@ class TestONNXRuntime(unittest.TestCase):
                     elif xi.dim() == 5:
                         mode_i = "trilinear"
                 self._interpolate(xi, mode_i, True, is_upsample)
-                if self.opset_version >= 9:  # throws unimplemented
+                # the following cases, require dynamic sizes/scales,
+                # which which is not supported for opset_version < 9
+                if self.opset_version >= 9:
+                    self._interpolate_script(xi, mode_i, True, is_upsample)
                     self._interpolate(xi, mode_i, False, is_upsample)
+                    self._interpolate_script(xi, mode_i, False, is_upsample)
 
     # enable when supported in ORT for opset 11
     @skipIfUnsupportedOpsetVersion([11])
@@ -544,7 +608,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(NarrowModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_index_fill(self):
         class IndexFillModel(torch.nn.Module):
             def forward(self, input):
@@ -555,7 +618,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IndexFillModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_index_copy(self):
         class IndexCopyModel(torch.nn.Module):
             def forward(self, input):
@@ -1069,6 +1131,24 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_masked_scatter(self):
+        class MaskedScatterModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.masked_scatter(x, x.ge(0.5), torch.ones(100, 100) * 5)
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(MaskedScatterModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_masked_select(self):
+        class MaskedSelectModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.masked_select(x, x.ge(0.5))
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        self.run_test(MaskedSelectModel(), x)
+
     @unittest.skip("Enable this once depthToSpace attr 'mode' is supported in ORT")
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
@@ -1217,8 +1297,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.zeros(4, 2, 3, requires_grad=True, dtype=torch.float64)
         self.run_test(RsqrtModel(), x)
 
-    # TODO: enable opset 11 test once ORT support for unique is in
-    @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_unique(self):
         class UniqueModel(torch.nn.Module):
@@ -1228,8 +1306,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
         self.run_test(UniqueModel(), x)
 
-    # TODO: enable opset 11 test once ORT support for unique is in
-    @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_unique_along_dim(self):
         class UniqueModel(torch.nn.Module):
@@ -1239,8 +1315,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
         self.run_test(UniqueModel(), x)
 
-    # TODO: enable opset 11 test once ORT support for cumsum is in
-    @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_cumsum(self):
         class CumSum(torch.nn.Module):
@@ -1288,9 +1362,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = Log1p()
         self.run_test(model, x)
 
-    # TODO: remove the skip tag once ORT implementation is in place
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_round(self):
         class Round(torch.nn.Module):
             def forward(self, x):
