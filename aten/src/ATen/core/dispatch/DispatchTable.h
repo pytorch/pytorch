@@ -139,20 +139,33 @@ class DispatchTable final {
    * Perform a dynamic dispatch on this table and find the kernel to call
    * for the given arguments.
    *
-   * @param args Arguments to invoke the function with
+   * @param stack Stack with arguments to invoke the kernel function with
    * @return Kernel function pointing to the right kernel for the given arguments.
    */
    const KernelFunction& lookup(const Stack* stack) const {
-     return lookup_([=] () -> c10::optional<TensorTypeId> {
+     return lookup_([&] () -> c10::optional<TensorTypeId> {
        if (!dispatch_strategy_.is_valid_) {
          return c10::nullopt;
        }
-       return dispatch_strategy_.get_dispatch_key(stack, operator_name_);
+       return dispatch_strategy_.get_dispatch_key(stack);
      });
    }
 
-   const KernelFunction& lookup(TensorTypeId dispatchKey) const {
-     return lookup_([=] () -> c10::optional<TensorTypeId> { return dispatchKey;});
+   /**
+    * Perform a dynamic dispatch on this table and find the kernel to call
+    * for the given arguments.
+    *
+    * @param args Arguments to invoke the kernel function with
+    * @return Kernel function pointing to the right kernel for the given arguments.
+    */
+   template<class... Args>
+   const KernelFunction& lookup(const Args&... args) const {
+     return lookup_([&] () -> c10::optional<TensorTypeId> {
+       if (!dispatch_strategy_.is_valid_) {
+         return c10::nullopt;
+       }
+       return dispatch_strategy_.get_dispatch_key<Args...>(args...);
+     });
    }
 
    bool isEmpty() const {
@@ -183,7 +196,7 @@ private:
     // as long as they only have fallback kernels and no dispatched kernels.
     bool is_valid_;
 
-    TensorTypeId get_dispatch_key(const Stack* stack, const std::string& operator_name) const {
+    TensorTypeId get_dispatch_key(const Stack* stack) const {
 
       TensorTypeSet ts;
       for (const auto& ivalue : torch::jit::last(*stack, num_args_)) {
@@ -200,6 +213,12 @@ private:
       // TODO: Don't use legacy extractor; blocked on c10 understanding
       // variable
       return c10::legacyExtractTypeId(ts);
+    }
+
+    template<class... Args>
+    TensorTypeId get_dispatch_key(const Args&... args) const {
+      AT_ASSERT(sizeof...(args) == num_args_, "Wrong number of arguments");
+      return at::impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(args...));
     }
   };
 
