@@ -192,9 +192,10 @@ set_property(
 # library.
 add_library(torch::cudart INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a" rt dl)
+    target_link_libraries(torch::cudart INTERFACE "${CUDA_cudart_static_LIBRARY}")
+    if (NOT WIN32)
+      target_link_libraries(torch::cudart INTERFACE rt dl)
+    endif()
 else()
     set_property(
         TARGET torch::cudart PROPERTY INTERFACE_LINK_LIBRARIES
@@ -214,14 +215,20 @@ if(CAFFE2_USE_CUDNN)
   set_property(
       TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
       ${CUDNN_INCLUDE_PATH})
+  if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+    target_link_libraries(caffe2::cudnn INTERFACE
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+  endif()
 endif()
 
 # curand
 add_library(caffe2::curand UNKNOWN IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a")
+    target_link_libraries(caffe2::curand INTERFACE
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
 else()
     set_property(
         TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
@@ -234,10 +241,10 @@ set_property(
 # cufft. CUDA_CUFFT_LIBRARIES is actually a list, so we will make an
 # interface library similar to cudart.
 add_library(caffe2::cufft INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
-    set_property(
-        TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a")
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
+    target_link_libraries(caffe2::cufft INTERFACE
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static.a"
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
 else()
     set_property(
         TARGET caffe2::cufft PROPERTY INTERFACE_LINK_LIBRARIES
@@ -261,7 +268,7 @@ endif()
 # cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
 # interface library similar to cudart.
 add_library(caffe2::cublas INTERFACE IMPORTED)
-if(CAFFE2_STATIC_LINK_CUDA)
+if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
