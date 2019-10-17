@@ -1167,7 +1167,7 @@ def foo(x):
   )";
   auto cu = compile(text);
   const Function& foo = cu->get_function("foo");
-  for (Node* n : foo.graph()->nodes()) {
+  for (Node* n : foo.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       int v = n->i(attr::value);
       switch (v) {
@@ -1176,7 +1176,7 @@ def foo(x):
           // The callstack for the correponding node should contain only the
           // function 'bar'.
           ASSERT_TRUE(n->callstack());
-          auto callstack_vector = (*n->callstack())->asVector();
+          auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 1);
           ASSERT_EQ(callstack_vector[0].first, &cu->get_function("bar"));
           break;
@@ -1186,7 +1186,7 @@ def foo(x):
           // which is then inlined to 'foo'. The callstack for the correponding
           // node should contain these two functions.
           ASSERT_TRUE(n->callstack());
-          auto callstack_vector = (*n->callstack())->asVector();
+          auto callstack_vector = (*n->callstack())->vec();
           ASSERT_EQ(callstack_vector.size(), 2);
           ASSERT_EQ(callstack_vector[0].first, &cu->get_function("baz"));
           ASSERT_EQ(callstack_vector[1].first, &cu->get_function("ham"));
@@ -1199,6 +1199,22 @@ def foo(x):
           break;
         }
       }
+    }
+  }
+
+  // Check that inlining doesn't corrupt callstack of the callee's nodes.
+  const Function& baz = cu->get_function("baz");
+  for (Node* n : baz.optimized_graph()->nodes()) {
+    if (n->kind() == prim::Constant) {
+      int v = n->i(attr::value);
+      ASSERT_TRUE(v == 7);
+      // Const 7 comes from function 'ham', which gets inlined to 'baz'. 'baz'
+      // was also inlined into 'foo', but when looking at the graph of 'baz' we
+      // should only see a callstack of depth 1 (containing only 'ham').
+      ASSERT_TRUE(n->callstack());
+      auto callstack_vector = (*n->callstack())->vec();
+      ASSERT_EQ(callstack_vector.size(), 1);
+      ASSERT_EQ(callstack_vector[0].first, &cu->get_function("ham"));
     }
   }
 }
