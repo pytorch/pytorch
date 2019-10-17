@@ -1,5 +1,3 @@
-#include <torch/csrc/python_headers.h>
-
 #include <array>
 #include <unordered_map>
 #include <thread>
@@ -19,11 +17,10 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/cuda/python_comm.h>
-#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/python_headers.h>
 
 using namespace torch;
 
