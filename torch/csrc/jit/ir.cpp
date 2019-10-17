@@ -1099,6 +1099,7 @@ void Node::cloneFrom(Node* s) {
     scope_ = s->scope_;
   }
   copyAttributes(*s);
+  callstack_ = s->callstack_;
 }
 
 void Node::replaceAllUsesWith(Node* n) {
@@ -1643,17 +1644,9 @@ void Graph::freeBlock(Block* b) {
 
 void Node::insertCallStackEntry(Function* f, SourceRange sr) {
   if (!callstack_) {
-    callstack_ = c10::make_intrusive<CallStack>(f, sr);
+    callstack_ = c10::make_intrusive<InlinedCallStack>(f, sr);
   } else {
     callstack_ = (*callstack_)->insertCallStackEntry(f, sr);
-  }
-}
-
-void Node::appendCallStackOf(Node* other) {
-  if (other->callstack_) {
-    for (auto& e : (*other->callstack_)->asVector()) {
-      insertCallStackEntry(e.first, e.second);
-    }
   }
 }
 
@@ -1680,11 +1673,9 @@ std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
   for (const auto& kv : value_map) {
-    Node* orig_node = kv.first->node();
     Node* new_node = kv.second->node();
     if (updated_nodes.insert(new_node).second) {
       new_node->insertCallStackEntry(callee, to_replace->sourceRange());
-      new_node->appendCallStackOf(orig_node);
     }
   }
 
