@@ -1796,16 +1796,13 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _log2__cpu
-    CUDA: _log2__cuda
 
 - func: log2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   dispatch:
-    CPU: _log2_out_cpu
-    CUDA: _log2_out_cuda
+    CPU: log2_out
+    CUDA: log2_out
 
 - func: logdet(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2255,6 +2252,10 @@
   use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: batch_norm_elemt_cuda
+
+- func: batch_norm_elemt.out(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CUDA: batch_norm_elemt_cuda_out
 
 # for backward compatibility
 - func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int count) -> (Tensor, Tensor)
