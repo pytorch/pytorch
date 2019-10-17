@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef __HIP_PLATFORM_HCC
+#ifdef __HIP_PLATFORM_HCC__
 template<typename T>
 struct __attribute__((packed)) uint24_t {
     T x : 24;
