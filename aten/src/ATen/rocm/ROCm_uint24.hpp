@@ -7,7 +7,7 @@ struct __attribute__((packed)) uint24_t {
 };
 
 template<typename T>
-inline
+inline __host__ __device__
 T mul24(T x, T y) noexcept
 {
     return uint24_t<T>{x}.x * uint24_t<T>{y}.x;
@@ -16,7 +16,7 @@ T mul24(T x, T y) noexcept
 template long long mul24<long long>(long long, long long);
 
 template<typename T>
-inline
+inline __host__ __device__
 T mad24(T x, T y, T z) noexcept
 {
     return uint24_t<T>{x}.x * uint24_t<T>{y}.x + uint24_t<T>{z}.x;
@@ -25,7 +25,7 @@ T mad24(T x, T y, T z) noexcept
 template long long mad24<long long>(long long, long long, long long);
 
 template<typename T>
-inline
+inline __host__ __device__
 T div24(T x, T y) noexcept
 {
     return uint24_t<T>{x}.x / uint24_t<T>{y}.x;
@@ -34,7 +34,7 @@ T div24(T x, T y) noexcept
 template long long div24<long long>(long long, long long);
 
 template<typename T>
-inline
+inline __host__ __device__
 T mod24(T x, T y) noexcept
 {
     return uint24_t<T>{x}.x % uint24_t<T>{y}.x;
