@@ -5720,7 +5720,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         # Ensure double type for hard-coded c name below
         t = torch.rand(2).double()
-        cpp_tensor_name = "Variable\[CPUDoubleType\]"
+        cpp_tensor_name = r"Variable\[CPUDoubleType\]"
 
         # Without error handling, the warnings cannot be catched
         # and the Tensor type names are not cleaned
