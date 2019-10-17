@@ -205,7 +205,7 @@ void TensorIterator::compute_types() {
 
       if (!std::get<2>(common_type)) {
         if (!compute_common_dtype_only_for_inputs) {
-          validate_dtype(op, common_dtype, ninputs());
+          validate_dtype(op, common_dtype_, ninputs());
         }
       }
 
