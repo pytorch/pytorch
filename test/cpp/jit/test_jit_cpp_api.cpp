@@ -278,25 +278,10 @@ struct List : public Value {
   void append(Value v);
 };
 
-struct TupleAccessorPolicy {
-  using key_type = size_t;
-  static jit::IValue get(const jit::IValue& obj, const key_type& name) {
-    return obj.toTuple()->elements().at(name);
-  }
-  static void set(
-      const jit::IValue& obj,
-      const key_type& name,
-      const jit::IValue value) {
-    // TODO: CHECK value.type() <: tuple_element_type
-    obj.toTuple()->elements().at(name) = std::move(value);
-  }
-};
-using TupleAccessor = Accessor<TupleAccessorPolicy>;
-
 struct Tuple : public Value {
-  TupleAccessor operator[](size_t i) const;
+  Value operator[](size_t i) const;
   // named tuple access
-  TupleAccessor operator[](const char* name) const;
+  Value operator[](const char* name) const;
   size_t len() const;
   FakeIterator<Value> begin();
   FakeIterator<Value> end();
