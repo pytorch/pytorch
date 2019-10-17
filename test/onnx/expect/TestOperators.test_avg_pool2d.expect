@@ -5,12 +5,34 @@ graph {
   node {
     input: "0"
     output: "1"
-    op_type: "AveragePool"
+    op_type: "Pad"
     attribute {
-      name: "count_include_pad"
-      i: 1
-      type: INT
+      name: "mode"
+      s: "constant"
+      type: STRING
     }
+    attribute {
+      name: "pads"
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "value"
+      f: 0
+      type: FLOAT
+    }
+  }
+  node {
+    input: "1"
+    output: "2"
+    op_type: "AveragePool"
     attribute {
       name: "kernel_shape"
       ints: 3
@@ -56,7 +78,7 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1
