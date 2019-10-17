@@ -12,22 +12,6 @@
 #include <tuple>
 
 namespace torch {
-
-const nn::init::Nonlinearity kLinear = nn::init::Nonlinearity::Linear;
-const nn::init::Nonlinearity kConv1D = nn::init::Nonlinearity::Conv1D;
-const nn::init::Nonlinearity kConv2D = nn::init::Nonlinearity::Conv2D;
-const nn::init::Nonlinearity kConv3D = nn::init::Nonlinearity::Conv3D;
-const nn::init::Nonlinearity kConvTranspose1D = nn::init::Nonlinearity::ConvTranspose1D;
-const nn::init::Nonlinearity kConvTranspose2D = nn::init::Nonlinearity::ConvTranspose2D;
-const nn::init::Nonlinearity kConvTranspose3D = nn::init::Nonlinearity::ConvTranspose3D;
-const nn::init::Nonlinearity kSigmoid = nn::init::Nonlinearity::Sigmoid;
-const nn::init::Nonlinearity kTanh = nn::init::Nonlinearity::Tanh;
-const nn::init::Nonlinearity kReLU = nn::init::Nonlinearity::ReLU;
-const nn::init::Nonlinearity kLeakyReLU = nn::init::Nonlinearity::LeakyReLU;
-
-const nn::init::FanMode kFanIn = nn::init::FanMode::FanIn;
-const nn::init::FanMode kFanOut = nn::init::FanMode::FanOut;
-
 namespace nn {
 namespace init {
 namespace {
@@ -60,7 +44,7 @@ double calculate_kaiming_std(
   Fan fan(tensor);
   const auto gain = calculate_gain(nonlinearity, a);
   double std = 0.0;
-  if (mode == torch::kFanIn) {
+  if (mode == torch::nn::init::FanMode::FanIn) {
     std = gain / std::sqrt(fan.in);
   } else {
     std = gain / std::sqrt(fan.out);
@@ -70,11 +54,11 @@ double calculate_kaiming_std(
 } // namespace
 
 double calculate_gain(Nonlinearity nonlinearity, double param) {
-  if (nonlinearity == torch::kTanh) {
+  if (nonlinearity == torch::nn::init::Nonlinearity::Tanh) {
     return 5.0 / 3.0;  // NOLINT
-  } else if (nonlinearity == torch::kReLU) {
+  } else if (nonlinearity == torch::nn::init::Nonlinearity::ReLU) {
     return std::sqrt(2.0);  // NOLINT
-  } else if (nonlinearity == torch::kLeakyReLU) {
+  } else if (nonlinearity == torch::nn::init::Nonlinearity::LeakyReLU) {
     return std::sqrt(2.0 / (1 + pow(param, 2)));  // NOLINT
   }
 

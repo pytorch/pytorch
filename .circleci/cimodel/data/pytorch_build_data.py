@@ -12,6 +12,10 @@ CONFIG_TREE_DATA = [
         ("gcc", [
             ("5.4", [  # All this subtree rebases to master and then build
                 XImportant("3.6"),
+                ("3.6", [
+                    ("parallel_tbb", [XImportant(True)]),
+                    ("parallel_native", [XImportant(True)]),
+                ]),
             ]),
             # TODO: bring back libtorch test
             ("7", [X("3.6")]),
@@ -121,6 +125,8 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
 
         next_nodes = {
             "xla": XlaConfigNode,
+            "parallel_tbb": ParallelTBBConfigNode,
+            "parallel_native": ParallelNativeConfigNode,
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "android_abi": AndroidAbiConfigNode,
@@ -138,6 +144,25 @@ class XlaConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
+class ParallelTBBConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PARALLELTBB=" + str(label)
+
+    def init2(self, node_name):
+        self.props["parallel_backend"] = "paralleltbb"
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+class ParallelNativeConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PARALLELNATIVE=" + str(label)
+
+    def init2(self, node_name):
+        self.props["parallel_backend"] = "parallelnative"
+
+    def child_constructor(self):
+        return ImportantConfigNode
 
 class LibTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):
