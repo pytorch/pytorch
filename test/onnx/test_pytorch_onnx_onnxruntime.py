@@ -659,8 +659,6 @@ class TestONNXRuntime(unittest.TestCase):
         base = 1
         self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
 
-    # TODO: enable for opset 11 when ONNXRuntime version will be updated
-    @skipIfUnsupportedOpsetVersion([11])
     def test_topk(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -669,8 +667,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         self.run_test(MyModule(), x)
 
-    # TODO: enable for opset 11 when ONNXRuntime version will be updated
-    @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_topk_smallest_unsorted(self):
         class MyModule(torch.nn.Module):
@@ -681,9 +677,7 @@ class TestONNXRuntime(unittest.TestCase):
         k = torch.tensor(3)
         self.run_test(MyModule(), (x, k))
 
-    # TODO: enable for opset 11 when ONNXRuntime version will be updated
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_topk_script(self):
         class MyModuleDynamic(torch.jit.ScriptModule):
             @torch.jit.script_method
