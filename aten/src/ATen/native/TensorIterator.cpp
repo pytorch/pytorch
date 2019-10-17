@@ -623,10 +623,12 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 }
 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
-    const Tensor& b, bool check_mem_overlap, bool promote_by_copy) {
+    const Tensor& b, bool check_mem_overlap, bool promote) {
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(check_mem_overlap);
-  iter.set_promote_by_copy(promote_by_copy);
+  if (!promote) {
+    dont_compute_common_dtype();
+  }
   iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);

@@ -130,7 +130,6 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     data[i] = (char*)iter.data_ptr(i);
   }
 
-
   int64_t numel = iter.numel();
   if (iter.is_trivial_1d()) {
     auto inner_strides = iter.get_inner_strides();
@@ -138,7 +137,6 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     for (int i = 0; i < ntensors; i++) {
       strides[i] = inner_strides[i];
     }
-   
 
     launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
       arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
