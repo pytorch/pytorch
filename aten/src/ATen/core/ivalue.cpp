@@ -186,22 +186,30 @@ void IValue::dump() const {
 
 
 std::string ivalue::Object::name() const {
-  return this->type_.type_->name()->qualifiedName();
+  auto classTypePtr =  std::dynamic_pointer_cast<ClassType>(type_.type_);
+  TORCH_CHECK(classTypePtr);
+  return classTypePtr->name()->qualifiedName();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  auto classTypePtr =  std::dynamic_pointer_cast<ClassType>(type_.type_);
+  TORCH_CHECK(classTypePtr);
+  const size_t slot = classTypePtr->getAttributeSlot(name);
   return getSlot(slot);
 }
 
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  auto classTypePtr =  std::dynamic_pointer_cast<ClassType>(type_.type_);
+  TORCH_CHECK(classTypePtr);
+  const size_t slot = classTypePtr->getAttributeSlot(name);
   setSlot(slot, std::move(v));
 }
 
 void ivalue::Object::resizeObject(size_t slot) {
-  AT_ASSERT(slot < type()->numAttributes());
-  slots_.resize(type()->numAttributes());
+  auto classTypePtr =  std::dynamic_pointer_cast<ClassType>(type_.type_);
+  TORCH_CHECK(classTypePtr);
+  AT_ASSERT(slot < classTypePtr->numAttributes());
+  slots_.resize(classTypePtr->numAttributes());
 }
 
 
