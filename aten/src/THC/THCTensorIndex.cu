@@ -223,12 +223,12 @@ __global__ void indexAddLargeIndex24(TensorInfo<T, IndexType> dst,
        linearIndex += gridDim.x * blockDim.x) {
     IndexType srcIndex, elementInSlice;
     if (IndexIsMajor) {
-      srcIndex = linearIndex / innerSize; //TODO div24
-      elementInSlice = linearIndex % innerSize; //TODO mod24
+      srcIndex = div24(linearIndex, innerSize);
+      elementInSlice = mod24(linearIndex, innerSize);
     }
     else {
-      elementInSlice = linearIndex / innerSize; //TODO div24
-      srcIndex = linearIndex % innerSize; //TODO mod24
+      elementInSlice = div24(linearIndex, innerSize);
+      srcIndex = mod24(linearIndex, innerSize);
     }
 
     // Lua indices begin at 1
