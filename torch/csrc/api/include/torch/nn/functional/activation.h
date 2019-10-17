@@ -41,24 +41,20 @@ inline Tensor logsigmoid(const Tensor& input) {
 }
 
 inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxOptions& options = {}) {
-    if (options.eps() != 1e-10) {
-        std::cerr << "`eps` parameter is deprecated and has no effect." << std::endl;
-    }
-
-    torch::Tensor gumbels = -torch::empty_like(logits).exponential_().log();  // ~Gumbel(0,1)
+    auto gumbels = -torch::empty_like(logits).exponential_().log();  // ~Gumbel(0,1)
     gumbels = (logits + gumbels) / options.tau();  // ~Gumbel(logits, tau)
-    torch::Tensor y_soft = gumbels.softmax(options.dim());
+    auto y_soft = gumbels.softmax(options.dim());
 
+    torch::Tensor ret;
     if (options.hard()) {
         // Straight through.
-        torch::Tensor index = std::get<1>(y_soft.max(options.dim(), true));
+        auto index = std::get<1>(y_soft.max(options.dim(), /*keepdim=*/true));
         auto y_hard = torch::zeros_like(logits).scatter_(options.dim(), index, 1.0);
-        auto ret = y_hard - y_soft.detach() + y_soft;
-        return ret;
+        ret = y_hard - y_soft.detach() + y_soft;
     } else {
-        auto ret = y_soft;
-        return ret;
+        ret = y_soft;
     }
+    return ret;
 }
 
 } // namespace functional
