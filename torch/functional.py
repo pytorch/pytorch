@@ -146,7 +146,7 @@ Args:
            If an index appears several times for the same operand, a diagonal is taken.
            Ellipses `...` represent a fixed number of dimensions. If the right hand side is inferred,
            the ellipsis dimensions are at the beginning of the output.
-    operands (list of Tensors): The operands to compute the Einstein sum of.
+    operands (Tensor): The operands to compute the Einstein sum of.
 
 Examples::
 
@@ -811,7 +811,4 @@ def lu(A, pivot=True, get_infos=False, out=None):
 
 
 def align_tensors(*tensors):
-    if not torch._C._BUILD_NAMEDTENSOR:
-        raise RuntimeError('NYI: torch.align_tensors is experimental and a part '
-                           'of our named tensors project.')
-    return torch._C._VariableFunctions.align_tensors(tensors)
+    raise RuntimeError('`align_tensors` not yet implemented.')

@@ -63,7 +63,7 @@ void Error::AppendMessage(const std::string& new_msg) {
   msg_without_backtrace_ = msg_without_backtrace();
 }
 
-void Warning::warn(SourceLocation source_location, std::string msg) {
+void Warning::warn(SourceLocation source_location, const std::string& msg) {
   warning_handler_(source_location, msg);
 }
 
