@@ -18,7 +18,6 @@ struct TORCH_API L1LossOptions {
       : reduction_(reduction) {}
 
   /// Specifies the reduction to apply to the output.
-  
   TORCH_ARG(reduction_t, reduction);
 };
 

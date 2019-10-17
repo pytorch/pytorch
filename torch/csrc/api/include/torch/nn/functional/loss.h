@@ -14,7 +14,7 @@ inline Tensor hinge_embedding_loss(
       x1,
       x2,
       options.margin(),
-      options.reduction());
+      torch::enumtype::_convert_reduction_variant_type_to_enum(options.reduction()));
 }
 
 inline Tensor multi_margin_loss(
@@ -32,7 +32,7 @@ inline Tensor multi_margin_loss(
     options.p(),
     options.margin(),
     options.weight(),
-    options.reduction()
+    torch::enumtype::_convert_reduction_variant_type_to_enum(options.reduction())
   );
 }
 
@@ -42,21 +42,31 @@ inline Tensor cosine_embedding_loss(
     const Tensor& target,
     const CosineEmbeddingLossOptions& options) {
   return torch::cosine_embedding_loss(
-      input1, input2, target, options.margin(), options.reduction());
+    input1,
+    input2,
+    target,
+    options.margin(),
+    torch::enumtype::_convert_reduction_variant_type_to_enum(options.reduction()));
 }
 
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
     const Tensor& target,
     const MultiLabelMarginLossOptions& options = {}) {
-  return torch::multilabel_margin_loss(input, target, options.reduction());
+  return torch::multilabel_margin_loss(
+    input,
+    target,
+    torch::enumtype::_convert_reduction_variant_type_to_enum(options.reduction()));
 }
 
 inline Tensor soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
     const SoftMarginLossOptions& options = {}) {
-  return torch::soft_margin_loss(input, target, options.reduction());
+  return torch::soft_margin_loss(
+    input,
+    target,
+    torch::enumtype::_convert_reduction_variant_type_to_enum(options.reduction()));
 }
 
 inline Tensor multilabel_soft_margin_loss(
@@ -98,7 +108,7 @@ inline Tensor triplet_margin_loss(
       options.p(),
       options.eps(),
       options.swap(),
-      options.reduction());
+      torch::enumtype::_convert_reduction_variant_type_to_enum(options.reduction()));
 }
 
 } // namespace functional
