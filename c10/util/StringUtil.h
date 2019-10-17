@@ -53,7 +53,7 @@ inline std::string str(const char* c_str) {
 
 template <class Container>
 inline std::string Join(const std::string& delimiter, const Container& v) {
-  std::stringstream s;
+  std::ostringstream s;
   int cnt = static_cast<int64_t>(v.size()) - 1;
   for (auto i = v.begin(); i != v.end(); ++i, --cnt) {
     s << (*i) << (cnt ? delimiter : "");

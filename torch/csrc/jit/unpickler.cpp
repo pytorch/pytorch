@@ -705,7 +705,7 @@ inline bool is_valid_python_id_char(char c) {
 
 // Read a newline terminated string
 std::string Unpickler::readString() {
-  std::stringstream ss;
+  std::ostringstream ss;
   while (true) {
     char c = read<char>();
     if (c == '\n') {
