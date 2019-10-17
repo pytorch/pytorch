@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/variant.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
