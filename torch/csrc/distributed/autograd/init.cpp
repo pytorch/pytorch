@@ -44,15 +44,25 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
                 }
                 return funcs;
               })
-          .def("_send_functions", [](const DistAutogradContext& ctx) {
-            std::map<int64_t, py::object> funcs;
-            for (const auto& map_entry : ctx.sendFunctions()) {
-              funcs.emplace(
-                  map_entry.first,
-                  py::reinterpret_steal<py::object>(
-                      torch::autograd::functionToPyObject(map_entry.second)));
+          .def(
+              "_send_functions",
+              [](const DistAutogradContext& ctx) {
+                std::map<int64_t, py::object> funcs;
+                for (const auto& map_entry : ctx.sendFunctions()) {
+                  funcs.emplace(
+                      map_entry.first,
+                      py::reinterpret_steal<py::object>(
+                          torch::autograd::functionToPyObject(
+                              map_entry.second)));
+                }
+                return funcs;
+              })
+          .def("_known_worker_ids", [](const DistAutogradContext& ctx) {
+            std::vector<rpc::worker_id_t> worker_ids;
+            for (const auto worker_id : ctx.getKnownWorkerIds()) {
+              worker_ids.push_back(worker_id);
             }
-            return funcs;
+            return worker_ids;
           });
 
   module.def(

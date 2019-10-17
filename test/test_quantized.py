@@ -1658,7 +1658,8 @@ class TestQNNPackOps(TestCase):
             import torch.nn.functional as F
             X_init = torch.from_numpy(np.random.randint(
                 0, 50, (batch_size, channels, height, width)))
-            zero_point = 0
+
+            padding = 0
             X = scale * (X_init - zero_point).to(dtype=torch.float)
 
             # Check constraints
@@ -1685,7 +1686,6 @@ class TestQNNPackOps(TestCase):
 
             np.testing.assert_array_almost_equal(a_pool.numpy(),
                                                  qa_pool.int_repr().numpy(), decimal=0)
-
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
