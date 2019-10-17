@@ -540,7 +540,7 @@ class TestQuantizedOps(TestCase):
             qX_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
                         count_include_pad=count_include_pad, divisor_override=divisor_override)
             qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
-                                       dtype=torch_type)
+                                               dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr(), qX_hat.int_repr(), prec=1.0,
                              message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
@@ -595,7 +595,7 @@ class TestQuantizedOps(TestCase):
                        count_include_pad=count_include_pad, divisor_override=divisor_override)
             self.assertTrue(X_hat.stride() != sorted(X_hat.stride()))
             qX_ref = torch.quantize_per_tensor(X_ref, scale=X_hat.q_scale(), zero_point=X_hat.q_zero_point(),
-                                       dtype=torch_type)
+                                               dtype=torch_type)
 
             self.assertEqual(qX_ref.int_repr(), X_hat.int_repr().to(torch.double), prec=1.0,
                              message="{} results are off".format(name))
