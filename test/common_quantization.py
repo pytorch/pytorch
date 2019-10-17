@@ -90,7 +90,7 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
-            self.assertTrue(hasattr(module, 'observer'),
+            self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         for child in module.children():
             self.checkObservers(child)
