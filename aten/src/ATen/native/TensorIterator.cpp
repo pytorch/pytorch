@@ -197,7 +197,7 @@ void TensorIterator::compute_types() {
     auto common_type = compute_common_type_(operands);
     auto common_device = std::get<0>(common_type);
     common_dtype = std::get<1>(common_type);
-    may_have_differing_types = std::get<2>(common_type);
+    may_have_differing_types = !std::get<2>(common_type);
     bool has_cpu_scalar = false;
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
