@@ -11,7 +11,7 @@ class Report:
         self.num_errors = int(text[len(self.HEAD):len(text) - len(self.TAIL)])
         self.errors = errors
         if len(errors) != self.num_errors:
-            raise ParseError()
+            raise ParseError("Number of errors does not match")
 
 
 class Error:
@@ -47,3 +47,4 @@ def parse(message):
             in_message = False
         else:
             message_lines.append(l)
+    raise ParseError("No error summary found")
