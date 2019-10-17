@@ -91,8 +91,9 @@ static void multilabel_margin_loss_forward_cpu_template(
   TORCH_CHECK(is_target.is_contiguous(), "is_target must be contiguous");
   is_target.zero_();
 
-  // special case ndims <= 1: produce scalar output 1d input
-  if (reduction != at::Reduction::None || ndims <= 1) {
+  // special case ndims == 0: produce scalar output for scalar inputs 
+  // even if reduction == Reduction::None
+  if (reduction != Reduction::None || ndims == 0) {
     output.resize_({});
   } else {
     output.resize_({nframe});
@@ -105,7 +106,7 @@ static void multilabel_margin_loss_forward_cpu_template(
         int64_t* target_data = target_contiguous.data_ptr<int64_t>();
         scalar_t* is_target_data = is_target.data_ptr<scalar_t>();
 
-        if (reduction != at::Reduction::None || output.dim() == 0) {
+        if (reduction != Reduction::None || output.dim() == 0) {
           auto output_acc = output.data_ptr<scalar_t>();
 
           accscalar_t sum = 0;
@@ -240,11 +241,10 @@ static void multilabel_margin_loss_backward_cpu_template(
         }
 
         scalar_t* grad_input_data = grad_input.data_ptr<scalar_t>();
-
         if (reduction != Reduction::None || grad_output.dim() == 0) {
           assert(
               reduction != Reduction::None || grad_output.dim() > 0 ||
-              nframe == 1); // check 1d scalar fallback-case
+              nframe == 1);
           const auto d = *grad_output.data_ptr<scalar_t>();
           for (int64_t t = 0; t < nframe * dim; t++) {
             grad_input_data[t] *= d;
