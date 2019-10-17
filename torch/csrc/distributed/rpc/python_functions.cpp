@@ -124,28 +124,11 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   auto scriptCall = c10::guts::make_unique<ScriptCall>(op, std::move(stack));
-  auto& autogradContainer = DistAutogradContainer::getInstance();
-  if (autogradContainer.hasValidContext()) {
-    // Retrieve the appropriate context to modify.
-    auto& autogradContext = autogradContainer.currentContext();
-
-    // Wrap the original rpc with autograd information.
-    AutogradMetadata autogradMetadata(
-        autogradContext.contextId(), autogradContainer.newAutogradMessageId());
-    RpcWithAutograd rpcWithAutograd(
-        agent.getWorkerInfo().id_,
-        MessageType::FORWARD_AUTOGRAD_REQ,
-        autogradMetadata,
-        std::move(scriptCall));
-
-    // Record autograd information for 'send'.
-    addSendRpcBackward(
-        autogradContext, autogradMetadata, rpcWithAutograd.tensors(), dst.id_);
-
-    return agent.send(dst, std::move(rpcWithAutograd).toMessage());
-  } else {
-    return agent.send(dst, std::move(*scriptCall).toMessage());
-  }
+  return sendMessage(
+      agent,
+      dst,
+      std::move(*scriptCall).toMessage(),
+      MessageType::FORWARD_AUTOGRAD_REQ);
 }
 
 PyRRef pyRemoteBuiltin(
@@ -179,12 +162,14 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
-  return agent.send(
+  auto pythonUDFCall = c10::guts::make_unique<PythonUDFCall>(
+      std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
+      tensors);
+  return sendMessage(
+      agent,
       dst,
-      PythonUDFCall(
-          std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
-          tensors)
-          .toMessage());
+      std::move(*pythonUDFCall).toMessage(),
+      MessageType::FORWARD_AUTOGRAD_REQ);
 }
 
 PyRRef pyRemotePythonUdf(

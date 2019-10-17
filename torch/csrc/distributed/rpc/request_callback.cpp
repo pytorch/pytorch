@@ -20,9 +20,27 @@ Message createException(const Message& request, const std::exception& e) {
       request.id());
 }
 
+struct ClearAutogradContextGuard {
+  ClearAutogradContextGuard() {
+    clear();
+  }
+  ~ClearAutogradContextGuard() {
+    clear();
+  }
+
+  void clear() {
+    auto& autogradContainer = DistAutogradContainer::getInstance();
+    autogradContainer.clearCurrentContext();
+  }
+};
+
 } // anonymous namespace
 
 Message RequestCallback::operator()(Message& request) const {
+  // For a rev thread, current context id should be invalid outside
+  // processMessage(). Clear current context id before and after
+  // processMessage().
+  ClearAutogradContextGuard guard;
   try {
     return processMessage(request);
   } catch (std::exception& e) {
