@@ -127,6 +127,9 @@ class Caffe2OperatorTestCase(object):
         if not workspace.RunOperatorMultiple(op, num_runs):
             raise ValueError("Unable to run operator gradient test case: {}".format(self.test_name))
 
+    def _print_per_iter(self):
+        pass
+
 
 def register_caffe2_op_test_case(op_bench, test_config):
     test_case = Caffe2OperatorTestCase(op_bench, test_config)

@@ -11,7 +11,6 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/proto/torch_pb.h"
 #include "caffe2/serialize/inline_container.h"
 
@@ -51,7 +50,8 @@ class ScriptModuleDeserializer final {
             [this](const std::string& qualifier) {
               return findSourceInArchiveFromQualifier(
                   *reader_, export_prefix_, qualifier);
-            }) {}
+            },
+            reader_->version()) {}
 
   script::Module LEGACY_deserialize();
 
@@ -347,17 +347,17 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
         LEGACY_pickled_ivalues_.at(module_def.get_state_attribute_id()));
   }
 
-  for (const auto& slot : module.get_attributes()) {
+  for (const script::NameValue& slot : module.get_attributes()) {
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
-    if (slot.type()->kind() != TypeKind::OptionalType) {
+    if (slot.value.type()->kind() != TypeKind::OptionalType) {
       TORCH_CHECK(
-          !slot.value().isNone(),
+          !slot.value.isNone(),
           "The field '",
-          slot.name(),
+          slot.name,
           "' was left unitialized after __setstate__, but expected a ",
           "value of type '",
-          slot.type()->python_str(),
+          slot.value.type()->python_str(),
           "'");
     }
   }

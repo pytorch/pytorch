@@ -191,6 +191,13 @@ jobs:
       - name: Install dependencies
         run: |
           set -eux
+          # Install CUDA
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/cuda-ubuntu1804.pin
+          sudo mv cuda-ubuntu1804.pin /etc/apt/preferences.d/cuda-repository-pin-600
+          sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
+          sudo add-apt-repository "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/ /"
+          sudo apt-get update
+          sudo apt-get --no-install-recommends -y install cuda
           # Install dependencies
           pip install pyyaml
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
@@ -211,11 +218,9 @@ jobs:
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
 
-            mkdir build
-            pushd build
+            export USE_NCCL=0
             # We really only need compile_commands.json, so no need to build!
-            time cmake ..
-            popd
+            time python setup.py --cmake-only build
 
             # Generate ATen files.
             time python aten/src/ATen/gen.py \
