@@ -33,6 +33,23 @@ std::tuple<Tensor, Tensor, Tensor> group_norm_cpu(
   return std::make_tuple(Y, mean, rstd);
 }
 
+std::tuple<Tensor, Tensor, Tensor> group_norm_cuda(
+    const Tensor& X,
+    const Tensor& gamma /* optional */,
+    const Tensor& beta /* optional */,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    double eps) {
+  Tensor Y = at::native::empty_like(X);
+  Tensor mean = at::empty({N, group}, X.options());
+  Tensor rstd = at::empty({N, group}, X.options());
+  GroupNormKernel(
+      kCUDA, X, gamma, beta, N, C, HxW, group, eps, &Y, &mean, &rstd);
+  return std::make_tuple(Y, mean, rstd);
+}
+
 std::tuple<Tensor, Tensor, Tensor> group_norm_backward_cpu(
     const Tensor& dY,
     const Tensor& X,
@@ -61,13 +78,41 @@ std::tuple<Tensor, Tensor, Tensor> group_norm_backward_cpu(
   return std::make_tuple(dX, dgamma, dbeta);
 }
 
+std::tuple<Tensor, Tensor, Tensor> group_norm_backward_cuda(
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    int64_t group,
+    std::array<bool, 3> grad_input_mask) {
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+  if (grad_input_mask[0]) {
+    dX = at::native::empty_like(X);
+  }
+  if (grad_input_mask[1]) {
+    dgamma = at::native::empty_like(gamma);
+  }
+  if (grad_input_mask[2]) {
+    dbeta = at::native::empty_like(gamma);
+  }
+  GroupNormBackwardKernel(
+      kCUDA, dY, X, mean, rstd, gamma, N, C, HxW, group, &dX, &dgamma, &dbeta);
+  return std::make_tuple(dX, dgamma, dbeta);
+}
+
 Tensor group_norm(
     const Tensor& input,
     int64_t num_groups,
     const Tensor& weight /* optional */,
     const Tensor& bias /* optional */,
     double eps,
-    bool cudnn_enabled) {
+    bool /* cudnn_enabled, deprecated */) {
   const int64_t N = input.size(0);
   const int64_t C = input.size(1);
   TORCH_CHECK(
@@ -100,32 +145,11 @@ Tensor group_norm(
       1LL,
       std::multiplies<int64_t>());
 
-  if (input.device().is_cpu()) {
-    const auto& X = input.is_contiguous() ? input : input.contiguous();
-    const auto& gamma = weight.is_contiguous() ? weight : weight.contiguous();
-    const auto& beta = bias.is_contiguous() ? bias : bias.contiguous();
-    return std::get<0>(
-        at::native_group_norm(X, gamma, beta, N, C, HxW, num_groups, eps));
-  }
-
-  // Apply group norm
-  auto input_reshaped = input.contiguous().view({1, N * num_groups, -1});
-  auto out = at::batch_norm(
-      input_reshaped, {}, {}, {}, {}, true, 0, eps, cudnn_enabled);
-  out = out.view(input_shape);
-  if (!weight.defined() && !bias.defined()) {
-    return out;
-  }
-  std::vector<int64_t> affine_param_shape(input.dim(), 1);
-  affine_param_shape[1] = C;
-  if (weight.defined() && bias.defined()) {
-    return bias.view(affine_param_shape)
-        .addcmul(out, weight.view(affine_param_shape), 1);
-  } else if (weight.defined()) {
-    return out.mul(weight.view(affine_param_shape));
-  } else {
-    return out.add(bias.view(affine_param_shape));
-  }
+  const auto& X = input.is_contiguous() ? input : input.contiguous();
+  const auto& gamma = weight.is_contiguous() ? weight : weight.contiguous();
+  const auto& beta = bias.is_contiguous() ? bias : bias.contiguous();
+  return std::get<0>(
+      at::native_group_norm(X, gamma, beta, N, C, HxW, num_groups, eps));
 }
 
 DEFINE_DISPATCH(GroupNormKernel);
