@@ -11,7 +11,6 @@ from dist_utils import INIT_METHOD_TEMPLATE, dist_init
 
 import threading
 
-prev_rank_rpc_done = False
 prev_rank_context_id = 0
 
 known_context_ids = []
@@ -23,10 +22,27 @@ def store_context_id(context_id):
     known_context_ids.append(context_id)
 
 def _set_rpc_done(context_id):
-    global prev_rank_rpc_done
     global prev_rank_context_id
-    prev_rank_rpc_done = True
     prev_rank_context_id = context_id
+
+# after dist autograd context is cleaned up, it should be cleaned up on other
+# nodes. This helper allows timeout_seconds for those RPCs to be completed, and
+# ensures that all the contexts have been cleaned up in that timeframe.any
+def _all_contexts_cleaned_up(num_contexts, timeout_seconds=10):
+    global known_context_ids
+    start = time.time()
+    context_id_to_raised = {}
+    while time.time() - start < timeout_seconds:
+        for context_id in known_context_ids:
+            try:
+                dist_autograd._retrieve_context(context_id)
+            except RuntimeError:
+                context_id_to_raised[context_id] = True
+        if len(context_id_to_raised) == num_contexts:
+            break
+    success = len(context_id_to_raised) == num_contexts and all(context_id_to_raised.values())
+    return success
+
 
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
@@ -237,16 +253,12 @@ class DistAutogradTest(object):
             for dst_rank in dst_ranks:
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
                 rpc.rpc_sync("worker{}".format(dst_rank), store_context_id, args=(context_id,))
-        # now let each worker finish with their cleanup RPCs
-        rpc.sync_rpc()
         # the thread's context id should be cleaned up
         with self.assertRaises(RuntimeError):
             dist_autograd._retrieve_context(context_id)
-
-        # all of the other context ids should have also been cleaned up
-        for context_id in known_context_ids:
-            with self.assertRaises(RuntimeError):
-                dist_autograd._retrieve_context(context_id)
+        # check that all contexts have been cleaned up.
+        success = _all_contexts_cleaned_up(num_contexts=len(dst_ranks))
+        self.assertTrue(success)
 
     @dist_init
     def test_worker_ids_recorded(self):
