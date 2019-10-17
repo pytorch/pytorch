@@ -156,6 +156,7 @@ EnforceWarningBuffer::EnforceWarningBuffer() noexcept(true): prev_handler(c10::W
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
+/// NOLINTNEXTLINE(bugprone-exception-escape)
 EnforceWarningBuffer::~EnforceWarningBuffer() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler);
 
