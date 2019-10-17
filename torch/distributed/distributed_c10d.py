@@ -428,9 +428,9 @@ def _new_process_group_helper(world_size,
     """
     Create a new distributed process group.
 
-    This function must be called by ALL processes in the global group, even if
-    the calling process is not part of the newly created group. In that case,
-    this function returns GroupMember.NON_GROUP_MEMBER.
+    For ``Backend.MPI``, this function must be called by ALL processes in the
+    global group, even if the calling process is not part of the newly created
+    group. In that case, this function returns GroupMember.NON_GROUP_MEMBER.
 
     This function is called with ``group_ranks == []`` for the default group.
     """
@@ -1440,10 +1440,10 @@ def new_group(ranks=None, timeout=_default_pg_timeout, backend=None):
     """
     Creates a new distributed group.
 
-    This function requires that all processes in the main group (i.e. all
-    processes that are part of the distributed job) enter this function, even
-    if they are not going to be members of the group. Additionally, groups
-    should be created in the same order in all processes.
+    For ``Backend.MPI``, this function requires that all processes in the main
+    group (i.e. all processes that are part of the distributed job) enter this
+    function, even if they are not going to be members of the group.
+    Additionally, groups should be created in the same order in all processes.
 
     Arguments:
         ranks (list[int]): List of ranks of group members.
