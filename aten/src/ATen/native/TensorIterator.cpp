@@ -627,7 +627,7 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(check_mem_overlap);
   if (!promote) {
-    dont_compute_common_dtype();
+    iter.dont_compute_common_dtype();
   }
   iter.add_output(out);
   iter.add_input(a);
