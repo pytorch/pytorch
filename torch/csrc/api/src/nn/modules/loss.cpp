@@ -48,7 +48,7 @@ Tensor MSELossImpl::forward(const Tensor& input, const Tensor& target) {
 
 // ============================================================================
 
-BCELossImpl::BCELossImpl(const BCELossOptions& options_) : options(options_) {
+BCELossImpl::BCELossImpl(const BCELossOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
   reset();
 }
 
@@ -130,8 +130,7 @@ Tensor CosineEmbeddingLossImpl::forward(
 // ============================================================================
 
 MultiLabelSoftMarginLossImpl::MultiLabelSoftMarginLossImpl(
-    const torch::nn::MultiLabelSoftMarginLossOptions&
-        options_) // NOLINT(modernize-pass-by-value)
+    const torch::nn::MultiLabelSoftMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
   reset();
 }
