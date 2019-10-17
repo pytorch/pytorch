@@ -174,7 +174,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
         op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
 #endif
@@ -185,7 +185,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
         op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
 #endif
@@ -217,7 +217,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::${name}", "${overload_name}"}).value();
+        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
         op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
@@ -230,7 +230,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::${name}", "${overload_name}"}).value();
+        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
         op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
@@ -279,7 +279,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::${name}", "${overload_name}"}).value();
+        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
         op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
@@ -292,7 +292,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::${name}", "${overload_name}"}).value();
+        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
         op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
