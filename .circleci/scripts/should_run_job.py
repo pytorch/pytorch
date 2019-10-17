@@ -62,10 +62,6 @@ default_set = set([
     # XLA
     'pytorch-xla-linux-xenial-py3.6-clang7',
 
-    # Parallel backends
-    "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4",
-    "pytorch-parallelnative-linux-xenial-py3.6-gcc5.4",
-
     # Other checks
     'pytorch-short-perf-test-gpu',
     'pytorch-python-doc-push',
