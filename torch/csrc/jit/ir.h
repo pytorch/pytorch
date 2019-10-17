@@ -320,7 +320,7 @@ struct TORCH_API Node {
   c10::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }
-  void insertCallStackEntry(Function* f, SourceRange sr);
+  void insertCallStackEntry(Function* f, const SourceRange& sr);
 
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
@@ -1105,6 +1105,8 @@ struct Graph {
       at::ArrayRef<TypePtr> types,
       bool is_list,
       bool is_tuple);
+
+  TORCH_API Value* insertUncheckedCast(Value* v, TypePtr type);
 
   TORCH_API Value* insertFunctionCall(
       Function* callee,
