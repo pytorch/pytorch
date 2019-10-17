@@ -1,7 +1,7 @@
 from common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List, Optional
+from typing import NamedTuple, List, Optional, Any
 import unittest
 import sys
 import torch
@@ -228,6 +228,18 @@ class TestScriptPy3(JitTestCase):
                 x = 5
                 if True:
                     x : Optional[int] = 7
+
+
+    def test_any_in_class_fails(self):
+        class MyCoolNamedTuple(NamedTuple):
+            a : Any
+            b : float
+            c : List[int]
+        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
+            @torch.jit.script
+            def foo():
+                return MyCoolNamedTuple(4, 5.5, [3])
+            print(foo.graph)
 
 
 if __name__ == '__main__':

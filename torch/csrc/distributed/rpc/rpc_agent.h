@@ -63,6 +63,9 @@ class TORCH_API RpcAgent {
   // ``RpcAgent`` base class makes no assumption on the thread-safeness of the
   // ``RequestCallback``. ``RpcAgent`` implementations need to make sure that
   // its threading model conform to ``RequestCallback``'s requirement.
+  // NB: RpcAgent implementations should not start serving requests until
+  // ``start()`` is called, as there could be other contexts that have not been
+  // initialized yet at this time.
   RpcAgent(WorkerInfo id, std::unique_ptr<RequestCallback> cb);
 
   virtual ~RpcAgent();
@@ -97,6 +100,9 @@ class TORCH_API RpcAgent {
   // Synchronize the this process with other ``RpcAgent`` processes. Block until
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
+
+  // start accepting requests
+  virtual void start() {}
 
   // Set the default rpc agent.
   static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);

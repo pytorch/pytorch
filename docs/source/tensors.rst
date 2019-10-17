@@ -373,6 +373,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: permute
    .. automethod:: pin_memory
    .. automethod:: pinverse
+   .. automethod:: polygamma
+   .. automethod:: polygamma_
    .. automethod:: pow
    .. automethod:: pow_
    .. automethod:: prod
@@ -398,6 +400,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: repeat
    .. automethod:: repeat_interleave
    .. autoattribute:: requires_grad
+      :noindex:
    .. automethod:: requires_grad_
    .. automethod:: reshape
    .. automethod:: reshape_as
