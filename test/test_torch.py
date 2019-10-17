@@ -35,7 +35,7 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
-    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf
+    dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride
 import torch.backends.quantized
 
 
@@ -12533,38 +12533,33 @@ class TestTorchDeviceType(TestCase):
             run_test(m, v2, v1, lambda x: x.transpose(0, 1))
 
     @onlyCPU
-    def test_addmv(self, device):
-        types = {
-            'torch.DoubleTensor': 1e-8,
-            'torch.FloatTensor': 1e-4,
-            'torch.BFloat16Tensor': 1e-0,
-        }
-        for tname, prec in types.items():
-            t = torch.randn(10, device=device).type(tname)
-            m = torch.randn(10, 100, device=device).type(tname)
-            v = torch.randn(100, device=device).type(tname)
-            res1 = torch.addmv(t, m, v)
-            res2 = torch.zeros(10, device=device).type(tname)
-            res2 += t
-            for i in range(10):
-                for j in range(100):
-                    res2[i] += m[i, j] * v[j]
+    @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8})
+    @dtypes(torch.bfloat16, torch.float, torch.double)
+    def test_addmv(self, device, dtype):
+        t = torch.randn(10, device=device).to(dtype)
+        m = torch.randn(10, 100, device=device).to(dtype)
+        v = torch.randn(100, device=device).to(dtype)
+        res1 = torch.addmv(t, m, v)
+        res2 = torch.zeros(10, dtype=dtype, device=device)
+        res2 += t
+        for i in range(10):
+            for j in range(100):
+                res2[i] += m[i, j] * v[j]
 
-            self.assertEqual(res1, res2, prec)
+        self.assertEqual(res1, res2)
 
         # Test 0-strided
-        for tname, prec in types.items():
-            t = torch.randn(1, device=device).type(tname).expand(10)
-            m = torch.randn(10, 1, device=device).type(tname).expand(10, 100)
-            v = torch.randn(100, device=device).type(tname)
-            res1 = torch.addmv(t, m, v)
-            res2 = torch.zeros(10, device=device).type(tname)
-            res2 += t
-            for i in range(10):
-                for j in range(100):
-                    res2[i] += m[i, j] * v[j]
+        t = torch.randn(1, device=device).to(dtype).expand(10)
+        m = torch.randn(10, 1, device=device).to(dtype).expand(10, 100)
+        v = torch.randn(100, device=device).to(dtype)
+        res1 = torch.addmv(t, m, v)
+        res2 = torch.zeros(10, dtype=dtype, device=device)
+        res2 += t
+        for i in range(10):
+            for j in range(100):
+                res2[i] += m[i, j] * v[j]
 
-            self.assertEqual(res1, res2, prec)
+        self.assertEqual(res1, res2)
 
     @onlyCPU
     def test_addmm(self, device):
