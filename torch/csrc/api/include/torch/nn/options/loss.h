@@ -70,28 +70,32 @@ struct TORCH_API CosineEmbeddingLossOptions {
 
 /// Options for a multi-label margin loss functional and module.
 struct TORCH_API MultiLabelMarginLossOptions {
-  MultiLabelMarginLossOptions(torch::Reduction::Reduction reduction = torch::Reduction::Mean)
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  MultiLabelMarginLossOptions(reduction_t reduction = torch::kMean)
     : reduction_(reduction) {}
 
   /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
-  TORCH_ARG(torch::Reduction::Reduction, reduction);
+  TORCH_ARG(reduction_t, reduction);
 };
 
 // ============================================================================
 
 /// Options for a soft margin loss functional and module.
 struct TORCH_API SoftMarginLossOptions {
-  SoftMarginLossOptions(torch::Reduction::Reduction reduction = torch::Reduction::Mean)
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  SoftMarginLossOptions(reduction_t reduction = torch::kMean)
     : reduction_(reduction) {}
 
   /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
-  TORCH_ARG(torch::Reduction::Reduction, reduction);
+  TORCH_ARG(reduction_t, reduction);
 };
 
 // ============================================================================
