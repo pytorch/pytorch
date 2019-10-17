@@ -14,11 +14,21 @@
 
 /// NOTE [ Conversion Cpp Python Warning ]
 /// Python warning semantic is different from the cpp one in that
-/// they can raise errors. To handle this case which requires
-/// modifying the return value of the handled function, we use a
-/// second try/catch where the __enforce_warning_buffer destructor will
-/// raise an error. Nothing else should ever raise in the scope
-/// between the two try or the program will be terminated.
+/// they can raise errors. This leads to the following cases:
+/// - The GIL is acquired in the EnforceWarningBuffer destructor
+///   - If there is no Error raised in the inner try/catch, the
+///     bufferred warnings are processed as python warnings.
+///     - If they don't raise an error, the function process with the
+///       original return code.
+///     - If any of them raise an error, the error code is set and
+///       the destructor will raise a python_error() that will be
+///       caught by the outer try/catch that will be able to change
+///       the return value of the function to reflect the error.
+///   - If an Error was raised in the inner try/catch, the inner try/catch
+///     must set the python error. The buffered warnings are then
+///     processed as cpp warnings as we cannot predict before hand
+///     whether a python warning will raise an error or not and we
+///     cannot handle two errors at the same time.
 #define HANDLE_TH_ERRORS                                           \
   try {                                                            \
     torch::EnforceWarningBuffer __enforce_warning_buffer;          \
@@ -192,19 +202,6 @@ struct ValueError : public PyTorchError {
   PyObject* python_type() override {
     return PyExc_ValueError;
   }
-};
-
-// ATen warning handler for Python
-struct PyWarningHandler{
-public:
-  using warning_buffer_t =
-    std::queue<std::pair<c10::SourceLocation, std::string>>;
-
-  static void py_warning_handler(
-    const c10::SourceLocation& source_location,
-    const std::string& msg);
-
-  static warning_buffer_t warning_buffer;
 };
 
 struct EnforceWarningBuffer {

@@ -89,7 +89,7 @@ class C10_API Warning {
 
   /// Issue a warning with a given message. Dispatched to the current
   /// warning handler.
-  static void warn(SourceLocation source_location, std::string msg);
+  static void warn(SourceLocation source_location, const std::string& msg);
   /// Sets the global warning handler. This is not thread-safe, so it should
   /// generally be called once during initialization or while holding the GIL
   /// for programs that use python.

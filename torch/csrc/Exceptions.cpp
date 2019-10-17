@@ -137,23 +137,29 @@ ValueError::ValueError(const char *format, ...) {
   va_end(fmt_args);
 }
 
-void PyWarningHandler::py_warning_handler(
+// ATen warning handler for Python
+using warning_buffer_t =
+  std::vector<std::pair<c10::SourceLocation, std::string>>;
+
+static warning_buffer_t warning_buffer;
+static std::mutex warning_buffer_mutex;
+
+static void py_warning_handler(
     const c10::SourceLocation& source_location,
     const std::string& msg) {
-  warning_buffer.push({source_location, msg});
-}
-
-PyWarningHandler::warning_buffer_t PyWarningHandler::warning_buffer = PyWarningHandler::warning_buffer_t();
+  std::unique_lock<std::mutex> lock(warning_buffer_mutex);
+  warning_buffer.push_back({source_location, msg});
+};
 
 EnforceWarningBuffer::EnforceWarningBuffer() noexcept(true): prev_handler(c10::Warning::get_warning_handler()) {
-  c10::Warning::set_warning_handler(&PyWarningHandler::py_warning_handler);
+  c10::Warning::set_warning_handler(&py_warning_handler);
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
 EnforceWarningBuffer::~EnforceWarningBuffer() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler);
 
-  auto& warning_buffer = PyWarningHandler::warning_buffer;
+  std::unique_lock<std::mutex> lock(warning_buffer_mutex);
 
   if(warning_buffer.size() > 0) {
     AutoGIL gil;
@@ -164,24 +170,21 @@ EnforceWarningBuffer::~EnforceWarningBuffer() noexcept(false) {
     if(ptype) {
       // A python error happened after the warning
       // Simply handle with the cpp handler
-      while(warning_buffer.size() > 0) {
-        auto warning = warning_buffer.front();
-        warning_buffer.pop();
+      for(const auto& warning: warning_buffer) {
         auto source_location = warning.first;
-        auto msg = processErrorMsg(warning.second);
+        const auto& msg = processErrorMsg(warning.second);
         c10::Warning::warn(source_location, msg);
       }
-      // The parent function already returns -1
+      warning_buffer.clear();
+      // The parent function already returns an error
       // We only restore the error and exit the
       // destructor normally
       PyErr_Restore(ptype, pvalue, ptraceback);
     } else {
-      while(warning_buffer.size() > 0) {
-        auto warning = warning_buffer.front();
-        warning_buffer.pop();
+      auto result = -1;
+      for(const auto& warning: warning_buffer) {
         auto source_location = warning.first;
-        auto msg = processErrorMsg(warning.second);
-        auto result = -1;
+        const auto& msg = processErrorMsg(warning.second);
         if (source_location.file == nullptr) {
           result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
         } else {
@@ -194,10 +197,14 @@ EnforceWarningBuffer::~EnforceWarningBuffer() noexcept(false) {
               /*registry=*/nullptr);
         }
         if (result < 0) {
-          /// A warning raised an error, we need to force the parent
-          /// function to return an error code.
-          throw python_error();
+          break;
         }
+      }
+      warning_buffer.clear();
+      if (result < 0) {
+        /// A warning raised an error, we need to force the parent
+        /// function to return an error code.
+        throw python_error();
       }
     }
   }

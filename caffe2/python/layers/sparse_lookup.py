@@ -130,7 +130,7 @@ class SparseLookup(ModelLayer):
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
-                 name='sparse_lookup', regularizer=None, **kwargs):
+                 name='sparse_lookup', regularizer=None, use_external_weights=False, **kwargs):
 
         super(SparseLookup, self).__init__(model, name, input_record, **kwargs)
 
@@ -146,22 +146,38 @@ class SparseLookup(ModelLayer):
 
         if reducer == "PositionWeighted":
             assert _is_id_score_list(self.input_record), (
-                "PositionWeighted only support IdScoreList, but got {} for {}" +
-                "please use PositionWeighted layer to convert IdList " +
-                "to IdScoreList").format(repr(self.input_record), self.sparse_key)
+                "PositionWeighted only support IdScoreList, but got {} for {}"
+                + "please use PositionWeighted layer to convert IdList "
+                + "to IdScoreList"
+            ).format(repr(self.input_record), self.sparse_key)
             self.external_weights = self.input_record.values()
 
         elif reducer == "RecencyWeighted":
             assert _is_id_score_list(self.input_record), (
                 "RecencyWeighted only supports IdScoreList, "
-                "while the sparse feature {} is not.".format(self.sparse_key))
+                "while the sparse feature {} is not.".format(self.sparse_key)
+            )
+            self.external_weights = self.input_record.values()
+        # TODO: create a new type of reducer with external weights to wrap
+        # this and the above two cases since essentially their input formats
+        # are the same.
+        elif use_external_weights:
+            assert _is_id_score_list(self.input_record), (
+                "Use_external_weights only supports IdScoreList, "
+                "while the sparse feature {} is not.".format(self.sparse_key)
+            )
+            assert reducer in ["Sum", "WeightedSum"], (
+                "Use_external_weights only supports Sum reducer, "
+                "while the reducer is {}.".format(reducer)
+            )
             self.external_weights = self.input_record.values()
         self.reducer = reducer
+        self.use_external_weights = use_external_weights
 
         input_dim = get_categorical_limit(self.input_record)
-        assert input_dim > 0, (
-            "{} should have categorical limit > 0, but got {}".format(
-                self.sparse_key, input_dim))
+        assert input_dim > 0, "{} should have categorical limit > 0, but got {}".format(
+            self.sparse_key, input_dim
+        )
 
         self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape
@@ -175,14 +191,16 @@ class SparseLookup(ModelLayer):
         self.weight_init = weight_init or default_init_op
 
         self.evicted_values = None
-        if schema.equal_schemas(self.input_record, IdListWithEvicted) or \
-            schema.equal_schemas(self.input_record, IdScoreListWithEvicted,
-                                 check_field_types=False):
+        if schema.equal_schemas(
+            self.input_record, IdListWithEvicted
+        ) or schema.equal_schemas(
+            self.input_record, IdScoreListWithEvicted, check_field_types=False
+        ):
             self.evicted_values = self.input_record._evicted_values
 
         # If fp16 is used, make sure fp16 init op is used
         if self.trainer_version == "fp16":
-            assert self.reducer in self._fp16_compatible_reducers, (
+            assert self.reducer in self._fp16_compatible_reducers or use_external_weights, (
                 "Fp16 training is enabled. The reducer specified is not supported. "
                 "Got {}. Supported reducers: {}. Right now, in general, sum, mean, "
                 "positional pooling are supported. Attention is not. Please check "
@@ -315,13 +333,19 @@ class SparseLookup(ModelLayer):
                 )
 
     def _sparse_lengths_weighted_reducer(
-            self, in_indices, weights, reducer,
-            net, version, grad_on_weights=0):
+        self,
+        in_indices,
+        weights,
+        reducer,
+        net,
+        version,
+        grad_on_weights=0,
+    ):
         op_input = [
             self.w,
             weights,
             in_indices,
-            self.input_record.lengths()
+            self.input_record.lengths(),
         ]
         layer_name = 'SparseLengths' + reducer
 
@@ -446,6 +470,12 @@ class SparseLookup(ModelLayer):
                 self.input_record.values(),
                 self.reducer, net, version)
 
+        elif self.reducer in ['PositionWeighted', 'RecencyWeighted'] or self.use_external_weights:
+            self._sparse_lengths_weighted_reducer(
+                self.input_record.keys(),
+                self.external_weights,
+                'WeightedSum', net, version, grad_on_weights=1)
+
         elif self.reducer in ['Sum', 'Mean']:
             op_input = [self.w,
                         self.input_record.keys(),
@@ -473,12 +503,6 @@ class SparseLookup(ModelLayer):
                         version, self.sparse_key
                     )
 
-        elif self.reducer in ['PositionWeighted', 'RecencyWeighted']:
-            self._sparse_lengths_weighted_reducer(
-                self.input_record.keys(),
-                self.external_weights,
-                'WeightedSum', net, version, grad_on_weights=1)
-
         elif self.reducer == 'None':
             # Gather operator will gather the embedding for each id of
             # each IdList.
@@ -490,8 +514,8 @@ class SparseLookup(ModelLayer):
                     self.reducer, self.sparse_key
                 )
 
-    def _add_ops(self, net, version='fp32'):
-        if self.evicted_values:
+    def _add_ops(self, net, version='fp32', is_train=True):
+        if self.evicted_values and is_train:
             net.CopyRowsToTensor(
                 [self.w, self.evicted_values.get(), self.reinit_vec], [self.w])
         if _is_id_list(self.input_record):
@@ -502,7 +526,7 @@ class SparseLookup(ModelLayer):
             raise "Unsupported input type {0}".format(self.input_record)
 
     def add_train_ops(self, net):
-        self._add_ops(net, self.trainer_version)
+        self._add_ops(net, self.trainer_version, is_train=True)
 
     def add_ops(self, net):
         version_info = get_current_scope().get(
@@ -526,6 +550,6 @@ class SparseLookup(ModelLayer):
         if not self.support_8bit() and version in {'uint8rowwise',
                                                    'fused_uint8rowwise',
                                                    'fused_uint4rowwise'}:
-            version = 'fp32'
+            version = 'fp16'
 
-        self._add_ops(net, version)
+        self._add_ops(net, version, is_train=False)
