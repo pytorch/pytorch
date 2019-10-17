@@ -193,7 +193,8 @@ def build_class_def(ctx, py_def, methods, self_name):
 
 def build_def(ctx, py_def, type_line, self_name=None):
     body = py_def.body
-    r = ctx.make_range(py_def.lineno, py_def.col_offset,
+    r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
+                       py_def.col_offset,
                        py_def.col_offset + len("def"))
     param_list = build_param_list(ctx, py_def.args, self_name)
     return_type = None
