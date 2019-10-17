@@ -12,14 +12,23 @@
 
 namespace at { namespace native {
 
+#define ADD_KERNEL_DISPATCH(TYPENAME, TYPE, EXPRESSION) AT_NAMED_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, TYPENAME, TYPE, "add_cuda/sub_cuda", EXPRESSION)
 void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "add_cuda/sub_cuda", [&]() {
-    auto alpha = alpha_scalar.to<scalar_t>();
-    gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return a + alpha * b;
-    });
-  });
+  ADD_KERNEL_DISPATCH(input0_t, iter.input_dtype(0),
+    ADD_KERNEL_DISPATCH(input1_t, iter.input_dtype(1),
+      ADD_KERNEL_DISPATCH(output_t, iter.output().scalar_type(),
+        [&]() {
+          using scalar_t = decltype(input0_t(0) + input1_t(0) + output_t(0));
+          scalar_t alpha = alpha_scalar.to<scalar_t>();
+          gpu_kernel_with_scalars(iter, [alpha]GPU_LAMBDA(input0_t a, input1_t b) -> output_t {
+            return output_t(a + alpha * b);
+          });
+        }()
+      )
+    )
+  );
 }
+#undef ADD_KERNEL_DISPATCH
 
 static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
   add_kernel_cuda(iter, -alpha_scalar);

@@ -12,6 +12,12 @@
     return __VA_ARGS__();                          \
   }
 
+#define AT_NAMED_PRIVATE_CASE_TYPE(enum_type, typename_, type, EXPRESSION) \
+  case enum_type: {                                                        \
+    using typename_ = type;                                                \
+    return EXPRESSION;                                                     \
+  }
+
 #define AT_QINT_PRIVATE_CASE_TYPE(enum_type, type, underlying_enum, underlying_type, ...) \
   case enum_type: {                                                     \
     const auto& UNDERLYING_TYPE C10_UNUSED = underlying_enum;           \
@@ -311,6 +317,24 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       default:                                                                                                   \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                                          \
     }                                                                                                            \
+  }()
+
+// Type of the macro below: expression -> expression
+#define AT_NAMED_DISPATCH_ALL_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, TYPENAME, TYPE, NAME, EXPRESSION)                            \
+  [&] {                                                                                                                       \
+    switch (TYPE) {                                                                                                             \
+      AT_NAMED_PRIVATE_CASE_TYPE(at::ScalarType::Byte, TYPENAME, uint8_t, EXPRESSION)                                           \
+      AT_NAMED_PRIVATE_CASE_TYPE(at::ScalarType::Char, TYPENAME, int8_t, EXPRESSION)                                            \
+      AT_NAMED_PRIVATE_CASE_TYPE(at::ScalarType::Double, TYPENAME, double, EXPRESSION)                                          \
+      AT_NAMED_PRIVATE_CASE_TYPE(at::ScalarType::Float, TYPENAME, float, EXPRESSION)                                            \
+      AT_NAMED_PRIVATE_CASE_TYPE(at::ScalarType::Int, TYPENAME, int32_t, EXPRESSION)                                            \
+      AT_NAMED_PRIVATE_CASE_TYPE(at::ScalarType::Long, TYPENAME, int64_t, EXPRESSION)                                           \
+      AT_NAMED_PRIVATE_CASE_TYPE(at::ScalarType::Short, TYPENAME, int16_t, EXPRESSION)                                          \
+      AT_NAMED_PRIVATE_CASE_TYPE(SCALARTYPE1, TYPENAME, decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE1>::t), EXPRESSION)   \
+      AT_NAMED_PRIVATE_CASE_TYPE(SCALARTYPE2, TYPENAME, decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE2>::t), EXPRESSION)   \
+      default:                                                                                                                  \
+        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                                                         \
+    }                                                                                                                           \
   }()
 
 #define AT_DISPATCH_ALL_TYPES_AND3(SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...)                       \

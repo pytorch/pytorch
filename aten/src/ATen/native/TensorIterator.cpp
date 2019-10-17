@@ -229,7 +229,7 @@ void TensorIterator::compute_types() {
         if (!compute_common_dtype_only_for_inputs) {
           validate_dtype(op, common_dtype, ninputs());
         }
-        if (!compute_common_dtype_only_for_inputs || !op.is_output) {
+        if (promote_by_copy_ && (!compute_common_dtype_only_for_inputs || !op.is_output)) {
           maybe_promote_common_dtype(op, common_dtype);
         }
       }
@@ -623,9 +623,10 @@ void TensorIterator::select_all_keeping_dim(int start_dim, IntArrayRef indices) 
 }
 
 TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
-    const Tensor& b, bool check_mem_overlap) {
+    const Tensor& b, bool check_mem_overlap, bool promote_by_copy) {
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(check_mem_overlap);
+  iter.set_promote_by_copy(promote_by_copy);
   iter.add_output(out);
   iter.add_input(a);
   iter.add_input(b);

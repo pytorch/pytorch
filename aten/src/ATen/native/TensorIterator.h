@@ -157,7 +157,7 @@ struct CAFFE2_API TensorIterator {
   void foreach_reduced_elt(loop_subiter_t loop, bool parallelize=true);
 
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b,
-    bool check_mem_overlap = false);
+    bool check_mem_overlap = false, bool promote_by_copy=true);
   static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b,
     bool check_mem_overlap = false);
   static TensorIterator unary_op(Tensor& out, const Tensor& a,
@@ -289,6 +289,10 @@ struct CAFFE2_API TensorIterator {
     check_mem_overlap_ = check_mem_overlap;
   }
 
+  void set_promote_by_copy(bool promote_by_copy) {
+    promote_by_copy_ = promote_by_copy;
+  }
+
   /// Construction
   void add_output(const Tensor& output) {
     operands_.emplace_back(output);
@@ -355,6 +359,7 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
+  bool promote_by_copy_ = true;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

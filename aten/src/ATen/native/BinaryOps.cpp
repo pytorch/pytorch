@@ -27,7 +27,7 @@ static constexpr char alpha_mismatch_err[] =
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+    /*check_mem_overlap=*/true, /*promote_by_copy=*/!self.device().is_cuda());
   TORCH_CHECK(! alpha.isBoolean() || iter.dtype() == ScalarType::Bool, "Boolean alpha only supported for boolean results");
   TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(true), alpha_mismatch_err);
   add_stub(iter.device_type(), iter, alpha);
@@ -37,7 +37,8 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
 
 Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/false, /*promote_by_copy=*/!self.device().is_cuda());
   TORCH_CHECK(! alpha.isBoolean() || iter.dtype() == ScalarType::Bool, "Boolean alpha only supported for boolean results");
   TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(true), alpha_mismatch_err);
   add_stub(iter.device_type(), iter, alpha);
