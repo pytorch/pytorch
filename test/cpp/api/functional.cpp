@@ -338,6 +338,31 @@ TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-4));
 }
 
+TEST_F(FunctionalTest, MultiLabelMarginLossDefaultOptions) {
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = F::multilabel_margin_loss(input, target);
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, MultiLabelMarginLossNoReduction) {
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = F::multilabel_margin_loss(
+    input, target, torch::Reduction::None);
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, TripletMarginLoss) {
   auto anchor = torch::tensor({{3., 3.}}, torch::kFloat);
   auto positive = torch::tensor({{2., 2.}}, torch::kFloat);
