@@ -75,7 +75,7 @@ class ModelNumerics(QuantizationTestCase):
                 torch.quantization.prepare_qat(fq_model)
                 fq_model.eval()
                 fq_model.apply(torch.quantization.disable_fake_quant)
-                fq_model.apply(torch.nn._intrinsic.qat.freeze_bn_stats)
+                fq_model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
                 fq_model(calib_data)
                 fq_model.apply(torch.quantization.enable_fake_quant)
                 fq_model.apply(torch.quantization.disable_observer)
@@ -102,8 +102,8 @@ class ModelNumerics(QuantizationTestCase):
                 torch.manual_seed(67)
                 calib_data = torch.rand(2048, 3, 15, 15, dtype=torch.float32)
                 eval_data = torch.rand(10, 3, 15, 15, dtype=torch.float32)
-                qconfigset = set([torch.quantization.default_weight_only_quant_qconfig,
-                                  torch.quantization.default_activation_only_quant_qconfig])
+                qconfigset = set([torch.quantization.default_weight_only_qconfig,
+                                  torch.quantization.default_activation_only_qconfig])
                 SQNRTarget = [35, 45]
                 for idx, qconfig in enumerate(qconfigset):
                     my_model = ModelMultipleOpsNoAvgPool().to(torch.float32)
@@ -116,7 +116,7 @@ class ModelNumerics(QuantizationTestCase):
                     torch.quantization.prepare_qat(fq_model)
                     fq_model.eval()
                     fq_model.apply(torch.quantization.disable_fake_quant)
-                    fq_model.apply(torch.nn._intrinsic.qat.freeze_bn_stats)
+                    fq_model.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
                     fq_model(calib_data)
                     fq_model.apply(torch.quantization.enable_fake_quant)
                     fq_model.apply(torch.quantization.disable_observer)

@@ -32,6 +32,12 @@ if [ -n "${IN_CIRCLECI}" ]; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # TODO: Move this to Docker
+  sudo apt-get -qq update
+  sudo apt-get -qq install --no-install-recommends libsndfile1
+fi
+
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # JIT C++ extensions require ninja.
@@ -202,8 +208,10 @@ test_backward_compatibility() {
   assert_git_not_dirty
 }
 
-(cd test && python -c "import torch; print(torch.__config__.show())")
-(cd test && python -c "import torch; print(torch.__config__.parallel_info())")
+if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
+  (cd test && python -c "import torch; print(torch.__config__.show())")
+  (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
+fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_backward_compatibility
@@ -211,6 +219,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   test_torchvision
   test_xla
+elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
+  # TODO: run some C++ tests
+  echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_torchvision
   test_python_nn

@@ -68,7 +68,6 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/autograd/python_legacy_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/python_variable_indexing.cpp
-    ${TORCH_SRC_DIR}/csrc/byte_order.cpp
     ${TORCH_SRC_DIR}/csrc/jit/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/onnx/fixup_onnx_loop.cpp
@@ -83,6 +82,7 @@ set(TORCH_PYTHON_SRCS
     ${TORCH_SRC_DIR}/csrc/jit/python_tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/init.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_sugared_value.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/concrete_module_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/python_tree_views.cpp
     ${TORCH_SRC_DIR}/csrc/multiprocessing/init.cpp
     ${TORCH_SRC_DIR}/csrc/onnx/init.cpp
@@ -123,7 +123,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${CMAKE_BINARY_DIR}/third_party
     ${CMAKE_BINARY_DIR}/third_party/onnx
 
-    ${TORCH_ROOT}/third_party/build/nccl/include
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/pybind11/include
@@ -225,20 +224,17 @@ if (USE_DISTRIBUTED)
     if (NOT MSVC)
       list(APPEND TORCH_PYTHON_SRCS
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/reducer.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/py_rref.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_rpc_handler.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback_impl.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
         )
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
@@ -250,12 +246,9 @@ endif()
 
 if (USE_NCCL)
     list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
-    if (USE_SYSTEM_NCCL)
-    endif()
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists

@@ -4,7 +4,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
-#include <THC/THCNumerics.cuh>
 #include <limits>
 
 
@@ -65,15 +64,25 @@ void mul_kernel_cuda(TensorIterator& iter) {
 void atan2_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "atan2_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return THCNumerics<scalar_t>::atan2(a, b);
+      return ::atan2(a, b);
     });
   });
 }
 
 void logical_xor_kernel_cuda(TensorIterator& iter) {
-  gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
-    return a != b;
-  });
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.input_dtype(), "logical_xor_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+        return bool(a) != bool(b);
+      });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "logical_xor_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return static_cast<scalar_t>(bool(a) != bool(b));
+      });
+    });
+  }
 }
 
 void lt_kernel_cuda(TensorIterator& iter) {
