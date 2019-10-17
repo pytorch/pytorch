@@ -254,12 +254,14 @@ void ProcessGroupAgent::sync() {
 }
 
 void ProcessGroupAgent::start() {
+  start_ = true;
   listenerThread_ = std::thread(&ProcessGroupAgent::listenLoop, this);
 }
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
+  TORCH_CHECK(start_, "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
       to.id_ != (worker_id_t)pg_->getRank(),
       "ProcessGroupAgent does not support making RPC calls to self.")
@@ -401,6 +403,13 @@ void ProcessGroupAgent::listenLoop() {
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
 
     enqueueRecv(RecvWork(allWorkerInfo_[srcRank], type, std::move(tensors[0])));
+  }
+}
+
+void ProcessGroupAgent::stop() {
+  start_ = false;
+  if (listenerThread_.joinable()) {
+    listenerThread_.detach();
   }
 }
 

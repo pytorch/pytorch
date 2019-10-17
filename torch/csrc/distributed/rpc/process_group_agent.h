@@ -50,6 +50,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   void start() override;
 
+  void stop() override;
+
  protected:
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will
@@ -133,6 +135,8 @@ class ProcessGroupAgent : public RpcAgent {
   std::unordered_map<int64_t, std::shared_ptr<FutureMessage>> futures_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
+
+  std::atomic<bool> start_{false};
 };
 
 } // namespace rpc
