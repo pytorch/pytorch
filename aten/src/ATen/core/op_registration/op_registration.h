@@ -493,9 +493,8 @@ public:
     }
 
     static bool op_is_still_on_aten_dispatcher_(const char* schema_string) {
-      // TODO Remove this function once all aten ops are on c10
-      const auto op_name = parse_operator_name_(schema_string);
-      return at::aten_op_is_not_moved_to_c10_yet(op_name);
+      // TODO Remove this function
+      return false;
     }
 
     Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction&& func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {

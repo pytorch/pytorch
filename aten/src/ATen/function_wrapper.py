@@ -112,18 +112,6 @@ ${return_type} ${api_name}(${type_method_formals}) {
 }
 """)
 
-DEFAULT_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyATenCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-""")
-BACKEND_LEGACY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyATenKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-""")
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
@@ -159,16 +147,6 @@ TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 # add non-virtual declaration to Tensor.cpp
-TENSOR_METHOD_DEFINITION = CodeTemplate("""\
-inline ${return_type} Tensor::${api_name}(${method_formals}) const {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_method_body}
-#else
-    static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->callUnboxed<${return_type}, ${formals_types}>(${method_actuals});
-#endif
-}
-""")
 C10_UNBOXEDONLY_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
@@ -200,17 +178,6 @@ DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
 C10_DEPRECATED static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
 # add method definition in Functions.h
-FUNCTION_DEFINITION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
-#else
-    static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->callUnboxed<${return_type}, ${formals_types}>(${native_actuals});
-#endif
-}
-""")
-
 C10_UNBOXEDONLY_FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
@@ -261,17 +228,6 @@ CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults
 """)
 
 # special method definition for factory functions in Functions.h that initializes backends
-FACTORY_DEFINITION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
-#else
-    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
-    static auto table = globalATenDispatch().getOpTable("${schema_string}");
-    return table->callUnboxed<${return_type}, ${formals_types}>(${native_actuals});
-#endif
-}
-""")
 C10_UNBOXEDONLY_FACTORY_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
@@ -528,8 +484,7 @@ TopEnvironment = TypedDict('TopEnvironment', {
     'type_registrations': List[str],
     'type_headers': List[str],
     'function_registrations': List[str],
-    'c10_ops_already_moved_from_aten_to_c10': List[str],
-    'c10_ops_not_moved_from_aten_to_c10_yet': List[str],
+    'list_of_aten_ops': List[str],
     'type_method_declarations': List[str],
     'type_method_definitions': List[str],
     'tensor_method_declarations': List[str],
@@ -1251,9 +1206,7 @@ def create_generic(top_env, declarations):
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
                     option, native_arguments=option['method_actuals'])
 
-            if option['use_c10_dispatcher'] == 'no':
-                method_definition = TENSOR_METHOD_DEFINITION
-            elif option['use_c10_dispatcher'] == 'unboxed_only':
+            if option['use_c10_dispatcher'] == 'unboxed_only':
                 method_definition = C10_UNBOXEDONLY_TENSOR_METHOD_DEFINITION
             else:
                 assert option['use_c10_dispatcher'] == 'full'
@@ -1289,10 +1242,7 @@ def create_generic(top_env, declarations):
                     option, native_arguments=option['native_actuals'])
 
             if is_factory_method:
-                if option['use_c10_dispatcher'] == 'no':
-                    fn_definition = FACTORY_DEFINITION.substitute(
-                        option, static_dispatch_function_body=static_dispatch_function_body)
-                elif option['use_c10_dispatcher'] == 'unboxed_only':
+                if option['use_c10_dispatcher'] == 'unboxed_only':
                     fn_definition = C10_UNBOXEDONLY_FACTORY_DEFINITION.substitute(
                         option, static_dispatch_function_body=static_dispatch_function_body)
                 else:
@@ -1300,10 +1250,7 @@ def create_generic(top_env, declarations):
                     fn_definition = C10_FACTORY_DEFINITION.substitute(
                         option, static_dispatch_function_body=static_dispatch_function_body)
             else:
-                if option['use_c10_dispatcher'] == 'no':
-                    fn_definition = FUNCTION_DEFINITION.substitute(
-                        option, static_dispatch_function_body=static_dispatch_function_body)
-                elif option['use_c10_dispatcher'] == 'unboxed_only':
+                if option['use_c10_dispatcher'] == 'unboxed_only':
                     fn_definition = C10_UNBOXEDONLY_FUNCTION_DEFINITION.substitute(
                         option, static_dispatch_function_body=static_dispatch_function_body)
                 else:
@@ -1378,14 +1325,9 @@ def create_generic(top_env, declarations):
         if not is_named_tensor_only:
             top_env['registration_declarations'].append(
                 REGISTRATION_DECLARATION.substitute(option))
-        if option['use_c10_dispatcher'] != 'no':
-            top_env['c10_ops_already_moved_from_aten_to_c10'].append(
-                check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
-            )
-        else:
-            top_env['c10_ops_not_moved_from_aten_to_c10_yet'].append(
-                check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
-            )
+        top_env['list_of_aten_ops'].append(
+            check_namedtensor_enabled(OPERATOR_NAME.substitute(option))
+        )
         option['native_type_method_dispatch'] = type_method_dispatch
 
         # Note [Abstract ATen methods]
@@ -1407,13 +1349,10 @@ def create_generic(top_env, declarations):
             if option['use_c10_dispatcher'] == 'full':
                 top_env['function_registrations'].append(
                     check_namedtensor_enabled(DEFAULT_FUNCTION_REGISTRATION.substitute(option)))
-            elif option['use_c10_dispatcher'] == 'unboxed_only':
+            else:
+                assert option['use_c10_dispatcher'] == 'unboxed_only'
                 top_env['function_registrations'].append(
                     check_namedtensor_enabled(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option)))
-            else:
-                assert option['use_c10_dispatcher'] == 'no'
-                top_env['function_registrations'].append(
-                    check_namedtensor_enabled(DEFAULT_LEGACY_FUNCTION_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1880,13 +1819,10 @@ def create_derived(backend_type_env, declarations):
                     if option['use_c10_dispatcher'] == 'full':
                         function_registrations.append(
                             BACKEND_FUNCTION_REGISTRATION.substitute(env))
-                    elif option['use_c10_dispatcher'] == 'unboxed_only':
+                    else:
+                        assert option['use_c10_dispatcher'] == 'unboxed_only'
                         function_registrations.append(
                             BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env))
-                    else:
-                        assert option['use_c10_dispatcher'] == 'no'
-                        function_registrations.append(
-                            BACKEND_LEGACY_FUNCTION_REGISTRATION.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
