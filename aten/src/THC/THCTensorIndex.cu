@@ -238,11 +238,11 @@ __global__ void indexAddLargeIndex24(TensorInfo<T, IndexType> dst,
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get24(elementInSlice, dst);
-    dstOffset += dstIndex * dst.strides[dstAddDim]; //TODO fma24
+    dstOffset = mad24(dstIndexm, dst.strides[dstAddDim], dstOffset);
 
     IndexType srcOffset =
       IndexToOffset<T, IndexType, SrcDim>::get24(elementInSlice, src);
-    srcOffset += srcIndex * src.strides[srcAddDim]; //TODO fma24
+    srcOffset = mad24(srcIndex, src.strides[srcAddDim], srcOffset);
 
     atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
   }
