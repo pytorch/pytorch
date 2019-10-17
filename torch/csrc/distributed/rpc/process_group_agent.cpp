@@ -147,9 +147,6 @@ ProcessGroupAgent::ProcessGroupAgent(
   for (int rank = 0; rank < (int)tmpWorkerIds.size(); ++rank) {
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
-
-  // construct PythonRpcHandler singleton here
-  PythonRpcHandler::getInstance();
 }
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
