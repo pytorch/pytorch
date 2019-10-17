@@ -353,12 +353,6 @@ public:
 //                            Variable::AutogradMeta
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// This struct exists so that AutogradMeta can simply forward-declare
-/// CppHooksList
-struct CppHooksList {
-  std::vector<std::function<Variable(const Variable&)>> hooks_list_;
-};
-
 /// Each `Variable` has one unique `AutogradMeta` struct, which stores autograd
 /// metadata fields that are necessary for tracking the Variable's autograd history.
 
@@ -710,15 +704,15 @@ template <typename T>
 auto Variable::register_hook(T&& hook) -> Variable::hook_return_void_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
-  auto &list = get_autograd_meta()->cpp_hooks_list_.hooks_list_;
+  auto &list = get_autograd_meta()->cpp_hooks_list_;
   if(!list) {
     create_cpp_hook();
   }
-  unsigned idx = list->size();
+  unsigned idx = list->hooks_list_.size();
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Variable return type
   std::function<void(Variable)> fn(hook);
-  list->emplace_back([fn](Variable grad){
+  list->hooks_list_.emplace_back([fn](Variable grad){
    fn(grad);
     return Variable();});
   return idx;
@@ -728,12 +722,12 @@ template <typename T>
 auto Variable::register_hook(T&& hook) -> Variable::hook_return_var_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
-  auto &list = get_autograd_meta()->cpp_hooks_list_.hooks_list_;
+  auto &list = get_autograd_meta()->cpp_hooks_list_;
   if(!list) {
     create_cpp_hook();
   }
-  unsigned idx = list->size();
-  list->push_back(hook);
+  unsigned idx = list->hooks_list_.size();
+  list->hooks_list_.push_back(hook);
   return idx;
 }
 

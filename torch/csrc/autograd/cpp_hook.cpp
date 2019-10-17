@@ -14,15 +14,15 @@ void check_single_result (Variable value, Variable result, std::string hook_name
 
 namespace torch { namespace autograd {
 
-CppFunctionPreHook::CppFunctionPreHook(const std::shared_ptr<hooks_list> &hooks, int value_idx)
-: hooks_(hooks)
+CppFunctionPreHook::CppFunctionPreHook(std::shared_ptr<CppHooksList> hooks, int value_idx)
+: hooks_(std::move(hooks))
 , value_idx_(value_idx)
 {}
 
 variable_list CppFunctionPreHook::operator()(const variable_list& values) {
   auto value = values[value_idx_];
-  for (unsigned i = 0; i < hooks_->size(); ++i) {
-    auto &hook = (*hooks_)[i];
+  for (unsigned i = 0; i < hooks_->hooks_list_.size(); ++i) {
+    auto &hook = hooks_->hooks_list_[i];
     if (!hook) {
       // hook was removed
       continue;
