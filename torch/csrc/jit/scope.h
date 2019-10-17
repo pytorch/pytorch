@@ -112,7 +112,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   // Essentially, find existing or insert new node into the trie.
   InlinedCallStackPtr insertCallStackEntry(
       Function* fn,
-      SourceRange source_range);
+      const SourceRange& source_range);
 
   // Flatten callstack to a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();

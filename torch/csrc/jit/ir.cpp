@@ -1341,13 +1341,7 @@ Value* Graph::insert(
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<SourceRange>& range) {
   return script::emitBuiltinCall(
-      range.value_or(fakeRange()),
-      *this,
-      opname,
-      c10::nullopt,
-      args,
-      kwargs,
-      /*required=*/true);
+      range.value_or(fakeRange()), *this, opname, args, kwargs);
 }
 
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
@@ -1548,6 +1542,11 @@ Node* Graph::createIsInstance(
   n->output()->setType(BoolType::get());
   return n;
 }
+Value* Graph::insertUncheckedCast(Value* v, TypePtr type) {
+  Node* n = insertNode(create(prim::unchecked_cast, {v}));
+  n->output()->setType(std::move(type));
+  return n->output();
+}
 
 Value* Graph::insertFunctionCall(
     Function* callee,
@@ -1642,7 +1641,7 @@ void Graph::freeBlock(Block* b) {
   all_blocks.erase(it);
 }
 
-void Node::insertCallStackEntry(Function* f, SourceRange sr) {
+void Node::insertCallStackEntry(Function* f, const SourceRange& sr) {
   if (!callstack_) {
     callstack_ = c10::make_intrusive<InlinedCallStack>(f, sr);
   } else {
