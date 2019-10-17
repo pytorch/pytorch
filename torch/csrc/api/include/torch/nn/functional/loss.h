@@ -90,7 +90,10 @@ inline Tensor multilabel_soft_margin_loss(
     ret = loss.sum();
   } else {
     ret = input;
-    TORCH_INTERNAL_ASSERT(true, options.reduction(), " is not valid");
+    TORCH_INTERNAL_ASSERT(
+      true,
+      c10::visit(torch::enumtype::enum_name{}, options.reduction()),
+      " is not valid");
   }
   return ret;
 }
