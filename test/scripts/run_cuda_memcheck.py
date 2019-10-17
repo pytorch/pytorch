@@ -40,7 +40,10 @@ args = parser.parse_args()
 # Filters that ignores cublas/cudnn errors
 # TODO (@zasdfgbnm): When can we remove this? Will cublas/cudnn run error-free under cuda-memcheck?
 def is_ignored_only(output):
-    report = cmc.parse(output)
+    try:
+        report = cmc.parse(output)
+    except cmc.ParseError:
+        return False
     count_ignored_errors = 0
     for e in report.errors:
         if 'libcublas' in ''.join(e.stack) or 'libcudnn' in ''.join(e.stack):

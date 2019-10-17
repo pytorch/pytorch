@@ -1,3 +1,7 @@
+class ParseError(Exception):
+    pass
+
+
 class Report:
     HEAD = 'ERROR SUMMARY: '
     TAIL = ' errors'
@@ -6,7 +10,8 @@ class Report:
         self.text = text
         self.num_errors = int(text[len(self.HEAD):len(text) - len(self.TAIL)])
         self.errors = errors
-        assert len(errors) == self.num_errors
+        if len(errors) != self.num_errors:
+            raise ParseError()
 
 
 class Error:
@@ -35,12 +40,10 @@ def parse(message):
         if l.startswith('ERROR SUMMARY:'):
             return Report(l, errors)
         if not in_message:
-            assert l[0] != ' '
             in_message = True
             message_lines = [l]
         elif l == '':
             errors.append(Error(message_lines))
             in_message = False
         else:
-            assert l[0] == ' '
             message_lines.append(l)
