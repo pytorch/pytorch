@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import time
 import unittest
 
-from enum import IntEnum
 import torch
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
