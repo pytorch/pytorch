@@ -9991,6 +9991,13 @@ class TestTorchDeviceType(TestCase):
             expected = torch.from_numpy(np.arange(0, num_samples)).to(device)
             self.assertEqual(actual, expected, "non-unique indicies")
 
+            dist = torch.cat((small_part, large_part), 0)
+            result = torch.multinomial(dist, num_samples, replacement=False)
+            actual = torch.unique(result, sorted=True)
+            expected = torch.from_numpy(np.arange(0, num_samples)).to(device)
+            self.assertEqual(actual, expected, "non-unique indicies")
+
+
     def test_cdist_large(self, device):
         x = torch.randn(1000, 10, device=device)
         y = torch.randn(1000, 10, device=device)

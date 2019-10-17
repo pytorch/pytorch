@@ -143,6 +143,8 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
       accscalar_t sum_high = 0;
       accscalar_t sum_low = 0;
       scalar_t val;
+      accscalar_t prev_sum_high = 0;
+      accscalar_t prev_sum_low = 0;
       for (int64_t j = 0; j < n_categories; j++) {
         val = self_ptr[i * self_stride_0 + j * self_stride_1];
         TORCH_CHECK(val >= 0, "invalid multinomial distribution (encountering probability entry < 0)");
@@ -151,12 +153,16 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
         self_copy_ptr[j] = val;
         scalar_t h = static_cast<scalar_t>(std::floor(val));
         scalar_t l = val - h;
+        prev_sum_high = sum_high;
+        prev_sum_low = sum_low;
         sum_high += h;
         sum_low += l;
         if (sum_low >= 1) {
           sum_low--;
           sum_high++;
         }
+        TORCH_CHECK(val == 0 || ((prev_sum_high == sum_high && sum_low > prev_sum_low) || (sum_high > prev_sum_high)),
+            "cumulative distribution should increase");
         if (val == 0) {
           n_zeros += 1;
         }
