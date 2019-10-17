@@ -621,14 +621,11 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "code",
           [](Module& self) {
-            std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
-            SourceRangeRecords source_ranges;
-            PythonPrint pp(ss, source_ranges, tensors, deps, false);
+            PythonPrint pp(tensors, deps, false);
             pp.printNamedType(self.type());
-            pp.finish();
-            return ss.str();
+            return pp.str();
           })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
@@ -722,14 +719,11 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "code",
           [](const StrongFunctionPtr& self) {
-            std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
-            SourceRangeRecords source_ranges;
-            PythonPrint pp(ss, source_ranges, tensors, deps, false);
+            PythonPrint pp(tensors, deps, false);
             pp.printFunction(*self.function_);
-            pp.finish();
-            return ss.str();
+            return pp.str();
           })
       .def(
           "get_debug_state",
@@ -759,14 +753,11 @@ void initJitScriptBindings(PyObject* module) {
           "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
       .def_property_readonly("code", [](Method& self) {
-        std::ostringstream ss;
         std::vector<at::Tensor> tensors;
         std::vector<c10::NamedTypePtr> deps;
-        SourceRangeRecords source_ranges;
-        PythonPrint pp(ss, source_ranges, tensors, deps, false);
+        PythonPrint pp(tensors, deps, false);
         pp.printMethod(self.function());
-        pp.finish();
-        return ss.str();
+        return pp.str();
       });
   m.def(
       "_jit_script_compile",
