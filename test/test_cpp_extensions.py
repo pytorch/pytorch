@@ -670,7 +670,7 @@ class TestCppExtension(common.TestCase):
         source = """
         #include <torch/script.h>
         torch::Tensor func(torch::Tensor x) { return x; }
-        static torch::jit::RegisterOperators r("test::func", &func);
+        static torch::RegisterOperators r("test::func", &func);
         """
         torch.utils.cpp_extension.load_inline(
             name="is_python_module",
