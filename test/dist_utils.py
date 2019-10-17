@@ -23,7 +23,7 @@ class TestConfig:
 
 
 TEST_CONFIG = TestConfig(rpc_backend=getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP))
-INIT_METHOD_TEMPLATE = "file://{file_name}?rank={rank}&world_size={world_size}"
+INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
 def dist_init(test_method):
@@ -37,13 +37,19 @@ def dist_init(test_method):
     @wraps(test_method)
     def wrapper(self, *arg, **kwargs):
         self.worker_id = self.rank
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
         # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
             backend=TEST_CONFIG.rpc_backend,
-            self_rank=self.rank,
             init_method=self.init_method,
+            self_rank=self.rank,
+            world_size=self.world_size,
             num_send_recv_threads=16
         )
         test_method(self, *arg, **kwargs)
