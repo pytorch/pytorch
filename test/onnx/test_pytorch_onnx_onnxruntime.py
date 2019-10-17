@@ -932,7 +932,7 @@ class TestONNXRuntime(unittest.TestCase):
         class ArangeScript(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, a):
-                return torch.arange(a.size(0) + 2).view(-1, 1) + a
+                return torch.arange(a.size(0))
 
         x = torch.randn(3, 4, requires_grad=True)
         outputs = ArangeScript()(x)
@@ -940,7 +940,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class ArangeModel(torch.nn.Module):
             def forward(self, a):
-                return torch.arange(a.size(0) + 2).view(-1, 1) + a
+                return torch.arange(a.size(0))
 
         self.run_test(ArangeModel(), x)
 
@@ -993,7 +993,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ArangeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    def test_arange_start_end_step(self):
+    def test_arange_start_end_step_notype(self):
         class ArangeScript(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, a):

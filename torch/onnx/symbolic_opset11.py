@@ -207,7 +207,6 @@ def arange(g, *args):
         raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
     return arange_tensor
 
-
 @parse_args('v', 'i')
 def _dim_arange(g, like, dim):
     like_shape = g.op('Shape', like)
