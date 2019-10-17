@@ -238,7 +238,7 @@ __global__ void indexAddLargeIndex24(TensorInfo<T, IndexType> dst,
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get24(elementInSlice, dst);
-    dstOffset = mad24(dstIndexm, dst.strides[dstAddDim], dstOffset);
+    dstOffset = mad24(dstIndex, dst.strides[dstAddDim], dstOffset);
 
     IndexType srcOffset =
       IndexToOffset<T, IndexType, SrcDim>::get24(elementInSlice, src);
