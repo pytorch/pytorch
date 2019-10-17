@@ -9541,9 +9541,9 @@ class TestTorchDeviceType(TestCase):
                         y = torch.randn(r2, m, device=device)
                         if p == 2:
                             for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
-                                actual = torch.cdist(x, y, p=p, compute_mode=cm)
-                                expected = brute_cdist(x, y, p=p)
-                                self.assertTrue(torch.allclose(expected, actual))
+                                actual = torch.cdist(x, y, p=2, compute_mode=cm)
+                                expected = brute_cdist(x, y, p=2)
+                                self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0.02))
                         else:
                             actual = torch.cdist(x, y, p=p)
                             expected = brute_cdist(x, y, p=p)
@@ -9558,9 +9558,9 @@ class TestTorchDeviceType(TestCase):
                         y = torch.randn(2, 3, 6, r2, m, device=device)
                         if p == 2:
                             for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
-                                actual = torch.cdist(x, y, p=p)
-                                expected = brute_cdist(x, y, p=p)
-                                self.assertTrue(torch.allclose(expected, actual))
+                                actual = torch.cdist(x, y, p=2, compute_mode=cm)
+                                expected = brute_cdist(x, y, p=2)
+                                self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0.02))
                         else:
                             actual = torch.cdist(x, y, p=p)
                             expected = brute_cdist(x, y, p=p)
