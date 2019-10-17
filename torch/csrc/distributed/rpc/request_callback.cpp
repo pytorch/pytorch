@@ -24,7 +24,7 @@ Message createException(const Message& request, const std::exception& e) {
 // current context id properly. This struct is used to clean up current context
 // id after processMessage() is done.
 struct ClearAutogradContextGuard {
-  ClearAutogradContextGuard() {}
+  ClearAutogradContextGuard() = default;
   ~ClearAutogradContextGuard() {
     clear();
   }
