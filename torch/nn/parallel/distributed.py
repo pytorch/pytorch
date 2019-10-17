@@ -217,6 +217,11 @@ class DistributedDataParallel(Module):
                          are getting different gradients, which should not
                          happen if DistributedDataParallel is correctly used.
                          (default: ``False``)
+        scatter: when set to ``False``, scatter functionality is bypassed in
+                 forward calls.  For multi-device, this assumes the inputs are
+                 already organized per device in an outer list.  For single-
+                 device, it passes the inputs directly to the wrapped model, so
+                 its interface doesn't change.  (default: ``True``)
 
     Attributes:
         module (Module): the module to be parallelized
@@ -230,7 +235,8 @@ class DistributedDataParallel(Module):
                  output_device=None, dim=0, broadcast_buffers=True,
                  process_group=None, bucket_cap_mb=25,
                  find_unused_parameters=False,
-                 check_reduction=False):
+                 check_reduction=False,
+                 scatter=True):
 
         super(DistributedDataParallel, self).__init__()
 
@@ -301,6 +307,8 @@ class DistributedDataParallel(Module):
             self._distributed_broadcast_coalesced(
                 module_states,
                 self.broadcast_bucket_size)
+
+        self._scatter = scatter
 
         self._ddp_init_helper()
 
@@ -441,15 +449,25 @@ class DistributedDataParallel(Module):
         if self.require_forward_param_sync:
             self._sync_params()
 
-        if self.device_ids:
-            inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
-            if len(self.device_ids) == 1:
-                output = self.module(*inputs[0], **kwargs[0])
+        if self._scatter:
+            # Code-block from previous to adding "_scatter" option here:
+            if self.device_ids:
+                inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
+                if len(self.device_ids) == 1:
+                    output = self.module(*inputs[0], **kwargs[0])
+                else:
+                    outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
+                    output = self.gather(outputs, self.output_device)
             else:
+                output = self.module(*inputs, **kwargs)
+        else:
+            if self.device_ids and len(self.device_ids) > 1:
+                # No scatter: assume inputs are already organized per-device.
                 outputs = self.parallel_apply(self._module_copies[:len(inputs)], inputs, kwargs)
                 output = self.gather(outputs, self.output_device)
-        else:
-            output = self.module(*inputs, **kwargs)
+            else:
+                # e.g. if single-device, directly pass inputs, no per-device list.
+                output = self.module(*inputs, **kwargs)
 
         if torch.is_grad_enabled() and self.require_backward_grad_sync:
             self.require_forward_param_sync = True
