@@ -1664,10 +1664,10 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm) {
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {
   ASSERT_EQ(
     c10::str(LayerNorm(LayerNormOptions({2, 2}))),
-      "torch::nn::LayerNorm(normalized_shape=[2, 2], elementwise_affine=true, eps=1e-05)");
+      "torch::nn::LayerNorm([2, 2], eps=1e-05, elementwise_affine=true)");
       ASSERT_EQ(
         c10::str(LayerNorm(LayerNormOptions({2, 2}).elementwise_affine(false).eps(2e-5))),
-          "torch::nn::LayerNorm(normalized_shape=[2, 2], elementwise_affine=false, eps=2e-05)");
+          "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
 }
 
 TEST_F(ModulesTest, PrettyPrintEmbedding) {

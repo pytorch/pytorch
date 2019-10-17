@@ -591,6 +591,16 @@ TEST_F(FunctionalTest, PReLU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, LayerNorm) {
+  const auto input = torch::randn({2, 2});
+  const LayerNormOptions& options = LayerNormOptions({2, 2});
+  const auto weight = torch::randn({2, 2});
+  const auto bias = torch::randn({2, 2});
+  auto y = F::layer_norm(input, options, weight, bias);
+  auto y_exp = torch::layer_norm(input, torch::IntArrayRef(options.normalized_shape()), weight, bias, options.eps());
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(FunctionalTest, Normalize) {
   const auto expected = torch::tensor(
     {{{0.00000000, 0.10000000, 0.2000, 0.30000000, 0.40000000},
@@ -606,16 +616,6 @@ TEST_F(FunctionalTest, Normalize) {
     ASSERT_EQ(s.ndimension(), 0);
     ASSERT_EQ(input.grad().numel(), 10);
     ASSERT_TRUE(torch::allclose(norm, expected));
-  }
-
-  TEST_F(FunctionalTest, LayerNorm) {
-    const Tensor& input = torch::randn(2, 2);
-    const LayerNormOptions& options = LayerNormOptions({2, 2}).elementwise_affine(false).eps(2e-5);
-    const Tensor& weight = torch::randn(2, 2);;
-    const Tensor& bias = torch::randn(2, 2);
-    auto y = F::layer_norm(input, options, weight, bias);
-    auto y_exp = torch::layer_norm(input, options.normalized_shape(), weight, bias, options.eps());
-    ASSERT_TRUE(torch::allclose(y, y_exp));
   }
 
   { // Test #2 Check variations of optional arguments
