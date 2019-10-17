@@ -9556,11 +9556,7 @@ class TestTorchDeviceType(TestCase):
                             expected = brute_cdist(x, y, p=p)
                             res = torch.allclose(expected, actual)
                             if not res:
-                                print(x)
-                                print(y)
-                                print(p)
-                                print(actual)
-                                print(expected)
+                                raise RuntimeError('cm:%s\nx:%s\ny:%s\nactual:%s\nexpected:%s\n' % (cm, x, y, actual, expected))
                             self.assertTrue(res)
 
     def test_cdist_norm_batch(self, device):
