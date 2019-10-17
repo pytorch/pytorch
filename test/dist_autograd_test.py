@@ -29,7 +29,7 @@ ctx_ids = [-1, -1, -1, -1]
 # Send rpc done info to dst_rank = (self.rank + rank_distance) % self.world_size
 def _set_rpc_done(ctx_id, rank_distance):
     global rpc_done
-    global context_id
+    global ctx_ids
     rpc_done[rank_distance] = True
     ctx_ids[rank_distance] = ctx_id
 
@@ -290,42 +290,48 @@ class DistAutogradTest(object):
             t2 = torch.zeros(3, 3, requires_grad=True)
             nest_dst_rank = (dst_rank + 1) % self.world_size
             ret = rpc.rpc_sync("worker{}".format(dst_rank),
-                               my_py_nested_call, args=(t1, t2, dst_rank, self.world_size, 0))
+                               my_py_nested_call, args=(t1, t2, dst_rank, self.world_size, 1))
             rpc.rpc_sync("worker{}".format((self.rank + RankDistance.PREV) % self.world_size),
                          _set_rpc_done, args=(context_id, RankDistance.PREV))
             rpc.rpc_sync("worker{}".format((self.rank + RankDistance.PREV_PREV) % self.world_size),
                          _set_rpc_done, args=(context_id, RankDistance.PREV_PREV))
+            rpc.rpc_sync("worker{}".format((self.rank + RankDistance.PREV_PREV_PREV) % self.world_size),
+                         _set_rpc_done, args=(context_id, RankDistance.PREV_PREV_PREV))
 
-            # For self.rank, it has four pairs of send and recv funcitons
-            # One pair is for current context id when this rank is worked as
-            # client
-            # Another two pairs are for prev context id when this rank is worked
-            # as server
-            # Last pair is for prev prev context id when this rank is worked as
-            # host to run the nested rpc call inside my_py_nested_call
+            # For self.rank, it has six pairs of send and recv funcitons
+            # One pair is for current context id when this rank send first rpc
+            # call.
+            # Another two pairs are for prev context id when this rank make
+            # 1st nested call.
+            # Another two pairs are for prev prev context id when this rank make
+            # 2nd nested call.
+            # Last pair is for prev prev prev context id when this rank
+            # execute the torch.add() operator.
 
-            # verify first pair of send and recv functions for current context
+            # Verify first pair of send and recv functions for current context
             self._verify_graph_for_first_rpc_call(context_id, t1, t2, ret)
 
-            # verify two pairs of send and recv functions for prev rank
-            # We should have send/recv functions from the previous rank, get all
-            # contexts in this node to find them.
-            # Wait for the prev rank to be done with rpc.
+            # Verify another two pairs of send and recv functions for 1st nested
+            # call
             while not rpc_done[RankDistance.PREV]:
                 time.sleep(0.1)
                 pass
             ctx = dist_autograd._retrieve_context(ctx_ids[RankDistance.PREV])
             self._verify_graph_for_nested_rpc_call(ctx)
 
-            # verify third pair of send and recv functions for
-            # prev of prev rank,
-            # We should have send/recv functions from the previous of previous
-            # rank, get all contexts in this node to find them.
-            # Wait for the prev prev rank to be done with rpc.
+            # Verify another two pairs of send and recv functions for 2nd nested
+            # call
             while not rpc_done[RankDistance.PREV_PREV]:
                 time.sleep(0.1)
                 pass
             ctx = dist_autograd._retrieve_context(ctx_ids[RankDistance.PREV_PREV])
+            self._verify_graph_for_nested_rpc_call(ctx)
+
+            # verify last pair of send and recv functions
+            while not rpc_done[RankDistance.PREV_PREV_PREV]:
+                time.sleep(0.1)
+                pass
+            ctx = dist_autograd._retrieve_context(ctx_ids[RankDistance.PREV_PREV_PREV])
             self._verify_graph_for_rpc_call_exec(ctx)
 
     @dist_init
