@@ -110,6 +110,8 @@ TripletMarginLossImpl::TripletMarginLossImpl(
     const TripletMarginLossOptions& options_)
     : options(options_) {}
 
+void TripletMarginLossImpl::reset() {}
+
 void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::TripletMarginLoss(margin=" << options.margin() << 
             ", p=" << options.p() <<
@@ -122,6 +124,37 @@ Tensor TripletMarginLossImpl::forward(
     const Tensor& positive,
     const Tensor& negative) {
   return F::triplet_margin_loss(anchor, positive, negative, options);
+}
+
+// ============================================================================
+
+MultiLabelMarginLossImpl::MultiLabelMarginLossImpl(
+    const torch::nn::MultiLabelMarginLossOptions& options_)
+    : options(options_) {}
+
+void MultiLabelMarginLossImpl::reset() {}
+
+void MultiLabelMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::MultiLabelMarginLoss()";
+}
+
+Tensor MultiLabelMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
+  return F::multilabel_margin_loss(input, target, options);
+}
+
+// ============================================================================
+
+SoftMarginLossImpl::SoftMarginLossImpl(
+    const torch::nn::SoftMarginLossOptions& options_) : options(options_) {}
+
+void SoftMarginLossImpl::reset() {}
+
+void SoftMarginLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::SoftMarginLoss()";
+}
+
+Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
+  return F::soft_margin_loss(input, target, options);
 }
 
 } // namespace nn

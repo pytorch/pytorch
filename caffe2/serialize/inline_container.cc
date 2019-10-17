@@ -114,18 +114,18 @@ void PyTorchStreamReader::init() {
   size_t version_size;
   std::tie(version_ptr, version_size) = getRecord("version");
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
-  size_t version_number = caffe2::stoull(version);
+  version_ = caffe2::stoull(version);
   AT_ASSERTM(
-      version_number >= kMinSupportedFileFormatVersion,
+      version_ >= kMinSupportedFileFormatVersion,
       "Attempted to read a PyTorch file with version ",
-      c10::to_string(version_number),
+      c10::to_string(version_),
       ", but the minimum supported version for reading is ",
       c10::to_string(kMinSupportedFileFormatVersion),
       ". Your PyTorch script module file is too old. Please re-export it again.");
   AT_ASSERTM(
-      version_number <= kMaxSupportedFileFormatVersion,
+      version_ <= kMaxSupportedFileFormatVersion,
       "Attempted to read a PyTorch file with version ",
-      version_number,
+      version_,
       ", but the maximum supported version for reading is ",
       kMaxSupportedFileFormatVersion,
       ". Your PyTorch installation may be too old.");
@@ -232,40 +232,51 @@ PyTorchStreamReader::~PyTorchStreamReader() {
   valid("closing reader for archive ", archive_name_.c_str());
 }
 
-size_t ostream_write_func(void *pOpaque, mz_uint64 file_ofs, const void *pBuf, size_t n) {
+size_t ostream_write_func(
+    void* pOpaque,
+    mz_uint64 file_ofs,
+    const void* pBuf,
+    size_t n) {
   auto self = static_cast<PyTorchStreamWriter*>(pOpaque);
   if (self->current_pos_ != file_ofs) {
-    // xxx - windows ostringstream refuses to seek to the end of an empty string
-    // so we workaround this by not calling seek unless necessary
-    // in the case of the first write (to the empty string) file_ofs and
-    // current_pos_ will be 0 and the seek won't occur.
-    self->out_->seekp(file_ofs);
-    if(!*self->out_)
-      return 0;
+    CAFFE_THROW("unexpected pos ", self->current_pos_, " vs ", file_ofs);
   }
+  size_t ret = self->writer_func_(pBuf, n);
+  if (n != ret) {
+    self->err_seen_ = true;
+  }
+  self->current_pos_ += ret;
+  return ret;
+}
 
-  self->out_->write(static_cast<const char*>(pBuf), n);
-  if(!*self->out_)
-    return 0;
-  self->current_pos_ = file_ofs + n;
-  return n;
+PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
+    : archive_name_(basename(file_name)) {
+  setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    std::string file_name,
-    std::ostream* out)
-    : ar_(caffe2::make_unique<mz_zip_archive>()),
-      archive_name_(basename(file_name)),
-      out_(out) {
+    const std::function<size_t(const void*, size_t)>& writer_func)
+    : archive_name_("archive"), writer_func_(writer_func) {
+  setup(archive_name_);
+}
+
+void PyTorchStreamWriter::setup(const string& file_name) {
+  ar_ = caffe2::make_unique<mz_zip_archive>();
   memset(ar_.get(), 0, sizeof(mz_zip_archive));
+  archive_name_plus_slash_ = archive_name_ + "/"; // for writeRecord().
 
   if (archive_name_.size() == 0) {
     CAFFE_THROW("invalid file name: ", file_name);
   }
-  if (!out_) {
-    file_stream_.open(file_name, std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
-    out_ = &file_stream_;
+  if (!writer_func_) {
+    file_stream_.open(
+        file_name,
+        std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     valid("opening archive ", file_name.c_str());
+    writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
+      file_stream_.write(static_cast<const char*>(buf), nbytes);
+      return !file_stream_ ? 0 : nbytes;
+    };
   }
 
   ar_->m_pIO_opaque = this;
@@ -275,15 +286,18 @@ PyTorchStreamWriter::PyTorchStreamWriter(
   valid("initializing archive ", file_name.c_str());
 
   std::stringstream version;
-  version << kMaxSupportedFileFormatVersion << "\n";
+  version << kProducedFileFormatVersion << "\n";
   writeRecord("version", version.str().c_str(), version.str().size());
 }
 
-void PyTorchStreamWriter::writeRecord(const std::string& name, const void* data, size_t size, bool compress) {
+void PyTorchStreamWriter::writeRecord(
+    const std::string& name,
+    const void* data,
+    size_t size,
+    bool compress) {
   AT_ASSERT(!finalized_);
-  std::stringstream ss;
-  ss << archive_name_ << "/" << name;
-  const std::string& full_name = ss.str();
+  AT_ASSERT(!archive_name_plus_slash_.empty());
+  std::string full_name = archive_name_plus_slash_ + name;
   std::string padding = getPadding(ar_->m_archive_size, full_name, size);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   mz_zip_writer_add_mem_ex_v2(
@@ -310,8 +324,9 @@ void PyTorchStreamWriter::writeEndOfFile() {
   mz_zip_writer_finalize_archive(ar_.get());
   mz_zip_writer_end(ar_.get());
   valid("writing central directory for archive ", archive_name_.c_str());
-  if (file_stream_.is_open())
+  if (file_stream_.is_open()) {
     file_stream_.close();
+  }
 }
 
 void PyTorchStreamWriter::valid(const char* what, const char* info) {
@@ -324,7 +339,7 @@ void PyTorchStreamWriter::valid(const char* what, const char* info) {
         ": ",
         mz_zip_get_error_string(err));
   }
-  if (!*out_) {
+  if (err_seen_) {
     CAFFE_THROW("PytorchStreamWriter failed ", what, info, ".");
   }
 }

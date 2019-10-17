@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import workspace
-from caffe2.python import core 
+from caffe2.python import core
 from caffe2.proto import caffe2_pb2
 import benchmark_core
 import benchmark_utils
@@ -37,22 +37,22 @@ class Caffe2BenchmarkBase(object):
         if device not in ['cuda', 'cpu']:
             raise ValueError("Missing attrs in configs")
 
-        if 'cuda' in device: 
+        if 'cuda' in device:
             self.dev = core.DeviceOption(caffe2_pb2.CUDA, 0)
-        else: 
+        else:
             self.dev = core.DeviceOption(caffe2_pb2.CPU)
         return self.dev
 
     def tensor(self, shapes, dtype='float32', device='cpu'):
         """ A wapper function to create C2 tensor filled with random data.
-            The name/label of the tensor is returned and it is available 
-            throughout the benchmark execution phase. 
-            Args: 
+            The name/label of the tensor is returned and it is available
+            throughout the benchmark execution phase.
+            Args:
                 shapes: int or a sequence of ints to defining the shapes of the tensor
-                dtype: use the dtypes from numpy 
+                dtype: use the dtypes from numpy
                     (https://docs.scipy.org/doc/numpy/user/basics.types.html)
-            Return: 
-                C2 tensor of dtype 
+            Return:
+                C2 tensor of dtype
         """
         blob_name = 'blob_' + str(Caffe2BenchmarkBase.tensor_index)
         dev = self._device_option(device)
@@ -65,14 +65,14 @@ class Caffe2BenchmarkBase(object):
         """ this is used to label the operator being benchmarked
         """
         if self.user_provided_name:
-            return self.user_provided_name 
+            return self.user_provided_name
         return self.__class__.__name__
 
-    def set_module_name(self, name): 
+    def set_module_name(self, name):
         self.user_provided_name = name
 
     def _value_to_str(self, value):
-        """ if value is bool, we will convert it to 0 and 1 
+        """ if value is bool, we will convert it to 0 and 1
         """
         ret = value
         if type(value) == bool:
@@ -83,7 +83,7 @@ class Caffe2BenchmarkBase(object):
         """ this is a globally unique name which can be used to
             label a specific test
         """
-        if name_type == "long": 
+        if name_type == "long":
             test_name_str = []
             for key in kargs:
                 value = kargs[key]
@@ -99,19 +99,19 @@ class Caffe2BenchmarkBase(object):
 
 
 class Caffe2OperatorTestCase(object):
-    """ This class includes all the information needed to benchmark an operator. 
-        op_bench: it's a user-defined class (child of Caffe2BenchmarkBase) 
+    """ This class includes all the information needed to benchmark an operator.
+        op_bench: it's a user-defined class (child of Caffe2BenchmarkBase)
         which includes input and operator, .etc
         test_config: a namedtuple includes test_name, input_shape, tag, run_backward.
         When run_backward is false, the run_forward method will be executed, otherwise
-        run_backward method will be executed. 
+        run_backward method will be executed.
     """
     def __init__(self, op_bench, test_config):
         self.op_bench = op_bench
         self.test_config = test_config
         self.framework = "Caffe2"
 
-    def run_forward(self, num_runs):
+    def run_forward(self, num_runs, print_per_iter=False):
         """ Run the forward path of an operator in a loop
         """
         with core.DeviceScope(self.op_bench.dev):
@@ -126,6 +126,9 @@ class Caffe2OperatorTestCase(object):
             op = self.op_bench.backward()
         if not workspace.RunOperatorMultiple(op, num_runs):
             raise ValueError("Unable to run operator gradient test case: {}".format(self.test_name))
+
+    def _print_per_iter(self):
+        pass
 
 
 def register_caffe2_op_test_case(op_bench, test_config):

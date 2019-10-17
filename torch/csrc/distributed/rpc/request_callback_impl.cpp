@@ -202,7 +202,7 @@ std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
       auto cleanupContextId = cleanupContextReq.getContextId();
       // release the context if it still exists on this thread. We need to check
       // if it exists since it may have been deleted by an in-flight RPC.
-      // This can created nested RPCs if there are other nodes that get notified
+      // This can create nested RPCs if there are other nodes that get notified
       // to clean up their context.
       DistAutogradContainer::getInstance().releaseContextIfPresent(
           cleanupContextId);

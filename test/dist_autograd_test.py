@@ -17,7 +17,7 @@ known_context_ids = []
 
 # we don't need a lock here since the GIL is held while executing remote
 # python UDFs, so access to known_context_ids is serialized across several workers.
-def store_context_id(context_id):
+def _store_context_id(context_id):
     global known_context_ids
     known_context_ids.append(context_id)
 
@@ -40,6 +40,7 @@ def _all_contexts_cleaned_up(num_contexts, timeout_seconds=10):
                 context_id_to_raised[context_id] = True
         if len(context_id_to_raised) == num_contexts:
             break
+    # all contexts have been cleaned up if trying to retrieve any context resulted in a RuntimeError.
     success = len(context_id_to_raised) == num_contexts and all(context_id_to_raised.values())
     return success
 
@@ -252,7 +253,7 @@ class DistAutogradTest(object):
             t2 = torch.zeros(3, 3, requires_grad=True)
             for dst_rank in dst_ranks:
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
-                rpc.rpc_sync("worker{}".format(dst_rank), store_context_id, args=(context_id,))
+                rpc.rpc_sync("worker{}".format(dst_rank), _store_context_id, args=(context_id,))
         # the thread's context id should be cleaned up
         with self.assertRaises(RuntimeError):
             dist_autograd._retrieve_context(context_id)
