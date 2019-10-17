@@ -148,8 +148,6 @@ ProcessGroupAgent::ProcessGroupAgent(
     allWorkerInfo_.emplace_back(std::move(tmpWorkerIds[rank]), rank);
   }
 
-  // construct PythonRpcHandler singleton here
-  PythonRpcHandler::getInstance();
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() {
