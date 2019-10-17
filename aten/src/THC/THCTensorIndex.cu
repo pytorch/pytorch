@@ -441,12 +441,12 @@ __global__ void indexSelectLargeIndex24(TensorInfo<T, IndexType> dst,
        linearIndex += gridDim.x * blockDim.x) {
     IndexType dstIndex, elementInSlice;
     if (IndexIsMajor) {
-      dstIndex = linearIndex / innerSize;
-      elementInSlice = linearIndex % innerSize;
+      dstIndex = div24(linearIndex, innerSize);
+      elementInSlice = mod24(linearIndex, innerSize);
     }
     else {
-      elementInSlice = linearIndex / innerSize;
-      dstIndex = linearIndex % innerSize;
+      elementInSlice = div24(linearIndex, innerSize);
+      dstIndex = mod24(linearIndex, innerSize);
     }
 
     // Lua indices begin at 1
@@ -456,11 +456,11 @@ __global__ void indexSelectLargeIndex24(TensorInfo<T, IndexType> dst,
 
     IndexType dstOffset =
       IndexToOffset<T, IndexType, DstDim>::get24(elementInSlice, dst);
-    dstOffset += dstIndex * dst.strides[dstSelectDim]; // TODO fma24
+    dstOffset = mad24(dstIndex, dst.strides[dstSelectDim], dstOffset);
 
     IndexType srcOffset =
       IndexToOffset<T, IndexType, SrcDim>::get24(elementInSlice, src);
-    srcOffset += srcIndex * src.strides[srcSelectDim]; // TODO fma24
+    srcOffset = mad24(srcIndex, src.strides[srcSelectDim], srcOffset);
 
     dst.data[dstOffset] = src.data[srcOffset];
   }
