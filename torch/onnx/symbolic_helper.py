@@ -351,6 +351,20 @@ def _index_fill_reshape_helper(g, self, dim, index):
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 
+
+def _avgpool_count_include_pad_helper(g, input, padding):
+    if _export_onnx_opset_version <= 10:
+        input = g.op("Pad", input,
+                     pads_i=((0,) * 2 + padding) * 2,
+                     mode_s='constant',
+                     value_f=0.)
+    else:
+        input = g.op("Pad", input,
+                     g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)),
+                     mode_s='constant')
+    padding = (0,) * len(padding)
+    return input, padding
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
