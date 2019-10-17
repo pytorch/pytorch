@@ -33,10 +33,14 @@ namespace script {
 TypeAndAlias SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", GeneratorType::get()},
+      {"Dimname", StringType::get()},
+      {"DimnameList", ListType::create(StringType::get())},
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
+      {"Storage", IntType::get()},
       {"QScheme", IntType::get()},
+      {"ConstQuantizerPtr", IntType::get()},
       {"Device", DeviceObjType::get()},
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
