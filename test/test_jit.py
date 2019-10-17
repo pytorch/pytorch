@@ -11077,7 +11077,7 @@ a")
                 self.mods = mods
                 self.mods2 = mods2
                 self.tup_larger = list(range(len(mods2) + 1))
-                self.tup_smaller = list(range(len(mods2) - 1))
+                self.tup_smaller = list(range(max(len(mods2) + 1, 1)))
 
             def forward(self, x):
                 iter = 0
@@ -11430,13 +11430,13 @@ a")
 
     def test_for_tuple_assign(self):
         def test_simple_assign(x):
-            # type: (Tuple[int, float]) -> float
+            # type: (Tuple[int, int]) -> float
             sum = 0.0
             for a in x:
                 sum += float(a)
             return sum
 
-        self.checkScript(test_simple_assign, ((1, 2.5),))
+        self.checkScript(test_simple_assign, ((1, 2),))
 
         def test_tuple_assign(x):
             # type: (Tuple[Tuple[int, int], Tuple[int, int]]) -> int

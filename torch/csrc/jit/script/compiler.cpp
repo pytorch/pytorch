@@ -1566,7 +1566,7 @@ struct to_ir {
   // https://github.com/onnx/onnx/blob/master/docs/Operators.md#Loop
   void emitLoopCommon(
       SourceRange range,
-      const List<Stmt>& body,
+      const std::function<void()>& emit_body,
       const SugaredValuePtr& iter_val,
       c10::optional<List<Expr>> targets,
       c10::optional<Expr> cond) {
@@ -1622,19 +1622,18 @@ struct to_ir {
         emitExprsAssign(target_exprs, {sv}, range, /*n_binders=*/1);
       }
 
-      emitStatements(body);
-
+      emit_body();
       popFrame();
     }
   }
 
-  void emitFor(const For& stmt) {
-    auto targets = stmt.targets();
-    auto itrs = stmt.itrs();
-    auto body = stmt.body();
-    auto loc = stmt.range();
-    if (stmt.itrs().size() != 1) {
-      throw ErrorReport(stmt) << "List of iterables is not supported currently";
+  void emitFor(
+      const List<Expr>& targets,
+      const List<Expr>& itrs,
+      const SourceRange& loc,
+      const std::function<void()>& emit_body) {
+    if (itrs.size() != 1) {
+      throw ErrorReport(loc) << "List of iterables is not supported currently";
     }
     // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
@@ -1650,7 +1649,7 @@ struct to_ir {
     // values would have to subtype the input type.
 
     if (!iterable->emitUnrolled()) {
-      return emitLoopCommon(loc, body, iterable->getValue(), targets, {});
+      return emitLoopCommon(loc, emit_body, iterable->getValue(), targets, {});
     }
     TORCH_INTERNAL_ASSERT(
         iterable->getLen(), "Static For should have defined length");
@@ -1661,13 +1660,19 @@ struct to_ir {
       auto sugared_value = iterable->getValue()->getitem(loc, method, index);
       emitExprsAssign(
           targets, {sugared_value}, itrs[0].range(), /*n_binders=*/1);
-      emitStatements(body);
+      emit_body();
     }
+  }
+
+  void emitFor(const For& stmt) {
+    auto emit_body = [&]() { emitStatements(stmt.body()); };
+    emitFor(stmt.targets(), stmt.itrs(), stmt.range(), emit_body);
   }
 
   void emitWhile(const While& stmt) {
     auto cond = stmt.cond();
-    emitLoopCommon(stmt.range(), stmt.body(), nullptr, {}, cond);
+    auto emit_body = [&]() { emitStatements(stmt.body()); };
+    emitLoopCommon(stmt.range(), emit_body, nullptr, {}, cond);
   }
 
   // Currently we do not support assigning exceptions to variables,

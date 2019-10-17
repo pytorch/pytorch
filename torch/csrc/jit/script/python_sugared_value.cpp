@@ -565,15 +565,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return toSimple(g.insertConstant(l, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
       py::tuple tup = obj;
-      std::vector<std::shared_ptr<SugaredValue>> result;
-      result.reserve(tup.size());
+      std::vector<Value*> values;
+      values.reserve(tup.size());
       for (py::handle t : tup) {
         py::object obj = py::reinterpret_borrow<py::object>(t);
-        result.push_back(toSugaredValue(obj, m, loc, true));
+        values.push_back(toSugaredValue(obj, m, loc, true)->asValue(loc, m));
       }
-      bool contains_module_list =
-          false; // Python Tuples can't contain module list
-      return std::make_shared<SugaredTupleValue>(result, contains_module_list);
+      return toSimple(
+          m.graph()->insertNode(m.graph()->createTuple(values))->output());
     }
   }
 

@@ -343,16 +343,14 @@ IterableValuePtr SimpleValue::asIterable(const SourceRange& loc, Function& m) {
     auto tuple_type = unifyTypeList(tup->elements());
     if (!tuple_type) {
       throw ErrorReport(loc)
-          << "Heterogenous tuples cannot be iterated over. Found "
+          << "Heterogenous or empty tuples cannot be iterated over. Found "
           << type->python_str();
     }
     int64_t static_len = tup->elements().size();
+    auto li = m.graph()->createList(*tuple_type, createTupleUnpack(value));
+    auto out = m.graph()->insertNode(li)->output();
     return std::make_shared<IterableValue>(
-        std::make_shared<SimpleValue>(
-            m.graph()
-                ->createList(*tuple_type, createTupleUnpack(value))
-                ->output()),
-        static_len);
+        std::make_shared<SimpleValue>(out), static_len);
   } else {
     throw ErrorReport(loc) << "'" << type->python_str() << "'"
                            << " object is not iterable";
