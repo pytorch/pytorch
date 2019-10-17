@@ -172,9 +172,6 @@ struct Accessor : public ValueAPI<Accessor<Policy>> {
   void operator=(const Accessor& a) && {
     std::move(*this).operator=(Value(a));
   }
-  void operator=(const Accessor& a) & {
-    operator=(Value(a));
-  }
   operator Value() const {
     return Value(ivalue());
   }
