@@ -65,7 +65,8 @@ namespace jit {
   _(ClassDerive)                       \
   _(Inliner)                           \
   _(LiteInterpreterAdd)                \
-  _(LiteInterpreterConv)
+  _(LiteInterpreterConv)               \
+  _(CPPAPIExample)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
