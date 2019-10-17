@@ -149,6 +149,15 @@ ProcessGroupAgent::ProcessGroupAgent(
   }
 }
 
+ProcessGroupAgent::~ProcessGroupAgent() {
+  // TODO: when futures handle failures
+  // (https://github.com/pytorch/pytorch/issues/25531), this should mark
+  // existing futures as completed with an exception.
+  if (listenerThread_.joinable()) {
+    listenerThread_.detach();
+  }
+}
+
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
     const std::string& workerName) const {
   const auto idIter = nameMap_.find(workerName);

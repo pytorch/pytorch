@@ -5,6 +5,7 @@ import sys
 import unittest
 from collections import namedtuple
 from unittest import mock
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -858,3 +859,13 @@ class RpcTest(object):
 
         if TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP:
             self.assertEqual(test_func(), "expected result")
+
+    def test_process_group_agent_exit(self):
+        dist.init_process_group(backend="gloo", init_method=self.init_method, timeout=timedelta(seconds=10))
+        rpc.init_model_parallel(
+            self_name="worker%d" % self.rank,
+            backend=TEST_CONFIG.rpc_backend,
+            self_rank=self.rank,
+            init_method=self.init_method,
+        )
+        # allow workers to exit without joining, and ensure that exceptions aren't raised.
