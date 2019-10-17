@@ -209,6 +209,25 @@ struct IndexToOffset<T, IndexType, -1> {
 
     return offset + linearId * info.strides[0];
   }
+
+#ifdef __HIP_PLATFORM_HCC__
+  static __host__ __device__ IndexType get24(
+    IndexType linearId,
+    const TensorInfo<T, IndexType>& info) {
+
+    IndexType offset = 0;
+
+    // Uses static dims
+    for (int i = info.dims - 1; i > 0; --i) {
+      IndexType curDimIndex = mod24(linearId, info.sizes[i]);
+      IndexType curDimOffset = mul24(curDimIndex, info.strides[i]);
+      offset += curDimOffset;
+      linearId = div24(linearId, info.sizes[i]);
+    }
+
+    return mad24(linearId, info.strides[0], offset);
+  }
+#endif
 };
 
 // OffsetInfo is a faster implementation of IndexToOffset that uses faster
