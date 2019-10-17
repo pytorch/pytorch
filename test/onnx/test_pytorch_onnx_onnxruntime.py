@@ -560,6 +560,14 @@ class TestONNXRuntime(unittest.TestCase):
         model = StandardDeviation()
         self.run_test(model, x)
 
+    def test_bitshift(self):
+        class BitshiftModel(torch.nn.Module):
+            def forward(self, input, input2):
+                return input >> 1, input << 3., input2 >> 2, input2 << 4.
+        input = torch.arange(24, dtype=torch.float32).reshape(3, 4, 2)
+        input2 = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
+        self.run_test(BitshiftModel(), (input, input2))
+
     def test_narrow(self):
         class NarrowModel(torch.nn.Module):
             def forward(self, input):

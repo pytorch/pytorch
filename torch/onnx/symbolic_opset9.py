@@ -810,6 +810,20 @@ def __or_(g, input, other):
     return g.op('Or', input, other)
 
 
+def __rshift_(g, self, other):
+    two = g.op('Constant', value_t=torch.tensor(2, dtype=torch.float))
+    two_pow = g.op('Pow', two, other)
+    rshift = g.op('Div', self, two_pow)
+    return rshift
+
+
+def __lshift_(g, self, other):
+    two = g.op('Constant', value_t=torch.tensor(2, dtype=torch.float))
+    two_pow = g.op('Pow', two, other)
+    lshift = g.op('Mul', self, two_pow)
+    return lshift
+
+
 def where(g, condition, self, other):
     return g.op("Where", condition, self, other)
 
