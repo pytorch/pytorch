@@ -30,7 +30,7 @@ class FloatFunctional(torch.nn.Module):
     """
     def __init__(self):
         super(FloatFunctional, self).__init__()
-        self.observer = torch.nn.Identity()
+        self.activation_post_process = torch.nn.Identity()
 
     def forward(self, x):
         raise RuntimeError("FloatFunctional is not intended to use the " +
@@ -40,7 +40,7 @@ class FloatFunctional(torch.nn.Module):
     def add(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
         r = torch.add(x, y)
-        r = self.observer(r)
+        r = self.activation_post_process(r)
         return r
 
     r"""Operation equivalent to ``torch.add(Tensor, float)``"""
@@ -54,7 +54,7 @@ class FloatFunctional(torch.nn.Module):
     def mul(self, x, y):
         # type: (Tensor, Tensor) -> Tensor
         r = torch.mul(x, y)
-        r = self.observer(r)
+        r = self.activation_post_process(r)
         return r
 
     r"""Operation equivalent to ``torch.mul(Tensor, float)``"""
@@ -68,7 +68,7 @@ class FloatFunctional(torch.nn.Module):
     def cat(self, x, dim=0):
         # type: (List[Tensor], int) -> Tensor
         r = torch.cat(x, dim=dim)
-        r = self.observer(r)
+        r = self.activation_post_process(r)
         return r
 
     r"""Operation equivalent to ``relu(torch.add(x,y))``"""
@@ -76,7 +76,7 @@ class FloatFunctional(torch.nn.Module):
         # type: (Tensor, Tensor) -> Tensor
         r = torch.add(x, y)
         r = torch.nn.functional.relu(r)
-        r = self.observer(r)
+        r = self.activation_post_process(r)
         return r
 
 
@@ -166,7 +166,7 @@ class QFunctional(torch.nn.Module):
     def from_float(cls, mod):
         assert type(mod) == FloatFunctional,\
             "QFunctional.from_float expects an instance of FloatFunctional"
-        scale, zero_point = mod.observer.calculate_qparams()
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = QFunctional()
         new_mod.scale = float(scale)
         new_mod.zero_point = int(zero_point)
