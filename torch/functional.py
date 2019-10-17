@@ -3,6 +3,8 @@ import torch.nn.functional as F
 from torch._six import inf
 from itertools import product
 
+from ._overrides import torch_function_dispatch
+
 __all__ = [
     'align_tensors',  # BUILD_NAMEDTENSOR only
     'broadcast_tensors',
@@ -22,6 +24,10 @@ __all__ = [
     'unique_consecutive',
 ]
 
+def _broadcast_tensors_dispatcher(*tensors):
+    return tensors
+
+@torch_function_dispatch(_broadcast_tensors_dispatcher)
 def broadcast_tensors(*tensors):
     r"""broadcast_tensors(*tensors) -> List of Tensors
 
@@ -51,6 +57,11 @@ def broadcast_tensors(*tensors):
     return torch._C._VariableFunctions.broadcast_tensors(tensors)
 
 
+def _split_dispatcher(tensor, split_size_or_sections, dim=0):
+    return (tensor,)
+
+
+@torch_function_dispatch(_split_dispatcher)
 def split(tensor, split_size_or_sections, dim=0):
     r"""Splits the tensor into chunks.
 
@@ -127,6 +138,11 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
+def _einsum_dispatcher(equation, *operands):
+    return operands
+
+
+@torch_function_dispatch(_einsum_dispatcher)
 def einsum(equation, *operands):
     r"""einsum(equation, *operands) -> Tensor
 
@@ -199,7 +215,11 @@ Examples::
         operands = operands[0]
     return torch._C._VariableFunctions.einsum(equation, operands)
 
+def _isfinite_dispatcher(tensor):
+    return (tensor,)
 
+
+@torch_function_dispatch(_isfinite_dispatcher)
 def isfinite(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `Finite` or not.
 
@@ -226,6 +246,7 @@ def isfinite(tensor):
     return (tensor == tensor) & (tensor.abs() != inf)
 
 
+@torch_function_dispatch(_isfinite_dispatcher)
 def isinf(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
 
@@ -247,6 +268,11 @@ def isinf(tensor):
     return tensor.abs() == inf
 
 
+def _meshgrid_dispatcher(*tensors, **kwargs):
+    return tensors
+
+
+@torch_function_dispatch(_meshgrid_dispatcher)
 def meshgrid(*tensors, **kwargs):
     r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
 vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
@@ -380,6 +406,12 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
 
 del torch.unique_dim
 
+def _unique_dispatcher(input, sorted=None, return_inverse=None,
+                       return_counts=None, dim=None):
+    return (input,)
+
+
+@torch_function_dispatch(_unique_dispatcher)
 def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None):
     r"""Returns the unique elements of the input tensor.
 
@@ -455,7 +487,11 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
     else:
         return output
 
+def _unique_consecutive_dispatcher(
+        input, return_inverse=None, return_counts=None, dim=None):
+    return (input,)
 
+@torch_function_dispatch(_unique_consecutive_dispatcher)
 def unique_consecutive(input, return_inverse=False, return_counts=False, dim=None):
     r"""Eliminates all but the first element from every consecutive group of equivalent elements.
 
@@ -516,6 +552,11 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         return output, counts
     return output
 
+def _tensordot_dispatcher(a, b, dims=None):
+    return (a, b)
+
+
+@torch_function_dispatch(_tensordot_dispatcher)
 def tensordot(a, b, dims=2):
     r"""Returns a contraction of a and b over multiple dimensions.
 
@@ -730,6 +771,11 @@ def chain_matmul(*matrices):
     """
     return torch._C._VariableFunctions.chain_matmul(matrices)
 
+def _lu_dispatcher(A, pivot=None, get_infos=None, out=None):
+    return (A,)
+
+
+@torch_function_dispatch(_lu_dispatcher)
 def lu(A, pivot=True, get_infos=False, out=None):
     r"""Computes the LU factorization of a square matrix or batches of square matrices
     :attr:`A`. Returns a tuple containing the LU factorization and pivots of :attr:`A`.

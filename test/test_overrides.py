@@ -319,7 +319,15 @@ class TensorLike(object):
         (torch.topk, lambda input, dim=-1, descending=False, out=None: -1),
         (torch.chunk, lambda input, chunks, dim=0: -1),
         (torch.gather, lambda input, dim, index, out=None, sparse_grad=False: -1),
-        (torch.index_select, lambda input, dim, index, out=None: -1)
+        (torch.index_select, lambda input, dim, index, out=None: -1),
+        (torch.broadcast_tensors, lambda *tensors: -1),
+        (torch.split, lambda tensor, split_size_or_sections, dim=0: -1),
+        (torch.einsum, lambda equation, *operands: -1),
+        (torch.isfinite, lambda tensor: -1),
+        (torch.isinf, lambda tensor: -1),
+        (torch.meshgrid, lambda *tensors, **kwargs: -1),
+        (torch.tensordot, lambda a, b, dims=2: -1),
+        (torch.lu, lambda A, pivot=True, get_infos=False, out=None: -1),
     )
     IMPLEMENTS_DECORATOR = implements_tensor_like
 
@@ -495,8 +503,7 @@ class TestApis(TestCase):
         self.assertEqual(torch.baddbmm(self.t1, self.t2, self.t3), -1)
 
     def test_einsum(self):
-        # self.assertEqual(torch.einsum('i,j->ij', self.t1, self.t2), -1)
-        pass
+        self.assertEqual(torch.einsum('i,j->ij', self.t1, self.t2), -1)
 
     def test_neg(self):
         self.assertEqual(torch.neg(self.t1), -1)
@@ -544,11 +551,9 @@ class TestApis(TestCase):
     def test_sum(self):
         self.assertEqual(torch.sum(self.t1), -1)
 
-    @unittest.skip("unique is pending")
     def test_unique(self):
         self.assertEqual(torch.unique(self.t1), -1)
 
-    @unittest.skip("unique_consecutive is pending")
     def test_unique_consecutive(self):
         self.assertEqual(torch.unique_consecutive(self.t1), -1)
 
@@ -575,6 +580,27 @@ class TestApis(TestCase):
 
     def test_index_select(self):
         self.assertEqual(torch.index_select(self.t1, 0, self.t2), -1)
+
+    def test__broadcast_tensors(self):
+        self.assertEqual(torch.broadcast_tensors(self.t1, self.t2), -1)
+
+    def test_split(self):
+        self.assertEqual(torch.split(self.t1, 2), -1)
+
+    def test_isfinite(self):
+        self.assertEqual(torch.isfinite(self.t1), -1)
+
+    def test_isinf(self):
+        self.assertEqual(torch.isinf(self.t1), -1)
+
+    def test_meshgrid(self):
+        self.assertEqual(torch.meshgrid(self.t1, self.t2), -1)
+
+    def test_tensordot(self):
+        self.assertEqual(torch.tensordot(self.t1, self.t2), -1)
+
+    def test_lu(self):
+        self.assertEqual(torch.lu(self.t1), -1)
 
 if __name__ == '__main__':
     unittest.main()
