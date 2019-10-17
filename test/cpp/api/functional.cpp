@@ -73,12 +73,38 @@ TEST_F(FunctionalTest, CosineSimilarity) {
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
+TEST_F(FunctionalTest, SoftMarginLossDefaultOptions) {
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
+  auto output =
+      F::soft_margin_loss(input, target);
+  auto expected = torch::tensor({1.3767317}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, MultiLabelSoftMarginLossDefaultOptions) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto output =
       F::multilabel_soft_margin_loss(input, target);
   auto expected = torch::tensor({0.7608436}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, SoftMarginLossNoReduction) {
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
+  auto output =
+      F::soft_margin_loss(input, target, torch::Reduction::None);
+  auto expected = torch::tensor({2.1269281, 0.01814993, 0.3132617, 3.0485873}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
@@ -310,6 +336,31 @@ TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   auto expected = torch::tensor({0.1004}, torch::kFloat);
 
   ASSERT_TRUE(output.allclose(expected, 1e-4));
+}
+
+TEST_F(FunctionalTest, MultiLabelMarginLossDefaultOptions) {
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = F::multilabel_margin_loss(input, target);
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, MultiLabelMarginLossNoReduction) {
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = F::multilabel_margin_loss(
+    input, target, torch::Reduction::None);
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
 TEST_F(FunctionalTest, TripletMarginLoss) {
@@ -589,6 +640,25 @@ TEST_F(FunctionalTest, PReLU) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({42, 24}));
   const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
   ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Bilinear) {
+  auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
+  auto input2 = torch::tensor({{7, 4}, {8 ,9}});
+  auto weight = torch::tensor({{{2, 3}, {9, 7}, {8, 6}}});
+  auto bias = torch::tensor({1});
+ 
+  auto y_with_bias = F::bilinear(input1, input2, weight, bias);
+  ASSERT_EQ(y_with_bias.ndimension(), 2);
+  ASSERT_EQ(y_with_bias.sizes(), torch::IntArrayRef({2, 1}));
+  auto y_with_bias_exp = torch::tensor({{449}, {1702}}).reshape({2, 1});
+  ASSERT_TRUE(torch::allclose(y_with_bias, y_with_bias_exp, 1e-4, 1e-7));
+
+  auto y_no_bias = F::bilinear(input1, input2, weight);
+  ASSERT_EQ(y_no_bias.ndimension(), 2);
+  ASSERT_EQ(y_no_bias.sizes(), torch::IntArrayRef({2, 1}));
+  auto y_no_bias_exp = torch::tensor({{448, 1701}}).reshape({2, 1});
+  ASSERT_TRUE(torch::allclose(y_no_bias, y_no_bias_exp, 1e-4, 1e-7));
 }
 
 TEST_F(FunctionalTest, Normalize) {
