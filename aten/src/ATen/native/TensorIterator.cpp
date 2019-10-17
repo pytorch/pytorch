@@ -12,6 +12,7 @@ using DimMask = TensorIterator::DimMask;
 using PtrVector = TensorIterator::PtrVector;
 using loop_t = TensorIterator::loop_t;
 using loop2d_t = TensorIterator::loop2d_t;
+using StrideVector = TensorIterator::StrideVector;
 
 void TensorIterator::reorder_dimensions() {
   // Sort the dimensions based on strides in ascending order with reduced dims
@@ -86,19 +87,44 @@ Device compute_device(at::ArrayRef<OperandInfo> operands) {
   return kCPU;
 }
 
-static std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
+static std::tuple<Device, ScalarType, bool> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
   // See [Result type computation] in TensorIterator.h
   auto device = compute_device(operands);
+  auto common_type = ScalarType::Undefined;
+  bool all_same_type = true;
+  for (const auto& op: operands){
+    if (!op.tensor.defined()) continue;
+    //don't handle scalars
+    if (op.tensor.dim() > 0){
+      ScalarType current = op.tensor.scalar_type();
+      if (current == ScalarType::Undefined){
+        all_same_type = false;
+        break;
+      }
+      if (common_type == ScalarType::Undefined) common_type = current;
+      if (common_type != current) {
+        all_same_type = false;
+        break;
+      }
+    } else {
+      all_same_type = false;
+      break;
+    }
+  }
+  if (all_same_type) {
+    return std::make_tuple(device, common_type, true);
+  }
+  //TODO refactor so that no tensor copies are done
   std::vector<Tensor> tensors;
   std::transform(std::begin(operands), std::end(operands), std::back_inserter(tensors),
                   [](const OperandInfo& op) { return op.tensor; });
   auto dtype = at::native::result_type(tensors);
-  auto result = std::make_tuple(device, dtype);
+  auto result = std::make_tuple(device, dtype, false);
   TORCH_INTERNAL_ASSERT(dtype != ScalarType::Undefined);
   return result;
 }
 
-std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
+std::tuple<Device, ScalarType, bool> TensorIterator::compute_common_type() {
   return compute_common_type_(operands_);
 }
 
@@ -199,11 +225,13 @@ void TensorIterator::compute_types() {
         }
       }
 
-      if (!compute_common_dtype_only_for_inputs) {
-        validate_dtype(op, common_dtype, ninputs());
-      }
-      if (!compute_common_dtype_only_for_inputs || !op.is_output) {
-        maybe_promote_common_dtype(op, common_dtype);
+      if (!std::get<2>(common_type)) {
+        if (!compute_common_dtype_only_for_inputs) {
+          validate_dtype(op, common_dtype, ninputs());
+        }
+        if (!compute_common_dtype_only_for_inputs || !op.is_output) {
+          maybe_promote_common_dtype(op, common_dtype);
+        }
       }
 
       if (op.tensor.defined() && op.device != op.tensor.device()) {
@@ -221,8 +249,8 @@ void TensorIterator::compute_types() {
   }
 }
 
-DimVector TensorIterator::compatible_stride(int element_size) const {
-  auto stride = DimVector();
+StrideVector TensorIterator::compatible_stride(int element_size) const {
+  auto stride = StrideVector();
   int64_t next_stride = element_size;
   for (int dim = 0; dim < ndim(); dim++) {
     stride.push_back(next_stride);
@@ -369,9 +397,9 @@ int64_t TensorIterator::numel() const {
   return numel;
 }
 
-DimVector TensorIterator::get_dim_strides(int dim) const {
+StrideVector TensorIterator::get_dim_strides(int dim) const {
   auto dims = ndim();
-  auto inner_strides = DimVector();
+  auto inner_strides = StrideVector();
   for (auto& op : operands_) {
     inner_strides.push_back(dims == 0 ? 0 : op.stride_bytes[dim]);
   }
@@ -478,8 +506,8 @@ void TensorIterator::for_each(loop2d_t loop) {
   }
 }
 
-DimVector TensorIterator::get_strides() const {
-  DimVector strides;
+StrideVector TensorIterator::get_strides() const {
+  StrideVector strides;
   for (int dim = 0; dim < ndim(); dim++) {
     for (int arg = 0; arg < ntensors(); arg++) {
       strides.push_back(operands_[arg].stride_bytes[dim]);
@@ -751,9 +779,11 @@ void TensorIterator::compute_strides() {
       auto original_shape = op.tensor.sizes();
       auto original_stride = op.tensor.strides();
       auto element_size_in_bytes = op.tensor.element_size();
-
-      op.stride_bytes.resize(ndim(), 0);
       auto offset = ndim() - original_shape.size();
+      if (offset > 0)
+          op.stride_bytes.resize(ndim(), 0);
+      else
+          op.stride_bytes.resize(ndim());
       for (size_t i = 0; i < original_shape.size(); i++) {
         if (original_shape[i] == 1) {
           op.stride_bytes[offset + i] = 0;
