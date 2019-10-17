@@ -198,7 +198,6 @@ void cpu_kernel(TensorIterator& iter, func_t op) {
       });
     }
   });
-  iter.cast_outputs();
 }
 
 template <typename func_t, typename vec_func_t>
@@ -220,7 +219,6 @@ void cpu_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
       });
     }
   });
-  iter.cast_outputs();
 }
 
 template <typename func_t>
@@ -239,7 +237,6 @@ void cpu_serial_kernel(TensorIterator& iter, func_t op) {
       });
     }
   }, {0, iter.numel()});
-  iter.cast_outputs();
 }
 
 }}}  // namespace at::native::<anonymous>
