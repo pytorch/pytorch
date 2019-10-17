@@ -353,6 +353,12 @@ public:
 //                            Variable::AutogradMeta
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/// This struct exists so that AutogradMeta can simply forward-declare
+/// CppHooksList
+struct CppHooksList {
+  std::vector<std::function<Variable(const Variable&)>> hooks_list_;
+};
+
 /// Each `Variable` has one unique `AutogradMeta` struct, which stores autograd
 /// metadata fields that are necessary for tracking the Variable's autograd history.
 
@@ -364,7 +370,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   std::weak_ptr<Node> grad_accumulator_;
 
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
-  std::shared_ptr<hooks_list> cpp_hooks_list;
+  std::shared_ptr<CppHooksList> cpp_hooks_list_;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
@@ -704,7 +710,7 @@ template <typename T>
 auto Variable::register_hook(T&& hook) -> Variable::hook_return_void_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
-  auto &list = get_autograd_meta()->cpp_hooks_list;
+  auto &list = get_autograd_meta()->cpp_hooks_list_.hooks_list_;
   if(!list) {
     create_cpp_hook();
   }
@@ -722,7 +728,7 @@ template <typename T>
 auto Variable::register_hook(T&& hook) -> Variable::hook_return_var_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
-  auto &list = get_autograd_meta()->cpp_hooks_list;
+  auto &list = get_autograd_meta()->cpp_hooks_list_.hooks_list_;
   if(!list) {
     create_cpp_hook();
   }

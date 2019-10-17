@@ -172,7 +172,7 @@ void Variable::rebase_history(Edge gradient_edge) {
 }
 
 void Variable::create_cpp_hook() {
-  auto &list = get_autograd_meta()->cpp_hooks_list;
+  auto &list = get_autograd_meta()->cpp_hooks_list_.hooks_list_;
   list.reset(new hooks_list());
   std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, output_nr()));
   clear_hooks();
@@ -184,7 +184,7 @@ void Variable::create_cpp_hook() {
 }
 
 void Variable::remove_hook(unsigned pos) {
-  auto &list = get_autograd_meta()->cpp_hooks_list;
+  auto &list = get_autograd_meta()->cpp_hooks_list_.hooks_list_;
   TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*list)[pos] = nullptr;
