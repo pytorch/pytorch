@@ -305,7 +305,7 @@ jobs:
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
 
           # TODO We may want to move the rebase logic to a separate step after checkout
           # Rebase to master only if in xenial_py3_6_gcc5_4 case
@@ -333,23 +333,25 @@ jobs:
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-          if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
-            NAMED_FLAG="export BUILD_NAMEDTENSOR=1"
+          if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+            export PARALLEL_FLAGS="export ATEN_THREADING=TBB USE_TBB=1 "
+          elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+            export PARALLEL_FLAGS="export ATEN_THREADING=NATIVE "
           fi
+          echo "Parallel backend flags: "${PARALLEL_FLAGS}
 
-          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$NAMED_FLAG"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$PARALLEL_FLAGS"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           # Push intermediate Docker image for next phase to use
           if [ -z "${BUILD_ONLY}" ]; then
             # Note [Special build images]
-            # The namedtensor and xla builds use the same docker image as
+            # The xla build uses the same docker image as
             # pytorch-linux-trusty-py3.6-gcc5.4-build. In the push step, we have to
             # distinguish between them so the test can pick up the correct image.
             output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
-            if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
-              export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
-            elif [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
+            if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-xla
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
@@ -382,25 +384,31 @@ jobs:
           set -e
           # See Note [Special build images]
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
-          if [[ ${BUILD_ENVIRONMENT} == *"namedtensor"* ]]; then
-            export COMMIT_DOCKER_IMAGE=$output_image-namedtensor
-            export NAMED_FLAG="export BUILD_NAMEDTENSOR=1 && export TEST_NAMEDTENSOR=1"
-          elif [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
+          if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
+
+          if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+            export PARALLEL_FLAGS="export ATEN_THREADING=TBB USE_TBB=1 "
+          elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+            export PARALLEL_FLAGS="export ATEN_THREADING=NATIVE "
+          fi
+          echo "Parallel backend flags: "${PARALLEL_FLAGS}
+
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
+
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${NAMED_FLAG}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           else
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${NAMED_FLAG}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           fi
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
   caffe2_linux_build:
@@ -446,7 +454,7 @@ jobs:
 
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
@@ -517,9 +525,9 @@ jobs:
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
           docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
 
@@ -837,10 +845,16 @@ jobs:
     - run_brew_for_ios_build
     - run:
         name: Build
-        contxt: org-member
         no_output_timeout: "1h"
         command: |
           script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
+          cat "$script"
+          source "$script"
+    - run:
+        name: Test
+        no_output_timeout: "30m"
+        command: |
+          script="/Users/distiller/project/.circleci/scripts/binary_ios_test.sh"
           cat "$script"
           source "$script"
     - persist_to_workspace:
@@ -898,41 +912,6 @@ jobs:
           root: .
           paths: .circleci/scripts
 
-  pytorch_short_perf_test_gpu:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-short-perf-test-gpu
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
-      PYTHON_VERSION: "3.6"
-      USE_CUDA_DOCKER_RUNTIME: "1"
-    resource_class: gpu.medium
-    machine:
-      image: ubuntu-1604:201903-01
-    steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - should_run_job
-    - setup_linux_system_environment
-    - setup_ci_environment
-    - run:
-        name: Perf Test
-        no_output_timeout: "1h"
-        command: |
-          set -e
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
-          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
-
-          docker cp $id:/var/lib/jenkins/workspace/env /home/circleci/project/env
-          # This IAM user allows write access to S3 bucket for perf test numbers
-          set +x
-          echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_PERF_TEST_S3_BUCKET_V4}" >> /home/circleci/project/env
-          echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_PERF_TEST_S3_BUCKET_V4}" >> /home/circleci/project/env
-          set -x
-          docker cp /home/circleci/project/env $id:/var/lib/jenkins/workspace/env
-
-          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/short-perf-test-gpu.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
   pytorch_python_doc_push:
     environment:
       BUILD_ENVIRONMENT: pytorch-python-doc-push
@@ -954,7 +933,7 @@ jobs:
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           # master branch docs push
           if [[ "${CIRCLE_BRANCH}" == "master" ]]; then
@@ -999,7 +978,7 @@ jobs:
           export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          export id=$(docker run -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
 
           # master branch docs push
           if [[ "${CIRCLE_BRANCH}" == "master" ]]; then
@@ -1168,14 +1147,14 @@ jobs:
 
           # x86_32
           time docker pull ${docker_image_libtorch_android_x86_32} >/dev/null
-          export id_x86_32=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
+          export id_x86_32=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           # arm-v7a
           time docker pull ${docker_image_libtorch_android_arm_v7a} >/dev/null
-          export id_arm_v7a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v7a})
+          export id_arm_v7a=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v7a})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v7a" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1185,7 +1164,7 @@ jobs:
 
           # x86_64
           time docker pull ${docker_image_libtorch_android_x86_64} >/dev/null
-          export id_x86_64=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_64})
+          export id_x86_64=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_64})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_x86_64" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1195,7 +1174,7 @@ jobs:
 
           # arm-v8a
           time docker pull ${docker_image_libtorch_android_arm_v8a} >/dev/null
-          export id_arm_v8a=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v8a})
+          export id_arm_v8a=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_arm_v8a})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v8a" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1248,7 +1227,7 @@ jobs:
 
           # x86_32
           time docker pull ${docker_image_libtorch_android_x86_32_gradle} >/dev/null
-          export id_x86_32=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32_gradle})
+          export id_x86_32=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32_gradle})
 
           export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export SONATYPE_NEXUS_USERNAME=${SONATYPE_NEXUS_USERNAME}" && echo "export SONATYPE_NEXUS_PASSWORD=${SONATYPE_NEXUS_PASSWORD}" && echo "export ANDROID_SIGN_KEY=${ANDROID_SIGN_KEY}" && echo "export ANDROID_SIGN_PASS=${ANDROID_SIGN_PASS}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/publish_android_snapshot.sh") | docker exec -u jenkins -i "$id_x86_32" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1288,7 +1267,7 @@ jobs:
 
           # x86
           time docker pull ${docker_image_libtorch_android_x86_32} >/dev/null
-          export id=$(docker run -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${docker_image_libtorch_android_x86_32})
 
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1312,6 +1291,28 @@ jobs:
       - should_run_job
       - checkout
       - run_brew_for_ios_build
+      - run:
+          name: cert install
+          no_output_timeout: "1h"
+          command: |
+            set -e 
+            PROJ_ROOT=/Users/distiller/project
+            cd ${PROJ_ROOT}/ios/TestApp
+            # install fastlane
+            sudo gem install bundler && bundle install
+            # install certificates
+            echo ${IOS_CERT_KEY} >> cert.txt
+            base64 --decode cert.txt -o Certificates.p12
+            rm cert.txt
+            bundle exec fastlane install_cert
+            # install the provisioning profile
+            PROFILE=TestApp_CI.mobileprovision
+            PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
+            mkdir -pv "${PROVISIONING_PROFILES}"
+            cd "${PROVISIONING_PROFILES}"
+            echo ${IOS_SIGN_KEY} >> cert.txt
+            base64 --decode cert.txt -o ${PROFILE}
+            rm cert.txt
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -1344,6 +1345,24 @@ jobs:
             export IOS_ARCH=${IOS_ARCH}
             export IOS_PLATFORM=${IOS_PLATFORM}
             unbuffer ${PROJ_ROOT}/scripts/build_ios.sh 2>&1 | ts
+      - run:
+          name: Test
+          no_output_timeout: "30m"
+          command: |
+            set -e
+            PROJ_ROOT=/Users/distiller/project
+            PROFILE=TestApp_CI
+            # run the ruby build script
+            if ! [ -x "$(command -v xcodebuild)" ]; then
+              echo 'Error: xcodebuild is not installed.'
+              exit 1
+            fi 
+            echo ${IOS_DEV_TEAM_ID}
+            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
+            if ! [ "$?" -eq "0" ]; then
+              echo 'xcodebuild failed!'
+              exit 1
+            fi
 
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html
@@ -1549,30 +1568,6 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-pynightly:347"
           resource_class: large
       - pytorch_linux_build:
-          name: pytorch_linux_xenial_py3_6_gcc4_8_build
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "pytorch-linux-xenial-py3.6-gcc4.8-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc4.8:347"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_py3_6_gcc4_8_test
-          requires:
-            - setup
-            - pytorch_linux_xenial_py3_6_gcc4_8_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "pytorch-linux-xenial-py3.6-gcc4.8-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc4.8:347"
-          resource_class: large
-      - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:
             - setup
@@ -1595,17 +1590,31 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:347"
           resource_class: large
       - pytorch_linux_build:
-          name: pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_build
+          name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
           requires:
             - setup
-          build_environment: "pytorch-namedtensor-linux-xenial-py3.6-gcc5.4-build"
+          build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:347"
       - pytorch_linux_test:
-          name: pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_test
+          name: pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_test
           requires:
             - setup
-            - pytorch_namedtensor_linux_xenial_py3_6_gcc5_4_build
-          build_environment: "pytorch-namedtensor-linux-xenial-py3.6-gcc5.4-test"
+            - pytorch_paralleltbb_linux_xenial_py3_6_gcc5_4_build
+          build_environment: "pytorch-paralleltbb-linux-xenial-py3.6-gcc5.4-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:347"
+          resource_class: large
+      - pytorch_linux_build:
+          name: pytorch_parallelnative_linux_xenial_py3_6_gcc5_4_build
+          requires:
+            - setup
+          build_environment: "pytorch-parallelnative-linux-xenial-py3.6-gcc5.4-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:347"
+      - pytorch_linux_test:
+          name: pytorch_parallelnative_linux_xenial_py3_6_gcc5_4_test
+          requires:
+            - setup
+            - pytorch_parallelnative_linux_xenial_py3_6_gcc5_4_build
+          build_environment: "pytorch-parallelnative-linux-xenial-py3.6-gcc5.4-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4:347"
           resource_class: large
       - pytorch_linux_build:
@@ -1644,20 +1653,6 @@ workflows:
             - setup
             - pytorch_linux_xenial_py3_clang5_asan_build
           build_environment: "pytorch-linux-xenial-py3-clang5-asan-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:347"
-          resource_class: large
-      - pytorch_linux_build:
-          name: pytorch_namedtensor_linux_xenial_py3_clang5_asan_build
-          requires:
-            - setup
-          build_environment: "pytorch-namedtensor-linux-xenial-py3-clang5-asan-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:347"
-      - pytorch_linux_test:
-          name: pytorch_namedtensor_linux_xenial_py3_clang5_asan_test
-          requires:
-            - setup
-            - pytorch_namedtensor_linux_xenial_py3_clang5_asan_build
-          build_environment: "pytorch-namedtensor-linux-xenial-py3-clang5-asan-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:347"
           resource_class: large
       - pytorch_linux_build:
@@ -1758,9 +1753,6 @@ workflows:
           build_environment: "pytorch-linux-xenial-cuda9-cudnn7-py3-nogpu-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
           resource_class: large
-      - pytorch_short_perf_test_gpu:
-          requires:
-            - pytorch_linux_xenial_cuda9_cudnn7_py3_build
       - pytorch_python_doc_push:
           requires:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
@@ -1768,18 +1760,18 @@ workflows:
           requires:
             - pytorch_linux_xenial_cuda9_cudnn7_py3_build
       - pytorch_linux_build:
-          name: pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build
+          name: pytorch_libtorch_linux_xenial_cuda9_cudnn7_py3_build
           requires:
             - setup
-          build_environment: "pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:347"
+          build_environment: "pytorch-libtorch-linux-xenial-cuda9-cudnn7-py3-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
       - pytorch_linux_test:
-          name: pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_test
+          name: pytorch_libtorch_linux_xenial_cuda9_cudnn7_py3_test
           requires:
             - setup
-            - pytorch_namedtensor_linux_xenial_cuda9_cudnn7_py2_build
-          build_environment: "pytorch-namedtensor-linux-xenial-cuda9-cudnn7-py2-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py2:347"
+            - pytorch_libtorch_linux_xenial_cuda9_cudnn7_py3_build
+          build_environment: "pytorch-libtorch-linux-xenial-cuda9-cudnn7-py3-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9-cudnn7-py3:347"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - pytorch_linux_build:
@@ -1910,40 +1902,20 @@ workflows:
       # Pytorch iOS PR builds
       - pytorch_ios_build:
           name: pytorch_ios_10_2_1_x86_64_build
+          context: org-member
           build_environment: "pytorch-ios-10.2.1-x86_64_build"
+          ios_arch: "x86_64"
           ios_platform: "SIMULATOR"
           requires:
             - setup
       - pytorch_ios_build:
           name: pytorch_ios_10_2_1_arm64_build
+          context: org-member
           build_environment: "pytorch-ios-10.2.1-arm64_build"
           ios_arch: "arm64"
+          ios_platform: "OS"
           requires:
             - setup
-      - caffe2_linux_build:
-          name: caffe2_py2_gcc4_8_ubuntu14_04_build
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "caffe2-py2-gcc4.8-ubuntu14.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:325"
-      - caffe2_linux_test:
-          name: caffe2_py2_gcc4_8_ubuntu14_04_test
-          requires:
-            - setup
-            - caffe2_py2_gcc4_8_ubuntu14_04_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "caffe2-py2-gcc4.8-ubuntu14.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc4.8-ubuntu14.04:325"
-          resource_class: large
       - caffe2_linux_build:
           name: caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_build
           requires:
@@ -3771,6 +3743,7 @@ workflows:
       - binary_ios_build:
           name: pytorch_ios_10_2_1_nightly_x86_64_build
           build_environment: "libtorch-ios-10.2.1-nightly-x86_64-build"
+          context: org-member
           ios_platform: "SIMULATOR"
           ios_arch: "x86_64"
           requires: 
@@ -3781,6 +3754,7 @@ workflows:
       - binary_ios_build:
           name: pytorch_ios_10_2_1_nightly_arm64_build
           build_environment: "libtorch-ios-10.2.1-nightly-arm64-build"
+          context: org-member
           ios_arch: "arm64"
           ios_platform: "OS"
           requires: 

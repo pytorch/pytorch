@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/api/support.h>
-#include <torch/ordered_dict.h>
+#include <torch/torch.h>
 
 template <typename T>
 using OrderedDict = torch::OrderedDict<std::string, T>;

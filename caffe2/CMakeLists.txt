@@ -21,6 +21,7 @@ if (INTERN_BUILD_ATEN_OPS)
     --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
   DEPENDS
   ATEN_CPU_FILES_GEN_TARGET
+  ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
 
@@ -470,21 +471,31 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
   endif()
 
+  if (USE_NCCL)
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
+  endif()
+
   if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/engine/dist_engine.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/autograd_metadata.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_with_autograd.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
@@ -537,6 +548,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/enum.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
@@ -559,6 +571,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/dropout.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/linear.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
@@ -611,6 +624,11 @@ ELSEIF(USE_CUDA)
 ELSE()
   add_library(torch ${Caffe2_CPU_SRCS})
 ENDIF()
+
+if (USE_NCCL)
+  target_link_libraries(torch PRIVATE __caffe2_nccl)
+  target_compile_definitions(torch PRIVATE USE_NCCL)
+endif()
 
 
 # ==========================================================
@@ -1048,8 +1066,8 @@ if(USE_CUDA)
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-
+  target_link_libraries(
+      torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
 endif()
 
