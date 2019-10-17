@@ -9543,11 +9543,25 @@ class TestTorchDeviceType(TestCase):
                             for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
                                 actual = torch.cdist(x, y, p=p, compute_mode=cm)
                                 expected = brute_cdist(x, y, p=p)
-                                self.assertTrue(torch.allclose(expected, actual))
+                                res = torch.allclose(expected, actual)
+                                if not res:
+                                    print(x)
+                                    print(y)
+                                    print(cm)
+                                    print(actual)
+                                    print(expected)
+                                self.assertTrue(res)
                         else:
                             actual = torch.cdist(x, y, p=p)
                             expected = brute_cdist(x, y, p=p)
-                            self.assertTrue(torch.allclose(expected, actual))
+                            res = torch.allclose(expected, actual)
+                            if not res:
+                                print(x)
+                                print(y)
+                                print(p)
+                                print(actual)
+                                print(expected)
+                            self.assertTrue(res)
 
     def test_cdist_norm_batch(self, device):
         for r1 in [3, 4, 5, 6]:
