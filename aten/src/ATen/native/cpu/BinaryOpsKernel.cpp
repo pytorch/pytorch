@@ -14,14 +14,13 @@ namespace {
 using namespace vec256;
 
 void add_kernel(TensorIterator& iter, Scalar alpha_scalar) {
-  if (iter.dtype() == ScalarType::Bool || isComplexType(iter.dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES_AND(kBool, iter.dtype(), "add_cpu/sub_cpu", [&]() {
+  if (iter.dtype() == ScalarType::Bool) {
+      using scalar_t = bool;
       auto alpha = alpha_scalar.to<scalar_t>();
       cpu_kernel(iter,
         [=](scalar_t a, scalar_t b) -> scalar_t { return a + alpha * b; });
-      });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "add_cpu/sub_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "add_cpu/sub_cpu", [&]() {
       auto alpha = alpha_scalar.to<scalar_t>();
       auto alpha_vec = Vec256<scalar_t>(alpha);
       cpu_kernel_vec(iter,
@@ -51,13 +50,8 @@ void sub_kernel(TensorIterator& iter, Scalar alpha_scalar) {
 void mul_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
-  } else if (isComplexType(iter.dtype())) {
-      AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "mul_cpu", [&]() {
-        cpu_kernel(iter,
-          [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; });
-     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "mul_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "mul_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) -> scalar_t { return a * b; },
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
@@ -78,9 +72,12 @@ void div_kernel(TensorIterator& iter) {
     });
   } else if (isComplexType(iter.dtype())) {
       AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "div_cpu", [&]() {
-        cpu_kernel(iter,
+        cpu_kernel_vec(iter,
           [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
              return a / b;
+          },
+          [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a / b;
           });
       });
     } else {
@@ -97,10 +94,21 @@ void div_kernel(TensorIterator& iter) {
 }
 
 void logical_xor_kernel(TensorIterator& iter) {
-  cpu_kernel(iter,
-    [](bool a, bool b) -> bool {
-      return a != b;
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "logical_xor_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> bool {
+          return bool(a) != bool(b);
+        });
     });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "logical_xor_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return static_cast<scalar_t>(bool(a) != bool(b));
+        });
+    });
+  }
 }
 
 void lt_kernel(TensorIterator& iter) {

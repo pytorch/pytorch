@@ -3,12 +3,7 @@ producer_name: "pytorch"
 producer_version: "1.3"
 graph {
   node {
-    input: "0"
     output: "1"
-    op_type: "Shape"
-  }
-  node {
-    output: "2"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -20,8 +15,13 @@ graph {
     }
   }
   node {
-    input: "1"
+    input: "0"
+    output: "2"
+    op_type: "Shape"
+  }
+  node {
     input: "2"
+    input: "1"
     output: "3"
     op_type: "Gather"
     attribute {

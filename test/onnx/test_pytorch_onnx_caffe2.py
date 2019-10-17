@@ -1306,6 +1306,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/10984')
     @skipIfUnsupportedOpsetVersion([10])
     def test_neg_slice_large_negone(self):
         class NegSlice(torch.nn.Module):
@@ -1350,6 +1351,22 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+    def test_unbind(self):
+        class UnbindModel(torch.nn.Module):
+            def forward(self, input):
+                return input.unbind()
+
+        x = torch.randn(3, 4, 5)
+        self.run_model_test(UnbindModel(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
+
+        class UnbindModel2(torch.nn.Module):
+            def forward(self, input):
+                _, out, _, _ = input.unbind(1)
+                return out
+
+        x = torch.randn(3, 4, 5)
+        self.run_model_test(UnbindModel2(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):

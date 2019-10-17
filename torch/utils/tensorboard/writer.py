@@ -266,26 +266,29 @@ class SummaryWriter(object):
 
     def add_hparams(self, hparam_dict=None, metric_dict=None):
         """Add a set of hyperparameters to be compared in TensorBoard.
+
         Args:
-            hparam_dict (dictionary): Each key-value pair in the dictionary is the
+            hparam_dict (dict): Each key-value pair in the dictionary is the
               name of the hyper parameter and it's corresponding value.
-            metric_dict (dictionary): Each key-value pair in the dictionary is the
+            metric_dict (dict): Each key-value pair in the dictionary is the
               name of the metric and it's corresponding value. Note that the key used
               here should be unique in the tensorboard record. Otherwise the value
-              you added by `add_scalar` will be displayed in hparam plugin. In most
+              you added by ``add_scalar`` will be displayed in hparam plugin. In most
               cases, this is unwanted.
 
-            p.s. The value in the dictionary can be `int`, `float`, `bool`, `str`, or
-            0-dim tensor
         Examples::
+
             from torch.utils.tensorboard import SummaryWriter
             with SummaryWriter() as w:
                 for i in range(5):
                     w.add_hparams({'lr': 0.1*i, 'bsize': i},
                                   {'hparam/accuracy': 10*i, 'hparam/loss': 10*i})
+
         Expected result:
+
         .. image:: _static/img/tensorboard/add_hparam.png
            :scale: 50 %
+
         """
         torch._C._log_api_usage_once("tensorboard.logging.add_hparams")
         if type(hparam_dict) is not dict or type(metric_dict) is not dict:

@@ -239,17 +239,10 @@ static inline ${return_type} ${api_name}(${formals}) {
 
 # In order to rely on the linker to strip unused ops, it requires us to dispatch statically
 # in Functions.h and TensorMethods.h.
-#
-# NB: The default body also needs to apply a variable guard, as in some
-# situations what we think is a default body actually does have an
-# explicit derivative, and thereby would have gotten unwrapped by
-# the time you get to the implementation.
 STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
-at::AutoNonVariableTypeMode _var_guard(true);
 ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
-at::AutoNonVariableTypeMode _var_guard(true);
 switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:

@@ -16,18 +16,17 @@ import torch._six
 from torch.utils import cpp_extension
 from common_utils import TEST_WITH_ROCM, shell
 import torch.distributed as dist
+PY33 = sys.version_info >= (3, 3)
 PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'autograd',
-    'cpp_api_parity',
     'cpp_extensions',
     'c10d',
     'c10d_spawn',
     'cuda',
     'cuda_primary_ctx',
     'dataloader',
-    'dist_autograd_fork',
     'distributed',
     'distributions',
     'docs_coverage',
@@ -63,19 +62,20 @@ TESTS = [
     'function_schema',
 ]
 
-# skip < 3.6 b/c fstrings added in 3.6 for jit_py3
-# skip < 3.6 for rpc_spawn and dist_autograd_spawn temporarily because
-# a segmenation fault was triggered on python 3.5,
-# rpc_spawn and dist_autograd_spawn tests were added in
-# https://github.com/pytorch/pytorch/pull/25656
-# skip < 3.6 for rpc_fork as it imports mock that is only available in 3.6, mock
-# was added to rpc_fork in https://github.com/pytorch/pytorch/pull/26997
+# skip < 3.3 because mock is added in 3.3 and is used in rpc_fork and rpc_spawn
+# skip python2 for rpc and dist_autograd tests that do not support python2
+if PY33:
+    TESTS.extend([
+        'rpc_fork',
+        'rpc_spawn',
+        'dist_autograd_fork',
+        'dist_autograd_spawn',
+    ])
+
+# skip < 3.6 b/c fstrings added in 3.6
 if PY36:
     TESTS.extend([
         'jit_py3',
-        'rpc_fork',
-        'rpc_spawn',
-        'dist_autograd_spawn',
     ])
 
 WINDOWS_BLACKLIST = [
@@ -87,12 +87,9 @@ WINDOWS_BLACKLIST = [
 ]
 
 ROCM_BLACKLIST = [
-    'c10d',
-    'cpp_api_parity',
     'cpp_extensions',
     'distributed',
     'multiprocessing',
-    'nccl',
     'rpc_fork',
     'rpc_spawn',
     'dist_autograd_fork',
