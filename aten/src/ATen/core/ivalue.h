@@ -21,6 +21,7 @@ template<class T> class List;
 struct IValue;
 struct ClassType;
 struct Type;
+struct NamedType;
 using TypePtr = std::shared_ptr<Type>;
 namespace ivalue {
 struct Tuple;
@@ -597,13 +598,13 @@ private:
 struct StrongTypePtr {
   StrongTypePtr(
       std::shared_ptr<torch::jit::script::CompilationUnit> cu,
-      std::shared_ptr<Type> type)
+      std::shared_ptr<NamedType> type)
       : cu_(std::move(cu)), type_(type) {
     TORCH_INTERNAL_ASSERT(cu_);
     TORCH_INTERNAL_ASSERT(type_);
   }
   std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
-  std::shared_ptr<Type> type_;
+  std::shared_ptr<NamedType> type_;
 };
 
 TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();

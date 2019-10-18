@@ -84,6 +84,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case CapsuleType::Kind:
       case StringType::Kind:
       case FunctionType::Kind:
+      case MobileType::Kind:
       case DeviceObjType::Kind:
         // no op, there is nothing to tag
         break;
@@ -526,7 +527,7 @@ PickleOpCode Unpickler::readInstruction() {
         TORCH_CHECK(false, "class name not understood: torch.", class_name);
       } else {
         AT_ASSERT(class_resolver_);
-        c10::ClassTypePtr typePtr =
+        c10::NamedTypePtr typePtr =
             class_resolver_(c10::QualifiedName(module_name, class_name));
         globals_.emplace_back([this, typePtr] {
           auto val = stack_.back();

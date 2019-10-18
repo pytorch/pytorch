@@ -150,13 +150,10 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
   };
 
   auto class_resolver = [&](const c10::QualifiedName& qn) {
-    return nullptr;
+    return c10::MobileType::create(qn);
   };
 
-  auto obj_loader = [&](c10::TypePtr typePtr, IValue input) {
-    if (typePtr == nullptr) {
-      typePtr = at::AnyType::create();
-    }
+  auto obj_loader = [&](c10::NamedTypePtr typePtr, IValue input) {
     c10::StrongTypePtr type(compilation_unit_, std::move(typePtr));
     auto dict = std::move(input).toGenericDict();
     size_t ndict = dict.size();

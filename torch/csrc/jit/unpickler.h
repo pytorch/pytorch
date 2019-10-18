@@ -6,10 +6,10 @@ namespace torch {
 namespace jit {
 
 using ClassResolver =
-    std::function<c10::ClassTypePtr(const c10::QualifiedName&)>;
+    std::function<c10::NamedTypePtr(const c10::QualifiedName&)>;
 
 using ObjLoader =
-    std::function<c10::intrusive_ptr<c10::ivalue::Object>(c10::ClassTypePtr, IValue)>;
+    std::function<c10::intrusive_ptr<c10::ivalue::Object>(c10::NamedTypePtr, IValue)>;
 
 // [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
 // PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at

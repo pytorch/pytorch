@@ -121,7 +121,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   // Decouple how to get obj from type. In this file it's dependent on
   // Method.run() and graph executor, etc.
   // For bytecode import we need to decouple these dependencies.
-  auto obj_loader = [&](c10::ClassTypePtr typePtr, IValue input) {
+  auto obj_loader = [&](c10::NamedTypePtr typePtr, IValue input) {
     c10::StrongTypePtr type(compilation_unit_, std::move(typePtr));
     auto cls = type.type_->expect<at::ClassType>();
     size_t n = cls->numAttributes();
