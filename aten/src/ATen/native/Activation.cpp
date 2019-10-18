@@ -93,9 +93,9 @@ void inline prelu_cpu_kernel_share_weights(
   const Tensor& weight) {
 
   int64_t input_numel = input.numel();
-  auto result_data = result.data<scalar_t>();
-  auto input_data = input.data<scalar_t>();
-  auto weight_val = weight.data<scalar_t>()[0];
+  auto result_data = result.data_ptr<scalar_t>();
+  auto input_data = input.data_ptr<scalar_t>();
+  auto weight_val = weight.data_ptr<scalar_t>()[0];
 
   at::parallel_for(0, input_numel, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {
@@ -117,9 +117,9 @@ void inline prelu_cpu_kernel_multi_weights(
   int64_t input_stride0,
   int64_t input_stride1) {
 
-  scalar_t* result_data = result.data<scalar_t>();
-  scalar_t* input_data = input.data<scalar_t>();
-  scalar_t* weight_data = weight.data<scalar_t>();
+  scalar_t* result_data = result.data_ptr<scalar_t>();
+  scalar_t* input_data = input.data_ptr<scalar_t>();
+  scalar_t* weight_data = weight.data_ptr<scalar_t>();
 
   auto loop = [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; ++i) {
@@ -204,11 +204,11 @@ void inline prelu_cpu_backward_kernel_share_weights(
   Tensor& weight_grad) {
 
   int64_t input_numel = input.numel();
-  auto input_data = input.data<scalar_t>();
-  auto weight_val = weight.data<scalar_t>()[0];
-  auto grad_out_data = grad_out.data<scalar_t>();
-  auto input_grad_data = input_grad.data<scalar_t>();
-  auto weight_grad_data = weight_grad.data<scalar_t>();
+  auto input_data = input.data_ptr<scalar_t>();
+  auto weight_val = weight.data_ptr<scalar_t>()[0];
+  auto grad_out_data = grad_out.data_ptr<scalar_t>();
+  auto input_grad_data = input_grad.data_ptr<scalar_t>();
+  auto weight_grad_data = weight_grad.data_ptr<scalar_t>();
 
   scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
       [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
@@ -240,11 +240,11 @@ void inline prelu_cpu_backward_kernel_multi_weights(
   int64_t input_stride0,
   int64_t input_stride1) {
 
-  auto input_data = input.data<scalar_t>();
-  auto weight_data = weight.data<scalar_t>();
-  auto grad_out_data = grad_out.data<scalar_t>();
-  auto input_grad_data = input_grad.data<scalar_t>();
-  auto weight_grad_collector_data = weight_grad_collector.data<scalar_t>();
+  auto input_data = input.data_ptr<scalar_t>();
+  auto weight_data = weight.data_ptr<scalar_t>();
+  auto grad_out_data = grad_out.data_ptr<scalar_t>();
+  auto input_grad_data = input_grad.data_ptr<scalar_t>();
+  auto weight_grad_collector_data = weight_grad_collector.data_ptr<scalar_t>();
 
   auto loop = [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {

@@ -8,6 +8,9 @@
 #include <caffe2/core/workspace.h>
 #include <caffe2/proto/caffe2_pb.h>
 
+C10_DECLARE_string(onnxifi_blacklist);
+C10_DECLARE_string(onnxifi_blacklist_ops);
+
 namespace caffe2 {
 namespace glow {
 
@@ -29,6 +32,7 @@ void onnxifi(
     size_t max_seq_size = 0);
 
 std::unordered_set<int> ParseNetPositionList(const std::string& str);
+std::unordered_set<std::string> ParseBlackListOps(const std::string& str);
 
 } // namespace glow
 } // namespace caffe2

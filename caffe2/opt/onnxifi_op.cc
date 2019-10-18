@@ -27,6 +27,9 @@ void SetInputTensorDescriptorTypeAndBuffer(
   } else if (cpu_tensor.template IsType<int16_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_INT16;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int16_t>());
+  } else if (cpu_tensor.template IsType<c10::Half>()) {
+    desc->dataType = ONNXIFI_DATATYPE_FLOAT16;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<c10::Half>());
   } else if (cpu_tensor.template IsType<uint16_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_UINT16;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<uint16_t>());

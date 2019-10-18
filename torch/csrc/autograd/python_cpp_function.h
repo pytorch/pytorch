@@ -42,10 +42,10 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 
 PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook);
 PyObject* THPCppFunction_metadata(THPCppFunction *self, void *_unused);
-PyObject* THPCppFunction_requires_grad(THPCppFunction* self);
+PyObject* THPCppFunction_requires_grad(THPCppFunction* self, void *_unused);
 PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var);
 PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook);
-PyObject* THPCppFunction_name(PyObject* self);
+PyObject* THPCppFunction_name(PyObject* self, PyObject *noargs);
 
 PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
   PyGetSetDef* function_properties, PyMethodDef* function_methods);

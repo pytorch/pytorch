@@ -12,16 +12,16 @@ import torch
 
 # Configs for PT Split operator
 split_short_configs = op_bench.cross_product_configs(
-    M=[64, 128],
-    N=[64],
-    parts=[3],
+    M=[256, 512],
+    N=[512],
+    parts=[2],
     tags=['short']
 )
 
 
 class SplitBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, parts): 
-        self.input_one = torch.rand(M, N) 
+    def init(self, M, N, parts):
+        self.input_one = torch.rand(M, N)
         self.split_size = int(M * N / parts)
         self.set_module_name('split')
 

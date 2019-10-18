@@ -240,7 +240,7 @@ void slow_conv_dilated_all_cpu_template(
         }
         // Extract columns:
         hvol2col<scalar_t, dim>(
-            input_n.data<scalar_t>(),
+            input_n.data_ptr<scalar_t>(),
             nInputPlane,
             input_size,
             output_size,
@@ -248,7 +248,7 @@ void slow_conv_dilated_all_cpu_template(
             stride_size,
             pad_size,
             dilation_size,
-            columns.data<scalar_t>());
+            columns.data_ptr<scalar_t>());
         /*
           Compute:
 
@@ -278,12 +278,12 @@ void slow_conv_dilated_all_cpu_template(
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(0),
             /* alpha=*/1,
-            /*     A=*/columns.data<scalar_t>(),
+            /*     A=*/columns.data_ptr<scalar_t>(),
             /*   lda=*/columns.size(1),
-            /*     B=*/weight.data<scalar_t>(),
+            /*     B=*/weight.data_ptr<scalar_t>(),
             /*   ldb=*/columns.size(0),
             /*  beta=*/1,
-            /*     C=*/output_n.data<scalar_t>(),
+            /*     C=*/output_n.data_ptr<scalar_t>(),
             /*   ldc=*/columns.size(1));
 
       } else {
@@ -322,18 +322,18 @@ void slow_conv_dilated_all_cpu_template(
             /*     n=*/columns.size(0),
             /*     k=*/nOutputPlane,
             /* alpha=*/1,
-            /*     A=*/grad_output_n.data<scalar_t>(),
+            /*     A=*/grad_output_n.data_ptr<scalar_t>(),
             /*   lda=*/columns.size(1),
-            /*     B=*/weight.data<scalar_t>(),
+            /*     B=*/weight.data_ptr<scalar_t>(),
             /*   ldb=*/columns.size(0),
             /*  beta=*/0,
-            /*     C=*/columns.data<scalar_t>(),
+            /*     C=*/columns.data_ptr<scalar_t>(),
             /*   ldc=*/columns.size(1));
         // Unpack columns back into input:
         Tensor grad_input_n = grad_input.select(0, elt);
 
         col2hvol<scalar_t, dim>(
-            columns.data<scalar_t>(),
+            columns.data_ptr<scalar_t>(),
             nInputPlane,
             input_size,
             output_size,
@@ -341,14 +341,14 @@ void slow_conv_dilated_all_cpu_template(
             stride_size,
             pad_size,
             dilation_size,
-            grad_input_n.data<scalar_t>());
+            grad_input_n.data_ptr<scalar_t>());
       }
 
       // Gradient of weight:
       if (grad_weight.defined()) {
         // Extract columns:
         hvol2col<scalar_t, dim>(
-            input_n.data<scalar_t>(),
+            input_n.data_ptr<scalar_t>(),
             nInputPlane,
             input_size,
             output_size,
@@ -356,7 +356,7 @@ void slow_conv_dilated_all_cpu_template(
             stride_size,
             pad_size,
             dilation_size,
-            columns.data<scalar_t>());
+            columns.data_ptr<scalar_t>());
         scalar_t scale = 1; // TODO: expose as argument?
         /*
           Compute:
@@ -387,12 +387,12 @@ void slow_conv_dilated_all_cpu_template(
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(1),
             /* alpha=*/scale,
-            /*     A=*/columns.data<scalar_t>(),
+            /*     A=*/columns.data_ptr<scalar_t>(),
             /*   lda=*/columns.size(1),
-            /*     B=*/grad_output_n.data<scalar_t>(),
+            /*     B=*/grad_output_n.data_ptr<scalar_t>(),
             /*   ldb=*/columns.size(1),
             /*  beta=*/1,
-            /*     C=*/grad_weight.data<scalar_t>(),
+            /*     C=*/grad_weight.data_ptr<scalar_t>(),
             /*   ldc=*/columns.size(0));
       }
 

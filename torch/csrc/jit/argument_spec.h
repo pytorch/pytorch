@@ -44,11 +44,12 @@ struct ArgumentInfo {
   TypePtr toType() const {
     if (!defined())
       return TensorType::get();
-    return ProfiledTensorType::create(type(),
-      ConvertIntToCPUOrCUDA(device()),
-      c10::VaryingShape(dim()),
-      c10::VaryingShape(dim()),
-      requires_grad());
+    return TensorType::create(
+        type(),
+        ConvertIntToCPUOrCUDA(device()),
+        c10::VaryingShape(dim()),
+        c10::VaryingShape(dim()),
+        requires_grad());
   }
   operator TypePtr() const {
     return toType();
@@ -349,7 +350,7 @@ struct CompleteArgumentInfo {
   operator TypePtr() const {
     if (!defined())
       return TensorType::get();
-    return CompleteTensorType::create(
+    return TensorType::create(
         type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }
 
@@ -440,15 +441,15 @@ namespace std {
 template <>
 struct hash<c10::VaryingShape> {
   size_t operator()(const c10::VaryingShape& vs) const {
-    return torch::
-        get_hash<c10::optional<size_t>, std::vector<c10::optional<int64_t>>>(
-            vs.size(), vs.sizes());
+    return torch::get_hash(
+        vs.size(),
+        vs.size() ? vs.sizes().value() : std::vector<c10::optional<int64_t>>());
   }
 };
 
 template <>
-struct hash<c10::ProfiledTensorType> {
-  size_t operator()(const c10::ProfiledTensorType& ptt) const {
+struct hash<c10::TensorType> {
+  size_t operator()(const c10::TensorType& ptt) const {
     return torch::get_hash<
         c10::optional<int8_t>,
         c10::VaryingShape,

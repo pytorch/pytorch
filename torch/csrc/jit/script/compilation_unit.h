@@ -26,6 +26,7 @@ namespace jit {
 namespace script {
 
 struct Def;
+struct ClassDef;
 struct SugaredValue;
 struct Resolver;
 
@@ -103,6 +104,11 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self* self);
 
+  void define_interface(
+      const c10::QualifiedName& qualifiedName,
+      const ClassDef& classDef,
+      ResolverPtr rcb);
+
   Function* create_function(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
@@ -168,6 +174,14 @@ struct TORCH_API CompilationUnit {
       return nullptr;
     }
     return type->cast<c10::ClassType>();
+  }
+
+  c10::InterfaceTypePtr get_interface(const c10::QualifiedName& name) const {
+    auto type = get_type(name);
+    if (!type) {
+      return nullptr;
+    }
+    return type->cast<c10::InterfaceType>();
   }
 
   c10::TupleTypePtr get_named_tuple(const c10::QualifiedName& name) const {

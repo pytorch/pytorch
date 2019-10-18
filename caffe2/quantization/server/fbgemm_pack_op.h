@@ -24,6 +24,7 @@ class FullyConnectedDNNLowPPackWeightOp final
   int axis_w_;
   bool quantize_channelwise_;
   int nbits_in_non_outlier_; // only for DNNLOWP_ACC16
+  bool save_unpacked_weights_;
 
   INPUT_TAGS(FILTER, BIAS);
 };

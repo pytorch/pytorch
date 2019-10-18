@@ -8,22 +8,18 @@ def fuse_conv_bn_eval(conv, bn):
     assert(not (conv.training or bn.training)), "Fusion only for eval!"
     fused_conv = copy.deepcopy(conv)
 
-    w_conv = fused_conv.weight
-    b_conv = fused_conv.bias
-
-    bn_mean = bn.running_mean
-    bn_var_sqrt = torch.rsqrt(bn.running_var + bn.eps)
-
-    bn_weight = bn.weight
-    bn_bias = bn.bias
-
-    if b_conv is None:
-        b_conv = bn_mean.new_zeros(bn_mean.shape)
-
-    w_conv = w_conv * (bn_weight * bn_var_sqrt).reshape([-1, 1, 1, 1])
-    b_conv = (b_conv - bn_mean) * bn_var_sqrt * bn_weight + bn_bias
-
-    fused_conv.weight = torch.nn.Parameter(w_conv)
-    fused_conv.bias = torch.nn.Parameter(b_conv)
+    fused_conv.weight, fused_conv.bias = \
+        fuse_conv_bn_weights(fused_conv.weight, fused_conv.bias,
+                             bn.running_mean, bn.running_var, bn.eps, bn.weight, bn.bias)
 
     return fused_conv
+
+def fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b):
+    if conv_b is None:
+        conv_b = bn_rm.new_zeros(bn_rm.shape)
+    bn_var_rsqrt = torch.rsqrt(bn_rv + bn_eps)
+
+    conv_w = conv_w * (bn_w * bn_var_rsqrt).reshape([-1, 1, 1, 1])
+    conv_b = (conv_b - bn_rm) * bn_var_rsqrt * bn_w + bn_b
+
+    return torch.nn.Parameter(conv_w), torch.nn.Parameter(conv_b)

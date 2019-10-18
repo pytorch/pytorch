@@ -82,11 +82,11 @@ struct Source {
 
  private:
   void calc_line_start_offsets() {
+    line_starting_offsets_.push_back(0);
     size_t pos = 0;
-    do {
-      line_starting_offsets_.push_back(pos);
-      pos++;
-    } while ((pos = text_.find('\n', pos)) != std::string::npos);
+    while ((pos = text_.find('\n', pos)) != std::string::npos) {
+      line_starting_offsets_.push_back(++pos);
+    }
   }
   std::string text_;
   c10::optional<std::string> filename_;
@@ -112,7 +112,7 @@ struct CAFFE2_API SourceRange {
   size_t size() const {
     return end() - start();
   }
-  static const size_t CONTEXT = 10;
+  static const size_t CONTEXT = 3;
   void highlight(std::ostream& out) const;
   const std::shared_ptr<Source>& source() const {
     return source_;

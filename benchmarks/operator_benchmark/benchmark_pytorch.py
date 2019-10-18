@@ -3,6 +3,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import time
+import json
 import benchmark_core
 import torch
 import cpp_extension # noqa
@@ -16,8 +18,8 @@ microbenchmarks.
 
 class TorchBenchmarkBase(object):
     """ This is a base class used to create Pytorch operator benchmark.
-        module_name is the name of the operator being benchmarked. 
-        test_name is the name (it's created by concatenating all the 
+        module_name is the name of the operator being benchmarked.
+        test_name is the name (it's created by concatenating all the
         inputs) of a specific test
     """
 
@@ -32,12 +34,12 @@ class TorchBenchmarkBase(object):
 
     def auto_set(self):
         """ This is used to automatically set the require_grad for the backward patch.
-            It is implemented based on two counters. One counter to save the number of 
-            times init has been called. The other counter to save the number of times 
-            this function itself has been called. In the very first time init is called, 
-            this function counts how many inputs require gradient. In each of the 
-            following init calls, this function will return only one true value. 
-            Here is an example: 
+            It is implemented based on two counters. One counter to save the number of
+            times init has been called. The other counter to save the number of times
+            this function itself has been called. In the very first time init is called,
+            this function counts how many inputs require gradient. In each of the
+            following init calls, this function will return only one true value.
+            Here is an example:
                 ...
                 self.v1 = torch.rand(M, N, K, requires_grad=self.auto_set())
                 self.v2 = torch.rand(M, N, K, requires_grad=self.auto_set())
@@ -49,23 +51,23 @@ class TorchBenchmarkBase(object):
         if self._pass_count == 0:
             self._num_inputs_require_grads += 1
             return True
-        else: 
+        else:
             self._auto_set_counter += 1
             return (self._pass_count == self._auto_set_counter)
 
     def forward(self):
-        pass 
+        pass
 
     def _wrap_forward(self, foo):
-        """ The function passed to JIT trace must have at least one argument, 
-            this function is to wrap the forward method to meet that requirement. 
+        """ The function passed to JIT trace must have at least one argument,
+            this function is to wrap the forward method to meet that requirement.
             _consume op is used to avoid the dead-code-elimination optimization
-            in JIT. 
+            in JIT.
         """
         return torch.ops.operator_benchmark._consume(self.forward())
 
     def _generate_jit_forward_graph(self):
-        """ generate a graph for the forward function via tracing 
+        """ generate a graph for the forward function via tracing
         """
 
         func = torch.jit.trace(self._wrap_forward, torch.rand(1))
@@ -84,33 +86,39 @@ class TorchBenchmarkBase(object):
         """ this is used to label the operator being benchmarked
         """
         if self.user_given_name:
-            return self.user_given_name 
+            return self.user_given_name
         return self.__class__.__name__
 
-    def set_module_name(self, name): 
+    def set_module_name(self, name):
         self.user_given_name = name
 
     def test_name(self, **kargs):
-        """ this is a globally unique name which can be used to 
-            label a specific test 
+        """ this is a globally unique name which can be used to
+            label a specific test
         """
+
+        # This is a list of attributes which will not be included
+        # in the test name.
+        skip_key_list = ['device']
+
         test_name_str = []
         for key in kargs:
             value = kargs[key]
             test_name_str.append(
-                key + str(value if type(value) != bool else int(value)))
+                ('' if key in skip_key_list else key)
+                + str(value if type(value) != bool else int(value)))
         name = (self.module_name() + '_' +
                 '_'.join(test_name_str)).replace(" ", "")
         return name
 
 
 class PyTorchOperatorTestCase(object):
-    """ This class includes all the information needed to benchmark an operator. 
+    """ This class includes all the information needed to benchmark an operator.
         op_bench: it's a user-defined class (child of TorchBenchmarkBase)
         which includes input and operator, .etc
         test_config: a namedtuple includes test_name, input_shape, tag, run_backward.
-        When run_backward is false, the run_forward method will be executed, 
-        When run_backward is true, run_forward_eager and _output_mean will be 
+        When run_backward is false, the run_forward method will be executed,
+        When run_backward is true, run_forward_eager and _output_mean will be
         executed to generate output. Then, run_backward will be executed.
     """
     def __init__(self, op_bench, test_config):
@@ -118,31 +126,52 @@ class PyTorchOperatorTestCase(object):
         self.op_bench = op_bench
         self.place_holder_tensor = torch.ones(1)
         self.framework = "PyTorch"
+        self.time_series = []
 
-    def run_jit_forward(self, num_runs):
+    def run_jit_forward(self, num_runs, print_per_iter=False):
         """ Run the forward path of an op with JIT mode
         """
         if self.op_bench._jit_forward is None:
             self.op_bench._jit_forward = self.op_bench._generate_jit_forward_graph()
         self.op_bench._jit_forward(num_runs, self.place_holder_tensor)
 
-    def run_forward(self, num_runs):
+    def _print_per_iter(self):
+        # print last 50 values
+        length = min(len(self.time_series), 50)
+        for i in range(length):
+            print("PyTorchObserver " + json.dumps(
+                {
+                    "type": self.test_config.test_name,
+                    "metric": "latency",
+                    "unit": "ms",
+                    "value": str(self.time_series[length - i - 1]),
+                }
+            ))
+
+    def run_forward(self, num_runs, print_per_iter):
         """ Run the forward path of an op with eager mode
         """
-        for _ in range(num_runs):
-            self.output = self.op_bench.forward()
+        if print_per_iter:
+            for _ in range(num_runs):
+                start_time = time.time()
+                self.output = self.op_bench.forward()
+                end_time = time.time()
+                self.time_series.append((end_time - start_time) * 1e3)
+        else:
+            for _ in range(num_runs):
+                self.output = self.op_bench.forward()
 
     def _output_mean(self):
-        """ TODO (mingzhe): it is not necessary to sum up everything by myself, 
-            torch.autograd.backward do take a gradient tensor. By default, it 
-            is the same shape as your output tensor, with all 1s. 
-            Mathematically, it is the same as if the output is summed together. 
-            So we should be able to get ride of this method. 
+        """ TODO (mingzhe): it is not necessary to sum up everything by myself,
+            torch.autograd.backward do take a gradient tensor. By default, it
+            is the same shape as your output tensor, with all 1s.
+            Mathematically, it is the same as if the output is summed together.
+            So we should be able to get ride of this method.
             dummy function for gradient calculation
         """
         self.mean = self.output.mean()
 
-    def run_backward(self, num_runs):
+    def run_backward(self, num_runs, print_per_iter=False):
         """ Run the backward path of an op in many iterations
         """
         # TODO: can we use JIT here to reduce python overhead?

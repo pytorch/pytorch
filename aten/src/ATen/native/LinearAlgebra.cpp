@@ -6,10 +6,13 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
+#include <ATen/core/grad_mode.h>
 #include <functional>
 #include <numeric>
 #include <vector>
 #include <limits>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {
@@ -25,8 +28,13 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs).sum(-1, /*keepdim=*/false, /*dtype=*/self.scalar_type()).fmod_(2);
-  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1),
-                                    lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1));
+  auto u_diagonal = lu.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+
+  // We have to manually set the diagonal to 0 due to an issue with MAGMA's getrf_batched routine
+  if (self.dim() > 2 && self.is_cuda()) {
+    u_diagonal.index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
+  }
+  return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
 }
 
 Tensor det(const Tensor& self) {
@@ -76,18 +84,20 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor pinverse(const Tensor& self, double rcond) {
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() == 2,
-           "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) && self.dim() >= 2,
+           "pinverse(", self.type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
            "of floating types");
   if (self.numel() == 0) {
     // Match NumPy
-    return at::empty({self.size(1), self.size(0)}, self.options());
+    auto self_sizes = self.sizes().vec();
+    std::swap(self_sizes[self.dim() - 1], self_sizes[self.dim() - 2]);
+    return at::empty(self_sizes, self.options());
   }
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
-  Tensor max_val = S[0];
+  Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
   Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
-  return V.mm(S_pseudoinv.diag().mm(U.t()));
+  return at::matmul(V, at::matmul(S_pseudoinv.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1), U.transpose(-2, -1)));
 }
 
 static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
@@ -289,7 +299,19 @@ Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
 Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
-  return bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+#ifdef BUILD_NAMEDTENSOR
+  {
+  NoNamesGuard guard;
+#endif
+  bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names(
+      result,
+      namedinference::compute_bmm_outnames(result, batch1, batch2),
+      /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
@@ -322,6 +344,9 @@ Tensor matmul(
     c10::optional<Tensor> out_opt,
     const Tensor& tensor1,
     const Tensor& tensor2) {
+#ifdef BUILD_NAMEDTENSOR
+  NoNamesGuard guard;
+#endif
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
   auto has_out = out_opt.has_value();
@@ -429,11 +454,24 @@ Tensor matmul(
 }
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
-  return at::native::matmul(c10::nullopt, tensor1, tensor2);
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
+#endif
+  auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
+#endif
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
   return result;
 }
 
@@ -512,7 +550,11 @@ Tensor nuclear_norm(const Tensor& self, bool keepdim) {
       self.dim() == 2,
       "Expected a tensor with 2 dimensions, but got a tensor with ",
       self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-  return at::sum(std::get<1>(at::svd(self)), 0, keepdim);
+  // Since we error out on svd_backward when we don't compute U and V, the backward pass for nuclear_norm
+  // would end up throwing an error as a result if U and V aren't computed.
+  // Due to this, we have to compute U and V conditionally.
+  return at::sum(std::get<1>(at::svd(self, /*some=*/true,
+                 /*compute_uv=*/at::GradMode::is_enabled() && self.is_variable() && self.requires_grad())), 0, keepdim);
 }
 
 Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
@@ -520,14 +562,19 @@ Tensor &nuclear_norm_out(Tensor& result, const Tensor& self, bool keepdim) {
       self.dim() == 2,
       "Expected a tensor with 2 dimensions, but got a tensor with ",
       self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-  return at::sum_out(result, std::get<1>(at::svd(self)), 0, keepdim);
+  return at::sum_out(result, std::get<1>(at::svd(self, /*some=*/true, /*compute_uv=*/false)), 0, keepdim);
+
 }
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
 
   Tensor p = _move_to_end(self, dim);
-  return at::sum(std::get<1>(at::svd(p, /*some=*/true, /*compute_uv=*/false)), -1, keepdim);
+  // Since we error out on svd_backward when we don't compute U and V, the backward pass for nuclear_norm
+  // would end up throwing an error as a result if U and V aren't computed.
+  // Due to this, we have to compute U and V conditionally.
+  return at::sum(std::get<1>(at::svd(p, /*some=*/true,
+                 /*compute_uv=*/at::GradMode::is_enabled() && self.is_variable() && self.requires_grad())), -1, keepdim);
 }
 
 Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
@@ -535,6 +582,7 @@ Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bo
 
   Tensor p = _move_to_end(self, dim);
   return at::sum_out(result, std::get<1>(at::svd(p, /*some=*/true, /*compute_uv=*/false)), -1, keepdim);
+
 }
 
 static inline Tensor _chain_matmul_general(TensorList matrices, std::vector<std::vector<int64_t>>& order, int64_t i, int64_t j) {

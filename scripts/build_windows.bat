@@ -55,11 +55,13 @@ if NOT DEFINED MSVC_Z7_OVERRIDE (
 )
 
 if NOT DEFINED CMAKE_GENERATOR (
-  set CMAKE_GENERATOR=Visual Studio 15 2017
+  set CMAKE_GENERATOR=Ninja
 )
 
+set CMAKE_VERBOSE_MAKEFILE=1
+
 :: Install pyyaml for Aten codegen
-pip install pyyaml
+pip install pyyaml ninja
 
 echo CAFFE2_ROOT=%CAFFE2_ROOT%
 echo CMAKE_GENERATOR=%CMAKE_GENERATOR%
