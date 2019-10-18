@@ -732,9 +732,21 @@ TEST_F(ModulesTest, Linear) {
 }
 
 TEST_F(ModulesTest, LayerNorm) {
-  // LayerNorm model(LayerNormOptions({2, 2}));
-  // auto input = torch::Tensor({{1,2}, {3, 4}});
-  // auto y = model(input);
+  LayerNorm model(LayerNormOptions({2, 2}).eps(2e-5));
+  auto x = torch::randn({2, 2}, torch::requires_grad());
+  auto y = model(x);
+  auto y_exp = torch::layer_norm(x, {2, 2}, model->weight, model->bias, 2e-5);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
+  for (auto i = 0; i < 2; i++) {
+    ASSERT_EQ(y.size(i), 2);
+  }
+
+  ASSERT_EQ(model->weight.grad().numel(), 2 * 2);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
 TEST_F(ModulesTest, Fold) {
