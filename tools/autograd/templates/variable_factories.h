@@ -125,10 +125,10 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
 #define TENSOR(T, S) \
   TensorDataContainer(at::ArrayRef<T> values) { \
+    at::AutoNonVariableTypeMode non_var_type_mode(true);  \
     type_ = TensorDataContainerType::Tensor; \
     sizes_ = {(int64_t)values.size()}; \
     scalar_type_ = at::k##S; \
-    at::AutoNonVariableTypeMode non_var_type_mode(true);  \
     tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU).is_variable(false));       \
   } \
   TensorDataContainer(std::vector<T> values) : TensorDataContainer(at::ArrayRef<T>(values)) {}
@@ -159,7 +159,8 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     if (type_ == TensorDataContainerType::Tensor) {
       return tensor_.to(options);
     } else if (type_ == TensorDataContainerType::Scalar) {
-      return at::scalar_tensor(scalar_, options);
+      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      return at::scalar_tensor(scalar_, options.is_variable(false));
     } else if (type_ == TensorDataContainerType::InitList) {
       // NOTE: Here we explicitly choose to initialize the tensor on CPU first,
       // fill each element of the tensor, and then move the tensor to the desired
@@ -169,7 +170,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       // `N` is the number of the elements in the tensor).
       at::Tensor tensor = ([&]() {
         at::AutoNonVariableTypeMode non_var_type_mode(true);
-        return at::empty(sizes_, at::TensorOptions(options).device(at::kCPU).is_variable(false));
+        return at::empty(sizes_, options.device(at::kCPU).is_variable(false));
       })();
       fill_tensor(*this, tensor);
       return tensor.to(options.device());

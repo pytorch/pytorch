@@ -471,7 +471,7 @@ TEST(CustomAutogradTest, DeepReentrant) {
       }
       {
         at::AutoGradMode enable_grad(true);
-        apply(ctx->saved_data["x"].toTensor())[0].sum().backward();
+        apply(ctx->saved_data["x"].toTensor()).sum().backward();
         return grad_output;
       }
     }
@@ -512,7 +512,7 @@ TEST(CustomAutogradTest, ReentrantPriority) {
       }
       {
         at::AutoGradMode enable_grad(true);
-        apply(ctx->saved_data["x"].toTensor())[0].sum().backward();
+        apply(ctx->saved_data["x"].toTensor()).sum().backward();
         return grad_output;
       }
     }

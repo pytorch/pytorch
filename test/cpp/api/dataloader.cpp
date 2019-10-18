@@ -636,7 +636,7 @@ TEST(DataTest, MapDoesNotCopy) {
 
   auto data = dataset.get_batch(1).at(0).data;
   ASSERT_EQ(data.numel(), 1);
-  ASSERT_EQ(data[0].item<float>(), 7);
+  ASSERT_EQ(data.item<float>(), 7);
 }
 
 TEST(DataTest, QueuePushAndPopFromSameThread) {
