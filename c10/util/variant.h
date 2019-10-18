@@ -11,12 +11,23 @@
 // - Move to `c10` namespace.
 // - Rename namespace `detail` to `detail_`, to not conflict with existing
 //   c10 implementations in `detail` namespace.
-// - `struct in_place_t` is renamed to `struct variant_in_place_t`, to not
-//   conflict with `struct in_place_t` in c10/util/Optional.h.
 // - In two functions, the template name reference `I` is changed to
 //   `detail_::best_match<Arg, Ts...>::value` to work around gcc 7.3.1 bug.
 //   However, this workaround also limits the use cases of `c10::variant`.
 //   Please see NOTE [gcc 7.3.1 bug workaround] for details.
+// - The following code is moved to `c10/util/in_place.h`:
+//   ```
+//   struct in_place_t { explicit in_place_t() = default; };
+//
+//   template <std::size_t I>
+//   struct in_place_index_t { explicit in_place_index_t() = default; };
+//
+//   template <typename T>
+//   struct in_place_type_t { explicit in_place_type_t() = default; };
+//
+//   constexpr in_place_t in_place{};
+//   ```
+//   so that they can also be used in `c10/util/Optional.h`.
 
 #ifndef C10_UTIL_VARIANT_H_
 #define C10_UTIL_VARIANT_H_
@@ -322,22 +333,14 @@ namespace std {
 #ifndef MPARK_IN_PLACE_HPP
 #define MPARK_IN_PLACE_HPP
 
+#include <c10/util/in_place.h>
+
 #include <cstddef>
 
 
 namespace c10 {
 
-  struct variant_in_place_t { explicit variant_in_place_t() = default; };
-
-  template <std::size_t I>
-  struct in_place_index_t { explicit in_place_index_t() = default; };
-
-  template <typename T>
-  struct in_place_type_t { explicit in_place_type_t() = default; };
-
 #ifdef MPARK_VARIABLE_TEMPLATES
-  constexpr variant_in_place_t in_place{};
-
   template <std::size_t I> constexpr in_place_index_t<I> in_place_index{};
 
   template <typename T> constexpr in_place_type_t<T> in_place_type{};
@@ -1651,7 +1654,7 @@ namespace c10 {
 #pragma warning(disable : 4244)
 #endif
       template <typename... Args>
-      inline explicit constexpr alt(variant_in_place_t, Args &&... args)
+      inline explicit constexpr alt(in_place_t, Args &&... args)
           : value(lib::forward<Args>(args)...) {}
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -1676,7 +1679,7 @@ namespace c10 {
     template <typename... Args>                                            \
     inline explicit constexpr recursive_union(in_place_index_t<0>,         \
                                               Args &&... args)             \
-        : head_(variant_in_place_t{}, lib::forward<Args>(args)...) {}              \
+        : head_(in_place_t{}, lib::forward<Args>(args)...) {}              \
                                                                            \
     template <std::size_t I, typename... Args>                             \
     inline explicit constexpr recursive_union(in_place_index_t<I>,         \
@@ -1841,7 +1844,7 @@ namespace c10 {
       template <std::size_t I, typename T, typename... Args>
       inline static T &construct_alt(alt<I, T> &a, Args &&... args) {
         auto *result = ::new (static_cast<void *>(lib::addressof(a)))
-            alt<I, T>(variant_in_place_t{}, lib::forward<Args>(args)...);
+            alt<I, T>(in_place_t{}, lib::forward<Args>(args)...);
         return result->value;
       }
 
