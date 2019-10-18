@@ -1090,8 +1090,7 @@ struct to_ir {
     const auto loc = lc.range();
     const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
     const auto itrs = List<Expr>::create(lc.range(), {lc.iter()});
-    auto placeholder_node =
-        graph->insertNode(create(prim::Uninitialized, loc, 1));
+    auto placeholder_node = graph->insertNode(create(prim::Print, loc, 0));
     Value* list_value = nullptr;
     if (type_hint) {
       if (!type_hint->cast<ListType>()) {
@@ -1107,11 +1106,10 @@ struct to_ir {
     }
     auto emit_body = [&]() {
       auto comprehension_out = emitExpr(lc.elt());
-      // if (*iter_pointer)
       if (list_value == nullptr) {
-        auto li_node = graph->createList(comprehension_out->type(), {})
-                           ->insertBefore(placeholder_node);
-        list_value = li_node->output();
+        auto list_node = graph->createList(comprehension_out->type(), {})
+                             ->insertBefore(placeholder_node);
+        list_value = list_node->output();
       }
       NamedValue self = NamedValue(loc, "self", list_value);
       NamedValue input = NamedValue(loc, "", comprehension_out);
