@@ -1443,3 +1443,5 @@ endif()
 #
 # End ATen checks
 #
+add_compile_options(-DFMT_HEADER_ONLY)
+include_directories(SYSTEM ${CMAKE_CURRENT_LIST_DIR}/../third_party/fmt/include)

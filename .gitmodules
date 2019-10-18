@@ -118,3 +118,6 @@
     ignore = dirty
     path = android/libs/fbjni
     url = https://github.com/IvanKobzarev/fbjni.git
+[submodule "third_party/fmt"]
+	path = third_party/fmt
+	url = https://github.com/fmtlib/fmt

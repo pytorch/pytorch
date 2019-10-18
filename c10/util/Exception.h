@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <fmt/format.h>
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
 #define __func__ __FUNCTION__
@@ -241,6 +242,13 @@ inline std::string if_empty_then(std::string x, std::string y) {
         __FILE__                              \
     );                                        \
   }
+#define TORCH_CHECK_FMT(cond, ...)                \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    C10_THROW_ERROR(Error,                    \
+        #cond " CHECK FAILED at "             \
+        __FILE__                              \
+    );                                        \
+  }
 #else
 #define TORCH_CHECK(cond, ...)                              \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
@@ -253,9 +261,17 @@ inline std::string if_empty_then(std::string x, std::string y) {
       )                                                     \
     );                                                      \
   }
+
+// Like TORCH_CHECK, but use Python-like format strings for the error message.
+// Usage:
+//    TORCH_CHECK(should_be_true, "{} had an error: {}", arg1, arg2);
+#define TORCH_CHECK_FMT(cond, fmt_str, ...)                 \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
+    C10_THROW_ERROR(Error,                                  \
+      fmt::format(fmt_str, __VA_ARGS__)                     \
+    );                                                      \
+  }
 #endif
-// TODO: We're going to get a lot of similar looking string literals
-// this way; check if this actually affects binary size.
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
 #ifdef C10_MOBILE
