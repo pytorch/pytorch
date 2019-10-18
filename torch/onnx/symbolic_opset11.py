@@ -189,21 +189,22 @@ def _prepare_onnx_paddings(g, dim, pad):
     # The desired order of paddings is
     # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
     # n is the dimension of input.
-    pad_shape = g.op("Shape", pad)
-    # assume zero-dimensions in the beginning
-    pad_len = torch.onnx.symbolic_opset9.select(g, pad_shape, g.op("Constant", value_t=torch.tensor([0])),
-                                                g.op("Constant", value_t=torch.tensor([0])))
+    # Assume zero-dimensions in the beginning, pad the "pad" sequence with zeros in the beginning
+    pad_len = torch.onnx.symbolic_opset9.size(g, pad, g.op("Constant", value_t=torch.tensor([0])))
+    # Set extension = [0] * (dim * 2 - len(pad))
     extension = g.op("Sub", g.op("Mul", g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64)),
                      g.op("Constant", value_t=torch.tensor(2, dtype=torch.int64))), pad_len)
-    ext_pad = g.op("Pad", g.op("Cast", extension, to_i=sym_help.cast_pytorch_to_onnx['Float']),
-                   g.op("Constant", value_t=torch.tensor([1, 0], dtype=torch.int64)))
-    # reverse order and collate first beginnings and then ends
-    ext_pad = g.op("Cast", ext_pad, to_i=sym_help.cast_pytorch_to_onnx['Long'])
-    paddings = g.op("Cast", pad, to_i=sym_help.cast_pytorch_to_onnx['Float'])
-    paddings = g.op("Reshape", g.op("Pad", paddings, ext_pad), g.op("Constant", value_t=torch.tensor([-1, 2])))
+    # Concat pad with extension: paddings = [dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, 0, 0, ... ]
+    paddings = g.op("Concat", pad, g.op("ConstantOfShape", extension, value_t=torch.tensor([0])), axis_i=0)
+    # ext_pad = g.op("Transpose", ext_pad, perm_i=[1, 0])
+    # Reshape and reverse order and collate first beginnings and then ends
+    # paddings = [[..., 0, dim_n - 1_begin, dim_n_begin]
+    #               [..., 0, dim_n - 1_end, dim_n_end]]
+    # Reshape back to 1-D paddings = [..., 0, dim_n - 1_begin, dim_n_begin, ..., 0, dim_n - 1_end, dim_n_end]
+    paddings = g.op("Reshape", paddings, g.op("Constant", value_t=torch.tensor([-1, 2])))
     paddings = g.op("Transpose", torch.onnx.symbolic_opset10.flip(g, paddings, [0]), perm_i=[1, 0])
-    paddings = g.op("Reshape", paddings, g.op("Constant", value_t=torch.tensor([1, -1])))
-    padding_c = g.op("Cast", g.op("Squeeze", paddings, axes_i=[0]), to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    paddings = g.op("Reshape", paddings, g.op("Constant", value_t=torch.tensor([-1])))
+    padding_c = g.op("Cast", paddings, to_i=sym_help.cast_pytorch_to_onnx['Long'])
     return padding_c
 
 
