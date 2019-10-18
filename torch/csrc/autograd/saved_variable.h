@@ -9,7 +9,6 @@
 
 namespace torch { namespace autograd {
 
-struct Variable;
 struct Node;
 
 TORCH_API extern const char* ERR_BACKWARD_TWICE;
@@ -19,14 +18,14 @@ TORCH_API extern const char* ERR_BACKWARD_TWICE;
 class TORCH_API SavedVariable {
  public:
   SavedVariable() = default;
-  SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view=false);
+  SavedVariable(const at::Tensor& variable, bool is_output, bool is_inplace_view=false);
   SavedVariable(SavedVariable&&) = default;
   SavedVariable& operator=(SavedVariable&&) = default;
 
   /// Reconstructs the saved variable. Pass `saved_for` as the gradient
   /// function if constructing the `SavedVariable` with it would have caused a
   /// circular reference.
-  Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
+  at::Tensor unpack(std::shared_ptr<Node> saved_for = nullptr) const;
 
   void reset_data() {
     return data_.reset();
