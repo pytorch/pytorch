@@ -162,8 +162,6 @@ EnforceWarningBuffer::EnforceWarningBuffer() noexcept(true): prev_handler(c10::W
 EnforceWarningBuffer::~EnforceWarningBuffer() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler);
 
-  std::unique_lock<std::mutex> lock(warning_buffer_mutex);
-
   bool has_warnings;
   {
     std::unique_lock<std::mutex> lock(warning_buffer_mutex);
