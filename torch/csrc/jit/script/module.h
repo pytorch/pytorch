@@ -96,11 +96,6 @@ struct TORCH_API Method {
     return *function_;
   }
 
-  // Used for ONNX export. Return a tuple (graph, parameters) where
-  // the last parameters.size() inputs to the graph are the trainable parameters
-  // used in this method. The remaining inputs are the true inputs to the function.
-  std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> _lowered_graph();
-
  private:
   // Methods are uniqued onwed by a single module. This raw pointer allows
   // looking up the module.
