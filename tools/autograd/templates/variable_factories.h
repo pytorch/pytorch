@@ -31,10 +31,6 @@ template <size_t D> struct TensorDataContainer;
 
 template <size_t D>
 inline void fill_tensor(const TensorDataContainer<D>& init_list_tensor, at::Tensor tensor) {
-  static_assert(
-    D <= TENSOR_CTOR_MAX_NUM_DIMS,
-    "Tensor with more than 10 dimensions is not supported");
-
   size_t index = 0;
   for (const auto& elem : init_list_tensor.init_list()) {
     if (elem.type() == TensorDataContainerType::Scalar) {
@@ -53,20 +49,16 @@ inline void fill_tensor(const TensorDataContainer<D>& init_list_tensor, at::Tens
   }
 }
 
-// // NOTE: We add an explicit template specialization for `fill_tensor`
-// template <>
-// inline void fill_tensor(const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS+1>& init_list_tensor, at::Tensor tensor) {
-//   TORCH_CHECK(
-//     false,
-//     ); // yf225 TODO: add a test for this
-// }
+// NOTE: We add an explicit template specialization for `fill_tensor`
+template <>
+inline void fill_tensor(const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS+1>& init_list_tensor, at::Tensor tensor) {
+  TORCH_CHECK(
+    false,
+    "Tensor with more than ", TENSOR_CTOR_MAX_NUM_DIMS, " dimensions is not supported"); // yf225 TODO: add a test for this
+}
 
 template <size_t D>
 inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<D>& init_list_tensor) {
-  static_assert(
-    D <= TENSOR_CTOR_MAX_NUM_DIMS,
-    "Tensor with more than 10 dimensions is not supported");
-
   if (init_list_tensor.type() == TensorDataContainerType::Scalar) {
     AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, init_list_tensor.scalar_type(), "TensorDataContainer_pretty_print_scalar", [&] {
       stream << init_list_tensor.scalar().template to<scalar_t>();
@@ -93,15 +85,15 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<
   return stream;
 }
 
-// template <>
-// inline std::ostream& operator<<(
-//     std::ostream& stream,
-//     const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS+1>& init_list_tensor) {
-//   TORCH_CHECK(
-//     false,
-//     "Tensor with more than ", TENSOR_CTOR_MAX_NUM_DIMS, " dimensions is not supported"); // yf225 TODO: add a test for this
-//   return stream;
-// }
+template <>
+inline std::ostream& operator<<(
+    std::ostream& stream,
+    const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS+1>& init_list_tensor) {
+  TORCH_CHECK(
+    false,
+    "Tensor with more than ", TENSOR_CTOR_MAX_NUM_DIMS, " dimensions is not supported"); // yf225 TODO: add a test for this
+  return stream;
+}
 
 // We use `TensorDataContainer` to support converting the following data container types
 // into the equivalent Tensor:
