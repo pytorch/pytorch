@@ -116,7 +116,9 @@ void nll_loss_forward_out_cpu_template(
           }
         }
 
-        if (reduction == Reduction::Mean && total_weight_val != 0) {
+        if (reduction == Reduction::Mean &&
+            (total_weight_val != 0 || input.numel() == 0)) {
+          // allow NaN result for total_weight_val == 0 case, see #15870
           output_val /= total_weight_val;
         }
 
@@ -171,8 +173,8 @@ void nll_loss_backward_out_cpu_template(
               if (cur_target == ignore_index) {
                 continue;
               }
-              scalar_t w = weight_data ? weight_data[cur_target]
-                                       : static_cast<scalar_t>(1);
+              const scalar_t w = weight_data ? weight_data[cur_target]
+                                             : static_cast<scalar_t>(1);
               grad_input_acc[i][cur_target] = -w * grad_output_acc[i];
             }
           });
@@ -216,12 +218,12 @@ void nll_loss_backward_out_cpu_template(
             if (cur_target != ignore_index) {
               TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
 
-              grad_input_acc[i][cur_target] =
-                  -(weight_data != nullptr ? weight_data[cur_target]
-                                           : static_cast<scalar_t>(1)) *
-                  grad_output_value;
+              const scalar_t w = weight_data != nullptr
+                  ? weight_data[cur_target]
+                  : static_cast<scalar_t>(1);
+              grad_input_acc[i][cur_target] = -w * grad_output_value;
 
-              if (reduction == Reduction::Mean && total_weight_value != 0) {
+              if (reduction == Reduction::Mean) {
                 grad_input_acc[i][cur_target] /= total_weight_value;
               }
             }
