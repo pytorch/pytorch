@@ -1,4 +1,5 @@
 #include <c10/util/Optional.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
@@ -149,7 +150,7 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  requires_grad &= isFloatingPoint(self.scalar_type());
+  requires_grad &= isFloatingType(self.scalar_type()) || isComplexType(self.scalar_type());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));

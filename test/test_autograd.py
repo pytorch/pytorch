@@ -3958,6 +3958,14 @@ class TestAutogradDeviceType(TestCase):
         output = input.to(device=devices[1]) + input.to(device=devices[1])
         output.backward()
 
+    def test_copy__bfloat16(self, device):
+        x = torch.randn(10, device=device, requires_grad=True)
+        y = torch.empty(10, device=device, dtype=torch.bfloat16)
+        y.copy_(x)
+        self.assertTrue(y.requires_grad)
+        z = x.to(torch.bfloat16)
+        self.assertTrue(z.requires_grad)
+
     @onlyCUDA
     def test_cross_device_reentrant_autograd(self, device):
         # Output on gpu so that this task will be associated with the gpu thread
