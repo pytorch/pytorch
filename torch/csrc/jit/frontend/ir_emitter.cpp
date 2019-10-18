@@ -372,11 +372,12 @@ struct Environment {
       std::stringstream why_not;
       if (!as_simple_value->type()->isSubtypeOfExt(parent_type, &why_not)) {
         auto error = ErrorReport(loc);
-        error << "Variable '" << name << "' previously has type "
-              << simple_parent->type()->python_str()
-              << " but is now being assigned to a value of type "
-              << as_simple_value->type()->python_str();
-
+        error << fmt::format(
+            "Variable '{}' previously had type '{}', "
+            "but is now being assigned to a value of type '{}'",
+            name,
+            simple_parent->type()->python_str(),
+            as_simple_value->type()->python_str());
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
             as_simple_value->type()->kind() == TypeKind::ListType) {
