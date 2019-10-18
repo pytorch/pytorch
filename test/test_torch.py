@@ -2651,7 +2651,7 @@ class _TestTorchMixin(object):
 
     def test_put_(self):
         def check(dst, idx, value):
-            expected = dst.clone().view(-1).index_copy_(
+            expected = dst.clone(memory_format=torch.contiguous_format).view(-1).index_copy_(
                 0, idx.contiguous().view(-1), value.contiguous().view(-1))
             expected = expected.view_as(dst)
             dst.put_(idx, value)
@@ -12372,7 +12372,7 @@ class TestTorchDeviceType(TestCase):
         else:
             check_sum_all(torch.tensor([True, False, True], dtype=torch.bool, device=device))
 
-    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn):
+    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn, default_is_preserve=False):
         nhwc = input_generator_fn(device)
         # nhwc is not memory dense, but looks like channels last
         nhwc = nhwc[:, :, ::2, ::2]
@@ -12391,8 +12391,12 @@ class TestTorchDeviceType(TestCase):
 
         nhwc = input_generator_fn(device)
         clone = transformation_fn(nhwc)
-        self.assertTrue(clone.is_contiguous())
-        self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
+        if default_is_preserve:
+            self.assertFalse(clone.is_contiguous())
+            self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
+        else:
+            self.assertTrue(clone.is_contiguous())
+            self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(nhwc, clone)
 
         x = torch.randn((3, 4, 5, 6, 7, 8, 9), device=device)
@@ -12427,7 +12431,7 @@ class TestTorchDeviceType(TestCase):
         def transformation_fn(tensor, **kwargs):
             return tensor.clone(**kwargs)
 
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn)
+        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, True)
 
     @onlyCPU
     @dtypes(torch.double)
