@@ -80,9 +80,9 @@ static void multilabel_margin_loss_forward_cpu_template(
   }
 
   TORCH_CHECK(
-      *target.min().data_ptr<int64_t>() >= -1, target_arg, " is out of range");
+      target.min().item<int64_t>() >= -1, target_arg, " is out of range");
   TORCH_CHECK(
-      *target.max().data_ptr<int64_t>() < dim, target_arg, " is out of range");
+      target.max().item<int64_t>() < dim, target_arg, " is out of range");
 
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
@@ -91,7 +91,7 @@ static void multilabel_margin_loss_forward_cpu_template(
   TORCH_CHECK(is_target.is_contiguous(), "is_target must be contiguous");
   is_target.zero_();
 
-  // special case ndims == 0: produce scalar output for scalar inputs 
+  // special case ndims == 0: produce scalar output for scalar inputs
   // even if reduction == Reduction::None
   if (reduction != Reduction::None || ndims == 0) {
     output.resize_({});
@@ -186,9 +186,9 @@ static void multilabel_margin_loss_backward_cpu_template(
   checkSameSize(c, target_arg, is_target_arg);
 
   TORCH_CHECK(
-      *target.min().data_ptr<int64_t>() >= -1, target_arg, " is out of range");
+      target.min().item<int64_t>() >= -1, target_arg, " is out of range");
   TORCH_CHECK(
-      *target.max().data_ptr<int64_t>() < dim, target_arg, " is out of range");
+      target.max().item<int64_t>() < dim, target_arg, " is out of range");
 
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
@@ -201,11 +201,11 @@ static void multilabel_margin_loss_backward_cpu_template(
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "multilabel_margin_loss_forward_cpu", [&] {
         TORCH_CHECK(
-            *is_target.min().data_ptr<scalar_t>() >= 0,
+            is_target.min().item<scalar_t>() >= 0,
             is_target_arg,
             " is out of range");
         TORCH_CHECK(
-            *is_target.max().data_ptr<scalar_t>() <= 1,
+            is_target.max().item<scalar_t>() <= 1,
             is_target_arg,
             " is out of range");
 
