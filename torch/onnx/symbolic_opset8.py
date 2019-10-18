@@ -60,12 +60,12 @@ def _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, ali
         return _unimplemented(name, "torch._C.Value (output_size) indexing")
     if scales is None:
         scales = [1. if i < 2 else
-                    float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
-                    for i in range(0, dim)]
+                  float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
+                  for i in range(0, dim)]
     return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)
 
 def _interpolate1d(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, scales_1, scales_2, align_corners=None):
+    def symbolic_fn(g, input, output_size, scales_1, align_corners=None):
         scales = sym_help._interpolate_get_scales_if_available(g, [scales_1])
         return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
     return symbolic_fn

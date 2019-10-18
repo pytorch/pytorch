@@ -77,7 +77,7 @@ def _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, ali
 
 
 def _interpolate1d(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, scales_1, scales_2, align_corners=None):
+    def symbolic_fn(g, input, output_size, scales_1, align_corners=None):
         scales = sym_help._interpolate_get_scales_if_available(g, [scales_1])
         return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
     return symbolic_fn

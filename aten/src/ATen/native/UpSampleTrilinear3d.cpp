@@ -221,6 +221,9 @@ static void upsample_trilinear3d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
+    double scales_3,
     bool align_corners) {
   TORCH_CHECK(
       output_size.size() == 3,
@@ -282,6 +285,9 @@ static void upsample_trilinear3d_backward_out_cpu_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
+    double scales_3,
     IntArrayRef input_size,
     bool align_corners) {
   TORCH_CHECK(
@@ -347,19 +353,25 @@ Tensor& upsample_trilinear3d_out_cpu(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
+    double scales_3,
     bool align_corners) {
   upsample_trilinear3d_out_cpu_template(
-      output, input, output_size, align_corners);
+      output, input, output_size, scales_1, scales_2, scales_3, align_corners);
   return output;
 }
 
 Tensor upsample_trilinear3d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
+    double scales_3,
     bool align_corners) {
   auto output = at::empty({0}, input.options());
   upsample_trilinear3d_out_cpu_template(
-      output, input, output_size, align_corners);
+      output, input, output_size, scales_1, scales_2, scales_3, align_corners);
   return output;
 }
 
@@ -367,21 +379,27 @@ Tensor& upsample_trilinear3d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
+    double scales_3,
     IntArrayRef input_size,
     bool align_corners) {
   upsample_trilinear3d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, scales_1, scales_2, scales_3, input_size, align_corners);
   return grad_input;
 }
 
 Tensor upsample_trilinear3d_backward_cpu(
     const Tensor& grad_output,
     IntArrayRef output_size,
+    double scales_1,
+    double scales_2,
+    double scales_3,
     IntArrayRef input_size,
     bool align_corners) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_trilinear3d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, scales_1, scales_2, scales_3, input_size, align_corners);
   return grad_input;
 }
 

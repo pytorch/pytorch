@@ -111,6 +111,7 @@ static void upsample_linear1d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
+    double scales_1,
     bool align_corners) {
   TORCH_CHECK(
       output_size.size() == 1,
@@ -157,6 +158,7 @@ static void upsample_linear1d_backward_out_cpu_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
+    double scales_1,
     IntArrayRef input_size,
     bool align_corners) {
   TORCH_CHECK(
@@ -209,17 +211,19 @@ Tensor& upsample_linear1d_out_cpu(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
+    double scales_1,
     bool align_corners) {
-  upsample_linear1d_out_cpu_template(output, input, output_size, align_corners);
+  upsample_linear1d_out_cpu_template(output, input, output_size, scales_1, align_corners);
   return output;
 }
 
 Tensor upsample_linear1d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
+    double scales_1,
     bool align_corners) {
   auto output = at::empty({0}, input.options());
-  upsample_linear1d_out_cpu_template(output, input, output_size, align_corners);
+  upsample_linear1d_out_cpu_template(output, input, output_size, scales_1, align_corners);
   return output;
 }
 
@@ -227,21 +231,23 @@ Tensor& upsample_linear1d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
+    double scales_1,
     IntArrayRef input_size,
     bool align_corners) {
   upsample_linear1d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, scales_1, input_size, align_corners);
   return grad_input;
 }
 
 Tensor upsample_linear1d_backward_cpu(
     const Tensor& grad_output,
     IntArrayRef output_size,
+    double scales_1,
     IntArrayRef input_size,
     bool align_corners) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_linear1d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, scales_1, input_size, align_corners);
   return grad_input;
 }
 

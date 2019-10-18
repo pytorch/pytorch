@@ -119,19 +119,9 @@ def _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, ali
         scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
     return g.op("Resize", input, scales, mode_s=interpolate_mode)
 
-def _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners=None):
-    sym_help._interpolate_warning(interpolate_mode)
-    align_corners = sym_help._maybe_get_scalar(align_corners)
-    if align_corners:
-        return _unimplemented(name, "align_corners == True")
-    if scales is None:
-        scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
-    r = g.op("Upsample", input, scales, mode_s=interpolate_mode)
-    return r
-
 
 def _interpolate1d(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, scales_1, scales_2, align_corners=None):
+    def symbolic_fn(g, input, output_size, scales_1, align_corners=None):
         scales = sym_help._interpolate_get_scales_if_available(g, [scales_1])
         return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
     return symbolic_fn

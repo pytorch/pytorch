@@ -733,7 +733,7 @@ def _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, ali
 
 
 def _interpolate1d(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, scales_1, scales_2, align_corners=None):
+    def symbolic_fn(g, input, output_size, scales_1, align_corners=None):
         scales = sym_help._interpolate_get_scales_if_available(g, [scales_1])
         return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
     return symbolic_fn
@@ -755,7 +755,7 @@ def _interpolate3d(name, dim, interpolate_mode):
 
 upsample_nearest1d = _interpolate1d('upsample_nearest1d', 3, "nearest")
 upsample_nearest2d = _interpolate2d('upsample_nearest2d', 4, "nearest")
-upsample_nearest3d = _interpolate2d('upsample_nearest3d', 5, "nearest")
+upsample_nearest3d = _interpolate3d('upsample_nearest3d', 5, "nearest")
 upsample_linear1d = _interpolate1d('upsample_linear1d', 3, "linear")
 upsample_bilinear2d = _interpolate2d('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate3d('upsample_trilinear3d', 5, "linear")

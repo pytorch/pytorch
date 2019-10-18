@@ -115,6 +115,7 @@ static void upsample_linear1d_out_cuda_template(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
+    double scale_1,
     bool align_corners) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_linear1d_out_cuda", {input_arg, output_arg});
@@ -167,6 +168,7 @@ static void upsample_linear1d_backward_out_cuda_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
+    double scale_1,
     IntArrayRef input_size,
     bool align_corners) {
   TensorArg grad_output_arg{grad_output_, "grad_output_", 1},
@@ -229,19 +231,21 @@ Tensor& upsample_linear1d_out_cuda(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
+    double scale_1,
     bool align_corners) {
   upsample_linear1d_out_cuda_template(
-      output, input, output_size, align_corners);
+      output, input, output_size, scale_1, align_corners);
   return output;
 }
 
 Tensor upsample_linear1d_cuda(
     const Tensor& input,
     IntArrayRef output_size,
+    double scale_1,
     bool align_corners) {
   Tensor output = at::empty_like(input);
   upsample_linear1d_out_cuda_template(
-      output, input, output_size, align_corners);
+      output, input, output_size, scale_1, align_corners);
   return output;
 }
 
@@ -249,21 +253,23 @@ Tensor& upsample_linear1d_backward_out_cuda(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
+    double scale_1,
     IntArrayRef input_size,
     bool align_corners) {
   upsample_linear1d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, scale_1, input_size, align_corners);
   return grad_input;
 }
 
 Tensor upsample_linear1d_backward_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
+    double scale_1,
     IntArrayRef input_size,
     bool align_corners) {
   Tensor grad_input = at::empty_like(grad_output);
   upsample_linear1d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, scale_1, input_size, align_corners);
   return grad_input;
 }
 
