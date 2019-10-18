@@ -754,6 +754,11 @@ TEST_F(ModulesTest, Bilinear) {
   auto x1 = torch::randn({10, 5}, torch::requires_grad());
   auto x2 = torch::randn({10, 3}, torch::requires_grad());
   auto y = model(x1, x2);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(s.ndimension(), 0);
   ASSERT_EQ(y.size(0), 10);
   ASSERT_EQ(y.size(1), 2);
 
