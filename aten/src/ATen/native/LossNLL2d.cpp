@@ -163,7 +163,9 @@ void nll_loss2d_forward_out_cpu_template(
           }
         }
 
-        if (reduction == Reduction::Mean && total_weight_val) {
+        if (reduction == Reduction::Mean &&
+            (total_weight_val != 0 || input.numel() == 0)) {
+          // allow NaN result for total_weight_val == 0 case, see #15870
           output_val /= total_weight_val;
         }
 
