@@ -57,6 +57,16 @@
 
 namespace at {
 
+// Fetch a value with type src_type from ptr, and cast it to dest_t.
+template<typename dest_t>
+__host__ __device__ inline dest_t fetch_and_cast<dest_t, false>(ScalarType src_type, const void *ptr) {
+}
+
+// Cast a value with type src_t into dest_type, and store it to ptr.
+template<typename src_t>
+__host__ __device__ inline void cast_and_store(ScalarType dest_type, void *ptr, src_t value) {
+}
+
 struct DimCounter {
   DimCounter(IntArrayRef shape, Range range);
 
