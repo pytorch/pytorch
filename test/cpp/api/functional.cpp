@@ -16,7 +16,7 @@ TEST_F(FunctionalTest, MaxPool1d) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1, 2})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
 TEST_F(FunctionalTest, MaxPool2d) {
@@ -25,7 +25,7 @@ TEST_F(FunctionalTest, MaxPool2d) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
 TEST_F(FunctionalTest, MaxPool3d) {
@@ -34,7 +34,7 @@ TEST_F(FunctionalTest, MaxPool3d) {
 
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
 TEST_F(FunctionalTest, AvgPool1d) {
@@ -43,7 +43,7 @@ TEST_F(FunctionalTest, AvgPool1d) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1, 2})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 2}));
 }
 
 TEST_F(FunctionalTest, AvgPool2d) {
@@ -52,7 +52,7 @@ TEST_F(FunctionalTest, AvgPool2d) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2}));
 }
 
 TEST_F(FunctionalTest, AvgPool3d) {
@@ -61,7 +61,7 @@ TEST_F(FunctionalTest, AvgPool3d) {
 
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 2, 2, 2})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 2, 2, 2}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
 TEST_F(FunctionalTest, CosineSimilarity) {
@@ -71,6 +71,60 @@ TEST_F(FunctionalTest, CosineSimilarity) {
       F::cosine_similarity(input1, input2, CosineSimilarityOptions().dim(1));
   auto expected = torch::tensor({0.8078, 0.8721}, torch::kFloat);
   ASSERT_TRUE(output.allclose(expected, 1e-04));
+}
+
+TEST_F(FunctionalTest, SoftMarginLossDefaultOptions) {
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
+  auto output =
+      F::soft_margin_loss(input, target);
+  auto expected = torch::tensor({1.3767317}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, MultiLabelSoftMarginLossDefaultOptions) {
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
+  auto output =
+      F::multilabel_soft_margin_loss(input, target);
+  auto expected = torch::tensor({0.7608436}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, SoftMarginLossNoReduction) {
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
+  auto output =
+      F::soft_margin_loss(input, target, torch::Reduction::None);
+  auto expected = torch::tensor({2.1269281, 0.01814993, 0.3132617, 3.0485873}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
+  auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
+  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::Reduction::None).weight(weight);
+  auto output =
+      F::multilabel_soft_margin_loss(input, target, options);
+  auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
 TEST_F(FunctionalTest, PairwiseDistance) {
@@ -103,7 +157,7 @@ TEST_F(FunctionalTest, AdaptiveMaxPool1d) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1, 3})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
 TEST_F(FunctionalTest, AdaptiveMaxPool2d) {
@@ -112,7 +166,7 @@ TEST_F(FunctionalTest, AdaptiveMaxPool2d) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 3, 3})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
 TEST_F(FunctionalTest, AdaptiveMaxPool3d) {
@@ -121,7 +175,7 @@ TEST_F(FunctionalTest, AdaptiveMaxPool3d) {
 
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 3, 3, 3})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3, 3}));
 }
 
 TEST_F(FunctionalTest, AdaptiveAvgPool1d) {
@@ -130,7 +184,7 @@ TEST_F(FunctionalTest, AdaptiveAvgPool1d) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({1, 1, 3})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 3}));
 }
 
 TEST_F(FunctionalTest, AdaptiveAvgPool2d) {
@@ -139,7 +193,7 @@ TEST_F(FunctionalTest, AdaptiveAvgPool2d) {
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 3, 3})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3}));
 }
 
 TEST_F(FunctionalTest, AdaptiveAvgPool3d) {
@@ -148,7 +202,52 @@ TEST_F(FunctionalTest, AdaptiveAvgPool3d) {
 
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_TRUE(torch::allclose(y, torch::ones({2, 3, 3, 3})));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 3, 3, 3}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3, 3}));
+}
+
+TEST_F(FunctionalTest, L1Loss) {
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::l1_loss(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, MSELoss) {
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::mse_loss(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, BCELoss) {
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::binary_cross_entropy(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, KLDivLoss) {
+  KLDivLoss loss;
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::kl_div(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
 TEST_F(FunctionalTest, HingeEmbeddingLoss) {
@@ -165,8 +264,8 @@ TEST_F(FunctionalTest, AffineGrid) {
   {
     // 2D affine.
     auto theta = torch::arange(1, 13, torch::kDouble)
-                     .view(torch::IntArrayRef({2, 2, 3}));
-    auto size = torch::IntArrayRef({2, 3, 2, 2}).vec();
+                     .view(std::vector<int64_t>({2, 2, 3}));
+    auto size = std::vector<int64_t>({2, 3, 2, 2});
     auto align_corners = true;
     auto output = F::affine_grid(theta, size, !align_corners);
     auto expected = torch::tensor(
@@ -183,8 +282,8 @@ TEST_F(FunctionalTest, AffineGrid) {
   {
     // 3D affine.
     auto theta = torch::arange(1, 13, torch::kDouble)
-                     .view(torch::IntArrayRef({1, 3, 4}));
-    auto size = torch::IntArrayRef({1, 1, 3, 2, 2}).vec();
+                     .view(std::vector<int64_t>({1, 3, 4}));
+    auto size = std::vector<int64_t>({1, 1, 3, 2, 2});
     auto align_corners = true;
     auto output = F::affine_grid(theta, size, !align_corners);
     auto expected = torch::tensor(
@@ -208,7 +307,7 @@ TEST_F(FunctionalTest, AffineGrid) {
   }
   {
     auto theta = torch::empty({1, 2, 3}, torch::kDouble);
-    auto size = torch::IntArrayRef({1, 1, 2, 2}).vec();
+    auto size = std::vector<int64_t>({1, 1, 2, 2});
     ASSERT_THROWS_WITH(
         F::affine_grid(torch::empty({2, 2, 3}), {-1, 1, 2, 2}),
         "Expected non-zero, positive output size. Got [-1, 1, 2, 2]");
@@ -234,7 +333,7 @@ TEST_F(FunctionalTest, AffineGrid) {
   }
   {
     auto theta = torch::empty({1, 3, 4}, torch::kDouble);
-    auto size = torch::IntArrayRef({1, 1, 2, 2, 3}).vec();
+    auto size = std::vector<int64_t>({1, 1, 2, 2, 3});
     ASSERT_THROWS_WITH(
         F::affine_grid(theta[0], size),
         "Expected a batch of 3D affine matrices of shape Nx3x4 for size "
@@ -284,6 +383,42 @@ TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-4));
 }
 
+TEST_F(FunctionalTest, MultiLabelMarginLossDefaultOptions) {
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = F::multilabel_margin_loss(input, target);
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, MultiLabelMarginLossNoReduction) {
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = F::multilabel_margin_loss(
+    input, target, torch::Reduction::None);
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, TripletMarginLoss) {
+  auto anchor = torch::tensor({{3., 3.}}, torch::kFloat);
+  auto positive = torch::tensor({{2., 2.}}, torch::kFloat);
+  auto negative = torch::tensor({{0., 0.}}, torch::kFloat);
+  auto output = F::triplet_margin_loss(
+      anchor, positive, negative, TripletMarginLossOptions().margin(1.0));
+  auto expected = torch::tensor({0.}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+}
+
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
@@ -292,17 +427,17 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(
       y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 9}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
   x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   y = F::max_unpool1d(
-      x, indices, MaxUnpool1dOptions(3), c10::IntArrayRef({1, 1, 9}));
+      x, indices, MaxUnpool1dOptions(3), std::vector<int64_t>({1, 1, 9}));
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(
       y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 9}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
   x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
@@ -311,7 +446,7 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(
       torch::allclose(y, torch::tensor({{{0, 2, 0, 4, 5}}}, torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 5}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 5}));
 }
 
 TEST_F(FunctionalTest, MaxUnpool2d) {
@@ -343,7 +478,7 @@ TEST_F(FunctionalTest, MaxUnpool2d) {
       { 0,  0,  0,  0,  0},
       { 0, 41,  0, 43, 44},
       { 0, 46,  0, 48, 49}}}} , torch::kFloat)));
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({2, 1, 5, 5}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 1, 5, 5}));
 }
 
 TEST_F(FunctionalTest, ELU) {
@@ -357,7 +492,7 @@ TEST_F(FunctionalTest, ELU) {
       auto y = F::elu(x, ELUOptions().alpha(alpha).inplace(inplace));
 
       ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       ASSERT_TRUE(torch::allclose(y, y_exp));
       if (inplace) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -404,7 +539,7 @@ TEST_F(FunctionalTest, Hardshrink) {
     ASSERT_EQ(s.ndimension(), 0);
 
     ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     auto y_exp = (x.abs() > lambda) * x;
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
@@ -419,7 +554,7 @@ TEST_F(FunctionalTest, OneHot) {
 
     ASSERT_EQ(y.ndimension(), 2);
     ASSERT_TRUE(torch::allclose(y, expected));
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({5, 3}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({5, 3}));
   }
 
   { // Test #2
@@ -435,12 +570,12 @@ TEST_F(FunctionalTest, OneHot) {
 
     ASSERT_EQ(y.ndimension(), 2);
     ASSERT_TRUE(torch::allclose(y, expected));
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({5, 5}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({5, 5}));
   }
 
   { // Test #3
     auto x = torch::arange(0, 6, torch::kLong);
-    auto y = F::one_hot(x.view(torch::IntArrayRef({3, 2})) % 3);
+    auto y = F::one_hot(x.view(std::vector<int64_t>({3, 2})) % 3);
     auto expected = torch::tensor(
         {{{1, 0, 0}, {0, 1, 0}},
          {{0, 0, 1}, {1, 0, 0}},
@@ -449,7 +584,7 @@ TEST_F(FunctionalTest, OneHot) {
 
     ASSERT_EQ(y.ndimension(), 3);
     ASSERT_TRUE(torch::allclose(y, expected));
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 2, 3}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({3, 2, 3}));
   }
 }
 
@@ -467,7 +602,7 @@ TEST_F(FunctionalTest, Hardtanh) {
           .max_val(max_val).inplace(inplace));
 
         ASSERT_EQ(y.ndimension(), 3);
-        ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
         ASSERT_TRUE(torch::allclose(y, y_exp));
         if (inplace) {
           ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -488,7 +623,7 @@ TEST_F(FunctionalTest, LeakyReLU) {
         .negative_slope(negative_slope).inplace(inplace));
 
       ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       ASSERT_TRUE(torch::allclose(y, y_exp));
       if (inplace) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -505,7 +640,7 @@ TEST_F(FunctionalTest, LogSigmoid) {
   auto y = F::logsigmoid(x);
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
   auto y_exp = torch::log(torch::ones_like(x)/(torch::ones_like(x) + torch::exp(torch::neg(x))));
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
@@ -517,6 +652,17 @@ TEST_F(FunctionalTest, Softmax) {
 
   for (int i = 0; i < 2; i++) {
     auto expected = torch::exp(input[i]) / sum[i];
+    ASSERT_TRUE(torch::allclose(output[i], expected));
+  }
+}
+
+TEST_F(FunctionalTest, Softmin) {
+  auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
+  auto output = F::softmin(input, /*dim=*/1);
+  auto sum = torch::sum(torch::exp(-input), 1);
+
+  for (int i = 0; i < 2; i++) {
+    auto expected = torch::exp(-input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
 }
@@ -536,9 +682,65 @@ TEST_F(FunctionalTest, PReLU) {
   const auto x = torch::rand({42, 24}) * 200 - 100;
   const auto w = torch::rand(24) * 200 - 100;
   const auto y = F::prelu(x, w);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({42, 24}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({42, 24}));
   const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
   ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Bilinear) {
+  auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
+  auto input2 = torch::tensor({{7, 4}, {8 ,9}});
+  auto weight = torch::tensor({{{2, 3}, {9, 7}, {8, 6}}});
+  auto bias = torch::tensor({1});
+ 
+  auto y_with_bias = F::bilinear(input1, input2, weight, bias);
+  ASSERT_EQ(y_with_bias.ndimension(), 2);
+  ASSERT_EQ(y_with_bias.sizes(), torch::IntArrayRef({2, 1}));
+  auto y_with_bias_exp = torch::tensor({{449}, {1702}}).reshape({2, 1});
+  ASSERT_TRUE(torch::allclose(y_with_bias, y_with_bias_exp, 1e-4, 1e-7));
+
+  auto y_no_bias = F::bilinear(input1, input2, weight);
+  ASSERT_EQ(y_no_bias.ndimension(), 2);
+  ASSERT_EQ(y_no_bias.sizes(), torch::IntArrayRef({2, 1}));
+  auto y_no_bias_exp = torch::tensor({{448, 1701}}).reshape({2, 1});
+  ASSERT_TRUE(torch::allclose(y_no_bias, y_no_bias_exp, 1e-4, 1e-7));
+}
+
+TEST_F(FunctionalTest, Normalize) {
+  const auto expected = torch::tensor(
+    {{{0.00000000, 0.10000000, 0.2000, 0.30000000, 0.40000000},
+      {0.14285715, 0.17142858, 0.2000, 0.22857143, 0.25714287}}}, torch::requires_grad().dtype(torch::kFloat));
+  { // Test #1 
+    auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat).requires_grad(true));
+    auto norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
+    
+    // reduce to scalar to call .backward()
+    torch::Tensor s = norm.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(input.grad().numel(), 10);
+    ASSERT_TRUE(torch::allclose(norm, expected));
+  }
+
+  { // Test #2 Check variations of optional arguments
+    auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat));
+    auto output = torch::randn({1,2,5}, torch::dtype(torch::kFloat));
+    // non-null output argument
+    F::normalize(input, NormalizeOptions().p(1).dim(-1), output);
+    // default options
+    F::normalize(input);
+
+    ASSERT_TRUE(torch::allclose(output, expected));
+  }
+  
+  { // Test #3 Base case of scalar tensor
+    auto input = torch::randn({}, torch::requires_grad());
+    torch::Tensor norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
+    norm.backward();
+
+    ASSERT_EQ(input.grad().numel(), 1);
+  }
 }
 
 TEST_F(FunctionalTest, ReLU) {
@@ -550,7 +752,7 @@ TEST_F(FunctionalTest, ReLU) {
     auto y = F::relu(x, ReLUOptions().inplace(inplace));
 
     ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     ASSERT_TRUE(torch::allclose(y, y_exp));
     if (inplace) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -559,7 +761,7 @@ TEST_F(FunctionalTest, ReLU) {
     y = F::relu(x, /*inplace=*/inplace);
 
     ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     ASSERT_TRUE(torch::allclose(y, y_exp));
     if (inplace) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -575,7 +777,7 @@ TEST_F(FunctionalTest, ReLUDefaultOptions) {
   auto y = F::relu(x);
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
@@ -588,7 +790,7 @@ TEST_F(FunctionalTest, ReLU6) {
     auto y = F::relu6(x, ReLU6Options().inplace(inplace));
 
     ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     ASSERT_TRUE(torch::allclose(y, y_exp));
     if (inplace) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -597,7 +799,7 @@ TEST_F(FunctionalTest, ReLU6) {
     y = F::relu6(x, /*inplace=*/inplace);
 
     ASSERT_EQ(y.ndimension(), 3);
-    ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
     ASSERT_TRUE(torch::allclose(y, y_exp));
     if (inplace) {
       ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -613,7 +815,7 @@ TEST_F(FunctionalTest, ReLU6DefaultOptions) {
   auto y = F::relu6(x);
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
@@ -631,7 +833,7 @@ TEST_F(FunctionalTest, RReLU) {
           (x_copy < 0) * (y >= x_copy * upper) * (y <= lower * x_copy)) * 1.0;
 
         ASSERT_EQ(y.ndimension(), 3);
-        ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
         ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
         if (inplace) {
           ASSERT_TRUE(torch::allclose(x, y));
@@ -653,7 +855,7 @@ TEST_F(FunctionalTest, RReLUDefaultOptions) {
     (x_copy < 0) * (y >= x_copy * upper) * (y <= lower * x_copy)) * 1.0;
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
   ASSERT_TRUE(torch::allclose(z, torch::ones_like(z)));
 }
 
@@ -668,7 +870,7 @@ TEST_F(FunctionalTest, CELU) {
       auto y = F::celu(x, CELUOptions().alpha(alpha).inplace(inplace));
 
       ASSERT_EQ(y.ndimension(), 3);
-      ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
       ASSERT_TRUE(torch::allclose(y, y_exp));
       if (inplace) {
         ASSERT_TRUE(torch::allclose(x, y_exp));
@@ -687,7 +889,7 @@ TEST_F(FunctionalTest, CELUDefaultOptions) {
   auto y = F::celu(x);
 
   ASSERT_EQ(y.ndimension(), 3);
-  ASSERT_EQ(y.sizes(), torch::IntArrayRef({size, size, size}));
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
@@ -707,4 +909,119 @@ TEST_F(FunctionalTest, PixelShuffle) {
   ASSERT_EQ(y.ndimension(), 4);
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4}));
   ASSERT_TRUE(y.allclose(y_exp));
+}
+
+TEST_F(FunctionalTest, Softplus) {
+  const auto size = 3;
+  for (const auto beta : {0.5, 1.0, 2.0}) {
+    for (const auto threshold : {1.0, 3.0, 5.0}) {
+      auto x = torch::linspace(-3.0, 3.0, 61);
+      x.resize_({size, size, size});
+      auto y_exp =
+        (x <= threshold) * torch::log(1 + torch::exp(x * beta)) / beta +
+        (x > threshold) * x;
+      auto y = F::softplus(x,
+        SoftplusOptions().beta(beta).threshold(threshold));
+
+      ASSERT_EQ(y.ndimension(), 3);
+      ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+      ASSERT_TRUE(torch::allclose(y, y_exp));
+    }
+  }
+}
+
+TEST_F(FunctionalTest, SoftplusDefaultOptions) {
+  const auto size = 3;
+  const auto beta = 1.0;
+  const auto threshold = 20.0;
+  auto x = torch::linspace(-3.0, 3.0, 61);
+  x.resize_({size, size, size});
+  auto y_exp =
+    (x <= threshold) * torch::log(1 + torch::exp(x * beta)) / beta +
+    (x > threshold) * x;
+  auto y = F::softplus(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Unfold) {
+  auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
+  auto output = F::unfold(input, UnfoldOptions({2, 4}).padding(1).stride(2));
+  auto expected_sizes = std::vector<int64_t>({2, 16, 6});
+
+  ASSERT_EQ(output.sizes(), expected_sizes);
+}
+
+TEST_F(FunctionalTest, Softshrink) {
+  const auto size = 3;
+  for (const auto lambda : {0.0, 0.42, 1.0, 4.2, 42.42}) {
+    auto x = torch::linspace(-10.0, 10.0, size * size * size);
+    x.resize_({size, size, size}).set_requires_grad(true);
+    auto y = F::softshrink(x, /*lambda=*/lambda);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(s.ndimension(), 0);
+
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+    auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
+TEST_F(FunctionalTest, SoftshrinkDefaultOptions) {
+  const auto size = 3;
+  const auto lambda = 0.5;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size}).set_requires_grad(true);
+  auto y = F::softshrink(x);
+  torch::Tensor s = y.sum();
+
+  s.backward();
+  ASSERT_EQ(s.ndimension(), 0);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+  auto y_exp = (x < -lambda) * (x + lambda) + (x > lambda) * (x - lambda);
+}
+
+TEST_F(FunctionalTest, Softsign) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x / (1 + x.abs());
+  auto y = F::softsign(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Tanhshrink) {
+  auto x = torch::randn(100) * 10;
+  auto y_exp = x - x.tanh();
+  auto y = F::tanhshrink(x);
+
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Threshold) {
+  const auto size = 3;
+  for (const auto threshold : {0.5, 1.0, 2.0}) {
+    for (const auto value : {0.5, 1.0, 2.0}) {
+      for (const auto inplace : {false, true}) {
+        auto x = torch::linspace(-3.0, 3.0, 61);
+        x.resize_({size, size, size});
+        auto y_exp = (x <= threshold) * value + (x > threshold) * x;
+        auto y = F::threshold(x,
+          ThresholdOptions(threshold, value).inplace(inplace));
+
+        ASSERT_EQ(y.ndimension(), 3);
+        ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+        ASSERT_TRUE(torch::allclose(y, y_exp));
+        if (inplace) {
+          ASSERT_TRUE(torch::allclose(x, y_exp));
+        }
+      }
+    }
+  }
 }
