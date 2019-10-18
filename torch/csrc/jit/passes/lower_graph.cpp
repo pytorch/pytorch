@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/passes/lower_graph.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/utils/pybind.h>
 #include <unordered_map>
 
 namespace torch {
