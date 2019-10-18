@@ -399,7 +399,12 @@ class RpcTest(object):
 
     def test_join_rpc(self):
         # Initialize RPC.
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
             backend=TEST_CONFIG.rpc_backend,

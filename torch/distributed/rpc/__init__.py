@@ -6,6 +6,7 @@ from .backend_registry import *  # noqa: F401
 
 
 if sys.version_info >= (3, 0):
+    from . import api
     from .api import _init_rpc
     from .api import *  # noqa: F401
     import torch.distributed.autograd
@@ -55,6 +56,4 @@ if sys.version_info >= (3, 0):
             num_send_recv_threads,
         )
         # Initialize Autograd.
-        from .api import _agent
-
-        torch.distributed.autograd._init(_agent.get_worker_info().id)
+        torch.distributed.autograd._init(api._agent.get_worker_info().id)
