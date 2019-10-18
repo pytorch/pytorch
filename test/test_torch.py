@@ -9539,9 +9539,15 @@ class TestTorchDeviceType(TestCase):
                     for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                         x = torch.randn(r1, m, device=device)
                         y = torch.randn(r2, m, device=device)
-                        actual = torch.cdist(x, y, p=p)
-                        expected = brute_cdist(x, y, p=p)
-                        self.assertTrue(torch.allclose(expected, actual))
+                        if p == 2:
+                            for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+                                actual = torch.cdist(x, y, p=2, compute_mode=cm)
+                                expected = brute_cdist(x, y, p=2)
+                                self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0.02))
+                        else:
+                            actual = torch.cdist(x, y, p=p)
+                            expected = brute_cdist(x, y, p=p)
+                            self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_norm_batch(self, device):
         for r1 in [3, 4, 5, 6]:
@@ -9550,73 +9556,83 @@ class TestTorchDeviceType(TestCase):
                     for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                         x = torch.randn(2, 3, 6, r1, m, device=device)
                         y = torch.randn(2, 3, 6, r2, m, device=device)
-                        actual = torch.cdist(x, y, p=p)
-                        expected = brute_cdist(x, y, p=p)
-                        self.assertTrue(torch.allclose(expected, actual))
+                        if p == 2:
+                            for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+                                actual = torch.cdist(x, y, p=2, compute_mode=cm)
+                                expected = brute_cdist(x, y, p=2)
+                                self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0.02))
+                        else:
+                            actual = torch.cdist(x, y, p=p)
+                            expected = brute_cdist(x, y, p=p)
+                            self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large(self, device):
-        x = torch.randn(1000, 10, device=device)
-        y = torch.randn(1000, 10, device=device)
-        actual = torch.cdist(x, y, p=2)
-        expected = brute_cdist(x, y, p=2)
-        self.assertTrue(torch.allclose(expected, actual))
+        for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+            x = torch.randn(1000, 10, device=device)
+            y = torch.randn(1000, 10, device=device)
+            actual = torch.cdist(x, y, p=2, compute_mode=cm)
+            expected = brute_cdist(x, y, p=2)
+            self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large_batch(self, device):
-        x = torch.randn(4, 3, 1000, 10, device=device)
-        y = torch.randn(4, 3, 1000, 10, device=device)
-        actual = torch.cdist(x, y, p=2)
-        expected = brute_cdist(x, y, p=2)
-        self.assertTrue(torch.allclose(expected, actual))
+        for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+            x = torch.randn(4, 3, 1000, 10, device=device)
+            y = torch.randn(4, 3, 1000, 10, device=device)
+            actual = torch.cdist(x, y, p=2, compute_mode=cm)
+            expected = brute_cdist(x, y, p=2)
+            self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_non_contiguous(self, device):
-        x = torch.randn(5, 7, device=device).transpose(-1, -2)
-        y = torch.randn(5, 3, device=device).transpose(-1, -2)
-        actual = torch.cdist(x, y, p=2)
-        expected = brute_cdist(x, y, p=2)
-        self.assertFalse(x.is_contiguous())
-        self.assertFalse(y.is_contiguous())
-        self.assertTrue(torch.allclose(expected, actual))
+        for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+            x = torch.randn(5, 7, device=device).transpose(-1, -2)
+            y = torch.randn(5, 3, device=device).transpose(-1, -2)
+            actual = torch.cdist(x, y, p=2, compute_mode=cm)
+            expected = brute_cdist(x, y, p=2)
+            self.assertFalse(x.is_contiguous())
+            self.assertFalse(y.is_contiguous())
+            self.assertTrue(torch.allclose(expected, actual))
 
-        x = torch.randn(7, 5, device=device)
-        y = torch.randn(5, 3, device=device).t()
-        actual = torch.cdist(x, y, p=2)
-        expected = brute_cdist(x, y, p=2)
-        self.assertTrue(x.is_contiguous())
-        self.assertFalse(y.is_contiguous())
-        self.assertTrue(torch.allclose(expected, actual))
+            x = torch.randn(7, 5, device=device)
+            y = torch.randn(5, 3, device=device).t()
+            actual = torch.cdist(x, y, p=2, compute_mode=cm)
+            expected = brute_cdist(x, y, p=2)
+            self.assertTrue(x.is_contiguous())
+            self.assertFalse(y.is_contiguous())
+            self.assertTrue(torch.allclose(expected, actual))
 
-        x = torch.randn(5, 7, device=device).t()
-        y = torch.randn(3, 5, device=device)
-        actual = torch.cdist(x, y, p=2)
-        expected = brute_cdist(x, y, p=2)
-        self.assertFalse(x.is_contiguous())
-        self.assertTrue(y.is_contiguous())
-        self.assertTrue(torch.allclose(expected, actual))
+            x = torch.randn(5, 7, device=device).t()
+            y = torch.randn(3, 5, device=device)
+            actual = torch.cdist(x, y, p=2, compute_mode=cm)
+            expected = brute_cdist(x, y, p=2)
+            self.assertFalse(x.is_contiguous())
+            self.assertTrue(y.is_contiguous())
+            self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_non_contiguous_batch(self, device):
-        x = torch.randn(4, 3, 2, 5, 7, device=device).transpose(-1, -2)
-        y = torch.randn(4, 3, 2, 5, 3, device=device).transpose(-1, -2)
-        actual = torch.cdist(x, y, p=2)
-        expected = brute_cdist(x, y, p=2)
-        self.assertFalse(x.is_contiguous())
-        self.assertFalse(y.is_contiguous())
-        self.assertTrue(torch.allclose(expected, actual))
+        for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+            x = torch.randn(4, 3, 2, 5, 7, device=device).transpose(-1, -2)
+            y = torch.randn(4, 3, 2, 5, 3, device=device).transpose(-1, -2)
+            actual = torch.cdist(x, y, p=2, compute_mode=cm)
+            expected = brute_cdist(x, y, p=2)
+            self.assertFalse(x.is_contiguous())
+            self.assertFalse(y.is_contiguous())
+            self.assertTrue(torch.allclose(expected, actual))
 
-        x = torch.randn(7, 2, 7, 5, device=device)
-        y = torch.randn(7, 2, 5, 3, device=device).transpose(-1, -2)
-        actual = torch.cdist(x, y, p=2)
-        expected = brute_cdist(x, y, p=2)
-        self.assertTrue(x.is_contiguous())
-        self.assertFalse(y.is_contiguous())
-        self.assertTrue(torch.allclose(expected, actual))
+            x = torch.randn(7, 2, 7, 5, device=device)
+            y = torch.randn(7, 2, 5, 3, device=device).transpose(-1, -2)
+            actual = torch.cdist(x, y, p=2, compute_mode=cm)
+            expected = brute_cdist(x, y, p=2)
+            self.assertTrue(x.is_contiguous())
+            self.assertFalse(y.is_contiguous())
+            self.assertTrue(torch.allclose(expected, actual))
 
-        x = torch.randn(4, 5, 7, device=device).transpose(-1, -2)
-        y = torch.randn(4, 3, 5, device=device)
-        actual = torch.cdist(x, y, p=2)
-        expected = brute_cdist(x, y, p=2)
-        self.assertFalse(x.is_contiguous())
-        self.assertTrue(y.is_contiguous())
-        self.assertTrue(torch.allclose(expected, actual))
+            x = torch.randn(4, 5, 7, device=device).transpose(-1, -2)
+            y = torch.randn(4, 3, 5, device=device)
+            actual = torch.cdist(x, y, p=2, compute_mode=cm)
+            expected = brute_cdist(x, y, p=2)
+            self.assertFalse(x.is_contiguous())
+            self.assertTrue(y.is_contiguous())
+            self.assertTrue(torch.allclose(expected, actual))
 
     def test_multinomial_constraints(self, device):
         x = torch.empty(1, 2, 3, dtype=torch.double, device=device)

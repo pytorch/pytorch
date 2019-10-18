@@ -2117,7 +2117,7 @@
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
 
-- func: cdist(Tensor x1, Tensor x2, float p=2) -> Tensor
+- func: cdist(Tensor x1, Tensor x2, float p=2, int? compute_mode=None) -> Tensor
   use_c10_dispatcher: full
 
 - func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
@@ -2489,9 +2489,6 @@
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: sin_out
-    CUDA: sin_out
 
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2681,9 +2678,6 @@
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: sqrt_out
-    CUDA: sqrt_out
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full
