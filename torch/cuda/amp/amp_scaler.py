@@ -3,10 +3,29 @@ from collections import defaultdict
 from torch._six import container_abcs
 
 
+class _PerDeviceHelper(object):
+    """
+    Helper class to serve copies of a master tensor that may be needed on multiple devices.
+    Intended to be used as a temporary.
+    """
+    def __init__(self, master_tensor):
+        self.master = master_tensor
+        self._per_device_tensors = {}
+
+    def get(self, device):
+        retval = self._per_device_tensors.get(device, None)
+        if retval is None:
+            retval = self.master.clone() if (device == self.master.device) else self.master.to(device)
+            self._per_device_tensors[device] = retval
+        return retval
+
+
 class AmpScaler(object):
     """
-    Performs dynamic gradient scaling, intended to be used when gradients
-    have a dtype with limited dynamic range (e.g. if part of your network is ``torch.float16``).
+    ``torch.float16`` has a limited dynamic range.  Late in training, when gradient magnitudes become small,
+    gradient values may underflow in ``float16`` regions of the backward pass.
+    
+    :class:`AmpScaler` performs dynamic gradient scaling to mitigate underflow.
 
     Here's how that looks in a simple example::
 
@@ -20,21 +39,23 @@ class AmpScaler(object):
             scaler.step(optimizer)
             scaler.update()
 
-    See :ref:`Gradient Scaling Examples<gradient-scaling-examples>` for usage in more complex cases.
+    See the :ref:`Gradient Scaling Examples<gradient-scaling-examples>` for usage in more complex cases.
 
     By default, ``scaler.step`` internally unscales ``optimizer``'s gradients before applying them, so the
-    learning rate and other hyperparameters don't need to change.  If you wish to unscale gradients manually
-    prior to :meth:`step`, use :meth:`unscale`.
+    learning rate and other hyperparameters don't need to change.  You may also unscale gradients manually
+    prior to :meth:`step` using :meth:`unscale`.
 
-    ``scaler`` maintains the scale factor internally.  To leverage the dtype's full dynamic range,
+    ``scaler`` maintains the scale factor internally.  To leverage ``float16``'s full dynamic range,
     ``scaler`` attempts to use the largest scale factor it can without incurring overflow.
     It does so by checking the gradients for infs and NaNs during every :meth:`step` or separate :meth:`unscale`.
     If no infs/NaNs are found, :meth:`step` runs the underlying ``optimizer.step()`` as usual and
-    :meth:`update` increases the scale factor slightly.  If infs/NaNs are found, :meth:`step` skips the underlying
-    ``optimizer.step()`` (so the params themselves remain unpolluted) and decreases the scale factor.
+    :meth:`update` multiplies the scale factor by the growth factor.  If infs/NaNs are found, :meth:`step` skips the
+    underlying ``optimizer.step()`` (so the params themselves remain unpolluted) and multiplies the scale factor by
+    the backoff factor.
 
-    Often, ``scaler.step`` skips the underlying ``optimizer.step()`` for the first few iterations
-    as the scale value calibrates.  After that, step skipping should occur rarely (once every few hundred iterations).
+    The scale factor often causes infs/NaNs to appear in gradients for the first few iterations as its
+    value calibrates.  ``scaler.step`` will skip the underlying ``optimizer.step()`` for these
+    iterations.  After that, step skipping should occur rarely (once every few hundred iterations).
 
     Arguments:
         init_scale (float, optional, default=2.**24):  Initial scale factor.
@@ -53,8 +74,8 @@ class AmpScaler(object):
         self._enabled = enabled
         if enabled:
             self._scale = torch.full((1,), init_scale, dtype=torch.float32, device="cuda")
-            self._growth_factor = 1.001
-            self._backoff_factor = 0.5
+            self._growth_factor = growth_factor
+            self._backoff_factor = backoff_factor
             self._per_optimizer_states = defaultdict(dict)
 
     def scale(self, outputs):
@@ -73,10 +94,18 @@ class AmpScaler(object):
         if not self._enabled:
             return outputs
 
+        # Short-circuit for the common case.
+        if isinstance(outputs, torch.Tensor):
+            assert outputs.is_cuda
+            return outputs * self._scale.to(outputs.device)
+
+        # Invoke the more complex machinery only if we're treating multiple outputs.
+        per_device_scale = _PerDeviceHelper(self._scale)
+
         def apply_scale(val):
             if isinstance(val, torch.Tensor):
                 assert val.is_cuda
-                return val * self._scale
+                return val * per_device_scale.get(val.device)
             elif isinstance(val, container_abcs.Iterable):
                 return type(val)(apply_scale(v) for v in val)
             else:
@@ -85,6 +114,9 @@ class AmpScaler(object):
         return apply_scale(outputs)
 
     def _unscale_grads(self, optimizer, rscale, found_inf, allow_fp16=False):
+        per_device_rscale = _PerDeviceHelper(rscale)
+        per_device_found_inf = _PerDeviceHelper(found_inf)
+
         for group in optimizer.param_groups:
             for param in group["params"]:
                 if param.grad is not None:
@@ -92,7 +124,11 @@ class AmpScaler(object):
                         raise ValueError("Attempting to unscale FP16 gradients.  If you want to check for "
                                          "infs/nans without unscaling, use optimizer.check_infs() instead.")
                     else:
-                        torch._amp_unscale_inf_check_(param.grad, rscale, found_inf)
+                        torch._amp_unscale_inf_check_(param.grad,
+                                                      per_device_rscale.get(param.grad.device),
+                                                      per_device_found_inf.get(param.grad.device))
+
+        return per_device_found_inf._per_device_tensors
 
     def unscale(self, optimizer):
         """
@@ -123,7 +159,7 @@ class AmpScaler(object):
 
         .. warning::
             :meth:`unscale` should only be called once per optimizer per step,
-            and only after _all_ gradients for that optimizer's owned parameters
+            and only after all gradients for that optimizer's owned parameters
             have been accumulated.
         """
         if not self._enabled:
@@ -138,9 +174,7 @@ class AmpScaler(object):
         rscale = self._scale.double().reciprocal().float()
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
 
-        self._unscale_grads(optimizer, rscale, found_inf, allow_fp16=False)
-
-        optimizer_state["found_inf"] = found_inf
+        optimizer_state["found_inf_per_device"] = self._unscale_grads(optimizer, rscale, found_inf, allow_fp16=False)
         optimizer_state["unscaled"] = True
 
     def step(self, optimizer, *args, **kwargs):
@@ -161,11 +195,6 @@ class AmpScaler(object):
 
         Returns:
             The return value of ``optimizer.step(*args, **kwargs)``.
-
-        .. note::
-            If you're writing a custom optimizer, and wish to define your own scaling-safe ``step`` method that
-            :meth:`AmpScaler.step` may call directly without any wrapping logic, see the
-            :ref:`Custom Optimizer Guide<custom-optimizer-guide>`.
 
         .. warning::
             Closure use is not currently supported.
@@ -188,7 +217,9 @@ class AmpScaler(object):
         if "unscaled" not in optimizer_state:
             self.unscale(optimizer)
 
-        if not optimizer_state["found_inf"].item():
+        assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
+
+        if not sum(v.item() for k, v in optimizer_state["found_inf_per_device"].items()):
             return optimizer.step(*args, **kwargs)
 
     def update(self, new_scale=None):
@@ -216,13 +247,23 @@ class AmpScaler(object):
             if isinstance(new_scale, float):
                 self._scale = torch.full((1,), new_scale, dtype=torch.float32, device="cuda")
             else:
-                string = "new_scale should be a float or a 1-element torch.cuda.FloatTensor."
-                assert isinstance(new_scale, torch.cuda.FloatTensor), string
-                assert new_scale.numel() == 1, string
+                reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor."
+                assert isinstance(new_scale, torch.cuda.FloatTensor), reason
+                assert new_scale.numel() == 1, reason
                 self._scale = new_scale
         else:
-            # Consume shared inf/nan data collected from optimizers to update the scale asynchronously.
-            found_inf_combined = sum(v["found_inf"] for k, v in self._per_optimizer_states.items())
+            # Consume shared inf/nan data collected from optimizers to update the scale.
+            # If all found_inf tensors are on the same device as self._scale, this operation is asynchronous.
+            found_infs = [found_inf.to(self._scale.device) for opt_id, state in self._per_optimizer_states.items()
+                          for device, found_inf in state["found_inf_per_device"].items()]
+
+            assert len(found_infs) > 0, "No inf checks were recorded prior to update."
+
+            found_inf_combined = found_infs[0]
+            if len(found_infs) > 1:
+                for i in range(1, len(found_infs)):
+                    found_inf_combined += found_infs[i]
+
             self._scale = torch._amp_update_scale(self._scale,
                                                   found_inf_combined,
                                                   self._growth_factor,
@@ -234,8 +275,7 @@ class AmpScaler(object):
     def get_scale(self):
         """
         Returns:
-            The scale factor (a single-element ``torch.cuda.FloatTensor``),
-            or 1.0 if scaling is disabled.
+            The scale factor (a single-element ``torch.cuda.FloatTensor``), or 1.0 if scaling is disabled.
 
         .. note::
             :meth:`get_scale` alone does not incur a CPU-GPU sync, but if you wish to print the scale Tensor, or
@@ -282,11 +322,10 @@ class AmpScaler(object):
         dummy_rscale = torch.full((1,), 1.0, dtype=torch.float32, device="cuda")
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
 
-        self._unscale_grads(optimizer, dummy_rscale, found_inf, allow_fp16=True)
+        self._per_optimizer_states[id(optimizer)]["found_inf_per_device"] = \
+            self._unscale_grads(optimizer, dummy_rscale, found_inf, allow_fp16=True)
 
-        self._per_optimizer_states[id(optimizer)]["found_inf"] = found_inf
+        return self._per_optimizer_states[id(optimizer)]["found_inf_per_device"]
 
-        return found_inf
-
-    def _found_inf(self, optimizer):
-        return self._per_optimizer_states[id(optimizer)].get("found_inf")
+    def _found_inf_per_device(self, optimizer):
+        return self._per_optimizer_states[id(optimizer)]["found_inf_per_device"]

@@ -3,75 +3,57 @@
 Automatic Mixed Precision Examples
 ==================================
 
-When following the examples below, you don't need to call ``.half()`` on your model(s) or data.
-In fact, you shouldn't.  Model weights should remain FP32.
-
-You also don't need to retune any hyperparameters.
+.. currentmodule:: torch.cuda.amp
 
 .. contents:: :local:
 
-.. _autocasting-examples:
-
-Autocasting Examples
-^^^^^^^^^^^^^^^^^^^^
-
-Under construction...
-
 .. _gradient-scaling-examples:
 
-Gradient Scaling Examples
-^^^^^^^^^^^^^^^^^^^^^^^^^
+Gradient Scaling
+^^^^^^^^^^^^^^^^
 
 The code snippets below demonstrate recommended use of :class:`torch.cuda.amp.AmpScaler`.
-
-.. currentmodule:: torch.cuda.amp
+The :class:`AmpScaler` instance ``scaler`` performs dynamic gradient scaling
+(maintains the scale, helps create scaled gradients to prevent
+gradient underflow, and carries out scaling-safe steps).
 
 Typical use (1 loss, 1 optimizer)
 ---------------------------------
 
 ::
 
+    # Create an AmpScaler instance.
     scaler = AmpScaler()
     ...
     for input, target in data:
         optimizer.zero_grad()
         output = model(input)
         loss = loss_fn(output, target)
+
+        # Scale the loss, and call backward() on the scaled loss to create scaled gradients.
         scaler.scale(loss).backward()
+
+        # Carry out a scaling-safe step.  scaler.step() unscales the optimizer's gradients
+        # and skips optimizer.step() if the gradients contain infs or NaNs.
         scaler.step(optimizer)
+
+        # Update the scale for next iteration.
         scaler.update()
 
+
+Scale-Aware Operations
+----------------------
+
+The gradients resulting from ``scaler.scale(loss).backward()`` are scaled.  ``scaler.step(optimizer)``
+automatically knows if it must unscale gradients before applying them.  However, networks that directly use
+gradients between the backward pass and the optimizer step should also be aware of the scale factor.
 
 Gradient clipping
------------------
+"""""""""""""""""
 
-Gradient clipping requires awareness that the gradients resulting from ``scaler.scale(loss).backward()`` are scaled.
-One simple way to account for the scale factor is by clipping to ``max_norm*scaler.get_scale()`` instead of ``max_norm``::
-
-    scaler = AmpScaler()
-    ...
-    for input, target in data:
-        optimizer.zero_grad()
-        output = model(input)
-        loss = loss_fn(output, target)
-        scaler.scale(loss).backward()
-
-        # Gradients are scaled, so we clip to max_norm*scale
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm*scaler.get_scale())
-
-        scaler.step(optimizer)
-        scaler.update()
-
-Here the *scaled* gradients are clipped.  ``scaler.step(optimizer)`` is aware that gradients
-have not yet been unscaled, and unscales them under the hood before calling ``optimizer.step()``.
-
-Gradient clipping with separate unscaling
------------------------------------------
-
-The specific case of clipping scaled gradients isn't so hard (all you have to do is clip to ``max_norm*scaler.get_scale()``).
-However, in general, between the backward pass and the optimizer step you may wish to manipulate gradients in some way that's not
-so easy to translate to scaled gradients.  In such cases, you can unscale and step separately.  Here's how that looks,
-using gradient clipping as an example once more::
+Clipping is an operation that directly manipulates the gradients.
+:meth:`AmpScaler.unscale` may be used to unscale the gradients in-place before ``scaler.step(optimizer)``,
+allowing you to clip unscaled gradients as usual::
 
     scaler = AmpScaler()
     ...
@@ -81,19 +63,24 @@ using gradient clipping as an example once more::
         loss = loss_fn(output, target)
         scaler.scale(loss).backward()
 
+        # Unscale the gradients owned by optimizer in-place
         scaler.unscale(optimizer)
-        # Since the optimizer's owned gradients are unscaled, we can clip to max_norm directly:
+
+        # Since the optimizer's owned gradients are unscaled, we can clip as usual:
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
 
         scaler.step(optimizer)
         scaler.update()
 
+``scaler`` records that ``scaler.unscale(optimizer)`` has been called for this optimizer
+this iteration, so ``scaler.step(optimizer)`` knows not to redundantly unscale gradients before
+calling ``optimizer.step()``.
 
 Gradient penalty
-----------------
+""""""""""""""""
 
 A gradient penalty loss term also requires awareness of the scale factor.
-Gradient penalty demonstrates some subtle/nonstandard use cases:
+Gradient penalty demonstrates the following use cases:
 
 * Creating out-of-place gradients with :func:`torch.autograd.grad`
 * Correct interaction of gradient scaling with double-backward
@@ -111,7 +98,7 @@ Here's how that looks for a simple L2 penalty::
         grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
 
         # In general, the penalty term may depend nonlinearly on the out-of-place gradients, so to be safe,
-        # manually unscale them before computing the penalty.  This unscale should be autograd-exposed.
+        # manually unscale them before computing the penalty.  This unscale should be out-of-place and autograd-exposed.
         grad_params = [p*(1./scaler.get_scale()) for p in grad_params]
 
         # Compute the penalty term and add it to the loss
@@ -130,8 +117,7 @@ Here's how that looks for a simple L2 penalty::
 Gradient accumulation
 ---------------------
 
-Gradient accumulation across iterations (between steps) is a common use case.
-:class:`AmpScaler` accommodates gradient accumulation without trouble::
+Gradient accumulation across iterations (between steps) can be implemented as follows::
 
     scaler = AmpScaler()
     ...
@@ -148,7 +134,8 @@ Gradient accumulation across iterations (between steps) is a common use case.
 Switching gradient scaling on and off
 ------------------------------------
 
-The ``enabled`` kwarg to :class:`AmpScaler` allows gradient scaling to be globally enabled/disabled without script-side if statements::
+You can enable/disable gradient scaling globally (everywhere in the network a given :class:`AmpScaler` instance
+is used) by supplying a single ``enabled=True|False`` flag to that instance's constructor call::
 
     scaler = AmpScaler(enabled=args.use_mixed_precision)
     ...
@@ -160,18 +147,19 @@ The ``enabled`` kwarg to :class:`AmpScaler` allows gradient scaling to be global
         scaler.step(optimizer)
         scaler.update()
 
-If ``enabled=False``, ``scaler.step(optimizer)`` directly invokes ``optimizer.step()`` without any wrapping logic, and
+If ``enabled=False``, ``scaler.step(optimizer)`` is equivalent to ``optimizer.step()``, and
 the other methods (``scaler.scale``, ``scaler.update``) become no-ops.
 
 
-Multiple models/optimizers/losses
----------------------------------
+Working with Multiple Optimizers, Models, and Losses
+----------------------------------------------------
 
-Make sure to call ``scaler.update()`` only at the end of the iteration, after ``scaler.step(optimizer)`` has
-been called for all optimizers used this iteration::
+A single :class:`AmpScaler` instance should scale all losses and step all optimizers.
+The usage is equivalent to prior single-optimizer examples.  The only additional constraint is
+that ``scaler.update()`` may only be called after all optimizers used this iteration have been stepped::
 
     scaler = torch.cuda.amp.AmpScaler()
-
+    ...
     for input, target in data:
         optimizer0.zero_grad()
         optimizer1.zero_grad()
@@ -196,15 +184,3 @@ Note that the decision to invoke an explicit ``unscale`` can be made independent
     If you (optionally) choose to unscale gradients prior to stepping, ``scaler.unscale(optimizer)``
     should only be invoked once per optimizer per step, and only after all gradients for that optimizer's
     owned parameters have been accumulated.
-
-.. _custom-optimizer-guide:
-
-Custom Optimizer Guide
-^^^^^^^^^^^^^^^^^^^^^^
-
-I will write this once the gradient scaling API is approved.
-
-Additional References
-^^^^^^^^^^^^^^^^^^^^^
-
-Todo once API is approved.
