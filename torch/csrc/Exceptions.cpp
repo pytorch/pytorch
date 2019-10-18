@@ -142,6 +142,8 @@ using warning_buffer_t =
   std::vector<std::pair<c10::SourceLocation, std::string>>;
 
 static warning_buffer_t warning_buffer;
+// To avoid deadlocks, if both the GIL and this lock is needed,
+// The GIL needs to be acquired first.
 static std::mutex warning_buffer_mutex;
 
 static void py_warning_handler(
@@ -160,10 +162,15 @@ EnforceWarningBuffer::EnforceWarningBuffer() noexcept(true): prev_handler(c10::W
 EnforceWarningBuffer::~EnforceWarningBuffer() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler);
 
-  std::unique_lock<std::mutex> lock(warning_buffer_mutex);
+  {
+    std::unique_lock<std::mutex> lock(warning_buffer_mutex);
+    auto has_warnings = warning_buffer.size() > 0;
+  }
 
-  if(warning_buffer.size() > 0) {
+  if(has_warnings) {
     AutoGIL gil;
+    std::unique_lock<std::mutex> lock(warning_buffer_mutex);
+
 
     PyObject *ptype, *pvalue, *ptraceback;
     PyErr_Fetch(&ptype, &pvalue, &ptraceback);
