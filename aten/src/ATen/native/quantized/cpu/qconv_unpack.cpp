@@ -2,6 +2,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
 namespace at {
 namespace native {
@@ -16,8 +17,8 @@ namespace {
 class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
  public:
 #ifdef USE_FBGEMM
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> operator()(
-      Tensor packed_weights) {
+  std::tuple<at::Tensor, c10::optional<Tensor>> fbgemm_conv_unpack(
+      at::Tensor packed_weights) {
     // Pull out the packed weight instance from the owning tensor.
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedConvWeight>(packed_weights);
@@ -35,14 +36,16 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
     int C_per_G = input_channels / groups;
 
     // Tensor for unpacked weights
-    // Unpacked format would be KRS(C/G)
+    // Unpacked format would be physical KRS(C/G) but logical KCRS (channels first)
+    // because that's how FBGEMM stores the weights
     Tensor unpacked_weights;
     if (pack_ptr.q_scheme == kPerTensorAffine) {
       unpacked_weights = _empty_affine_quantized(
-          {output_channels, kernel_h, kernel_w, C_per_G},
+          {output_channels, C_per_G, kernel_h, kernel_w},
           device(kCPU).dtype(kQInt8),
           pack_ptr.w_scale[0],
-          pack_ptr.w_zp[0]);
+          pack_ptr.w_zp[0],
+          MemoryFormat::ChannelsLast);
     } else if (pack_ptr.q_scheme == kPerChannelAffine) {
       auto scales = from_blob(
           pack_ptr.w_scale.data(),
@@ -51,13 +54,16 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
       auto zero_points = from_blob(
           pack_ptr.w_zp.data(), pack_ptr.w_zp.size(), device(kCPU).dtype(kInt));
 
-    unpacked_weights = _empty_per_channel_affine_quantized_like(
-        scales.toType(kDouble),
-        zero_points.toType(kLong),
-        {output_channels, kernel_h, kernel_w, C_per_G},
-        {0}, /* The output channel axis is 0 */
-        device(kCPU).dtype(kQInt8));
-   }
+      unpacked_weights = _empty_per_channel_affine_quantized(
+          {output_channels, C_per_G, kernel_h, kernel_w},
+          scales.toType(kDouble),
+          zero_points.toType(kLong),
+          0, /* The output channel axis is 0 */
+          device(kCPU).dtype(kQInt8),
+          MemoryFormat::ChannelsLast);
+    } else {
+      TORCH_CHECK(false, "Unsupported qscheme: ", toString(pack_ptr.q_scheme));
+    }
     int8_t* unpacked_weights_p =
         reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());
 
@@ -66,17 +72,35 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
     return std::tuple<at::Tensor, c10::optional<Tensor>>(
         unpacked_weights, pack_ptr.bias);
   }
-#else // USE_FBGEMM
-  std::tuple<at::Tensor, c10::optional<at::Tensor>> operator()(
-      Tensor /* weight */
-  ) {
-    // We make a strong guarantee that models using these operators will have
-    // the same numerics across different machines. Therefore, we do not provide
-    // a fallback path and rather fail loudly if we cannot run FBGEMM.
-    TORCH_CHECK(
-        false, "This PyTorch installation was not built with FBGEMM operators");
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+  std::tuple<at::Tensor, c10::optional<Tensor>> qnnpack_conv_unpack(
+      at::Tensor packed_weight) {
+    auto& pack_ptr =
+        cpp_custom_type_hack::cast<PackedConvWeightsQnnp>(packed_weight);
+    return std::tuple<at::Tensor, c10::optional<Tensor>>(
+        pack_ptr.orig_weight, pack_ptr.bias);
   }
-#endif // USE_FBGEMM
+#endif
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> operator()(
+      Tensor packed_weights) {
+    auto& ctx = at::globalContext();
+
+#ifdef USE_FBGEMM
+    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+      return fbgemm_conv_unpack(packed_weights);
+    }
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+    if (ctx.qEngine() == at::QEngine::QNNPACK) {
+      return qnnpack_conv_unpack(packed_weights);
+    }
+#endif
+    TORCH_CHECK(
+        false,
+        "Didn't find engine for operation quantized::conv_unpack ",
+        toString(ctx.qEngine()));
+  }
 };
 
 static auto registry = c10::RegisterOperators().op(

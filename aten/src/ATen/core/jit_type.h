@@ -379,15 +379,14 @@ struct CAFFE2_API TensorType : public Type {
     return TensorTypePtr(new TensorType(t));
   }
 
-  static TensorTypePtr create(
-      c10::optional<at::ScalarType> scalar_type,
-      c10::optional<Device> device,
-      const VaryingShape& sizes,
-      const VaryingStrides& strides,
-      c10::optional<bool> requires_grad,
-      c10::optional<bool> autograd_zero=c10::nullopt) {
-    return TensorTypePtr(new TensorType(
-        scalar_type, device, sizes, strides, requires_grad));
+  static TensorTypePtr create(c10::optional<at::ScalarType> scalar_type,
+                              c10::optional<Device> device,
+                              const VaryingShape &sizes,
+                              const VaryingStrides &strides,
+                              c10::optional<bool> requires_grad,
+                              c10::optional<bool> undefined = false) {
+    return TensorTypePtr(new TensorType(scalar_type, device, sizes, strides,
+                                        requires_grad, undefined));
   }
 
   static TensorTypePtr create(
@@ -462,8 +461,9 @@ struct CAFFE2_API TensorType : public Type {
 
     auto rt = rhs.expect<TensorType>();
     return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-        strides() == rt->strides() && device() == rt->device() &&
-        requiresGrad() == rt->requiresGrad() && autogradZero() == rt->autogradZero();
+           strides() == rt->strides() && device() == rt->device() &&
+           requiresGrad() == rt->requiresGrad() &&
+           undefined() == rt->undefined();
   }
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
@@ -533,68 +533,59 @@ struct CAFFE2_API TensorType : public Type {
     return cloned;
   }
 
-  TensorTypePtr merge(TensorTypePtr other) const {
-    auto scalar_type = merge_primitive(scalarType(), other->scalarType());
-    auto dev = merge_primitive(device(), other->device());
-    auto sz = sizes().merge(other->sizes());
-    auto srs = strides().merge(other->strides());
-    auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
-    auto zero = merge_primitive(autogradZero(), other->autogradZero());
-    return TensorType::create(scalar_type, dev, sz, srs, gr, zero);
-  }
+  TensorTypePtr merge(TensorTypePtr other) const;
+
   // is all information about the type specified except for autograd?
   // This replaces the notion of a 'CompleteTensorType' that used to exist
-  // in the type-hierarchy. Excluding require_grad and autogradZero allows
+  // in the type-hierarchy. Excluding require_grad and undefined allows
   // this to match the old behavior.
   bool isComplete() const {
     return scalar_type_ && device_ && sizes_.isComplete() && strides_.isComplete();
   }
 
-  TensorTypePtr withAutogradZero() {
+  // this property is used by GuardElimination
+  // please see `checkInputs` for more details
+  bool isSummarized() const {
+    return !(isComplete() && requiresGrad().has_value() &&
+             undefined().has_value());
+  }
+
+  TensorTypePtr withUndefined() {
     auto r = clone();
-    r->autograd_zero_ = true;
+    r->undefined_ = true;
     return r;
   }
 
-  c10::optional<bool> autogradZero() const {
-    return autograd_zero_;
-  }
+  c10::optional<bool> undefined() const { return undefined_; }
 
   static TensorTypePtr get();
 
   static const TypeKind Kind = TypeKind::TensorType;
 
  private:
-  TensorType(const at::Tensor& tensor)
-      : Type(TypeKind::TensorType),
-        scalar_type_(tensor.scalar_type()),
-        device_(tensor.device()),
-        sizes_(tensor.sizes().size()),
-        strides_(tensor.sizes().size()),
-        requires_grad_(tensor.requires_grad()) {
-          if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
-            sizes_ = tensor.sizes().vec();
-            strides_ = tensor.strides().vec();
-          }
+   TensorType(const at::Tensor &tensor)
+       : Type(TypeKind::TensorType), scalar_type_(tensor.scalar_type()),
+         device_(tensor.device()), sizes_(tensor.sizes().size()),
+         strides_(tensor.sizes().size()),
+         requires_grad_(tensor.requires_grad()), undefined_(false) {
+     if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
+       sizes_ = tensor.sizes().vec();
+       strides_ = tensor.strides().vec();
+     }
         }
-  TensorType(
-      c10::optional<at::ScalarType> scalar_type,
-      c10::optional<Device> device,
-      const VaryingShape& sizes,
-      const VaryingStrides& strides,
-      c10::optional<bool> requires_grad,
-      c10::optional<bool> autograd_zero=c10::nullopt)
-      : Type(TypeKind::TensorType),
-        scalar_type_(scalar_type),
-        device_(device),
-        sizes_(sizes),
-        strides_(strides),
-        requires_grad_(requires_grad),
-        autograd_zero_(autograd_zero) {}
+        TensorType(c10::optional<at::ScalarType> scalar_type,
+                   c10::optional<Device> device, const VaryingShape &sizes,
+                   const VaryingStrides &strides,
+                   c10::optional<bool> requires_grad,
+                   c10::optional<bool> undefined = false)
+            : Type(TypeKind::TensorType), scalar_type_(scalar_type),
+              device_(device), sizes_(sizes), strides_(strides),
+              requires_grad_(requires_grad), undefined_(undefined) {}
 
-  TensorTypePtr clone() const {
-    return TensorTypePtr(new TensorType(
-        scalar_type_, device_, sizes_, strides_, requires_grad_, autograd_zero_));
+        TensorTypePtr clone() const {
+          return TensorTypePtr(new TensorType(scalar_type_, device_, sizes_,
+                                              strides_, requires_grad_,
+                                              undefined_));
   }
 
   static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
@@ -614,11 +605,17 @@ struct CAFFE2_API TensorType : public Type {
   VaryingStrides strides_;
   c10::optional<bool> requires_grad_;
   // we exploit the fact certain tensors must be zero in the autograd to
-  // optimize gradient computation. If true, this means that this tensor
-  // must only contain zeros. Normally this will be nullopt, meaning
-  // the tensor may or may not contain only zeros. If false,
-  // this means the tensor must have some non-zero elements.
-  c10::optional<bool> autograd_zero_;
+  // optimize gradient computation. Such zero tensors are currently implemented
+  // with `UndefinedTensorImpl.` They can be handled only by special operators
+  // (e.g. `AutogradAdd`) and their `Tensor::defined()` property returns false.
+  // Normally, `undefined_` is set to false, unless a type was created
+  // with `withUndefined`
+  // This will also mean that `undefined` tensors will fail
+  // `subtypeOf(TensorType::get())` check
+  // undefined_ may become `c10::nullopt` if the tensor was observed to be both
+  // defined and undefined. However, no tensor type starts out with
+  // `undefined_` set to `c10::nullopt`
+  c10::optional<bool> undefined_;
 };
 
 struct ListType;
@@ -784,6 +781,19 @@ struct CAFFE2_API NamedType : public Type {
 private:
   c10::optional<QualifiedName> name_;
 };
+
+// Any should never appear in a named type like a class, namedtuple or
+// interface. If it does, then dynamic type information will be lost in the
+// Pickler, leading to hard-to-track-down bugs that will only occur
+// after saving or loading a model. This is because we rely on the
+// static types in named types to reconstruct type tags of loaded
+// values. Lifting this restriction requires solving the serialization
+// problem first.
+CAFFE2_API void checkNoAny(
+    const Type& base,
+    const char* what,
+    const std::string& attrname,
+    const TypePtr& attrtype);
 
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
@@ -1237,6 +1247,12 @@ struct getTypePtr_<at::Scalar> final {
   }
 };
 template <>
+struct getTypePtr_<at::Generator*> final {
+  static TypePtr call() {
+    return OptionalType::create(GeneratorType::get());
+  }
+};
+template <>
 struct getTypePtr_<std::string> final {
   static TypePtr call() {
     return StringType::get();
@@ -1301,10 +1317,6 @@ inline TypePtr getTypePtr() {
   return detail::getTypePtr_<T>::call();
 }
 
-CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
-CAFFE2_API TypePtr attemptToRecoverType(const IValue& input_ivalue);
-CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
-
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
   MatchTypeReturn(std::string reason) : reason_(std::move(reason)) {}
@@ -1319,7 +1331,7 @@ struct MatchTypeReturn {
   }
 
  private:
-  MatchTypeReturn() 
+  MatchTypeReturn()
   : reason_(c10::nullopt) {}
   c10::optional<std::string> reason_; // is there is no match, this contains the reason
 };
@@ -1329,13 +1341,13 @@ struct MatchTypeReturn {
 // and a r.reason() that describes why it could not match.
 // note: It is possible to successfully match a formal, but for type variables
 // in the formal to still not be defined. In particular, None matches Optional[T]
-// but does not define the value of T. 
+// but does not define the value of T.
 CAFFE2_API MatchTypeReturn
 matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 
-// replace type variables appearing in `type` with the values in 
-// `type_env`. Returns nullptr if a variable used in `type` 
-// does not appear in `type_env` 
+// replace type variables appearing in `type` with the values in
+// `type_env`. Returns nullptr if a variable used in `type`
+// does not appear in `type_env`
 CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 /**
@@ -1404,9 +1416,7 @@ struct CAFFE2_API ClassType : public NamedType {
 
   Function* getMethod(const std::string& name) const;
   const std::vector<Function*>& methods() const;
-  void addMethod(Function* method) {
-    methods_.push_back(method);
-  }
+  void addMethod(Function* method);
 
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
@@ -1455,6 +1465,28 @@ struct CAFFE2_API ClassType : public NamedType {
       TypePtr type,
       bool is_parameter = false);
 
+  // Add attribute \p NAME if it doesn't exist or verify that it has a
+  // compatible type otherwise.
+  size_t addOrCheckAttribute(
+      const std::string& name,
+      TypePtr ty,
+      bool is_parameter = false) {
+    auto slot_idx = findAttributeSlot(name);
+    if (!slot_idx) {
+      return addAttribute(name, ty, is_parameter);
+    }
+
+    TORCH_CHECK(
+        is_parameter == this->is_parameter(*slot_idx),
+        "Parameter field mismatch for the field '",
+        name,
+        "'");
+    TypePtr atype = getAttribute(*slot_idx);
+    TORCH_CHECK(ty->isSubtypeOf(atype));
+    return *slot_idx;
+  }
+
+
   at::ArrayRef<std::string> attributeNames() const {
     return attributeNames_;
   }
@@ -1487,6 +1519,12 @@ struct CAFFE2_API ClassType : public NamedType {
 
   bool is_module() const {
     return bool(parameterSlots_);
+  }
+  bool is_module(size_t slot) const {
+    if (auto cls = getAttribute(slot)->cast<at::ClassType>()) {
+      return cls->is_module();
+    }
+    return false;
   }
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(

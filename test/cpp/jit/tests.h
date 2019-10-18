@@ -19,6 +19,7 @@ namespace jit {
   _(CustomOperatorAliasing)            \
   _(IValueKWargs)                      \
   _(CustomFusion)                      \
+  _(SchemaMatching)                    \
   _(Differentiate)                     \
   _(DifferentiateWithRequiresGrad)     \
   _(FromQualString)                    \
@@ -61,9 +62,10 @@ namespace jit {
   _(SaveExtraFilesHook)                \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
-  _(ImportTooNew)                      \
   _(ClassDerive)                       \
-  _(Inliner)
+  _(Inliner)                           \
+  _(LiteInterpreterAdd)                \
+  _(LiteInterpreterConv)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

@@ -3,8 +3,8 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
-#include <c10/util/flat_hash_map.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/order_preserving_flat_hash_map.h>
 #include <c10/util/Optional.h>
 #include <ATen/core/TensorBody.h>
 
@@ -39,7 +39,7 @@ struct DictKeyEqualTo {
 };
 
 struct DictImpl final : public c10::intrusive_ptr_target {
-  using dict_map_type = ska::flat_hash_map<IValue, IValue, DictKeyHash, DictKeyEqualTo>;
+  using dict_map_type = ska_ordered::order_preserving_flat_hash_map<IValue, IValue, DictKeyHash, DictKeyEqualTo>;
   struct DictElementTypes final {
     TypePtr keyType;
     TypePtr valueType;
@@ -202,9 +202,9 @@ class Dict final {
 private:
   static_assert((std::is_same<IValue, Key>::value && std::is_same<IValue, Value>::value) || guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "Invalid Key type for Dict. We only support int64_t, double, bool, and string.");
 
-  // impl_ stores the underlying map as a ska::flat_hash_map.
+  // impl_ stores the underlying map as a ska_ordered::order_preserving_flat_hash_map.
   // We intentionally don't offer conversion from/to
-  // ska::flat_hash_map, return references to it or something like that,
+  // order_preserving_flat_hash_map, return references to it or something like that,
   // because such operations would get expensive if we switch out
   // the actual map implementation.
   // This is an intrusive_ptr because Dict is a pointer type.

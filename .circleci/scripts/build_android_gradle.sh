@@ -4,7 +4,7 @@ set -eux -o pipefail
 export ANDROID_NDK_HOME=/opt/ndk
 export ANDROID_HOME=/opt/android/sdk
 
-export GRADLE_VERSION=5.1.1
+export GRADLE_VERSION=4.10.3
 export GRADLE_HOME=/opt/gradle/gradle-$GRADLE_VERSION
 export GRADLE_PATH=$GRADLE_HOME/bin/gradle
 
