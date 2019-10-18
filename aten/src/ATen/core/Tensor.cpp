@@ -2,6 +2,7 @@
 #include <ATen/core/Formatting.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/function.h>
 
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
@@ -159,12 +160,12 @@ const std::shared_ptr<torch::autograd::Node>& Tensor::grad_fn() const {
     auto current_version = this->current_version();
     if (diff_view_meta->attr_version != current_version) {
       AT_ASSERT(diff_view_meta->output_nr_ == 0);
-      auto fn = std::make_shared<generated::AsStridedBackward>();
+      auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
       fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
       fn->size = sizes().vec();
       fn->stride = strides().vec();
       fn->storage_offset = storage_offset();
-      fn->set_next_edges(collect_next_edges(diff_view_meta->base_));
+      fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
       fn->add_input_metadata(
         diff_view_meta->base_.type()
       , sizes() // Note: sizes(), not base_.sizes(), is intentional

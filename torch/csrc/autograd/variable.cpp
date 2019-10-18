@@ -51,4 +51,18 @@ DifferentiableViewMeta::~DifferentiableViewMeta() {
   base_.reset();
 }
 
+// In c++ file so we can access Node
+void _create_cpp_hook(const Tensor& self) {
+  auto &list = self.get_autograd_meta()->cpp_hooks_list_;
+  list.reset(new torch::autograd::CppHooksList());
+  std::unique_ptr<torch::autograd::FunctionPreHook> hook_ptr(new torch::autograd::CppFunctionPreHook(list, self.output_nr()));
+  self.clear_hooks();
+  self.add_hook(std::make_shared<torch::autograd::CppFunctionPreHook>(list, 0));
+  auto fn = self.grad_fn();
+  if (fn) {
+    fn->add_pre_hook(std::move(hook_ptr));
+  }
+}
+
+
 }} // namespace torch::autograd

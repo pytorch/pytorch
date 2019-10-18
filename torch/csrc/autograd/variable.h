@@ -20,6 +20,8 @@
 
 namespace torch { namespace autograd {
 
+using variable_list = std::vector<at::Tensor>;
+
 struct Node;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -372,17 +374,7 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
 // AutogradMeta is available inline, move these back to Tensor.h
 namespace at {
 
-inline void _create_cpp_hook(const Tensor& self) {
-  auto &list = self.get_autograd_meta()->cpp_hooks_list_;
-  list.reset(new torch::autograd::CppHooksList());
-  std::unique_ptr<torch::autograd::FunctionPreHook> hook_ptr(new torch::autograd::CppFunctionPreHook(list, self.output_nr()));
-  self.clear_hooks();
-  self.add_hook(std::make_shared<torch::autograd::CppFunctionPreHook>(list, 0));
-  auto fn = self.grad_fn();
-  if (fn) {
-    fn->add_pre_hook(std::move(hook_ptr));
-  }
-}
+void _create_cpp_hook(const Tensor& self);
 
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
