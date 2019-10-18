@@ -11448,6 +11448,50 @@ a")
 
                 return sum
 
+    def test_list_comprehension_modulelist(self):
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
+        class M(torch.nn.Module):
+            __constants__ = ["module_list"]
+
+            def __init__(self, mod_list):
+                super(M, self).__init__()
+                self.module_list = mod_list
+
+            def forward(self, x):
+                out = torch.jit.annotate(List[Tensor], [mod(x) for mod in self.module_list])
+                return out
+
+        mod = M(nn.ModuleList([Inner(), Inner()]))
+        self.checkModule(mod, (torch.tensor(3),))
+
+        mod = M(nn.ModuleList([]))
+        torch.jit.script(mod)
+
+        class M2(M):
+            def __init__(self, mod_list):
+                super(M2, self).__init__(mod_list)
+
+            def forward(self, x):
+                out = [mod(x) for mod in self.module_list]
+                return out
+
+        mod = M2(nn.ModuleList([Inner(), Inner()]))
+        self.checkModule(mod, (torch.tensor(3),))
+
+        mod = M2(nn.ModuleList([]))
+        with self.assertRaisesRegex(Exception, "Must provide a type annotation"):
+            torch.jit.script(mod)
+
+        def bad_type_annotation():
+            out = torch.jit.annotate(int, [x for x in [1, 2, 3]])
+            return out
+
+        with self.assertRaisesRegex(Exception, "Expected list type annotation"):
+            torch.jit.script(bad_type_annotation)
+
     def test_for_in_zip(self):
         def fn(x, y):
             # type: (List[int], List[int]) -> int
