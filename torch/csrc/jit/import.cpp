@@ -33,7 +33,7 @@ using caffe2::serialize::ReadAdapterInterface;
 
 void postSetStateValidate(const IValue& v) {
   auto obj = v.toObject();
-  const auto& objType = obj->type();
+  const auto& objType = obj->type()->expect<ClassType>();
   for (size_t i = 0; i < objType->numAttributes(); i++) {
     const auto& attrType = objType->getAttribute(i);
     const auto& attrName = objType->getAttributeName(i);

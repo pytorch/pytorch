@@ -362,9 +362,9 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   const std::vector<IValue>& slots() const {
     return slots_;
   }
-  std::shared_ptr<ClassType> type() const {
-    auto classTypePtr =  std::dynamic_pointer_cast<ClassType>(type_.type_);
-    return classTypePtr;
+
+  std::shared_ptr<NamedType> type() const {
+    return type_.type_;
   }
 
   std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {

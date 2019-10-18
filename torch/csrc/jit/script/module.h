@@ -325,8 +325,8 @@ struct TORCH_API Module {
 
   ModulePtr module_object() const;
 
-  ClassTypePtr type() const {
-    return module_object()->type();
+  c10::ClassTypePtr type() const {
+    return module_object()->type()->expect<c10::ClassType>();
   }
   std::shared_ptr<CompilationUnit> class_compilation_unit() const {
     return module_object()->compilation_unit();

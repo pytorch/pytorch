@@ -788,7 +788,15 @@ struct CAFFE2_API NamedType : public Type {
     return 0;
   }
 
-private:
+  virtual const TypePtr& getAttribute(size_t slot) const {
+    return nullptr;
+  }
+
+//  virtual const std::string& getAttributeName(size_t slot) const {
+//    return "";
+//  }
+
+ private:
   c10::optional<QualifiedName> name_;
 };
 
@@ -1412,7 +1420,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeTypes_[pos];
   }
 
-  const TypePtr& getAttribute(size_t slot) const {
+  const TypePtr& getAttribute(size_t slot) const override {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     AT_ASSERT(slot < attributeTypes_.size());
     return attributeTypes_[slot];

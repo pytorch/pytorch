@@ -671,7 +671,7 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
-    if (obj->type()->is_module()) {
+    if (obj->type()->expect<ClassType>()->is_module()) {
       return py::cast(script::Module(obj));
     }
 

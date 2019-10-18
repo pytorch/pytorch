@@ -937,7 +937,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // the object is turned into an interface
             auto function = peek(stack, 0, inst.N)
                                 .toObject()
-                                ->type()
+                                ->type()->expect<ClassType>()
                                 ->getMethod(af.constants[inst.X].toStringRef());
             const Code& code = function->get_executor().getPlanFor(stack).code;
             frames.back().pc = af.pc + 1;
