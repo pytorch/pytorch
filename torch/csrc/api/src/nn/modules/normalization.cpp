@@ -14,10 +14,6 @@ namespace nn {
 
 LayerNormImpl::LayerNormImpl(const LayerNormOptions& options_) : options(options_) {
   reset();
-  if (options.elementwise_affine()) {
-    torch::nn::init::ones_(weight);
-    torch::nn::init::zeros_(bias);
-  }
 }
 
 void LayerNormImpl::reset() {
@@ -27,6 +23,10 @@ void LayerNormImpl::reset() {
   } else {
     weight = register_parameter("weight", torch::Tensor(), /*requires_grad=*/false);
     bias = register_parameter("bias", torch::Tensor(), /*requires_grad=*/false);
+  }
+  if (options.elementwise_affine()) {
+    torch::nn::init::ones_(weight);
+    torch::nn::init::zeros_(bias);
   }
 }
 

@@ -731,6 +731,12 @@ TEST_F(ModulesTest, Linear) {
   ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
 }
 
+TEST_F(ModulesTest, LayerNorm) {
+  // LayerNorm model(LayerNormOptions({2, 2}));
+  // auto input = torch::Tensor({{1,2}, {3, 4}});
+  // auto y = model(input);
+}
+
 TEST_F(ModulesTest, Fold) {
   Fold model(FoldOptions({4, 5}, {2, 2}));
   auto x = torch::randn({1, 3 * 2 * 2, 12}, torch::requires_grad());
