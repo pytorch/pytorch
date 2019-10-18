@@ -50,6 +50,7 @@ void window_function_checks(
       window_length);
 }
 
+// bool inputs are considered integral
 static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scalar>> l) {
   for (Scalar& s : l) {
     if (!s.isIntegral(true)) {
@@ -77,12 +78,9 @@ Tensor arange(
     Scalar step,
     const TensorOptions& options) {
   bool set_to_integral_dtype = !options.has_dtype() && allIntegral({start, end, step});
-  Tensor result;
-  if (set_to_integral_dtype) {
-      result = at::empty({0}, options.dtype(at::ScalarType::Long));
-  } else {
-      result = at::empty({0}, options);
-  }
+  Tensor result = set_to_integral_dtype
+      ? at::empty({0}, options.dtype(at::ScalarType::Long))
+      : at::empty({0}, options);
   return at::arange_out(result, start, end, step);
 }
 

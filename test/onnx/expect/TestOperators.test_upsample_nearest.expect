@@ -214,7 +214,7 @@ graph {
     }
     attribute {
       name: "ends"
-      ints: 9223372036854775807
+      ints: 4
       type: INTS
     }
     attribute {

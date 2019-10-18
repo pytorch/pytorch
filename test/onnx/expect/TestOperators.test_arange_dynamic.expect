@@ -89,41 +89,108 @@ graph {
     }
   }
   node {
-    input: "3"
+    input: "9"
     output: "10"
-    op_type: "Cast"
+    op_type: "Unsqueeze"
     attribute {
-      name: "to"
-      i: 1
-      type: INT
+      name: "axes"
+      ints: 0
+      type: INTS
     }
   }
   node {
     input: "8"
     output: "11"
-    op_type: "Cast"
+    op_type: "Unsqueeze"
     attribute {
-      name: "to"
-      i: 1
-      type: INT
+      name: "axes"
+      ints: 0
+      type: INTS
     }
   }
   node {
-    input: "9"
+    input: "3"
     output: "12"
-    op_type: "Cast"
+    op_type: "Unsqueeze"
     attribute {
-      name: "to"
-      i: 1
-      type: INT
+      name: "axes"
+      ints: 0
+      type: INTS
     }
   }
   node {
-    input: "10"
     input: "11"
     input: "12"
     output: "13"
-    op_type: "Range"
+    op_type: "Sub"
+  }
+  node {
+    input: "13"
+    input: "10"
+    output: "14"
+    op_type: "Div"
+  }
+  node {
+    input: "14"
+    output: "15"
+    op_type: "ConstantOfShape"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 1
+        raw_data: "\000\000\200?"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "15"
+    output: "16"
+    op_type: "NonZero"
+  }
+  node {
+    input: "16"
+    output: "17"
+    op_type: "Transpose"
+    attribute {
+      name: "perm"
+      ints: 1
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "17"
+    output: "18"
+    op_type: "Squeeze"
+    attribute {
+      name: "axes"
+      ints: 1
+      type: INTS
+    }
+  }
+  node {
+    input: "18"
+    input: "10"
+    output: "19"
+    op_type: "Mul"
+  }
+  node {
+    input: "19"
+    input: "12"
+    output: "20"
+    op_type: "Add"
+  }
+  node {
+    input: "20"
+    output: "21"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 1
+      type: INT
+    }
   }
   name: "torch-jit-export"
   input {
@@ -146,7 +213,7 @@ graph {
     }
   }
   output {
-    name: "13"
+    name: "21"
     type {
       tensor_type {
         elem_type: 1
