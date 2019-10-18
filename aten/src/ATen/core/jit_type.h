@@ -789,12 +789,9 @@ struct CAFFE2_API NamedType : public Type {
   }
 
   virtual const TypePtr& getAttribute(size_t slot) const {
-    return nullptr;
+    static const TypePtr ptr = nullptr;
+    return ptr;
   }
-
-//  virtual const std::string& getAttributeName(size_t slot) const {
-//    return "";
-//  }
 
  private:
   c10::optional<QualifiedName> name_;
