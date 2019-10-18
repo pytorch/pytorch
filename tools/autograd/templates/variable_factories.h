@@ -22,6 +22,9 @@ using at::DimnameList;
 namespace torch {
 
 namespace detail {
+
+const int TENSOR_CTOR_MAX_NUM_DIMS = 10;
+
 enum class TensorDataContainerType { Scalar, InitList, Tensor };
 
 template <size_t D> struct TensorDataContainer;
@@ -46,9 +49,12 @@ inline void fill_tensor(const TensorDataContainer<D>& init_list_tensor, at::Tens
   }
 }
 
+// NOTE: We add an explicit template specialization for `fill_tensor`
 template <>
-inline void fill_tensor(const TensorDataContainer<11>& init_list_tensor, at::Tensor tensor) {
-  TORCH_CHECK(false, "Tensor has too many dimensions");  // yf225 TODO: improve error msg
+inline void fill_tensor(const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS+1>& init_list_tensor, at::Tensor tensor) {
+  TORCH_CHECK(
+    false,
+    "Tensor with more than ", TENSOR_CTOR_MAX_NUM_DIMS, " dimensions is not supported"); // yf225 TODO: add a test for this
 }
 
 template <size_t D>
@@ -65,7 +71,7 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<
     }
     stream << "}";
   } else if (init_list_tensor.type() == TensorDataContainerType::Tensor) {
-    auto tensor = init_list_tensor.to_tensor({});
+    auto tensor = init_list_tensor.tensor();
     stream << "{";
     for (int64_t i = 0; i < tensor.sizes()[0]; i++) {
       AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, init_list_tensor.scalar_type(), "TensorDataContainer_pretty_print_tensor_item", [&] {
@@ -80,11 +86,67 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<
 }
 
 template <>
-inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<11>& init_list_tensor) {
-  TORCH_CHECK(false, "Tensor has too many dimensions");  // yf225 TODO: improve error msg
+inline std::ostream& operator<<(
+    std::ostream& stream,
+    const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS+1>& init_list_tensor) {
+  TORCH_CHECK(
+    false,
+    "Tensor with more than ", TENSOR_CTOR_MAX_NUM_DIMS, " dimensions is not supported"); // yf225 TODO: add a test for this
   return stream;
 }
 
+// We use `TensorDataContainer` to support converting the following data container types
+// into the equivalent Tensor:
+// 1. Arbitrarily nested braced-init-list (e.g. `{{1, 2}, {3, 4}}`).
+// 2. `at::ArrayRef` of supported tensor data types.
+// 3. `std::vector` of supported tensor data types.
+//
+// At any time, a `TensorDataContainer` object represents one of the following:
+// 1. A scalar with value `scalar()` and type `scalar_type()`.
+// 2. A Tensor represented in `std::initializer_list<TensorDataContainer>` form,
+//    with value `init_list()`, Tensor scalar type `scalar_type()`, and Tensor sizes `sizes()`.
+// 3. A Tensor represented in `at::Tensor` form, with value `tensor()`, scalar type `scalar_type()`,
+//    and Tensor sizes `sizes()`.
+//
+// All the infrastructure here is mostly to support converting an arbitrarily nested braced-init-list
+// to the equivalent Tensor successfully. Consider the following example:
+//
+// `torch::tensor({{1}, {2}})`
+//
+// Here is the code path that it goes through:
+//
+// `at::Tensor tensor(detail::TensorDataContainer<1> init_list_tensor)`
+//
+// which calls:
+//
+// `TensorDataContainer<1>({{1}, {2}})`
+//
+// which matches to the `TensorDataContainer<1>(std::initializer_list<TensorDataContainer<2>>)` constructor,
+// and in an attempt to convert `{1}` and `{2}` to `TensorDataContainer<2>`, it calls the following:
+//
+// `TensorDataContainer<2>({1})`  (same call path happens for `{2}`, and we'll just focus on `{1}` here)
+//
+// At this point, theoretically there are two plausible ways for `{1}` to be matched to one of the
+// constructors of `TensorDataContainer<2>`:
+// 1. It can be a list-initialization of a scalar value, thus matching `TensorDataContainer<2>(int value)`.
+// 2. It can be converted to `std::initializer_list<TensorDataContainer<3>>`, thus matching
+//    `TensorDataContainer<2>(std::initializer_list<TensorDataContainer<3>>)`.
+// How does the compiler decide which one to choose? According to `https://en.cppreference.com/w/cpp/language/list_initialization`,
+// braced-init-list always prefers the constructor that takes `std::initializer_list`. Hence we happily
+// move forward with constructor #2, and it calls the following:
+//
+// `TensorDataContainer<3>(1)`
+//
+// Now it matches `TensorDataContainer<3>(int value)`, which stores `1` as a scalar value. All is good.
+//
+// Note that `torch::tensor({{1}, {2}})` can also match another existing function overload:
+// `torch::tensor(at::ArrayRef<int> values)`, because `{1}` and `{2}` can be treated as
+// a list-initialization of an `int` value. However, this will produce a Tensor with sizes `{2}`,
+// but we actually want a Tensor with sizes `{2, 1}`. In order to avoid matching this function overload,
+// we move the ability to convert `at::ArrayRef<T>` (and similarly `std::vector<T>`) into `TensorDataContainer<1>`,
+// and since for braced-init-list the `TensorDataContainer<1>(std::initializer_list<TensorDataContainer<2>>)`
+// constructor is always preferred over all other constructors, it will take the `std::initializer_list` path
+// and all is good again.
 template <size_t D>
 struct TensorDataContainer {
   // NOTE: For tensors with zero-size dimensions (e.g. `torch::tensor({{}, {}})`),
@@ -155,7 +217,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     return type_;
   }
 
-  at::Tensor to_tensor(const at::TensorOptions& options) const {
+  at::Tensor tensor(const at::TensorOptions& options = {}) const {
     if (type_ == TensorDataContainerType::Tensor) {
       return tensor_.to(options);
     } else if (type_ == TensorDataContainerType::Scalar) {
@@ -195,7 +257,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 /// the largest data type that can represent all of the elements, or by using
 /// variadic templates.
 inline at::Tensor tensor(detail::TensorDataContainer<1> init_list_tensor, const at::TensorOptions& options) {
-  return autograd::make_variable(init_list_tensor.to_tensor(options), options.requires_grad());
+  return autograd::make_variable(init_list_tensor.tensor(options), options.requires_grad());
 }
 
 inline at::Tensor tensor(detail::TensorDataContainer<1> init_list_tensor) {
