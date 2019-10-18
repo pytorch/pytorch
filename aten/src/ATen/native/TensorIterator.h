@@ -57,16 +57,6 @@
 
 namespace at {
 
-// Fetch a value with type src_type from ptr, and cast it to dest_t.
-template<typename dest_t>
-__host__ __device__ inline dest_t fetch_and_cast<dest_t, false>(ScalarType src_type, const void *ptr) {
-}
-
-// Cast a value with type src_t into dest_type, and store it to ptr.
-template<typename src_t>
-__host__ __device__ inline void cast_and_store(ScalarType dest_type, void *ptr, src_t value) {
-}
-
 struct DimCounter {
   DimCounter(IntArrayRef shape, Range range);
 
@@ -280,6 +270,16 @@ struct CAFFE2_API TensorIterator {
   /// as opposed to something that will be accumulated further. Only relevant for
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
+
+
+  bool has_promotion() const {
+    for (auto& op : operands_) {
+      if (op.tensor.scalar_type() != common_dtype_) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   void set_check_mem_overlap(bool check_mem_overlap) {
     check_mem_overlap_ = check_mem_overlap;
