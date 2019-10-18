@@ -896,7 +896,8 @@ void AliasDb::giveFreshAlias(const Value* value) {
     return;
   }
 
-  elementMap_[value] = memoryDAG_->makeFreshValue(value);
+  auto r = memoryDAG_->makeFreshValue(value);
+  elementMap_[value] = r;
 }
 
 Element* AliasDb::getOrCreateElement(const Value* value) {
