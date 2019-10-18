@@ -130,8 +130,10 @@ TORCH_MODULE(CosineEmbeddingLoss);
 /// It is less sensitive to outliers than the `MSELoss` and in some cases
 /// prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
 /// Also known as the Huber loss.
-struct TORCH_API SmoothL1LossImpl : Module {
+struct TORCH_API SmoothL1LossImpl : public Cloneable<SmoothL1LossImpl> {
   explicit SmoothL1LossImpl(const SmoothL1LossOptions& options_ = {});
+
+  void reset() override;
 
   /// Pretty prints the `L1Loss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;

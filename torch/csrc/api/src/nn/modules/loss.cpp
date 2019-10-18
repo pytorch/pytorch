@@ -162,6 +162,8 @@ Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
 SmoothL1LossImpl::SmoothL1LossImpl(
     const torch::nn::SmoothL1LossOptions& options_) : options(options_) {}
 
+void SmoothL1LossImpl::reset() {}
+
 void SmoothL1LossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::SmoothL1Loss";
 }
