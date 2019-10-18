@@ -1421,8 +1421,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
 
-    # TODO: enable this test once ORT supports more input types
-    @skipIfUnsupportedOpsetVersion([11])
     def test_constant_pad(self):
         model = torch.nn.ConstantPad1d(2, 3.5)
         x = torch.randn(2, 4, 4)
