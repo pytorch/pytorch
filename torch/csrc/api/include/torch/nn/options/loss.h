@@ -9,11 +9,43 @@ namespace nn {
 
 /// Options for a L1 loss module.
 struct TORCH_API L1LossOptions {
-  L1LossOptions(Reduction::Reduction reduction = Reduction::Mean)
+  L1LossOptions(torch::Reduction::Reduction reduction = torch::Reduction::Mean)
+      : reduction_(reduction) {}
+
+  /// Specifies the reduction to apply to the output.
+  TORCH_ARG(torch::Reduction::Reduction, reduction);
+};
+
+// ============================================================================
+
+/// Options for a KLDiv loss module.
+struct TORCH_API KLDivLossOptions {
+  KLDivLossOptions(Reduction::Reduction reduction = Reduction::Mean)
       : reduction_(reduction) {}
 
   /// Specifies the reduction to apply to the output.
   TORCH_ARG(Reduction::Reduction, reduction);
+};
+
+// ============================================================================
+
+/// Options for a MSE loss module.
+struct TORCH_API MSELossOptions {
+  MSELossOptions(Reduction::Reduction reduction = Reduction::Mean)
+      : reduction_(reduction) {}
+
+  /// Specifies the reduction to apply to the output.
+  TORCH_ARG(Reduction::Reduction, reduction);
+};
+
+// ============================================================================
+
+/// Options for a BCE loss module.
+struct TORCH_API BCELossOptions {
+  /// A manual rescaling weight given to the loss of each batch element.
+  TORCH_ARG(Tensor, weight) = {};
+  /// Specifies the reduction to apply to the output.
+  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
 };
 
 // ============================================================================
@@ -24,7 +56,7 @@ struct TORCH_API HingeEmbeddingLossOptions {
   /// reach in order to incur zero loss. Default: 1
   TORCH_ARG(double, margin) = 1.0;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
 // ============================================================================
@@ -44,7 +76,7 @@ struct TORCH_API MultiMarginLossOptions {
   /// ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
   /// ``'mean'``: the sum of the output will be divided by the number of
   /// elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
 // ============================================================================
@@ -56,7 +88,35 @@ struct TORCH_API CosineEmbeddingLossOptions {
   /// to 0.5 is suggested. Default: 0.0
   TORCH_ARG(double, margin) = 0.0;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
+};
+
+// ============================================================================
+
+/// Options for a multi-label margin loss functional and module.
+struct TORCH_API MultiLabelMarginLossOptions {
+  MultiLabelMarginLossOptions(torch::Reduction::Reduction reduction = torch::Reduction::Mean)
+    : reduction_(reduction) {}
+
+  /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+  /// 'none': no reduction will be applied, 'mean': the sum of the output will
+  /// be divided by the number of elements in the output, 'sum': the output will
+  /// be summed. Default: 'mean'
+  TORCH_ARG(torch::Reduction::Reduction, reduction);
+};
+
+// ============================================================================
+
+/// Options for a soft margin loss functional and module.
+struct TORCH_API SoftMarginLossOptions {
+  SoftMarginLossOptions(torch::Reduction::Reduction reduction = torch::Reduction::Mean)
+    : reduction_(reduction) {}
+
+  /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+  /// 'none': no reduction will be applied, 'mean': the sum of the output will
+  /// be divided by the number of elements in the output, 'sum': the output will
+  /// be summed. Default: 'mean'
+  TORCH_ARG(torch::Reduction::Reduction, reduction);
 };
 
 // ============================================================================
@@ -72,7 +132,7 @@ struct TORCH_API MultiLabelSoftMarginLossOptions {
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
 // ============================================================================
@@ -90,7 +150,7 @@ struct TORCH_API TripletMarginLossOptions {
   /// E. Riba et al. Default: False
   TORCH_ARG(bool, swap) = false;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
 } // namespace nn

@@ -27,7 +27,7 @@ def requires_process_group_agent(message=""):
 VALUE_FUTURE = concurrent.futures.Future()
 
 
-def stub_init_rpc_backend_handler(self_rank, self_name, init_method):
+def stub_start_rpc_backend_handler(self_rank, self_name, init_method):
     return mock.Mock()  # RpcAgent.
 
 
@@ -225,13 +225,13 @@ class RpcTest(object):
             rpc.rpc_sync(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
 
     @mock.patch.object(torch.distributed.autograd, "_init")
-    @mock.patch.object(torch.distributed.rpc.api, "_init_rpc_agent")
-    def test_register_rpc_backend_and_init_rpc_backend(
+    @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
+    def test_register_rpc_backend_and_start_rpc_backend(
         self, mock_rpc_agent, mock_dist_autograd_init
     ):
         backend_name = "stub_backend"
         rpc.register_backend(
-            backend_name, stub_init_rpc_backend_handler
+            backend_name, stub_start_rpc_backend_handler
         )
         rpc.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
 
@@ -379,8 +379,16 @@ class RpcTest(object):
             self.assertEqual(ret1, torch.ones(n, n) * 2)
             self.assertEqual(ret2, torch.ones(n, n) * 3)
 
-    @dist_init
     def test_join_rpc(self):
+        # Initialize RPC.
+        dist.init_process_group(backend="gloo", init_method=self.init_method)
+        rpc.init_model_parallel(
+            self_name="worker%d" % self.rank,
+            backend=TEST_CONFIG.rpc_backend,
+            self_rank=self.rank,
+            init_method=self.init_method,
+        )
+
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync(
@@ -600,6 +608,39 @@ class RpcTest(object):
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
         self.assertEqual(rref.to_here().wait(), torch.ones(n, n) * 2)
+
+    @dist_init
+    def test_asymmetric_load_with_join(self):
+        """Test graceful termination."""
+        # worker0 drives and waits for worker1 and worker2
+        # throughout the test.
+        if self.rank == 0:
+            assert self.world_size >= 3
+
+            num_repeat = 200
+            futs = []
+
+            # Phase 1: Only worker1 has workload.
+            dst = "worker1"
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
+
+            # Phase 2: Only worker2 has workload.
+            # If join is not correctly implemented,
+            # worker2 should be closed by now.
+            dst = "worker2"
+            for _ in range(num_repeat):
+                fut = rpc.rpc_async(dst, heavy_rpc, args=(torch.ones(100, 100),))
+                futs.append(fut)
+
+            for fut in futs:
+                fut.wait()
+                self.assertEqual(fut.wait(), 0)
 
     def _test_multi_remote_call(self, fn, args_fn=lambda x: (), kwargs_fn=lambda x: {}):
         m = 10
