@@ -60,14 +60,11 @@ struct TORCH_API LeakyReLUOptions {
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace) = false;
 };
-  
-// ============================================================================
 
 // ============================================================================
 
 /// Options for Gumbel Softmax functional and module.
 struct GumbelSoftmaxOptions {
-
   /// non-negative scalar temperature
   TORCH_ARG(double, tau) = 1.0;
 
@@ -77,7 +74,7 @@ struct GumbelSoftmaxOptions {
 
   /// dimension along which softmax will be computed. Default: -1
   TORCH_ARG(int, dim) = -1;
-}
+};
 
 // ============================================================================
 
