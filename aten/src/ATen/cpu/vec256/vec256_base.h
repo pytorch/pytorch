@@ -256,8 +256,20 @@ public:
   Vec256<T> log1p() const {
     return map(std::log1p);
   }
+  template <typename other_t = T,
+            typename std::enable_if<!std::is_complex_t<other_t>::value, int>::type = 0>
   Vec256<T> log2() const {
+    // other_t is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<other_t, T>::value, "other_t must be T");
     return map(std::log2);
+  }
+  template <typename complex_t = T,
+            typename std::enable_if<std::is_complex_t<complex_t>::value, int>::type = 0>
+  Vec256<T> log2() const {
+    // complex_t is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<complex_t, T>::value, "complex_t must be T");
+    const double log_2 = std::log(2);
+    return map(std::log2)/log_2;
   }
   Vec256<T> ceil() const {
     return map(at::native::ceil_impl);

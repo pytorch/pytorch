@@ -196,8 +196,7 @@ public:
     return _mm256_div_ps(log(), log10_);
   }
   Vec256<std::complex<float>> log1p() const {
-    const __m256 one = _mm256_setr_ps(1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0);
-    return Vec256(_mm256_add_ps(one, values)).log();
+    AT_ERROR("not supported for complex numbers");
   }
   Vec256<std::complex<float>> asin() const {
     // asin(x)
@@ -238,8 +237,7 @@ public:
     return map(std::exp);
   }
   Vec256<std::complex<float>> expm1() const {
-    const __m256 one = _mm256_setr_ps(1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0);
-    return _mm256_sub_ps(exp(), one);
+    AT_ERROR("not supported for complex numbers");
   }
   Vec256<std::complex<float>> sin() const {
     return map(std::sin);
