@@ -65,8 +65,10 @@ NonlinearityType _compute_nonlinearity_type(Nonlinearity nonlinearity) {
     default:
       TORCH_INTERNAL_ASSERT(
         false,
-        "The enum class `torch::nn::init::Nonlinearity` is deprecated. ",
-        "Please don't add any new enum value to it.")
+        "The enum class `torch::nn::init::Nonlinearity` is deprecated, ",
+        "please don't add any new enum to it. ",
+        "Instead, add the new enum to `torch/csrc/api/include/torch/enum.h` ",
+        "and use `torch::kEnumName` to reference it.")
   }
 }
 
@@ -77,8 +79,10 @@ FanModeType _compute_fanmode_type(FanMode fanmode) {
     default:
       TORCH_INTERNAL_ASSERT(
         false,
-        "The enum class `torch::nn::init::FanMode` is deprecated. ",
-        "Please don't add any new enum value to it.")
+        "The enum class `torch::nn::init::Nonlinearity` is deprecated, ",
+        "please don't add any new enum to it. ",
+        "Instead, add the new enum to `torch/csrc/api/include/torch/enum.h` ",
+        "and use `torch::kEnumName` to reference it.")
   }
 }
 
