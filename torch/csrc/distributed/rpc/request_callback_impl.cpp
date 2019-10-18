@@ -26,7 +26,7 @@ namespace rpc {
 
 using namespace torch::distributed::autograd;
 
-Message RequestCallbackImpl::processRpc(
+std::unique_ptr<RpcCommandBase> RequestCallbackImpl::processRpc(
     RpcCommandBase& rpc,
     MessageType messageType) const {
   // TODO: RpcCommandBase should have an abstract execute() method that we can
@@ -50,16 +50,15 @@ Message RequestCallbackImpl::processRpc(
           "size ",
           stack.size());
 
-      return std::move(ScriptResp(std::move(stack.front()))).toMessage();
+      return c10::guts::make_unique<ScriptResp>(std::move(stack.front()));
     }
     case MessageType::PYTHON_CALL: {
       auto& pyCall = static_cast<PythonUDFCall&>(rpc);
       std::vector<torch::Tensor> responseTensorTable;
       auto payload = PythonRpcHandler::getInstance().generatePythonUDFResult(
           pyCall.pickledPayload(), pyCall.tensors(), responseTensorTable);
-      return std::move(PythonUDFResp(
-                           std::move(payload), std::move(responseTensorTable)))
-          .toMessage();
+      return c10::guts::make_unique<PythonUDFResp>(
+          std::move(payload), std::move(responseTensorTable));
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       auto& src = static_cast<ScriptRemoteCall&>(rpc);
@@ -80,7 +79,8 @@ Message RequestCallbackImpl::processRpc(
 
       ownerRRef->setValue(std::move(stack.front()));
       ctx.addForkOfOwner(src.retRRefId(), src.retForkId());
-      return std::move(RemoteRet(src.retRRefId(), src.retForkId())).toMessage();
+      return c10::guts::make_unique<RemoteRet>(
+          src.retRRefId(), src.retForkId());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -93,7 +93,7 @@ Message RequestCallbackImpl::processRpc(
       ownerRRef->setValue(
           PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
       ctx.addForkOfOwner(rrefId, forkId);
-      return std::move(RemoteRet(rrefId, forkId)).toMessage();
+      return c10::guts::make_unique<RemoteRet>(rrefId, forkId);
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
@@ -101,8 +101,8 @@ Message RequestCallbackImpl::processRpc(
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return std::move(RRefFetchRet(RRefFetchRet({rref->getValue()})))
-          .toMessage();
+      return c10::guts::make_unique<RRefFetchRet>(
+          RRefFetchRet({rref->getValue()}));
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
@@ -112,55 +112,65 @@ Message RequestCallbackImpl::processRpc(
           ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
       SerializedPyObj result =
           PythonRpcHandler::getInstance().serialize(rref->getValue());
-      return std::move(RRefFetchRet(RRefFetchRet(result.toIValues())))
-          .toMessage();
+      return c10::guts::make_unique<RRefFetchRet>(
+          RRefFetchRet(result.toIValues()));
     }
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
-      return std::move(RRefAck()).toMessage();
+      return c10::guts::make_unique<RRefAck>();
     }
     case MessageType::RREF_CHILD_ACCEPT: {
       auto& rca = static_cast<RRefChildAccept&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.delPendingChild(rca.forkId());
-      return std::move(RRefAck()).toMessage();
+      return c10::guts::make_unique<RRefAck>();
     }
     case MessageType::RREF_FORK_REQUEST: {
       auto& rfr = static_cast<RRefForkRequest&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
-      return std::move(RRefAck()).toMessage();
+      return c10::guts::make_unique<RRefAck>();
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
+      const auto& autogradMetadata = rpcWithAutograd.autogradMetadata();
 
       // Attach 'recv' autograd function.
       DistAutogradContext* autogradContext = addRecvRpcBackward(
           rpcWithAutograd.autogradMetadata(),
           rpcWithAutograd.tensors(),
           rpcWithAutograd.fromWorkerId());
-      // For this recv thread on server side, before processRpc(),
-      // set current_context_id_ to be context_id passed from client.
-      // In this way, if there is nested rpc call in python rpc call, original
-      // context_id from client can be passed in the chain calls.
-      auto& autogradContainer = DistAutogradContainer::getInstance();
-      TORCH_INTERNAL_ASSERT(
-          autogradContext != nullptr,
-          "autogradContext is nullptr, FORWARD_AUTOGRAD_REQ should always get "
-          "or create valid autogradContext in addRecvRpcBackward.");
-      autogradContainer.setCurrentContextId(autogradContext->contextId());
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
       auto wrappedRpcResponse =
           processRpc(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
 
-      return getMessageWithAutograd(
-          rpcWithAutograd.fromWorkerId(),
-          std::move(wrappedRpcResponse),
-          MessageType::FORWARD_AUTOGRAD_RESP);
+      // Wrap the response with autograd, need a new autograd message id for
+      // each send/recv pair.
+      auto& autogradContainer = DistAutogradContainer::getInstance();
+      AutogradMetadata responseAutogradMetadata(
+          autogradMetadata.autogradContextId,
+          autogradContainer.newAutogradMessageId());
+
+      auto response = c10::guts::make_unique<RpcWithAutograd>(
+          rpc::RpcAgent::getDefaultRpcAgent()->getWorkerInfo().id_,
+          MessageType::FORWARD_AUTOGRAD_RESP,
+          responseAutogradMetadata,
+          std::move(wrappedRpcResponse));
+
+      // Attach the 'send' autograd function if needed.
+      if (autogradContext != nullptr) {
+        rpc::worker_id_t fromWorkerId = rpcWithAutograd.fromWorkerId();
+        addSendRpcBackward(
+            *autogradContext,
+            responseAutogradMetadata,
+            response->tensors(),
+            fromWorkerId);
+      }
+      return std::move(response);
     }
     case MessageType::BACKWARD_AUTOGRAD_REQ: {
       auto& gradientsCall = static_cast<PropagateGradientsReq&>(rpc);
@@ -183,7 +193,7 @@ Message RequestCallbackImpl::processRpc(
       DistEngine::getInstance().executeSendFunction(
           autogradContext, sendFunction);
 
-      return std::move(PropagateGradientsResp()).toMessage();
+      return c10::guts::make_unique<PropagateGradientsResp>();
     }
     default: {
       TORCH_INTERNAL_ASSERT(
@@ -194,7 +204,11 @@ Message RequestCallbackImpl::processRpc(
 
 Message RequestCallbackImpl::processMessage(Message& request) const {
   std::unique_ptr<RpcCommandBase> rpc = deserializeRequest(request);
-  auto responseMessage = processRpc(*rpc, request.type());
+  auto response = processRpc(*rpc, request.type());
+  if (response == nullptr) {
+    return Message();
+  }
+  auto responseMessage = std::move(*response).toMessage();
   responseMessage.setId(request.id());
   return responseMessage;
 }
