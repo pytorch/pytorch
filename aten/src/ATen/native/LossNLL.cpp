@@ -34,8 +34,12 @@ void nll_loss_forward_out_cpu_template(
 
   total_weight.resize_({1});
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "nll_loss_forward_out_cpu_template", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      input.scalar_type(),
+      "nll_loss_forward_out_cpu_template",
+      [&] {
         auto weight_contiguous = weight.contiguous();
         const scalar_t* weight_data =
             weight.defined() ? weight_contiguous.data_ptr<scalar_t>() : nullptr;
@@ -153,8 +157,12 @@ void nll_loss_backward_out_cpu_template(
       !weight.defined() || weight.numel() == n_classes,
       "weight tensor should be defined either for all or no classes");
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "nll_loss_backward_out_cpu_template", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      input.scalar_type(),
+      "nll_loss_backward_out_cpu_template",
+      [&] {
         auto target_acc = target.accessor<int64_t, 1>();
 
         auto weight_contiguous = weight.contiguous();
