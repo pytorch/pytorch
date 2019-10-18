@@ -73,6 +73,8 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
     if (InputSize() == 2 && is_same<T, uint8_t>::value && GetCpuId().avx2() &&
         GetCpuId().fma()) {
       // fast path when we have 2 uint8_t inputs with AVX2 / FMA support
+      // NOTE: this path does addition in floating point unlike slow path that
+      // does everything in fixed-point. So they are numerically different.
       array<const T*, 2> input_data;
       for (int i = 0; i < 2; ++i) {
         input_data[i] = InputTensorCPU_(i).template data<T>();

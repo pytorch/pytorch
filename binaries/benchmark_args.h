@@ -50,6 +50,11 @@ C10_DEFINE_string(
     "Input type when specifying the input dimension."
     "The supported types are float, uint8_t.");
 C10_DEFINE_int(iter, 10, "The number of iterations to run.");
+C10_DEFINE_bool(
+    measure_memory,
+    false,
+    "Whether to measure increase in allocated memory while "
+    "loading and running the net.");
 C10_DEFINE_string(net, "", "The given net to benchmark.");
 C10_DEFINE_string(
     output,

@@ -75,12 +75,12 @@ SparseTensor new_sparse(const TensorOptions& options) {
   AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
   if (options.device().is_cuda()) {
-    type_id = SparseCUDATensorId();
+    type_id = TensorTypeId::SparseCUDATensorId;
   } else {
-    type_id = SparseCPUTensorId();
+    type_id = TensorTypeId::SparseCPUTensorId;
   }
   return detail::make_tensor<SparseTensorImpl>(
-      type_id, options.dtype());
+      TensorTypeSet(type_id), options.dtype());
 }
 
 /** Actual dispatched creation methods ***/
@@ -255,7 +255,11 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, A
 
 // NB: Deleted newWithSizeNd variants
 
-SparseTensor clone_sparse(const SparseTensor& self) {
+SparseTensor clone_sparse(const SparseTensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "unsupported memory format option ",
+      optional_memory_format.value());
   SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), self.options());
   copy_into_sparse(other, self._indices(), self._values(), true);
   return other._coalesced_(self.is_coalesced());
@@ -281,6 +285,7 @@ namespace {
   }
 }
 
+// Invoked from native/Resize.cpp (no dynamic dispatch necessary)
 SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     sparse_resize_(self, src.sizes(), src.sparse_dim(), src.dense_dim());
@@ -392,8 +397,8 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
       values.scalar_type(), "coalesce", [&] {
         int64_t prev = -1;
         int64_t blockSize = values.stride(0);
-        scalar_t* values_ptr = values.data<scalar_t>();
-        scalar_t* newValues_ptr = newValues.data<scalar_t>();
+        scalar_t* values_ptr = values.data_ptr<scalar_t>();
+        scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
         for (int64_t j = 0; j < nnz; j++) {
           int64_t pos = indicesPermutationAccessor[j];
           int64_t curr = indicesBufferAccessor[j];
@@ -438,7 +443,7 @@ void inline sparse_mask_out_cpu_kernel(
 ) {
   auto r_values_accessor = r_values.accessor<scalar_t, 1>();
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
-  scalar_t* t_ptr = t.data<scalar_t>();
+  scalar_t* t_ptr = t.data_ptr<scalar_t>();
 
   at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {

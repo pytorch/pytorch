@@ -10,8 +10,9 @@ struct TensorIterator;
 
 namespace native {
 
-using addcmul_fn = void (*)(TensorIterator&, Scalar scalar);
+using pointwise_fn = void (*)(TensorIterator&, Scalar scalar);
 
-DECLARE_DISPATCH(addcmul_fn, addcmul_stub);
+DECLARE_DISPATCH(pointwise_fn, addcmul_stub);
+DECLARE_DISPATCH(pointwise_fn, addcdiv_stub);
 } // namespace native
 } // namespace at

@@ -22,8 +22,8 @@ void inline flip_cpu_kernel(
   Tensor& out_tensor
 ){
   const int64_t numel = in_tensor.numel();
-  const scalar_t* in_tensor_d = in_tensor.data<scalar_t>();
-  scalar_t* out_tensor_d = out_tensor.data<scalar_t>();
+  const scalar_t* in_tensor_d = in_tensor.data_ptr<scalar_t>();
+  scalar_t* out_tensor_d = out_tensor.data_ptr<scalar_t>();
   auto sizes_v = in_tensor.sizes().vec();
   auto strides_v = in_tensor.strides().vec();
 
@@ -94,11 +94,12 @@ Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   std::vector<Tensor> vec = std::vector<Tensor>(size);
   int64_t index = 0;
   for (int64_t i = start; i < size; i++) {
-    vec[index++] = tensors[i];
+    vec[index++] = std::move(tensors[i]);
   }
 
   for (int64_t i = 0; i < start; i++) {
-    vec[index++] = tensors[i];
+    // `tensors` is dead after this, so we can avoid refcount bumps by moving.
+    vec[index++] = std::move(tensors[i]);
   }
 
   return at::stack(vec, dim);

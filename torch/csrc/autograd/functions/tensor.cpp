@@ -3,7 +3,6 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
-#include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
@@ -28,12 +27,11 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
     // This code is kind of weirdly asymmetric.
     if (grad.is_cuda() && grad.device() != src_device) {
       grad_inputs[1] = grad.to(
-          src_type->device_type(),
-          src_type->scalarType(),
+          src_options,
           /*non_blocking=*/false,
           /*copy=*/true);
     } else {
-      grad_inputs[1] = grad.toType(*src_type);
+      grad_inputs[1] = grad.to(src_options);
     }
   }
   return grad_inputs;

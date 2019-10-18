@@ -30,7 +30,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
             " but got weight tensor of shape: %s", n_classes, s1.str);
   }
 
-  if (reduction == Reduction::None && n_dims == 2) {
+  if (reduction == at::Reduction::None && n_dims == 2) {
     int batch_size = THTensor_(size)(input, 0);
     THTensor_(resize1d)(output, batch_size);
 
@@ -44,7 +44,9 @@ void THNN_(ClassNLLCriterion_updateOutput)(
           continue;
         }
         if (cur_target >= 0 && cur_target < n_classes) {
-            scalar_t cur_weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
+          scalar_t cur_weight =
+              weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target)
+                      : (scalar_t)1.0f;
             THTensor_(fastSet1d)(output, i, -THTensor_(fastGet2d)(input, i, cur_target) * cur_weight);
         } else {
           int tmp = -1;
@@ -78,7 +80,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     int cur_target = target_data[0];
     if (cur_target != ignore_index) {
       THAssert(cur_target >= 0 && cur_target < n_classes);
-      total_weight_data[0] = weights ? weights_data[cur_target] : 1.0f;
+      total_weight_data[0] =
+          weights ? weights_data[cur_target] : (scalar_t)1.0f;
       output_data[0] = -input_data[cur_target] * total_weight_data[0];
     }
   } else if (THTensor_(nDimensionLegacyAll)(input) == 2) {
@@ -93,14 +96,15 @@ void THNN_(ClassNLLCriterion_updateOutput)(
       if (cur_target != ignore_index) {
         THAssert(cur_target >= 0 && cur_target < n_classes);
 
-        scalar_t cur_weight = weights ? weights_data[cur_target] : 1.0f;
+        scalar_t cur_weight =
+            weights ? weights_data[cur_target] : (scalar_t)1.0f;
         total_weight_data[0] += cur_weight;
         output_data[0] -= input_data[i * n_target + cur_target] * cur_weight;
       }
     }
   }
 
-  if (reduction == Reduction::Mean && total_weight_data[0]) {
+  if (reduction == at::Reduction::Mean && total_weight_data[0]) {
     output_data[0] /= total_weight_data[0];
   }
 
@@ -144,7 +148,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     THError("weight tensor should be defined either for all or no classes");
   }
 
-  if (reduction == Reduction::None && n_dims == 2) {
+  if (reduction == at::Reduction::None && n_dims == 2) {
     int batch_size = THTensor_(size)(input, 0);
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, batch_size);
 
@@ -154,7 +158,9 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         if (cur_target == ignore_index) {
           continue;
         }
-        scalar_t weight = weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target) : 1.0f;
+        scalar_t weight =
+            weights ? THTensor_(fastGetLegacy1dNoScalars)(weights, cur_target)
+                    : (scalar_t)1.0f;
         THTensor_(fastSet2d)(gradInput, i, cur_target, -weight * THTensor_(fastGetLegacy1dNoScalars)(gradOutput, i));
       }
     });
@@ -182,8 +188,9 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     if (cur_target != ignore_index) {
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
-      gradInput_data[cur_target] =
-        (reduction != Reduction::Mean && weights) ? -weights_data[cur_target] : -1;
+      gradInput_data[cur_target] = (reduction != at::Reduction::Mean && weights)
+                                       ? -weights_data[cur_target]
+                                       : (scalar_t)-1;
       gradInput_data[cur_target] *= gradOutput_value;
     }
 
@@ -201,9 +208,10 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         THAssert(cur_target >= 0 && cur_target < n_classes);
 
         gradInput_data[i * n_target + cur_target] =
-          -(weights ? weights_data[cur_target] : 1.0f) * gradOutput_value;
+            -(weights ? weights_data[cur_target] : (scalar_t)1.0f) *
+            gradOutput_value;
 
-        if (reduction == Reduction::Mean && *total_weight_data) {
+        if (reduction == at::Reduction::Mean && *total_weight_data) {
           gradInput_data[i * n_target + cur_target] /= *total_weight_data;
         }
       }

@@ -47,10 +47,6 @@ echo "Caffe2 path: $CAFFE2_ROOT"
 echo "Using Android NDK at $ANDROID_NDK"
 echo "Android NDK version: $ANDROID_NDK_VERSION"
 
-# Build protobuf from third_party so we have a host protoc binary.
-echo "Building protoc"
-$CAFFE2_ROOT/scripts/build_host_protoc.sh
-
 # Now, actually build the Android target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
 INSTALL_PREFIX=${BUILD_ROOT}/install
@@ -59,14 +55,24 @@ cd $BUILD_ROOT
 
 CMAKE_ARGS=()
 
+if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then
+  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+  CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
+else
+  # Build protobuf from third_party so we have a host protoc binary.
+  echo "Building protoc"
+  $CAFFE2_ROOT/scripts/build_host_protoc.sh
+  # Use locally built protoc because we'll build libprotobuf for the
+  # target architecture and need an exact version match.
+  CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
+fi
+
 # If Ninja is installed, prefer it to Make
 if [ -x "$(command -v ninja)" ]; then
   CMAKE_ARGS+=("-GNinja")
 fi
-
-# Use locally built protoc because we'll build libprotobuf for the
-# target architecture and need an exact version match.
-CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
 
 # Use android-cmake to build Android project from CMake.
 CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake")

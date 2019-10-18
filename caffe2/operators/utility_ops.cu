@@ -30,6 +30,8 @@ bool SumOp<CUDAContext>::RunOnDevice() {
     return DoRunWithType<float, float>();
   } else if (Input(0).IsType<at::Half>()) {
     return DoRunWithType<at::Half, at::Half>();
+  } else if (Input(0).IsType<int32_t>()) {
+    return DoRunWithType<int32_t, int32_t>();
   } else {
     CAFFE_THROW("Unsupported inputs");
   }
@@ -171,7 +173,7 @@ __global__ void AxpySliceKernel(
 }
 
 // this kernel is a custom version of AxpySliceKernel
-// to be used when there is only one weighted X to update 
+// to be used when there is only one weighted X to update
 // slice of Y.
 template <typename T_INDEX>
 __global__ void AxpySliceKernel2(
@@ -219,7 +221,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   int64_t block_size = M / N;
 
   float* data = output->template mutable_data<float>();
-  
+
   const int64_t B = (InputSize() - 3) / 2;
   if(B > 1) {
     // In order to have all device pointers of x_i (and weight_i similarly)
@@ -259,11 +261,10 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
         indices.template data<Index>(),
         data,
         M);
-  } 
-  else {
+  } else {
     // when only one input exists to update data buffer,
     // avoid copying pointers to device array to prevent
-    // copy overhead      
+    // copy overhead
     auto& X1 = Input(3);
     auto& weight1 = Input(4);
     AxpySliceKernel2<<<
@@ -279,7 +280,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
         indices.template data<Index>(),
         data,
         M);
-  }   
+  }
   return true;
 }
 

@@ -5,6 +5,8 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace native {
@@ -21,8 +23,8 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
     inner_size *= input.size(i);
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  scalar_t* input_data_base = input.data<scalar_t>();
-  scalar_t* output_data_base = output.data<scalar_t>();
+  scalar_t* input_data_base = input.data_ptr<scalar_t>();
+  scalar_t* output_data_base = output.data_ptr<scalar_t>();
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size,
@@ -38,7 +40,7 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
           for (int64_t d = 1; d < dim_size; d++)
             max_input = std::max(max_input, input_data[d * dim_stride]);
 
-          scalar_t tmpsum = 0;
+          acc_type<scalar_t, false> tmpsum = 0;
           for (int64_t d = 0; d < dim_size; d++) {
             scalar_t z = std::exp(input_data[d * dim_stride] - max_input);
             if (!LogSoftMax) {
@@ -78,9 +80,9 @@ void host_softmax_backward(
     inner_size *= grad.size(i);
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
-  scalar_t* gradInput_data_base = gI.data<scalar_t>();
-  scalar_t* output_data_base = output.data<scalar_t>();
-  scalar_t* gradOutput_data_base = grad.data<scalar_t>();
+  scalar_t* gradInput_data_base = gI.data_ptr<scalar_t>();
+  scalar_t* output_data_base = output.data_ptr<scalar_t>();
+  scalar_t* gradOutput_data_base = grad.data_ptr<scalar_t>();
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
@@ -94,7 +96,7 @@ void host_softmax_backward(
           const scalar_t* gradOutput_data =
               gradOutput_data_base + outer_idx * outer_stride + inner_idx;
 
-          scalar_t sum = 0; // TODO was accreal here
+          acc_type<scalar_t, false> sum = 0;
           for (int64_t d = 0; d < dim_size; d++)
             if (LogSoftMax)
               sum += gradOutput_data[d * dim_stride];
@@ -157,9 +159,9 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
     log_softmax_lastdim_kernel(kCPU, output, input);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_softmax", [&] {
-      host_softmax<scalar_t, true>(output, input, dim);
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        at::ScalarType::BFloat16, input.scalar_type(), "log_softmax",
+        [&] { host_softmax<scalar_t, true>(output, input, dim); });
   }
   return output;
 }
@@ -221,43 +223,91 @@ Tensor log_softmax_backward_cpu(
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
     log_softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "log_softmax_backward", [&] {
-      host_softmax_backward<scalar_t, true>(grad_input, grad, output, dim);
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad.scalar_type(),
+                                   "log_softmax_backward", [&] {
+                                     host_softmax_backward<scalar_t, true>(
+                                         grad_input, grad, output, dim);
+                                   });
   }
   return grad_input;
 }
 
 Tensor softmax(const Tensor& input_, const int64_t dim_) {
-  return at::_softmax(input_, dim_, false);
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    return at::_softmax(input_, dim_, false);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, input_);
+#endif
+  return result;
 }
 
 Tensor softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
-      return at::_softmax(input_, dim_, true);
-  } else {
-      Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
-      return at::_softmax(converted, dim_, false);
-  }
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+        return at::_softmax(input_, dim_, true);
+    } else {
+        Tensor converted = dtype.has_value() ? input_.toType(dtype.value()) : input_;
+        return at::_softmax(converted, dim_, false);
+    }
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, input_);
+#endif
+  return result;
 }
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_) {
-  return at::_log_softmax(input_, dim_, false);
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    return at::_log_softmax(input_, dim_, false);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, input_);
+#endif
+  return result;
 }
 
 Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
-  if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
-      return at::_log_softmax(input_, dim_, true);
-  } else {
-      Tensor converted = dtype.has_value()? input_.toType(dtype.value()) : input_;
-      return at::_log_softmax(converted, dim_, false);
-  }
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
+        return at::_log_softmax(input_, dim_, true);
+    } else {
+        Tensor converted = dtype.has_value()? input_.toType(dtype.value()) : input_;
+        return at::_log_softmax(converted, dim_, false);
+    }
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, input_);
+#endif
+  return result;
 }
 
 DEFINE_DISPATCH(softmax_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_lastdim_kernel);
 DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
+
+#ifdef BUILD_NAMEDTENSOR
+Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+  return at::softmax(self, dimname_to_position(self, dim), dtype);
+}
+
+Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
+  return at::log_softmax(self, dimname_to_position(self, dim), dtype);
+}
+#endif
 
 }
 }
