@@ -79,7 +79,8 @@ void nll_loss_forward_out_cpu_template(
           return;
         }
 
-        output.resize_({1});
+        // produce scalar output when reducing or input is 1d
+        output.resize_({});
 
         auto input_contiguous = input.contiguous();
         auto target_contiguous = target.contiguous();
@@ -123,9 +124,8 @@ void nll_loss_forward_out_cpu_template(
         }
 
         // write result to output tensors
-        auto output_acc = output.accessor<scalar_t, 1>();
         auto total_weight_acc = total_weight.accessor<scalar_t, 1>();
-        output_acc[0] = output_val;
+        *output.data_ptr<scalar_t>() = output_val;
         total_weight_acc[0] = total_weight_val;
       });
 }
