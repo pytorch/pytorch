@@ -17,8 +17,8 @@ Microbenchmarks for the softmax operators.
 # Configs for softmax ops
 softmax_configs_short = op_bench.config_list(
     attrs=[
-        [1, 3, 32, 32],
-        [2, 3, 64, 64],
+        [4, 3, 128, 128],
+        [8, 3, 256, 256],
     ],
     attr_names=[
         'N', 'C', 'H', 'W'
@@ -29,7 +29,7 @@ softmax_configs_short = op_bench.config_list(
 softmax_configs_long = op_bench.config_list(
     attrs=[
         [8, 3, 128, 128],
-        [16, 512, 14, 14], 
+        [16, 512, 14, 14],
         [16, 256, 28, 28],
     ],
     attr_names=[
@@ -57,8 +57,8 @@ class SoftmaxBenchmark(op_bench.TorchBenchmarkBase):
         return self.op_func(self.input_one)
 
 
-op_bench.generate_pt_tests_from_op_list(softmax_ops_list, 
-                                        softmax_configs_short + softmax_configs_long, 
+op_bench.generate_pt_tests_from_op_list(softmax_ops_list,
+                                        softmax_configs_short + softmax_configs_long,
                                         SoftmaxBenchmark)
 
 

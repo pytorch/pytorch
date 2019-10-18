@@ -15,17 +15,9 @@
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
 
+#include <c10/macros/Macros.h>
 
 namespace {
-
-#ifdef __HIP_PLATFORM_HCC__
-static const int WARP_SIZE = 64;
-#else
-static const int WARP_SIZE = 32;
-#endif
-
-
-
 
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
@@ -66,7 +58,7 @@ __global__ void indexing_backward_kernel(
         while (start_feature < stride) {
           #pragma unroll
           for (int ii = 0; ii < SZ; ii++) {
-            int feature_dim = start_feature + ii * WARP_SIZE;
+            int feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
               gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
               weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
@@ -80,7 +72,7 @@ __global__ void indexing_backward_kernel(
 
           #pragma unroll
           for (int ii = 0; ii < SZ; ii++) {
-            int feature_dim = start_feature + ii * WARP_SIZE;
+            int feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
                 grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
             }
@@ -229,9 +221,9 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       const int UNROLL = 4;
       const int indices_per_block = 4;
       dim3 grid(THCCeilDiv(num_indices, (int64_t) indices_per_block),
-           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], THCCeilDiv(sliceSize, (int64_t) (WARP_SIZE*UNROLL))),
+           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], THCCeilDiv(sliceSize, (int64_t) (C10_WARP_SIZE*UNROLL))),
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
-      dim3 block(WARP_SIZE, indices_per_block);
+      dim3 block(C10_WARP_SIZE, indices_per_block);
   
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(value_.scalar_type(), "embedding_backward", [&] {
       indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(

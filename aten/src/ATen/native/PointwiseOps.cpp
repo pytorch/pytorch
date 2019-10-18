@@ -5,10 +5,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/core/EnableNamedTensor.h>
 
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
 
 namespace at {
 namespace native {

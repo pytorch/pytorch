@@ -8,8 +8,6 @@ from .. import functional as F
 from .. import init
 
 
-# TODO: check contiguous in THNN
-# TODO: use separate backend functions?
 class _BatchNorm(Module):
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps', 'weight', 'bias',
@@ -58,7 +56,7 @@ class _BatchNorm(Module):
     def forward(self, input):
         self._check_input_dim(input)
 
-        # exponential_average_factor is self.momentum set to
+        # exponential_average_factor is set to self.momentum 
         # (when it is available) only so that if gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
@@ -69,7 +67,7 @@ class _BatchNorm(Module):
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:
-                self.num_batches_tracked += 1
+                self.num_batches_tracked = self.num_batches_tracked + 1
                 if self.momentum is None:  # use cumulative moving average
                     exponential_average_factor = 1.0 / float(self.num_batches_tracked)
                 else:  # use exponential moving average
@@ -428,10 +426,16 @@ class SyncBatchNorm(_BatchNorm):
 
         self._check_input_dim(input)
 
-        exponential_average_factor = 0.0
+        # exponential_average_factor is set to self.momentum 
+        # (when it is available) only so that if gets updated
+        # in ONNX graph when this node is exported to ONNX.
+        if self.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
-            self.num_batches_tracked += 1
+            self.num_batches_tracked = self.num_batches_tracked + 1
             if self.momentum is None:  # use cumulative moving average
                 exponential_average_factor = 1.0 / self.num_batches_tracked.item()
             else:  # use exponential moving average

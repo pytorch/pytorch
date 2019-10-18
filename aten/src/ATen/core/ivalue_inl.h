@@ -135,16 +135,24 @@ struct Future;
 
 struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
  private:
-   std::vector<IValue> elements_;
+  std::vector<IValue> elements_;
+  mutable std::shared_ptr<TupleType> type_; // lazily computed for unnamed tuples
 
  public:
-  static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_, std::shared_ptr<TupleType> type_) {
-    TORCH_INTERNAL_ASSERT(nullptr != type_.get(), "Type cannot be nullptr");
+  // named tuples have additional type information, so we
+  // directly create them tagged
+  static c10::intrusive_ptr<Tuple> createNamed(
+      std::vector<IValue> elements_,
+      std::shared_ptr<TupleType> type_) {
     return c10::make_intrusive<Tuple>(std::move(elements_), type_);
   }
-  C10_DEPRECATED_MESSAGE("Creating tuples without type information is deprecated. Please use Tuple::create(elements, type) instead.")
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
-    return c10::make_intrusive<Tuple>(std::move(elements_), nullptr);
+    return c10::make_intrusive<Tuple>(std::move(elements_));
+  }
+
+  template <typename... Args>
+  static c10::intrusive_ptr<Tuple> create(Args... elements_) {
+    return c10::make_intrusive<Tuple>(std::vector<IValue>{IValue(elements_)...});
   }
 
  const std::vector<IValue>& elements() const & {
@@ -164,11 +172,11 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
   std::vector<IValue>&& elements() && {
     return std::move(elements_);
   }
+  std::shared_ptr<TupleType> type() const;
 
-  std::shared_ptr<TupleType> type;
  private:
-  Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type)
-    : elements_(std::move(elements)), type(std::move(type)) {}
+  Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
+    : elements_(std::move(elements)), type_(std::move(type)) {}
 
   friend class c10::intrusive_ptr<Tuple>;
 };
@@ -188,6 +196,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  public:
+  Future(TypePtr type) : type_(type) {}
   struct CAFFE2_API FutureError final : public std::exception {
     FutureError(std::string&& error_msg_)
         : error_msg(std::move(error_msg_)) {}
@@ -266,13 +275,17 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   // Check if the current future has completed
-  bool completed() {
+  bool completed() const{
     return completed_;
   }
 
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const Future& v);
+
+  TypePtr type() const {
+    return type_;
+  }
 
  private:
   void fireCallbacks() {
@@ -290,6 +303,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
+  TypePtr type_;
   std::vector<std::function<void(void)>> callbacks;
   bool has_error = false;
   FutureError error;
@@ -513,6 +527,30 @@ c10::optional<T> generic_to(
   return std::move(ivalue).to<T>();
 }
 
+namespace detail {
+template <typename Tuple, std::size_t... I>
+Tuple generic_to_tuple_impl(
+    const std::vector<IValue>& t,
+    c10::guts::index_sequence<I...>) {
+  return std::make_tuple(
+      t[I].to<typename std::tuple_element<I, Tuple>::type>()...);
+}
+}
+
+template <
+    typename... Args,
+    typename Indices = c10::guts::make_index_sequence<sizeof...(Args)>,
+    c10::guts::enable_if_t<
+        !c10::guts::disjunction<
+            std::is_lvalue_reference<Args>...,
+            c10::guts::negation<std::is_constructible<IValue, Args>>...>::value,
+        std::nullptr_t> = nullptr>
+std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
+  auto vals = ivalue.toTuple()->elements();
+  TORCH_CHECK(vals.size() == sizeof...(Args));
+  return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
+}
+
 template <typename T>
 inline T IValue::to() && {
   return generic_to(std::move(*this), _fake_type<T>{});
@@ -599,6 +637,17 @@ inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const & {
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 : tag(Tag::Tuple), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
+}
+template <
+    typename... Args,
+    c10::guts::enable_if_t<
+        !c10::guts::disjunction<
+            std::is_lvalue_reference<Args>...,
+            c10::guts::negation<std::is_constructible<IValue, Args>>...>::value,
+        std::nullptr_t>>
+inline IValue::IValue(const std::tuple<Args...>& t)
+    : IValue(
+          std::move(c10::guts::apply(c10::ivalue::Tuple::create<Args...>, t))) {
 }
 inline IValue::IValue(c10::List<int64_t> v)
 : tag(Tag::IntList), is_intrusive_ptr(true) {

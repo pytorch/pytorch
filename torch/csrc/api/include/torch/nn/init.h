@@ -23,6 +23,12 @@ enum class Nonlinearity {
 
 enum class FanMode { FanIn, FanOut };
 
+} // namespace init
+} // nn
+
+namespace nn {
+namespace init {
+
 /// Return the recommended gain value for the given nonlinearity function.
 TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
 
@@ -77,8 +83,8 @@ TORCH_API Tensor uniform_(Tensor tensor, double low = 0, double high = 1);
 TORCH_API Tensor kaiming_normal_(
     Tensor tensor,
     double a = 0,
-    FanMode mode = FanMode::FanIn,
-    Nonlinearity nonlinearity = Nonlinearity::LeakyReLU);
+    FanMode mode = torch::nn::init::FanMode::FanIn,
+    Nonlinearity nonlinearity = torch::nn::init::Nonlinearity::LeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Delving deep into rectifiers: Surpassing human-level
@@ -88,8 +94,8 @@ TORCH_API Tensor kaiming_normal_(
 TORCH_API Tensor kaiming_uniform_(
     Tensor tensor,
     double a = 0,
-    FanMode mode = FanMode::FanIn,
-    Nonlinearity nonlinearity = Nonlinearity::LeakyReLU);
+    FanMode mode = torch::nn::init::FanMode::FanIn,
+    Nonlinearity nonlinearity = torch::nn::init::Nonlinearity::LeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Understanding the difficulty of training deep feedforward

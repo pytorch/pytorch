@@ -53,11 +53,34 @@ float fracf(float x) {
 
 ${type_declarations}
 
+#ifdef _MSC_VER
+template<size_t n> struct int_of_size;
+
+#define DEFINE_INT_OF_SIZE(int_t) \
+template<> struct int_of_size<sizeof(int_t)> { using type = int_t; }
+
+DEFINE_INT_OF_SIZE(int64_t);
+DEFINE_INT_OF_SIZE(int32_t);
+DEFINE_INT_OF_SIZE(int16_t);
+DEFINE_INT_OF_SIZE(int8_t);
+
+#undef DEFINE_INT_OF_SIZE
+
+template <typename T>
+using int_same_size_t = typename int_of_size<sizeof(T)>::type;
+
+#define IndexTypeLoop int_same_size_t<IndexType>
+#define ToIndexTypeLoop(x) static_cast<IndexTypeLoop>(x)
+#else
+#define IndexTypeLoop IndexType
+#define ToIndexTypeLoop(x) x
+#endif
+
 #define OMP_THRESHOLD 100000
 static void ${kernelName}_kernel(IndexType totalElements, ${formals}) {
   #pragma omp parallel for if(totalElements > OMP_THRESHOLD)
-  for (IndexType linearIndex = 0;
-        linearIndex < totalElements;
+  for (IndexTypeLoop linearIndex = 0;
+        linearIndex < ToIndexTypeLoop(totalElements);
         linearIndex += 1) {
       // Convert `linearIndex` into an offset of tensor:
       ${tensorOffsets}
@@ -66,8 +89,14 @@ static void ${kernelName}_kernel(IndexType totalElements, ${formals}) {
     }
 }
 
+#ifdef _WIN32
+#define JIT_API __declspec(dllexport)
+#else
+#define JIT_API
+#endif
+
 extern "C"
-void ${kernelName}(IndexType totalElements, void ** args) {
+JIT_API void ${kernelName}(IndexType totalElements, void ** args) {
   ${kernelName}_kernel(totalElements ${,argument_loads});
 }
 )");

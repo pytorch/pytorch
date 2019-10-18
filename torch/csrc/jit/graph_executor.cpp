@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/graph_executor_impl.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/pass_manager.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
@@ -26,6 +27,7 @@
 #include <torch/csrc/jit/passes/lower_grad_of.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -49,14 +51,6 @@
 
 namespace torch {
 namespace jit {
-
-thread_local bool kOptimize = true;
-void setGraphExecutorOptimize(bool o) {
-  kOptimize = o;
-}
-bool getGraphExecutorOptimize() {
-  return kOptimize;
-}
 
 namespace {
 c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
@@ -206,6 +200,12 @@ struct UnpackInstructions {
   std::vector<size_t> sizes_;
 };
 
+// unpack values packed by `packReturnValuesIntoTuple`
+static void unpackReturnTuple(Stack &stack) {
+  auto tuple = pop(stack).toTuple();
+  stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
+}
+
 struct DifferentiableGraphBackward : public autograd::Node {
   DifferentiableGraphBackward(
       GraphExecutor executor,
@@ -222,6 +222,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     input_instructions_.unpack(std::move(inputs), stack);
     captures_.unpack(stack, shared_from_this());
     executor.run(stack);
+    unpackReturnTuple(stack);
 
     // NB: stack.size() == num_outputs() is not always true
     // after we added TensorList support.
@@ -475,10 +476,6 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
-  if (tracer::isTracing()) {
-    return runTraced(stack);
-  }
-
   ExecutionPlan plan = getPlanFor(stack);
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
@@ -549,12 +546,13 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   ExecutionPlan compileSpec(const ArgumentSpec& spec) {
     auto opt_graph = graph->copy();
-
+    SOURCE_DUMP("Optimizing the following function:", opt_graph);
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
 
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
     //          left in that may inhibit optimization
     Inline(*opt_graph);
+    specializeAutogradZero(*opt_graph);
     LowerSimpleTuples(opt_graph);
     ConstantPooling(opt_graph);
 
@@ -645,7 +643,6 @@ GraphExecutorState GraphExecutor::getDebugState() {
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
-  specializeAutogradZero(*g);
   LowerGradOf(*g);
   // implicit inserted expand nodes are not necessarily always valid
   // when used inside script methods that might have unstable shapes
@@ -710,6 +707,9 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
 
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
+
+  // Fuse the dequant - op - quant patterns into quantized ops
+  QuantFusion(graph);
 
   FuseGraph(graph);
 }

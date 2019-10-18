@@ -67,22 +67,22 @@ class TestCppExtension(common.TestCase):
 
     def test_extension_module(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
-        weights = torch.rand(8, 4)
+        weights = torch.rand(8, 4, dtype=torch.double)
         expected = mm.get().mm(weights)
         result = mm.forward(weights)
         self.assertEqual(expected, result)
 
     def test_backward(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
-        weights = torch.rand(8, 4, requires_grad=True)
+        weights = torch.rand(8, 4, dtype=torch.double, requires_grad=True)
         result = mm.forward(weights)
         result.sum().backward()
         tensor = mm.get()
 
-        expected_weights_grad = tensor.t().mm(torch.ones([4, 4]))
+        expected_weights_grad = tensor.t().mm(torch.ones([4, 4], dtype=torch.double))
         self.assertEqual(weights.grad, expected_weights_grad)
 
-        expected_tensor_grad = torch.ones([4, 4]).mm(weights.t())
+        expected_tensor_grad = torch.ones([4, 4], dtype=torch.double).mm(weights.t())
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
     def test_jit_compile_extension(self):
@@ -474,17 +474,17 @@ class TestCppExtension(common.TestCase):
 
     @dont_wipe_extensions_build_folder
     @common.skipIfRocm
-    def test_cpp_frontend_module_has_same_output_as_python(self):
+    def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
             sources="cpp_extensions/cpp_frontend_extension.cpp",
             verbose=True,
         )
 
-        input = torch.randn(2, 5)
+        input = torch.randn(2, 5, dtype=dtype)
         cpp_linear = extension.Net(5, 2)
-        cpp_linear.to(torch.float64)
-        python_linear = torch.nn.Linear(5, 2)
+        cpp_linear.to(dtype)
+        python_linear = torch.nn.Linear(5, 2).to(dtype)
 
         # First make sure they have the same parameters
         cpp_parameters = dict(cpp_linear.named_parameters())
@@ -670,7 +670,7 @@ class TestCppExtension(common.TestCase):
         source = """
         #include <torch/script.h>
         torch::Tensor func(torch::Tensor x) { return x; }
-        static torch::jit::RegisterOperators r("test::func", &func);
+        static torch::RegisterOperators r("test::func", &func);
         """
         torch.utils.cpp_extension.load_inline(
             name="is_python_module",
@@ -761,6 +761,25 @@ class TestMSNPUTensor(common.TestCase):
         c = a + b
         self.assertEqual(msnpu_extension.get_test_int(), 1)
 
+    def test_conv_backend_override(self):
+        # To simplify tests, we use 4d input here to avoid doing view4d( which
+        # needs more overrides) in _convolution.
+        input = torch.empty(2, 4, 10, 2, device='msnpu', requires_grad=True)
+        weight = torch.empty(6, 4, 2, 2, device='msnpu', requires_grad=True)
+        bias = torch.empty(6, device='msnpu')
+
+        # Make sure forward is overriden
+        out = torch.nn.functional.conv1d(input, weight, bias, 2, 0, 1, 1)
+        self.assertEqual(msnpu_extension.get_test_int(), 2)
+        self.assertEqual(out.shape[0], input.shape[0])
+        self.assertEqual(out.shape[1], weight.shape[0])
+
+        # Make sure backward is overriden
+        # Double backward is dispatched to _convolution_double_backward.
+        # It is not tested here as it involves more computation/overrides.
+        grad = torch.autograd.grad(out, input, out, create_graph=True)
+        self.assertEqual(msnpu_extension.get_test_int(), 3)
+        self.assertEqual(grad[0].shape, input.shape)
 
 if __name__ == "__main__":
     common.run_tests()

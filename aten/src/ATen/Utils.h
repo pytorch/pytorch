@@ -65,14 +65,18 @@ static inline const Storage& checked_storage(
   return expr;
 }
 
-// TODO: Change Backend into TensorTypeId
-// TODO: Stop unwrapping (this is blocked on getting rid of TH ;)
-static inline TensorImpl* checked_tensor_unwrap(const Tensor& expr, const char * name, int pos, const char * api, bool allowNull, Backend backend, ScalarType scalar_type) {
+// TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
+// away, we can delete this function
+static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const char * name, int pos, const char * api, bool allowNull, DeviceType device_type, ScalarType scalar_type) {
   if(allowNull && !expr.defined()) {
     return nullptr;
   }
-  if (tensorTypeIdToBackend(expr.type_id()) != backend) {
-    AT_ERROR("Expected object of backend ", backend, " but got backend ", tensorTypeIdToBackend(expr.type_id()),
+  if (expr.layout() != Layout::Strided) {
+    AT_ERROR("Expected dense tensor but got ", expr.layout(),
+             " for argument #", pos, " '", name, "' in call to ", api);
+  }
+  if (expr.device().type() != device_type) {
+    AT_ERROR("Expected object of device type ", device_type, " but got device type ", expr.device().type(),
              " for argument #", pos, " '", name, "' in call to ", api);
   }
   if (expr.scalar_type() != scalar_type) {
@@ -91,8 +95,8 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
   unwrapped.reserve(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     const auto& expr = tensors[i];
-    if (tensorTypeIdToBackend(expr.type_id()) != backend) {
-      AT_ERROR("Expected object of backend ", backend, " but got backend ", tensorTypeIdToBackend(expr.type_id()),
+    if (tensorTypeIdToBackend(impl::dispatchTypeId(expr.type_set())) != backend) {
+      AT_ERROR("Expected object of backend ", backend, " but got backend ", tensorTypeIdToBackend(impl::dispatchTypeId(expr.type_set())),
                " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
     }
     if (expr.scalar_type() != scalar_type) {
@@ -109,9 +113,11 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
 }
 
 template <size_t N>
-std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, int pos, ArrayRef<int64_t> def={}) {
+std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, int pos) {
   if (list.empty()) {
-    list = def;
+    // TODO: is this necessary?  We used to treat nullptr-vs-not in IntList differently
+    // with strides as a way of faking optional.
+    list = {};
   }
   auto res = std::array<int64_t, N>();
   if (list.size() == 1 && N > 1) {

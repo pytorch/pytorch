@@ -125,7 +125,11 @@ void onnxifi(
       if (kv.size() == 2) {
         auto dims = caffe2::split(',', kv.back());
         TensorShape input;
-        input.set_data_type(TensorProto_DataType_FLOAT);
+        if (kv.front().find("int8") != std::string::npos) {
+          input.set_data_type(TensorProto_DataType_UINT8);
+        } else {
+          input.set_data_type(TensorProto_DataType_FLOAT);
+        }
         bool valid = true;
         for (const auto& d : dims) {
           try {

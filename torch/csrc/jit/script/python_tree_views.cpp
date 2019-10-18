@@ -171,19 +171,21 @@ void initTreeViewBindings(PyObject* module) {
       }));
 
   py::class_<Assign, Stmt>(m, "Assign")
-      .def(py::init([](const Expr& lhs, const Expr& rhs) {
+      .def(py::init([](std::vector<Expr> lhs, const Expr& rhs) {
+        auto li = wrap_list(rhs.range(), std::move(lhs));
         return Assign::create(
-            lhs.range(),
-            lhs,
+            li.range(),
+            li,
             Maybe<Expr>::create(rhs.range(), rhs),
-            Maybe<Expr>::create(lhs.range()));
+            Maybe<Expr>::create(li.range()));
       }))
-      .def(py::init([](const Expr& lhs, const Expr& rhs, Expr* type) {
+      .def(py::init([](std::vector<Expr> lhs, const Expr& rhs, Expr* type) {
+        auto li = wrap_list(rhs.range(), std::move(lhs));
         return Assign::create(
-            lhs.range(),
-            lhs,
+            li.range(),
+            li,
             Maybe<Expr>::create(rhs.range(), rhs),
-            wrap_maybe(lhs.range(), type));
+            wrap_maybe(li.range(), type));
       }));
   py::class_<AugAssign, Stmt>(m, "AugAssign")
       .def(py::init([](const Expr& lhs, std::string kind_str, const Expr& rhs) {

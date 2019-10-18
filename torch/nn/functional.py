@@ -1378,6 +1378,22 @@ def linear(input, weight, bias=None):
 
 def bilinear(input1, input2, weight, bias=None):
     # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor
+    r"""
+    Applies a bilinear transformation to the incoming data:
+    :math:`y = x_1 A x_2 + b`
+
+    Shape:
+
+        - input1: :math:`(N, *, H_{in1})` where :math:`H_{in1}=\text{in1\_features}`
+          and :math:`*` means any number of additional dimensions.
+          All but the last dimension of the inputs should be the same.
+        - input2: :math:`(N, *, H_{in2})` where :math:`H_{in2}=\text{in2\_features}`
+        - weight: :math:`(\text{out\_features}, \text{in1\_features},
+          \text{in2\_features})`
+        - bias: :math:`(\text{out\_features})`
+        - output: :math:`(N, *, H_{out})` where :math:`H_{out}=\text{out\_features}`
+          and all but the last dimension are the same shape as the input.
+    """
     return torch.bilinear(input1, input2, weight, bias)
 
 
@@ -1922,6 +1938,9 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
         :attr:``reduction`` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:``reduction`` = ``'batchmean'`` which aligns with KL math definition.
         In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
+
+    .. _Kullback-Leibler divergence:
+        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -2461,7 +2480,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
         # make scale_factor a tensor in tracing so constant doesn't get baked in
         if torch._C._get_tracing_state():
-            return [(torch.floor((input.size(i + 2) * torch.tensor(float(scale_factors[i]))).float())) for i in range(dim)]
+            return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
+                     dtype=torch.float32)).float())) for i in range(dim)]
         else:
             return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
@@ -2574,7 +2594,7 @@ GRID_SAMPLE_PADDING_MODES = {
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=None):
-    # type: (Tensor, Tensor, str, str, bool) -> Tensor
+    # type: (Tensor, Tensor, str, str, Optional[bool]) -> Tensor
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     ``output`` using :attr:`input` values and pixel locations from :attr:`grid`.
 
@@ -2683,7 +2703,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
 
 
 def affine_grid(theta, size, align_corners=None):
-    # type: (Tensor, List[int], bool) -> Tensor
+    # type: (Tensor, List[int], Optional[bool]) -> Tensor
     r"""Generates a 2D or 3D flow field (sampling grid), given a batch of
     affine matrices :attr:`theta`.
 
@@ -3184,7 +3204,6 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
-    assert list(query.size()) == [tgt_len, bsz, embed_dim]
     assert key.size() == value.size()
 
     head_dim = embed_dim // num_heads

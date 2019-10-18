@@ -101,7 +101,7 @@ class either final {
   }
 
   const Left& left() const& {
-    if (!is_left()) {
+    if (C10_UNLIKELY(!is_left())) {
       throw std::logic_error(
           "Tried to get left side of an either which is right.");
     }
@@ -116,7 +116,7 @@ class either final {
   }
 
   const Right& right() const& {
-    if (!is_right()) {
+    if (C10_UNLIKELY(!is_right())) {
       throw std::logic_error(
           "Tried to get right side of an either which is left.");
     }

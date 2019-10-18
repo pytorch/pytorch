@@ -99,6 +99,18 @@ public:
     auto mask = _mm256_set1_ps(-0.f);
     return _mm256_andnot_ps(mask, values);
   }
+  Vec256<float> angle() const {
+    return _mm256_set1_ps(0);
+  }
+  Vec256<float> real() const {
+    return *this;
+  }
+  Vec256<float> imag() const {
+    return _mm256_set1_ps(0);
+  }
+  Vec256<float> conj() const {
+    return *this;
+  }
   Vec256<float> acos() const {
     return Vec256<float>(Sleef_acosf8_u10(values));
   }
@@ -116,6 +128,9 @@ public:
   }
   Vec256<float> erfc() const {
     return Vec256<float>(Sleef_erfcf8_u15(values));
+  }
+  Vec256<float> erfinv() const {
+    return map(calc_erfinv);
   }
   Vec256<float> exp() const {
     return Vec256<float>(Sleef_expf8_u10(values));
@@ -137,16 +152,16 @@ public:
   }
   Vec256<float> frac() const;
   Vec256<float> sin() const {
-    return map(std::sin);
+    return Vec256<float>(Sleef_sinf8_u10(values));
   }
   Vec256<float> sinh() const {
-    return map(std::sinh);
+    return Vec256<float>(Sleef_sinhf8_u10(values));
   }
   Vec256<float> cos() const {
-    return map(std::cos);
+    return Vec256<float>(Sleef_cosf8_u10(values));
   }
   Vec256<float> cosh() const {
-    return map(std::cosh);
+    return Vec256<float>(Sleef_coshf8_u10(values));
   }
   Vec256<float> ceil() const {
     return _mm256_ceil_ps(values);
@@ -161,13 +176,16 @@ public:
     return _mm256_round_ps(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
   Vec256<float> tan() const {
-    return map(std::tan);
+    return Vec256<float>(Sleef_tanf8_u10(values));
   }
   Vec256<float> tanh() const {
     return Vec256<float>(Sleef_tanhf8_u10(values));
   }
   Vec256<float> trunc() const {
     return _mm256_round_ps(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+  }
+  Vec256<float> lgamma() const {
+    return Vec256<float>(Sleef_lgammaf8_u10(values));
   }
   Vec256<float> sqrt() const {
     return _mm256_sqrt_ps(values);
@@ -252,6 +270,21 @@ Vec256<float> inline minimum(const Vec256<float>& a, const Vec256<float>& b) {
   Vec256<float> isnan = _mm256_cmp_ps(a, b, _CMP_UNORD_Q);
   // Exploit the fact that all-ones is a NaN.
   return _mm256_or_ps(min, isnan);
+}
+
+template <>
+Vec256<float> inline clamp(const Vec256<float>& a, const Vec256<float>& min, const Vec256<float>& max) {
+  return _mm256_min_ps(max, _mm256_max_ps(min, a));
+}
+
+template <>
+Vec256<float> inline clamp_max(const Vec256<float>& a, const Vec256<float>& max) {
+  return _mm256_min_ps(max, a);
+}
+
+template <>
+Vec256<float> inline clamp_min(const Vec256<float>& a, const Vec256<float>& min) {
+  return _mm256_max_ps(min, a);
 }
 
 template <>

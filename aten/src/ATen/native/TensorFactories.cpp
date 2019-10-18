@@ -17,9 +17,8 @@
 #include <TH/THAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <ATen/NamedTensorUtils.h>
-#endif
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <cctype>
@@ -40,7 +39,7 @@ void window_function_checks(
       " is not implemented for sparse types, got: ",
       options);
   TORCH_CHECK(
-      at::isFloatingType(typeMetaToScalarType(options.dtype())),
+      at::isFloatingType(typeMetaToScalarType(options.dtype())) || at::isComplexType(typeMetaToScalarType(options.dtype())),
       function_name,
       " expects floating point dtypes, got: ",
       options);
@@ -86,7 +85,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AT_ASSERT(options.backend() == Backend::CPU);
+  AT_ASSERT(options.device().type() == DeviceType::CPU);
   AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
@@ -106,7 +105,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::CPUTensorId());
+  auto tensor = detail::make_tensor<TensorImpl>(std::move(storage_impl), at::TensorTypeId::CPUTensorId);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -128,7 +127,7 @@ Tensor empty(
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK(options.backend() == Backend::CPU || options.backend() == Backend::CUDA,
+  TORCH_CHECK(options.device().type() == DeviceType::CPU || options.device().type() == DeviceType::CUDA,
       "NYI: named tensors only support CPU and CUDA tensors");
   auto result = at::empty(size, options, optional_memory_format);
   internal_set_names_inplace(result, names);
@@ -173,7 +172,7 @@ Tensor& empty_out(
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
-AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, DEFINE_CAST_OP)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
@@ -219,21 +218,43 @@ Tensor empty_like(
                 "It is currently not supported to specify a dtype that doesn't match "
                 "the input tensor's dtype via empty_like.  Specified: ", options.dtype(),
                 " Input tensor's dtype: ", self.dtype());
-    // TODO: uncomment when qscheme diff is landed
-    // TORCH_INTERNAL_ASSERT(self.qscheme(), at::kPerTensorAffine,
-    //                       "empty_like for quantized Tensor only works for
-    //                        PerTensorAffine scheme right now");
-    return at::_empty_affine_quantized(self.sizes(), options,
-                                       self.q_scale(),
-                                       self.q_zero_point(),
-                                       use_memory_format);
+    auto qscheme = self.qscheme();
+    if (qscheme == kPerTensorAffine) {
+      return at::_empty_affine_quantized(self.sizes(), options,
+                                         self.q_scale(),
+                                         self.q_zero_point(),
+                                         use_memory_format);
+    } else if (qscheme == kPerChannelAffine) {
+      // Copy the tensors with channels to avoid accidental overrides
+      return at::_empty_per_channel_affine_quantized(
+          self.sizes(),
+          self.q_per_channel_scales().clone(),
+          self.q_per_channel_zero_points().clone(),
+          self.q_per_channel_axis(),
+          options,
+          use_memory_format);
+    } else {
+      TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
+    }
   }
 
 #ifdef BUILD_NAMEDTENSOR
-  return at::empty(self.sizes(), self.names(), options, use_memory_format);
+  if (self.opt_names()) {
+    return at::empty(self.sizes(), self.opt_names(), options, use_memory_format);
+  } else {
+    return at::empty(self.sizes(), options, use_memory_format);
+  }
 #else
   return at::empty(self.sizes(), options, use_memory_format);
 #endif
+}
+
+Tensor new_empty(
+    const Tensor& self,
+    IntArrayRef size,
+    const TensorOptions& options
+    ) {
+  return at::empty(size, self.options().merge_in(options));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -298,6 +319,16 @@ Tensor full_like(const Tensor& self, Scalar fill_value) {
 Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
   return native::full(self.sizes(), fill_value, options);
 }
+
+Tensor new_full(
+    const Tensor& self,
+    IntArrayRef size,
+    Scalar fill_value,
+    const TensorOptions& options
+    ) {
+  return at::full(size, fill_value, self.options().merge_in(options));
+}
+
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -680,6 +711,14 @@ Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   return native::zeros(self.sizes(), options);
 }
 
+Tensor new_zeros(
+    const Tensor& self,
+    IntArrayRef size,
+    const TensorOptions& options
+    ) {
+  return at::zeros(size, self.options().merge_in(options));
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor bartlett_window(int64_t window_length, const TensorOptions& options) {
@@ -814,7 +853,7 @@ Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
       return tensor_cpu(values, options);                           \
     }                                                               \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, BFloat16, TENSOR)
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
@@ -829,15 +868,27 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
           filename.c_str(), flags, my_size * dtype.itemsize(), nullptr),
       /*allocator=*/nullptr,
       /*resizable=*/false);
-    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::CPUTensorId());
+    auto tensor = detail::make_tensor<at::TensorImpl>(storage_impl, at::TensorTypeId::CPUTensorId);
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous({storage_impl->numel()});
     return tensor;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor clone(const Tensor& src) {
-  auto self = at::empty_like(src);
+Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto memory_format =
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
+  if (memory_format == MemoryFormat::Preserve) {
+    if (src.is_non_overlapping_and_dense()) {
+      // Copy all strides
+      auto self = at::empty_strided(src.sizes(), src.strides(), src.options());
+      self.copy_(src);
+      return self;
+    } else {
+      memory_format = src.suggest_memory_format();
+    }
+  }
+  auto self = at::empty_like(src, src.options(), memory_format);
   self.copy_(src);
   return self;
 }

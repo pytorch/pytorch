@@ -46,7 +46,7 @@ class averaged_loss_cpu final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::AveragedLoss",
     c10::RegisterOperators::options()
-      .kernel<averaged_loss_cpu<float, CPUContext>>(CPUTensorId()));
+      .kernel<averaged_loss_cpu<float, CPUContext>>(TensorTypeId::CPUTensorId));
 
 } // namespace
 

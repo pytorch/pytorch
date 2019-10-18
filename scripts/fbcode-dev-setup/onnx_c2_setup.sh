@@ -140,7 +140,7 @@ with_proxy python setup.py develop
 # Build PyTorch and Caffe2
 cd "$onnx_root/pytorch"
 with_proxy pip install -r "requirements.txt"
-with_proxy python setup.py build_deps develop
+with_proxy python setup.py develop
 
 # Sanity checks and useful info
 cd "$onnx_root"

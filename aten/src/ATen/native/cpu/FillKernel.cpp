@@ -25,6 +25,13 @@ void fill_kernel(TensorIterator& iter, Scalar value_scalar) {
         iter,
         [=]() -> H { return value; },
         [=]() { return Vec256<H>(value); });
+  } else if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "fill_cpu", [&]() {
+      scalar_t value = value_scalar.to<scalar_t>();
+      cpu_kernel(
+          iter,
+          [=]() -> scalar_t { return value; });
+    });
   } else {
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "fill_cpu", [&]() {
       scalar_t value = value_scalar.to<scalar_t>();

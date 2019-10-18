@@ -1068,7 +1068,7 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None, None, None, None
             return output, indices, backward
 
-        def batch_norm(input : Tensor,
+        def batch_norm_disabled(input : Tensor,
                        weight : Optional[Tensor],
                        bias : Optional[Tensor],
                        running_mean : Optional[Tensor],

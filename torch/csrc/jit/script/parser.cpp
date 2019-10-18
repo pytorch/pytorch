@@ -19,7 +19,7 @@ Decl mergeTypesFromTypeComment(
     expected_num_annotations -= 1;
   }
   if (expected_num_annotations != type_annotation_decl.params().size()) {
-    throw ErrorReport(type_annotation_decl.range())
+    throw ErrorReport(decl.range())
         << "Number of type annotations ("
         << type_annotation_decl.params().size()
         << ") did not match the number of "
@@ -318,12 +318,12 @@ struct ParserImpl {
 
   StringLiteral parseConcatenatedStringLiterals() {
     auto range = L.cur().range;
-    std::stringstream ss;
+    std::string ss;
     while (L.cur().kind == TK_STRINGLITERAL) {
       auto literal_range = L.cur().range;
-      ss << parseStringLiteral(literal_range, L.next().text());
+      ss.append(parseStringLiteral(literal_range, L.next().text()));
     }
-    return StringLiteral::create(range, ss.str());
+    return StringLiteral::create(range, ss);
   }
 
   Expr parseAttributeValue() {
@@ -450,11 +450,24 @@ struct ParserImpl {
       // There is an assignment operator, parse the RHS and generate the
       // assignment.
       auto rhs = parseExpOrExpTuple();
-      L.expect(TK_NEWLINE);
       if (maybeOp.value()->kind() == '=') {
+        std::vector<Expr> lhs_list = {lhs};
+        while (L.nextIf('=')) {
+          lhs_list.push_back(rhs);
+          rhs = parseExpOrExpTuple();
+        }
+        if (type.present() && lhs_list.size() > 1) {
+          throw ErrorReport(type.range())
+              << "Annotated multiple assignment is not supported in python";
+        }
+        L.expect(TK_NEWLINE);
         return Assign::create(
-            lhs.range(), lhs, Maybe<Expr>::create(rhs.range(), rhs), type);
+            lhs.range(),
+            List<Expr>::create(lhs_list[0].range(), lhs_list),
+            Maybe<Expr>::create(rhs.range(), rhs),
+            type);
       } else {
+        L.expect(TK_NEWLINE);
         // this is an augmented assignment
         if (lhs.kind() == TK_TUPLE_LITERAL) {
           throw ErrorReport(lhs.range())
@@ -468,7 +481,10 @@ struct ParserImpl {
       TORCH_INTERNAL_ASSERT(type.present());
       L.expect(TK_NEWLINE);
       return Assign::create(
-          lhs.range(), lhs, Maybe<Expr>::create(lhs.range()), type);
+          lhs.range(),
+          List<Expr>::create(lhs.range(), {lhs}),
+          Maybe<Expr>::create(lhs.range()),
+          type);
     }
   }
 

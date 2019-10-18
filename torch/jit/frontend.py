@@ -7,6 +7,7 @@ import string
 from textwrap import dedent
 from torch._six import PY2
 from torch._C._jit_tree_views import *
+from torch._utils_internal import get_source_lines_and_file
 
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
@@ -98,7 +99,7 @@ class FrontendError(Exception):
         self.error_report = torch._C.ErrorReport(self.source_range)
 
     def __str__(self):
-        return self.msg + self.error_report.what()
+        return self.msg + self.error_report.what().lstrip()
 
 
 class NotSupportedError(FrontendError):
@@ -146,9 +147,8 @@ def get_jit_class_def(cls, self_name):
     method_defs = [get_jit_def(method[1],
                    self_name=self_name) for method in methods]
 
-    sourcelines, file_lineno = inspect.getsourcelines(cls)
+    sourcelines, file_lineno, filename = get_source_lines_and_file(cls)
     source = ''.join(sourcelines)
-    filename = inspect.getsourcefile(cls)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
@@ -157,13 +157,12 @@ def get_jit_class_def(cls, self_name):
 
 
 def get_jit_def(fn, self_name=None):
-    sourcelines, file_lineno = inspect.getsourcelines(fn)
+    sourcelines, file_lineno, filename = get_source_lines_and_file(fn)
     source = ''.join(sourcelines)
-    filename = inspect.getsourcefile(fn)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("expected a single top-level function")
+        raise RuntimeError("Expected a single top-level function")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
@@ -194,7 +193,8 @@ def build_class_def(ctx, py_def, methods, self_name):
 
 def build_def(ctx, py_def, type_line, self_name=None):
     body = py_def.body
-    r = ctx.make_range(py_def.lineno, py_def.col_offset,
+    r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
+                       py_def.col_offset,
                        py_def.col_offset + len("def"))
     param_list = build_param_list(ctx, py_def.args, self_name)
     return_type = None
@@ -246,6 +246,9 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
 
 
 def get_default_args(fn):
+    if fn is None:
+        return {}
+
     if PY2:
         argspec = inspect.getargspec(fn)
         if argspec.defaults is not None:
@@ -282,11 +285,7 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Assign(ctx, stmt):
         rhs = build_expr(ctx, stmt.value)
-        if len(stmt.targets) > 1:
-            start_point = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + 1)
-            raise NotSupportedError(ctx.make_raw_range(start_point.start, rhs.range().end),
-                                    "Performing multiple assignments in a single line isn't supported")
-        lhs = build_expr(ctx, stmt.targets[0])
+        lhs = list(map(lambda x: build_expr(ctx, x), stmt.targets))
         return Assign(lhs, rhs)
 
     @staticmethod
@@ -294,7 +293,7 @@ class StmtBuilder(Builder):
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
-        return Assign(lhs, rhs, the_type)
+        return Assign([lhs], rhs, the_type)
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -400,6 +399,7 @@ class ExprBuilder(Builder):
     unop_map = {
         ast.Not: 'not',
         ast.USub: '-',
+        ast.Invert: '~',
     }
 
     boolop_map = {
@@ -494,10 +494,10 @@ class ExprBuilder(Builder):
         op = type(expr.op)
 
         if op == ast.Div and not ctx.uses_true_division:
-            raise RuntimeError('Division of ints in JIT script uses Python 3 true '
-                               'division semantics. Please put `from __future__ '
-                               'import division` at the top of your file')
-
+            err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
+            raise FrontendError(err_range, 'Division of ints in TorchScript uses Python 3 true '
+                                'division semantics. Please put `from __future__ '
+                                'import division` at the top of your file')
         op_token = ExprBuilder.binop_map.get(op)
         if op_token is None:
             err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
@@ -633,19 +633,20 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Constant(ctx, expr):
-        val = expr.value
-        if val is None or isinstance(val, bool):
+        value = expr.value
+        if value is None or isinstance(value, bool):
             # NB: this check has to happen before the int check because bool is
             # a subclass of int
             return ExprBuilder.build_NameConstant(ctx, expr)
-        if isinstance(val, (int, float)):
+        if isinstance(value, (int, float)):
             return ExprBuilder.build_Num(ctx, expr)
-        elif isinstance(val, str):
+        elif isinstance(value, str):
             return ExprBuilder.build_Str(ctx, expr)
-        elif isinstance(val, type(Ellipsis)):
+        elif isinstance(value, type(Ellipsis)):
             return ExprBuilder.build_Ellipsis(ctx, expr)
         else:
-            raise RuntimeError("Unknown Constant expr type for value: ", expr.value)
+            error_range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(str(value)))
+            raise FrontendError(error_range, "Unknown Constant expression type")
 
     @staticmethod
     def build_Str(ctx, expr):

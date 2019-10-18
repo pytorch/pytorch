@@ -14,7 +14,6 @@ from distutils.version import LooseVersion
 from . import which
 from .env import (BUILD_DIR, IS_64BIT, IS_DARWIN, IS_WINDOWS, check_negative_env_flag)
 from .cuda import USE_CUDA
-from .dist_check import USE_DISTRIBUTED, USE_GLOO_IBVERBS
 from .numpy_ import USE_NUMPY, NUMPY_INCLUDE_DIR
 
 
@@ -216,7 +215,9 @@ class CMake:
             # adding a new build option to this block: Consider making these two names identical and adding this option
             # in the block below.
             '_GLIBCXX_USE_CXX11_ABI': 'GLIBCXX_USE_CXX11_ABI',
-            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA'
+            'CUDNN_LIB_DIR': 'CUDNN_LIBRARY',
+            'USE_CUDA_STATIC_LINK': 'CAFFE2_STATIC_LINK_CUDA',
+            'USE_GLOO_IBVERBS': 'USE_IBVERBS'   # Backward compatibility. Will be removed in the future.
         }
         additional_options.update({
             # Build options that have the same environment variable name and CMake variable name and that do not start
@@ -226,6 +227,8 @@ class CMake:
             ('BLAS',
              'BUILDING_WITH_TORCH_LIBS',
              'CUDA_NVCC_EXECUTABLE',
+             'CUDNN_LIBRARY',
+             'CUDNN_INCLUDE_DIR',
              'EXPERIMENTAL_SINGLE_THREAD_POOL',
              'INSTALL_TEST',
              'MKL_THREADING',
@@ -236,6 +239,9 @@ class CMake:
              'ATEN_THREADING',
              'WERROR')
         })
+
+        if 'USE_GLOO_IBVERBS' in my_env:
+            print("WARNING: USE_GLOO_IBVERBS is deprecated. Use USE_IBVERBS instead.")
 
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
@@ -260,7 +266,6 @@ class CMake:
             'BUILD_PYTHON': build_python,
             'BUILD_TEST': build_test,
             'USE_CUDA': USE_CUDA,
-            'USE_DISTRIBUTED': USE_DISTRIBUTED,
             'USE_NUMPY': USE_NUMPY,
         })
 
@@ -286,14 +291,13 @@ class CMake:
                       NUMPY_INCLUDE_DIR=NUMPY_INCLUDE_DIR,
                       **build_options)
 
-        if USE_GLOO_IBVERBS:
-            CMake.defines(args, USE_IBVERBS="1", USE_GLOO_IBVERBS="1")
-
         expected_wrapper = '/usr/local/opt/ccache/libexec'
         if IS_DARWIN and os.path.exists(expected_wrapper):
-            CMake.defines(args,
-                          CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper),
-                          CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
+            if 'CMAKE_C_COMPILER' not in build_options and 'CC' not in os.environ:
+                CMake.defines(args, CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper))
+            if 'CMAKE_CXX_COMPILER' not in build_options and 'CXX' not in os.environ:
+                CMake.defines(args, CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper))
+
         for env_var_name in my_env:
             if env_var_name.startswith('gh'):
                 # github env vars use utf-8, on windows, non-ascii code may
