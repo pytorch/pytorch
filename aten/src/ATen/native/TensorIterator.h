@@ -271,7 +271,6 @@ struct CAFFE2_API TensorIterator {
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
 
-
   bool has_promotion() const {
     for (auto& op : operands_) {
       if (op.tensor.scalar_type() != common_dtype_) {

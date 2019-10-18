@@ -270,11 +270,11 @@ void cpu_kernel(TensorIterator& iter, func_t op) {
     }
     iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
       if (is_contiguous<traits>(strides)) {
-        basic_loop(data, strides, dtypes, 0, n, op);
+        basic_loop(data, strides, dtypes.data, 0, n, op);
       } else {
         using Indices = c10::guts::make_index_sequence<traits::arity>;
         unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-          basic_loop(data, strides, dtypes, 0, n, op);
+          basic_loop(data, strides, dtypes.data, 0, n, op);
         });
       }
     });
