@@ -89,7 +89,7 @@ TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
   auto input = torch::tensor({{0.1}, {1.2}, {4.7}}, torch::requires_grad());
   auto target = torch::tensor({{0.}, {1.}, {5.}}, torch::kFloat);
   auto output =
-      F::smooth_l1_loss(input, target, torch::Reduction::None);
+      F::smooth_l1_loss(input, target, /*reduction=*/torch::Reduction::None);
   auto expected = torch::tensor({{0.005}, {0.02}, {0.045}}, torch::kFloat);
   auto s = output.sum();
   s.backward();
