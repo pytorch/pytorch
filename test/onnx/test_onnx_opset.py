@@ -77,7 +77,8 @@ class TestONNXOpset(TestCase):
         ops_9 = [{"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2},
                  {"name" : "k", "i" : 3, "type" : 2}]}]
         ops_10 = [{"op_name" : "Constant", "attributes" : [{"name" : "value", "type" : 4}]},
-                  {"op_name" : "Unsqueeze", "attributes" : [{"name" : "axes", "ints" : [0], "type" : 7}]},
+                {"op_name" : "Constant", "attributes" : [{"name" : "value", "type" : 4}]},
+                  {"op_name" : "Reshape"},
                   {"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2}]}]
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.arange(1., 6., requires_grad=True)
@@ -89,7 +90,8 @@ class TestONNXOpset(TestCase):
             def forward(self, input, k):
                 return torch.topk(input, k)
 
-        ops_10 = [{"op_name" : "Unsqueeze", "attributes" : [{"name" : "axes", "ints" : [0], "type" : 7}]},
+        ops_10 = [{"op_name" : "Constant", "attributes" : [{"name" : "value", "type" : 4}]},
+                {"op_name" : "Reshape"},
                   {"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2}]}]
         ops = {10 : ops_10}
         x = torch.arange(1., 6., requires_grad=True)
