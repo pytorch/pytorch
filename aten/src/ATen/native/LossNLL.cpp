@@ -17,13 +17,12 @@ void nll_loss_forward_out_cpu_template(
     const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  total_weight.resize_({1});
-
-  auto n_dims = input.dim();
-  auto n_classes = input.size(-1);
-
+  TORCH_CHECK(
+      input.dim() > 0 && input.dim() <= 2, "input tensor should be 1D or 2D");
   TORCH_CHECK(target.dim() == 1, "multi-target not supported");
-  TORCH_CHECK(input.dim() <= 2, "input tensor should be 1D or 2D");
+
+  const auto n_dims = input.dim();
+  const auto n_classes = input.size(-1);
 
   TORCH_CHECK(
       !weight.defined() || weight.numel() == n_classes,
@@ -33,14 +32,16 @@ void nll_loss_forward_out_cpu_template(
       " but got weight tensor of shape: ",
       weight.sizes());
 
-  AT_DISPATCH_FLOATING_TYPES(
+  total_weight.resize_({1});
+
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "nll_loss_forward_out_cpu_template", [&] {
         auto weight_contiguous = weight.contiguous();
         const scalar_t* weight_data =
             weight.defined() ? weight_contiguous.data_ptr<scalar_t>() : nullptr;
 
         if (reduction == Reduction::None && n_dims == 2) {
-          auto batch_size = input.size(0);
+          const auto batch_size = input.size(0);
           output.resize_({batch_size});
 
           auto input_acc = input.accessor<scalar_t, 2>();
@@ -51,7 +52,7 @@ void nll_loss_forward_out_cpu_template(
               -1); // We cannot throw an exception inside parallel section
           at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
             for (auto i = start; i < end; i++) {
-              auto cur_target = target_acc[i];
+              const auto cur_target = target_acc[i];
 
               if (cur_target == ignore_index) {
                 output_acc[i] = 0;
@@ -60,7 +61,7 @@ void nll_loss_forward_out_cpu_template(
               if (cur_target >= 0 && cur_target < n_classes) {
                 scalar_t cur_weight = weight_data != nullptr
                     ? weight_data[cur_target]
-                    : static_cast<scalar_t>(1.0);
+                    : static_cast<scalar_t>(1);
                 output_acc[i] = -input_acc[i][cur_target] * cur_weight;
               } else {
                 int tmp = -1;
@@ -90,7 +91,7 @@ void nll_loss_forward_out_cpu_template(
         scalar_t total_weight_val = 0;
 
         if (input.dim() == 1) {
-          auto cur_target = target_data[0];
+          const auto cur_target = target_data[0];
           if (cur_target != ignore_index) {
             TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
             total_weight_val = weight_data ? weight_data[cur_target]
@@ -98,12 +99,12 @@ void nll_loss_forward_out_cpu_template(
             output_val = -input_data[cur_target] * total_weight_val;
           }
         } else if (input.dim() == 2) {
-          auto batch_size = input.size(0);
+          const auto batch_size = input.size(0);
           TORCH_CHECK(target.size(0) == batch_size);
-          auto n_target = input.size(1);
+          const auto n_target = input.size(1);
 
           for (int64_t i = 0; i < batch_size; i++) {
-            auto cur_target = target_data[i];
+            const auto cur_target = target_data[i];
             if (cur_target != ignore_index) {
               TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
 
@@ -136,20 +137,21 @@ void nll_loss_backward_out_cpu_template(
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
+  TORCH_CHECK(target.dim() == 1, "multi-target not supported");
+  TORCH_CHECK(input.dim() <= 2, "input tensor should be 1D or 2D");
+
   grad_input.resize_as_(input);
   grad_input.zero_();
 
-  auto n_dims = input.dim();
-  auto n_classes = input.size(-1);
+  const auto n_dims = input.dim();
+  const auto n_classes = input.size(-1);
 
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  TORCH_CHECK(target.dim() == 1, "multi-target not supported");
-  TORCH_CHECK(input.dim() <= 2, "input tensor should be 1D or 2D");
   TORCH_CHECK(
       !weight.defined() || weight.numel() == n_classes,
       "weight tensor should be defined either for all or no classes");
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "nll_loss_backward_out_cpu_template", [&] {
         auto target_acc = target.accessor<int64_t, 1>();
 
@@ -184,21 +186,20 @@ void nll_loss_backward_out_cpu_template(
         }
 
         TORCH_CHECK(
-            grad_output.dim() == 0 ||
-                grad_output.dim() == 1 && grad_output.numel() == 1,
+            grad_output.dim() <= 1 && grad_output.numel() == 1,
             "Expected a single element grad_output tensor, but got: ",
             grad_output.sizes());
-        scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
+        const scalar_t grad_output_value = *grad_output.data_ptr<scalar_t>();
 
         if (input.dim() == 1) {
           auto grad_input_acc = grad_input.accessor<scalar_t, 1>();
 
-          auto cur_target = target_acc[0];
+          const auto cur_target = target_acc[0];
           if (cur_target != ignore_index) {
             TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
 
             grad_input_acc[cur_target] =
-                (reduction != Reduction::Mean && weight_data)
+                (reduction != Reduction::Mean && weight_data != nullptr)
                 ? -weight_data[cur_target]
                 : static_cast<scalar_t>(-1);
             grad_input_acc[cur_target] *= grad_output_value;
@@ -206,11 +207,11 @@ void nll_loss_backward_out_cpu_template(
         } else if (input.dim() == 2) {
           auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
 
-          auto batch_size = input.size(0);
+          const auto batch_size = input.size(0);
           TORCH_CHECK(target.size(0) == batch_size);
 
           for (int64_t i = 0; i < batch_size; i++) {
-            auto cur_target = target_acc[i];
+            const auto cur_target = target_acc[i];
 
             if (cur_target != ignore_index) {
               TORCH_CHECK(cur_target >= 0 && cur_target < n_classes);
