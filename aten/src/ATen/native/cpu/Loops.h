@@ -53,6 +53,24 @@ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
 }
 #undef CASE
 
+template<>
+inline c10::qint8 fetch_and_cast(const ScalarType src_type, const void *ptr) {
+  TORCH_CHECK(false, "Unexpected scalar type");
+  return c10::qint8(0);
+}
+
+template<>
+inline c10::quint8 fetch_and_cast(const ScalarType src_type, const void *ptr) {
+  TORCH_CHECK(false, "Unexpected scalar type");
+  return c10::quint8(0);
+}
+
+template<>
+inline c10::qint32 fetch_and_cast(const ScalarType src_type, const void *ptr) {
+  TORCH_CHECK(false, "Unexpected scalar type");
+  return c10::qint32(0);
+}
+
 // Cast a value with type src_t into dest_type, and store it to ptr.
 #define CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = value; return;
 template<typename src_t>
@@ -64,6 +82,21 @@ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   }
 }
 #undef CASE
+
+template<>
+inline void cast_and_store(const ScalarType dest_type, void *ptr, c10::qint8 value) {
+  TORCH_CHECK(false, "Unexpected scalar type");
+}
+
+template<>
+inline void cast_and_store(const ScalarType dest_type, void *ptr, c10::quint8 value) {
+  TORCH_CHECK(false, "Unexpected scalar type");
+}
+
+template<>
+inline void cast_and_store(const ScalarType dest_type, void *ptr, c10::qint32 value) {
+  TORCH_CHECK(false, "Unexpected scalar type");
+}
 
 using namespace vec256;
 

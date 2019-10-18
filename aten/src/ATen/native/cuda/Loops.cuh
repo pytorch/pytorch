@@ -77,7 +77,7 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const vo
 #undef CASE
 
 // Cast a value with type src_t into dest_type, and store it to ptr.
-#define CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = value;
+#define CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = value; return;
 template<typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
