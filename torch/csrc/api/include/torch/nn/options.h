@@ -8,3 +8,4 @@
 #include <torch/nn/options/loss.h>
 #include <torch/nn/options/pooling.h>
 #include <torch/nn/options/rnn.h>
+#include <torch/nn/options/pixelshuffle.h>

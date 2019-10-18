@@ -12,7 +12,7 @@ struct TORCH_API PixelShuffleOptions {
   PixelShuffleOptions(int64_t upscale_factor)
       : upscale_factor_(upscale_factor) {}
 
-  /// Specifies the reduction to apply to the output.
+  /// Factor to increase spatial resolution by
   TORCH_ARG(int64_t, upscale_factor);
 };
 

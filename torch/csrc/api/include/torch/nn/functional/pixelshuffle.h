@@ -18,4 +18,3 @@ inline Tensor pixel_shuffle(
 } // namespace functional
 } // namespace nn
 } // namespace torch
-

@@ -17,7 +17,7 @@ namespace nn {
 /// `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
 /// by Shi et. al (2016) for more details.
 struct TORCH_API PixelShuffleImpl : public torch::nn::Cloneable<PixelShuffleImpl> {
-  explicit PixelShuffleImpl(const PixelShuffleOptions& options);
+  explicit PixelShuffleImpl(const PixelShuffleOptions& options_);
 
   /// Pretty prints the `PixelShuffle` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -34,4 +34,3 @@ TORCH_MODULE(PixelShuffle);
 
 } // namespace nn
 } // namespace torch
-
