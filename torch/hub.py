@@ -135,11 +135,11 @@ def _parse_repo_info(github):
 def _get_cache_or_reload(github, force_reload, verbose=True):
     # Parse github repo information
     repo_owner, repo_name, branch = _parse_repo_info(github)
-    # Github allows branch name with slash '/', this causes confusion
-    # with path, so replace it with underscore.
-    # Backslash which is used in Windows path is now allowed, but
-    # we use os.sep here to be safe.
-    normalized_br = branch.replace(os.sep, '_')
+    # Github allows branch name with slash '/',
+    # this causes confusion with path on both Linux and Windows.
+    # Backslash is not allowed in Github branch name so no need to
+    # to worry about it.
+    normalized_br = branch.replace('/', '_')
     # Github renames folder repo-v1.x.x to repo-1.x.x
     # We don't know the repo name before downloading the zip file
     # and inspect name from it.
