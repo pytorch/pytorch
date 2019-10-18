@@ -94,25 +94,25 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const vo
 // Cast a value with type src_t into dest_type, and store it to ptr.
 template<typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
-  switch (src_type) {
+  switch (dest_type) {
     case ScalarType::Byte:
-      *(uint8_t *)ptr = value;
+      *(uint8_t *)ptr = value; break;
     case ScalarType::Char:
-      *(int8_t *)ptr = value;
+      *(int8_t *)ptr = value; break;
     case ScalarType::Double:
-      *(double *)ptr = value;
+      *(double *)ptr = value; break;
     case ScalarType::Float:
-      *(float *)ptr = value;
+      *(float *)ptr = value; break;
     case ScalarType::Int:
-      *(int32_t *)ptr = value;
+      *(int32_t *)ptr = value; break;
     case ScalarType::Long:
-      *(int64_t *)ptr = value;
+      *(int64_t *)ptr = value; break;
     case ScalarType::Short:
-      *(int16_t *)ptr = value;
+      *(int16_t *)ptr = value; break;
     case ScalarType::Half:
-      *(at::Half *)ptr = value;
+      *(at::Half *)ptr = value; break;
     case ScalarType::Bool:
-      *(bool *)ptr = value;
+      *(bool *)ptr = value; break;
     default:
       assert(false);
   }
@@ -198,7 +198,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     data[i] = (char*)iter.data_ptr(i);
   }
 
-  at::detail::Array<char*, ntensors> dtypes;
+  at::detail::Array<ScalarType, ntensors> dtypes;
   for (int i = 0; i < ntensors; i++) {
     dtypes[i] = iter.tensor(i).scalar_type();
   }
