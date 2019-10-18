@@ -22,80 +22,145 @@ using at::DimnameList;
 namespace torch {
 
 namespace detail {
-  enum class InitListTensorType { Scalar, InitList };
+enum class TensorDataContainerType { Scalar, InitList, Tensor };
 
-  // We use `InitListTensor` to support converting an arbitrarily nested braced-init-list
-  // (e.g. {{1, 2}, {3, 4}}) into the equivalent Tensor, taking advantage of the fact that
-  // the constructor will automatically be called recursively until it reaches all innermost
-  // scalar values.
-  //
-  // At any time, a `InitListTensor` object represents either of the following:
-  // 1. A scalar with value `scalar()` and type `scalar_type()`.
-  // 2. A Tensor represented in `std::initializer_list<InitListTensor>` form, with value
-  //    `init_list()`, Tensor scalar type `scalar_type()`, and Tensor sizes `sizes()`.
-  struct InitListTensor {
-#define TENSOR(T, S)                   \
-    InitListTensor(T scalar) :         \
-        scalar_(scalar), init_list_(), \
-        sizes_(),                      \
-        scalar_type_(at::k##S),        \
-        type_(InitListTensorType::Scalar) {}
+template <size_t D> struct TensorDataContainer;
+
+template <size_t D>
+inline void fill_tensor(const TensorDataContainer<D>& init_list_tensor, at::Tensor tensor) {
+  size_t index = 0;
+  for (const auto& elem : init_list_tensor.init_list()) {
+    if (elem.type() == TensorDataContainerType::Scalar) {
+      at::NoGradGuard guard;
+      tensor[index].fill_(elem.scalar());
+    } else if (elem.type() == TensorDataContainerType::InitList) {
+      fill_tensor(elem, tensor[index]);
+    } else if (elem.type() == TensorDataContainerType::Tensor) {
+      TORCH_INTERNAL_ASSERT(
+        false,
+        "TensorDataContainer is already a Tensor type, `fill_tensor` should not be called");
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
+    }
+    index++;
+  }
+}
+
+template <>
+inline void fill_tensor(const TensorDataContainer<11>& init_list_tensor, at::Tensor tensor) {
+  TORCH_CHECK(false, "Tensor has too many dimensions");  // yf225 TODO: improve error msg
+}
+
+template <size_t D>
+inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<D>& init_list_tensor) {
+  if (init_list_tensor.type() == TensorDataContainerType::Scalar) {
+    AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, init_list_tensor.scalar_type(), "TensorDataContainer_pretty_print_scalar", [&] {
+      stream << init_list_tensor.scalar().template to<scalar_t>();
+    });
+  } else if (init_list_tensor.type() == TensorDataContainerType::InitList) {
+    stream << "{";
+    for (const TensorDataContainer<D+1>* it = init_list_tensor.init_list().begin(); it != init_list_tensor.init_list().end(); it++) {
+      stream << *it;
+      if (std::next(it) != init_list_tensor.init_list().end()) stream << ", ";
+    }
+    stream << "}";
+  } else if (init_list_tensor.type() == TensorDataContainerType::Tensor) {
+    auto tensor = init_list_tensor.to_tensor({});
+    stream << "{";
+    for (int64_t i = 0; i < tensor.sizes()[0]; i++) {
+      AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, init_list_tensor.scalar_type(), "TensorDataContainer_pretty_print_tensor_item", [&] {
+        stream << tensor[i].template item<scalar_t>();
+      });
+    }
+    stream << "}";
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
+  }
+  return stream;
+}
+
+template <>
+inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<11>& init_list_tensor) {
+  TORCH_CHECK(false, "Tensor has too many dimensions");  // yf225 TODO: improve error msg
+  return stream;
+}
+
+template <size_t D>
+struct TensorDataContainer {
+  // NOTE: For tensors with zero-size dimensions (e.g. `torch::tensor({{}, {}})`),
+  // the innermost empty braced-init-list `{}` matches the default constructor of
+  // the innermost `TensorDataContainer`.
+  TensorDataContainer() : sizes_({0}), scalar_type_(at::ScalarType::Undefined), type_(TensorDataContainerType::InitList) {}
+#define TENSOR(T, S) \
+  TensorDataContainer(T value) : sizes_(), scalar_(value), scalar_type_(at::k##S), type_(TensorDataContainerType::Scalar) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
-    InitListTensor(std::initializer_list<InitListTensor> init_list) :
-        scalar_(),
-        init_list_(init_list),
-        sizes_(),
-        scalar_type_(),
-        type_(InitListTensorType::InitList) {
-      TORCH_CHECK(
-        init_list.size() > 0,
-        "Empty init-list is not yet supported. We can create tensors with zero-size dimensions in the following way:\n",
-        "1-D: `torch::randn({0})`\n",
-        "N-D: `torch::randn({2, 3, 0})`");
-      scalar_type_ = init_list.begin()->scalar_type_;
-      const InitListTensor& first_elem = *(init_list.begin());
-      for (const auto& elem : init_list) {
-        TORCH_CHECK(elem.scalar_type_ == first_elem.scalar_type_,
-          "Expected all elements of the tensor to have the same scalar type: ",
-          first_elem.scalar_type_,
-          ", but got element of scalar type: ",
-          elem.scalar_type_);
-        TORCH_CHECK(elem.sizes_ == first_elem.sizes_,
-          "Expected all sub-lists to have sizes: ",
-          first_elem.sizes_,
-          " (e.g. ", first_elem, "), ",
-          "but got sub-list ",
-          elem,
-          " with sizes: ",
-          elem.sizes_);
-      }
-      sizes_.reserve(first_elem.sizes_.size() + 1);
-      sizes_.push_back(init_list.size());
-      sizes_.insert(sizes_.end(), first_elem.sizes_.begin(), first_elem.sizes_.end());
+  TensorDataContainer(std::initializer_list<TensorDataContainer<D+1>> init_list) :
+      sizes_(),
+      scalar_(),
+      scalar_type_(init_list.begin()->scalar_type()),
+      init_list_(init_list),
+      type_(TensorDataContainerType::InitList) {
+    const TensorDataContainer<D+1>& first_elem = *(init_list.begin());
+    for (const auto& elem : init_list) {
+      TORCH_CHECK(elem.sizes() == first_elem.sizes(),
+        "Expected all sub-lists to have sizes: ",
+        first_elem.sizes(),
+        " (e.g. ", first_elem, "), ",
+        "but got sub-list ",
+        elem,
+        " with sizes: ",
+        elem.sizes());
+      TORCH_CHECK(elem.scalar_type() == first_elem.scalar_type(),
+        "Expected all elements of the tensor to have the same scalar type: ",
+        first_elem.scalar_type(),
+        ", but got element of scalar type: ",
+        elem.scalar_type());
     }
+    sizes_.clear();
+    sizes_.reserve(first_elem.sizes().size() + 1);
+    sizes_.push_back(init_list.size());
+    sizes_.insert(sizes_.end(), first_elem.sizes().begin(), first_elem.sizes().end());
+  }
 
-    const c10::Scalar& scalar() const {
-      return scalar_;
-    }
+#define TENSOR(T, S) \
+  TensorDataContainer(at::ArrayRef<T> values) { \
+    type_ = TensorDataContainerType::Tensor; \
+    sizes_ = {(int64_t)values.size()}; \
+    scalar_type_ = at::k##S; \
+    at::AutoNonVariableTypeMode non_var_type_mode(true);  \
+    tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU).is_variable(false));       \
+  } \
+  TensorDataContainer(std::vector<T> values) : TensorDataContainer(at::ArrayRef<T>(values)) {}
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+#undef TENSOR
 
-    const std::initializer_list<InitListTensor>& init_list() const {
-      return init_list_;
-    }
+  const c10::Scalar& scalar() const {
+    return scalar_;
+  }
 
-    const std::vector<int64_t>& sizes() const {
-      return sizes_;
-    }
+  const std::initializer_list<TensorDataContainer<D+1>>& init_list() const {
+    return init_list_;
+  }
 
-    const c10::ScalarType& scalar_type() const {
-      return scalar_type_;
-    }
+  const std::vector<int64_t>& sizes() const {
+    return sizes_;
+  }
 
-    const InitListTensorType& type() const {
-      return type_;
-    }
+  const c10::ScalarType& scalar_type() const {
+    return scalar_type_;
+  }
 
-    at::Tensor to_tensor(const at::TensorOptions& options) const {
+  const TensorDataContainerType& type() const {
+    return type_;
+  }
+
+  at::Tensor to_tensor(const at::TensorOptions& options) const {
+    if (type_ == TensorDataContainerType::Tensor) {
+      return tensor_.to(options);
+    } else if (type_ == TensorDataContainerType::Scalar) {
+      return at::scalar_tensor(scalar_, options);
+    } else if (type_ == TensorDataContainerType::InitList) {
       // NOTE: Here we explicitly choose to initialize the tensor on CPU first,
       // fill each element of the tensor, and then move the tensor to the desired
       // device. For CUDA device, this approach only involves 1 CUDA kernel launch,
@@ -106,113 +171,34 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         at::AutoNonVariableTypeMode non_var_type_mode(true);
         return at::empty(sizes_, at::TensorOptions(options).device(at::kCPU).is_variable(false));
       })();
-      fill_tensor(tensor);
+      fill_tensor(*this, tensor);
       return tensor.to(options.device());
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
     }
-
-    void pretty_print_recursive(std::ostream& stream) const {
-      if (type_ == InitListTensorType::Scalar) {
-        AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, scalar_type_, "InitListTensor_pretty_print_scalar", [&] {
-          stream << scalar_.to<scalar_t>();
-        });
-      } else if (type_ == InitListTensorType::InitList) {
-        stream << "{";
-        for (const InitListTensor* it = init_list_.begin(); it != init_list_.end(); it++) {
-          it->pretty_print_recursive(stream);
-          if (std::next(it) != init_list_.end()) stream << ", ";
-        }
-        stream << "}";
-      }
-    }
-
-   private:
-    void fill_tensor(at::Tensor tensor) const {
-      size_t index = 0;
-      for (const auto& elem : init_list_) {
-        if (elem.type_ == InitListTensorType::Scalar) {
-          at::NoGradGuard guard;
-          tensor[index].fill_(elem.scalar());
-        } else if (elem.type_ == InitListTensorType::InitList) {
-          elem.fill_tensor(tensor[index]);
-        } else {
-          TORCH_INTERNAL_ASSERT(false, "Invalid InitListTensor");
-        }
-        index++;
-      }
-    }
-    c10::Scalar scalar_;
-    std::initializer_list<InitListTensor> init_list_;
-    std::vector<int64_t> sizes_;
-    c10::ScalarType scalar_type_;
-    InitListTensorType type_;
-  };
-
-  inline std::ostream& operator<<(std::ostream& stream, const InitListTensor& init_list_tensor) {
-    init_list_tensor.pretty_print_recursive(stream);
-    return stream;
   }
+ private:
+  std::vector<int64_t> sizes_;
+  c10::Scalar scalar_;
+  c10::ScalarType scalar_type_;
+  std::initializer_list<TensorDataContainer<D+1>> init_list_;
+  TensorDataContainerType type_;
+  at::Tensor tensor_;
+};
+
 } // namespace detail
 
-#define TENSOR(T, S)                                                       \
-  inline at::Tensor tensor(                                                \
-      at::ArrayRef<T> values, const at::TensorOptions& options) {          \
-    at::Tensor result = ([&]() {                                           \
-      at::AutoNonVariableTypeMode non_var_type_mode(true);                 \
-      return at::tensor(values, at::TensorOptions(options).is_variable(false)); \
-    })();                                                                  \
-    return autograd::make_variable(result, options.requires_grad());       \
-  }                                                                        \
-  inline at::Tensor tensor(                                                \
-      std::initializer_list<T> values, const at::TensorOptions& options) { \
-    return torch::tensor(at::ArrayRef<T>(values), options);                \
-  }                                                                        \
-  inline at::Tensor tensor(T value, const at::TensorOptions& options) {    \
-    return torch::tensor(at::ArrayRef<T>(value), options);                 \
-  }                                                                        \
-  inline at::Tensor tensor(at::ArrayRef<T> values) {                       \
-    return torch::tensor(std::move(values), at::dtype(at::k##S));          \
-  }                                                                        \
-  inline at::Tensor tensor(std::initializer_list<T> values) {              \
-    return torch::tensor(at::ArrayRef<T>(values));                         \
-  }                                                                        \
-  inline at::Tensor tensor(T value) {                                      \
-    return torch::tensor(at::ArrayRef<T>(value));                          \
-  }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
-#undef TENSOR
-
-/// NOTE: `torch::tensor({})` doesn't work at the moment because we would need to solve the
-/// ambiguous overload problem (see https://github.com/pytorch/pytorch/pull/26210#discussion_r325336686).
-/// We can create tensors with zero-size dimensions in the following way instead:
-/// - 1-D tensor: `torch::randn({0})`
-/// - N-D tensor: `torch::randn({2, 3, 0})`
-///
 /// NOTE: Currently `torch::tensor(...)` doesn't support mixed data types
 /// (i.e. `torch::tensor({{bool, 2.0}})` doesn't work). We might be able to
 /// support it in the future by iterating over all sub-lists to find
 /// the largest data type that can represent all of the elements, or by using
 /// variadic templates.
-inline at::Tensor tensor(detail::InitListTensor init_list_tensor, const at::TensorOptions& options) {
+inline at::Tensor tensor(detail::TensorDataContainer<1> init_list_tensor, const at::TensorOptions& options) {
   return autograd::make_variable(init_list_tensor.to_tensor(options), options.requires_grad());
 }
 
-inline at::Tensor tensor(detail::InitListTensor init_list_tensor) {
+inline at::Tensor tensor(detail::TensorDataContainer<1> init_list_tensor) {
   return torch::tensor(init_list_tensor, at::dtype(init_list_tensor.scalar_type()));
-}
-
-/// NOTE: We add `torch::tensor(std::initializer_list<detail::InitListTensor>)` function overload (and its options variant),
-/// so that `torch::tensor({{1, 2}})` can take this overload instead of `torch::tensor(at::ArrayRef<T>)`.
-inline at::Tensor tensor(std::initializer_list<detail::InitListTensor> init_list, const at::TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT(
-    init_list.begin()->type() != detail::InitListTensorType::Scalar,
-    "1D tensor construction such as `torch::tensor({1, 2, 3})` should never take the ",
-    "torch::tensor(std::initializer_list<detail::InitListTensor>) function overload. ",
-    "Please fix the code to avoid this regression.")
-  return torch::tensor(detail::InitListTensor(init_list), options);
-}
-
-inline at::Tensor tensor(std::initializer_list<detail::InitListTensor> init_list) {
-  return torch::tensor(init_list, at::dtype(init_list.begin()->scalar_type()));
 }
 
 /// A generic deleter function.
