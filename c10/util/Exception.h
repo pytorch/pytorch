@@ -242,7 +242,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
         __FILE__                              \
     );                                        \
   }
-#define TORCH_CHECK_FMT(cond, ...)                \
+#define TORCH_CHECK_FMT(cond, ...)            \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
         #cond " CHECK FAILED at "             \
