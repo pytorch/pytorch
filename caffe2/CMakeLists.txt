@@ -1066,8 +1066,8 @@ if(USE_CUDA)
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(
-      torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  target_link_libraries(torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+
 
 endif()
 
