@@ -37,7 +37,8 @@ class TORCH_API DistAutogradContainer {
 
   // Clean up resources for a given context_id once the autograd pass is done.
   // Sends RPC to other workers this worker knows about, telling them to clean
-  // up their context as well.
+  // up their context as well. Throws an exception if the context_id does not
+  // exist.
   void releaseContext(int64_t context_id);
 
   // Releases an autograd context if it is present on this node. Also sends RPC
