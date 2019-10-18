@@ -64,8 +64,8 @@ inline Tensor smooth_l1_loss(
 
   if (target.requires_grad()) {
     ret = _smooth_l1_loss(input, target);
-    if (options.reduction() != Reduction::None) {
-      ret = options.reduction() == Reduction::Mean ? torch::mean(ret) : torch::sum(ret);
+    if (options.reduction() != torch::Reduction::None) {
+      ret = options.reduction() == torch::Reduction::Mean ? torch::mean(ret) : torch::sum(ret);
     }
   } else {
     std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
