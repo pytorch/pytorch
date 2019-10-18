@@ -15,6 +15,7 @@ import threading
 # sent from prev rank respectively.
 # rpc_done[2] and ctx_ids[2] represents for prev of prev rank.
 # rpc_done[3] and ctx_ids[3] represents for prev of prev of prev rank.
+# rpc_done[0] and ctx_ids[0] represents for current rank, but mostly not used.
 rpc_done = [False, False, False, False]
 ctx_ids = [-1, -1, -1, -1]
 
@@ -163,8 +164,8 @@ class DistAutogradTest(object):
         self.assertEqual(ret.grad_fn, recv_function)
 
     # For a context passed from previous nested chain calls, this rank
-    # recevied two tensors t1 and t2, execute torch.add(t1, t2) and send result
-    # tensor t3 back.
+    # receives two tensors t1 and t2, executes torch.add(t1, t2) and sends
+    # result tensor t3 back.
     # For this context in this rank, it expects graph like this:
     #  send and recv functions:
     #       rpcSendBackward
@@ -191,15 +192,15 @@ class DistAutogradTest(object):
         self.assertEqual(next_funcs[0][0], next_funcs[1][0])
 
     # For a context passed from previous nested chain calls, this rank
-    # recevied two tensors t1 and t2, forwarding t1 and t2 tensors using
+    # receives two tensors t1 and t2, forwards t1 and t2 tensors using
     # nested rpc call to next dst. In return route, receive result tensor t3
     # from next dst and forwarding t3 back to previous calls.
     # For this context in this rank, it expects graph like this:
-    #  send and recv functions while recevive and forward t1 and t2:
+    #  send and recv functions for receving and forwarding t1 and t2:
     #       rpcSendBackward
     #          /          \
     # t1.recvRpcBackward    t2.recvRpcBackward
-    #  send and recv functions while receive and forward t3:
+    #  send and recv functions for receiving and forwarding t3:
     #       rpcSendBackward
     #             |
     #           t3.recvRpcBackward
