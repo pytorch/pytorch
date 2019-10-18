@@ -1086,85 +1086,49 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
-  TypePtr emitInTempEnvironment(const std::function<TypePtr()>& fn) {
-    auto b = graph->insertNode(graph->create(prim::Loop))->addBlock();
-    pushFrame(b);
-    WithInsertPoint guard(b);
-    auto ret_type = fn();
-    popFrame();
-    b->owningNode()->destroy();
-    return ret_type;
-  }
-
-  // emit a single expr from the loop comprehension so that we can correctly
-  // type the list we create, then remove the nodes we emitted
-  TypePtr getListCompType(const ListComp& lc, const TypePtr type_ptr) {
-    return emitInTempEnvironment([&]() {
-      auto li_elem = graph->insertNode(graph->createUninitialized(type_ptr));
-      emitExprsAssign(
-          List<Expr>::create(lc.range(), {lc.target()}),
-          {std::make_shared<SimpleValue>(li_elem->output())},
-          lc.range(),
-          /*n_binders*/ 1);
-      return emitExpr(lc.elt())->type();
-    });
-  }
-
-  // emit a single index of the Iterable to get the children type
-  TypePtr getIterableChildrenType(const ListComp& lc, IterableTree& tree) {
-    return emitInTempEnvironment([&]() {
-      return tree.getitem(lc.range(), method, graph->insertConstant(0))
-          ->asValue(lc.range(), method)
-          ->type();
-    });
-  }
-
-  Value* emitListComprehension(const ListComp& lc) {
-    const auto tmp_name = createTempName("$list_acc");
-    const auto sv = emitSugaredExpr(lc.iter(), 1);
-
-    TypePtr list_type;
-
-    auto siv = dynamic_cast<SimpleValue*>(sv.get());
-    if (siv && siv->getValue()->type()->cast<ListType>()) {
-      auto list_elem =
-          siv->getValue()->type()->cast<ListType>()->getElementType();
-      list_type = getListCompType(lc, list_elem);
-    } else if (auto iterable_tree = dynamic_cast<IterableTree*>(sv.get())) {
-      list_type =
-          getListCompType(lc, getIterableChildrenType(lc, *iterable_tree));
-    } else if (dynamic_cast<RangeValue*>(sv.get())) {
-      list_type = getListCompType(lc, IntType::get());
-    } else {
-      throw ErrorReport(lc.range())
-          << "iterator expression is expected to be a list, iterable, or "
-             "range, found "
-          << sv->kind();
-    }
-
-    // given `[x*2 for x in my_list]` this generates the following AST:
-    // __list_acc = []
-    // for x in my_list:
-    //  __list_acc.append(x*2)
-    const auto n =
-        graph->insertNode(graph->createList(list_type, at::ArrayRef<Value*>{}));
-    environment_stack->setVar(lc.range(), tmp_name, n->output());
-    const auto tmp_list_ident = Ident::create(lc.range(), tmp_name);
-    const auto tmp_list_var = Var::create(lc.range(), tmp_list_ident);
-    const auto append_ident = Ident::create(lc.range(), "append");
-    const auto dot_op = Select::create(lc.range(), tmp_list_var, append_ident);
-    const auto append_args_list = List<Expr>::create(lc.range(), {lc.elt()});
-    const auto append_attrs = List<Attribute>::create(lc.range(), {});
-    const auto apply_append =
-        Apply::create(lc.range(), dot_op, append_args_list, append_attrs);
-    const auto expr_stmt = ExprStmt::create(lc.range(), apply_append);
-    const auto stmt_list = List<Stmt>::create(lc.range(), {expr_stmt});
-    const auto iters_list = List<Expr>::create(lc.range(), {lc.iter()});
+  Value* emitListComprehension(const ListComp& lc, const TypePtr& type_hint) {
+    const auto loc = lc.range();
     const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
-    const auto for_loop =
-        For::create(lc.range(), targets_list, iters_list, stmt_list);
-    emitFor(for_loop);
-    return n->output();
+    const auto itrs = List<Expr>::create(lc.range(), {lc.iter()});
+    auto placeholder_node =
+        graph->insertNode(create(prim::Uninitialized, loc, 1));
+    Value* list_value = nullptr;
+    if (type_hint) {
+      if (!type_hint->cast<ListType>()) {
+        throw ErrorReport(loc)
+            << "Expected list type annotation for list comprehension"
+               ", found "
+            << type_hint->python_str();
+      }
+      auto list_node =
+          graph->createList(type_hint->cast<ListType>()->getElementType(), {})
+              ->insertBefore(placeholder_node);
+      list_value = list_node->output();
+    }
+    auto emit_body = [&]() {
+      auto comprehension_out = emitExpr(lc.elt());
+      // if (*iter_pointer)
+      if (list_value == nullptr) {
+        auto li_node = graph->createList(comprehension_out->type(), {})
+                           ->insertBefore(placeholder_node);
+        list_value = li_node->output();
+      }
+      NamedValue self = NamedValue(loc, "self", list_value);
+      NamedValue input = NamedValue(loc, "", comprehension_out);
+      emitBuiltinCall(loc, *graph, aten::append, self, {input}, {}, true);
+    };
+    emitFor(targets_list, itrs, loc, emit_body);
+    placeholder_node->destroy();
+
+    // there was no type hint and this was emitted as a list comprehension over
+    // an iterable containing a module list, and it had length zero
+    // TODO: error or create tensor list ?
+    if (list_value == nullptr) {
+      throw ErrorReport(loc)
+          << "Must provide a type annotation if iterating over a modulelist"
+          << "of size zero in a list comprehension";
+    }
+    return list_value;
   }
 
   // Insert subtyping refinements
@@ -1566,7 +1530,7 @@ struct to_ir {
   // https://github.com/onnx/onnx/blob/master/docs/Operators.md#Loop
   void emitLoopCommon(
       SourceRange range,
-      const List<Stmt>& body,
+      const std::function<void()>& emit_body,
       const SugaredValuePtr& iter_val,
       c10::optional<List<Expr>> targets,
       c10::optional<Expr> cond) {
@@ -1621,20 +1585,18 @@ struct to_ir {
         }
         emitExprsAssign(target_exprs, {sv}, range, /*n_binders=*/1);
       }
-
-      emitStatements(body);
-
+      emit_body();
       popFrame();
     }
   }
 
-  void emitFor(const For& stmt) {
-    auto targets = stmt.targets();
-    auto itrs = stmt.itrs();
-    auto body = stmt.body();
-    auto loc = stmt.range();
-    if (stmt.itrs().size() != 1) {
-      throw ErrorReport(stmt) << "List of iterables is not supported currently";
+  void emitFor(
+      const List<Expr>& targets,
+      const List<Expr>& itrs,
+      const SourceRange& loc,
+      const std::function<void()>& emit_body) {
+    if (itrs.size() != 1) {
+      throw ErrorReport(loc) << "List of iterables is not supported currently";
     }
     // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
@@ -1650,7 +1612,7 @@ struct to_ir {
     // values would have to subtype the input type.
 
     if (!iterable->emitUnrolled()) {
-      return emitLoopCommon(loc, body, iterable->getValue(), targets, {});
+      return emitLoopCommon(loc, emit_body, iterable->getValue(), targets, {});
     }
     TORCH_INTERNAL_ASSERT(
         iterable->getLen(), "Static For should have defined length");
@@ -1661,13 +1623,19 @@ struct to_ir {
       auto sugared_value = iterable->getValue()->getitem(loc, method, index);
       emitExprsAssign(
           targets, {sugared_value}, itrs[0].range(), /*n_binders=*/1);
-      emitStatements(body);
+      emit_body();
     }
+  }
+
+  void emitFor(const For& stmt) {
+    auto emit_body = [&]() { emitStatements(stmt.body()); };
+    emitFor(stmt.targets(), stmt.itrs(), stmt.range(), emit_body);
   }
 
   void emitWhile(const While& stmt) {
     auto cond = stmt.cond();
-    emitLoopCommon(stmt.range(), stmt.body(), nullptr, {}, cond);
+    auto emit_body = [&]() { emitStatements(stmt.body()); };
+    emitLoopCommon(stmt.range(), emit_body, nullptr, {}, cond);
   }
 
   // Currently we do not support assigning exceptions to variables,
@@ -2800,7 +2768,7 @@ struct to_ir {
       } break;
       case TK_LIST_COMP: {
         auto lc = ListComp(tree);
-        return emitListComprehension(lc);
+        return emitListComprehension(lc, type_hint);
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
