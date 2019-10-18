@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from .QConfig import QConfig
+from .qconfig import QConfig
 
 class PackedParams(torch.nn.Module):
     def __init__(self):

@@ -89,65 +89,44 @@ extern "C" void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int 
 namespace at {
 namespace native {
 
+#ifdef USE_LAPACK
 // Define the per-batch functions to be used in the main implementation of the batched
 // linear algebra operations
 template<class scalar_t>
-void lapackSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info) {
-  AT_ERROR("solve only takes float or double or complex<float or double> Tensors");
-}
+void lapackSolve(int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
 template<class scalar_t>
-void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info) {
-  AT_ERROR("lu only takes float or double or complex<float or double> Tensors");
-}
+void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info);
 
 template<class scalar_t>
-void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwork, int *info) {
-  AT_ERROR("getri only takes float or double or complex<float or double> Tensors");
-}
+void lapackGetri(int n, scalar_t *a, int lda, int *ipiv, scalar_t *work, int lwork, int *info);
 
 template<class scalar_t>
-void lapackCholeskySolve(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
-  AT_ERROR("cholesky_solve only takes float or double or complex<float or double> Tensors");
-}
+void lapackCholeskySolve(char uplo, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info);
 
 template<class scalar_t>
-void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info) {
-  AT_ERROR("cholesky only takes float or double or complex<float or double> Tensors");
-}
+void lapackCholesky(char uplo, int n, scalar_t *a, int lda, int *info);
 
 template<class scalar_t>
-void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info) {
-  AT_ERROR("triangular_solve only takes float or double or complex<float or double> Tensors");
-}
+void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, int *info);
 
 template<class scalar_t>
-void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info) {
-  AT_ERROR("geqrf only takes float or double or complex<float or double> Tensors");
-}
+void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
 template<class scalar_t>
-void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info) {
-  AT_ERROR("orgqr only takes float or double or complex<float or double> Tensors");
-}
+void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
 template<class scalar_t>
-void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info) {
-  AT_ERROR("symeig only takes float or double Tensors");
-}
+void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info);
 
 template<class scalar_t, class value_t=scalar_t>
 void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
-               value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, int *rwork, int *iwork, int *info) {
-  AT_ERROR("svd only takes float or double Tensors");
-}
+               value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, int *rwork, int *iwork, int *info);
 
 template<class scalar_t>
-void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info) {
-  AT_ERROR("lu_solve only takes float or double or complex<float or double> Tensors");
-}
+void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
-#ifdef USE_LAPACK
+
 template<> void lapackSolve<std::complex<double>>(int n, int nrhs, std::complex<double> *a, int lda, int *ipiv, std::complex<double> *b, int ldb, int *info) {
   zgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
@@ -1112,13 +1091,13 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   auto n = self.size(-1);
   auto mn = std::min(m, n);
   auto mx = std::max(m, n);
-  int64_t lrwork; // These settings are based on LAPACK 3.8.
+  int64_t lrwork; // These settings are valid for on LAPACK 3.6+
   if (jobz == 'N'){
-    lrwork = 5*mn;
-  }else if (mx > 10*mn){
-    lrwork = 5*mn*mn + 5*mn;
+    lrwork = 7 * mn;
+  }else if (mx > 10 * mn){
+    lrwork = 7 * mn * mn + 7 * mn;
   } else {
-    lrwork = std::max(5*mn*mn + 5*mn, 2*mx*mn + 2*mn*mn + mn);
+    lrwork = std::max(7 * mn * mn + 7 * mn, 2 * mx * mn + 2 *mn * mn + mn);
   }
   Tensor rwork = at::empty({std::max(int64_t(1), lrwork)}, at::kInt);
   auto rwork_data = rwork.data_ptr<int>();

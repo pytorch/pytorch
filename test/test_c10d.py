@@ -28,8 +28,7 @@ from torch.nn.parallel import DistributedDataParallel
 from common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout, skip_if_rocm
-from common_utils import TestCase, load_tests, run_tests, default_floating_dtype
-from common_utils import retry_on_address_already_in_use_error
+from common_utils import TestCase, load_tests, run_tests, retry_on_address_already_in_use_error
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -954,20 +953,19 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootRank = self.rank
             pg.scatter([t1], [[t1] * self.world_size, [t1] * self.world_size], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
+        desired_list_size = self.world_size
+        incorrect_list_size = self.world_size - 1
+        err_str = "Incorrect input list size {}. Input list size should be {}"
+        with self.assertRaisesRegex(ValueError, err_str.format(incorrect_list_size, desired_list_size)):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
-            pg.scatter([t1], [[t1] * (self.world_size - 1)], opts)
+            pg.scatter([t1], [[t1] * incorrect_list_size], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
+        incorrect_list_size = self.world_size + 1
+        with self.assertRaisesRegex(ValueError, err_str.format(incorrect_list_size, desired_list_size)):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
-            pg.scatter([t1], [[t1] * (self.world_size + 1)], opts)
-
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
-            opts = c10d.ScatterOptions()
-            opts.rootRank = self.rank
-            pg.scatter([t1], [[t1] * (self.world_size + 1)], opts)
+            pg.scatter([t1], [[t1] * incorrect_list_size], opts)
 
         with self.assertRaisesRegex(ValueError, "invalid tensor type"):
             opts = c10d.ScatterOptions()
@@ -2089,8 +2087,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
-    @default_floating_dtype(torch.double)
-    def test_sync_params_no_buffers(self):
+    def test_sync_params_no_buffers(self, dtype=torch.double):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
@@ -2098,9 +2095,9 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # Use all available devices on every process here (data is small, so should be fine).
         devices = gpus_for_rank(self.world_size)[self.rank]
-        target = torch.arange(10, dtype=torch.float64, device='cuda:{}'.format(devices[0])).chunk(5)
+        target = torch.arange(10, dtype=dtype, device='cuda:{}'.format(devices[0])).chunk(5)
         parameter_data = [target]
-        parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+        parameter_data += [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
         buffer_data = [[]] * len(parameter_data)
 
         c10d._sync_params(
@@ -2117,26 +2114,26 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
-    @default_floating_dtype(torch.double)
-    def test_sync_params_with_buffers(self):
+    @skip_if_rocm
+    def test_sync_params_with_buffers(self, dtype=torch.double):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
 
         devices = gpus_for_rank(self.world_size)[self.rank]
-        target = torch.arange(10, dtype=torch.float64, device='cuda:{}'.format(devices[0])).chunk(5)
+        target = torch.arange(10, dtype=dtype, device='cuda:{}'.format(devices[0])).chunk(5)
         parameter_data = [target]
-        parameter_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+        parameter_data += [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
 
         # sync_params should do a dist_broadcast for buffers, so we only populate the master buffers and
         # then check that other processes' tensors end up matching.
 
         if self.is_master:
             buffer_data = [target]
-            buffer_data += [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
+            buffer_data += [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices[1:]]
         else:
-            buffer_data = [torch.zeros(10, device=torch.device('cuda', d)).chunk(5) for d in devices]
+            buffer_data = [torch.zeros(10, dtype=dtype, device=torch.device('cuda', d)).chunk(5) for d in devices]
 
         c10d._sync_params(
             process_group,

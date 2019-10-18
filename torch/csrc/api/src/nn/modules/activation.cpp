@@ -161,6 +161,19 @@ Tensor LogSoftmaxImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
+void Softmax2dImpl::reset() {}
+
+void Softmax2dImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Softmax2d()";
+}
+
+Tensor Softmax2dImpl::forward(const Tensor& input) {
+  TORCH_CHECK(input.dim() == 4, "Softmax2d requires a 4D tensor as input");
+  return F::softmax(input, SoftmaxOptions(/*dim=*/1));
+}
+
+// ============================================================================
+
 PReLUImpl::PReLUImpl(const PReLUOptions& options_) : options(options_) {
   reset();
 }
@@ -305,6 +318,50 @@ void SoftsignImpl::reset() {}
 
 void SoftsignImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Softsign()";
+}
+
+// ============================================================================
+
+Tensor TanhImpl::forward(const Tensor& input) {
+  return torch::tanh(input);
+}
+
+void TanhImpl::reset() {}
+
+void TanhImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Tanh()";
+}
+
+// ============================================================================
+
+Tensor TanhshrinkImpl::forward(const Tensor& input) {
+  return F::tanhshrink(input);
+}
+
+void TanhshrinkImpl::reset() {}
+
+void TanhshrinkImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Tanhshrink()";
+}
+
+// ============================================================================
+
+ThresholdImpl::ThresholdImpl(const ThresholdOptions& options_)
+    : options(options_) {}
+
+Tensor ThresholdImpl::forward(Tensor& input) {
+  return F::threshold(input, options);
+}
+
+void ThresholdImpl::reset() {}
+
+void ThresholdImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Threshold(threshold=" << options.threshold()
+         << ", value=" << options.value();
+  if (options.inplace()) {
+    stream << std::boolalpha << ", inplace=" << options.inplace();
+  }
+  stream << ")";
 }
 
 } // namespace nn
