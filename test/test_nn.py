@@ -1634,6 +1634,16 @@ class TestNN(NNTestCase):
         with self.assertRaises(TypeError):
             net.to(cpu, torch.tensor(3, dtype=torch.long), non_blocking=True)
 
+    def test_RNN_nonlinearity(self):
+        rnn = torch.nn.RNN(1, 10)
+        self.assertEqual(rnn.nonlinearity, 'tanh')
+
+        rnn = torch.nn.RNN(1, 10, nonlinearity='relu')
+        self.assertEqual(rnn.nonlinearity, 'relu')
+
+        with self.assertRaisesRegex(ValueError, 'Unknown nonlinearity'):
+            rnn = torch.nn.RNN(1, 10, nonlinearity='garbage')
+
     def test_module_apply_inplace_op(self):
         def add_one_inplace(t):
             return t.add_(1.0)
