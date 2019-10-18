@@ -40,9 +40,7 @@ from torch._six import string_classes, inf
 import torch.backends.cudnn
 import torch.backends.mkl
 
-
 torch.backends.disable_global_flags()
-
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--subprocess', action='store_true',
@@ -443,7 +441,7 @@ try:
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
                 max_examples=100,
-                verbosity=hypothesis.Verbosity.quiet))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -467,7 +465,7 @@ try:
                 database=None,
                 max_examples=100,
                 min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.quiet))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
