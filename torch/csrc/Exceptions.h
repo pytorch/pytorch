@@ -12,8 +12,12 @@
 #include "c10/util/Exception.h"
 
 /// NOTE [ Conversion Cpp Python Warning ]
-/// Python warning semantic is different from the cpp one in that
-/// they can raise errors. This leads to the following cases:
+/// The warning handler cannot set python warnings immediately
+/// as it requires acquirering the GIL (potential deadlock)
+/// and would need to properly exit if the warning raised a
+/// python error. To solve this, we buffer the warnings and
+/// process them when we go back to python.
+/// This leads to the following cases:
 /// - The GIL is acquired in the EnforceWarningBuffer destructor
 ///   - If there is no Error raised in the inner try/catch, the
 ///     bufferred warnings are processed as python warnings.
