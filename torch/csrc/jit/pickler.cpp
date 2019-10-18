@@ -415,17 +415,11 @@ void Pickler::pushDouble(double value) {
 void Pickler::pushLong(const std::string& data) {
   uint64_t size = data.size();
 
-  if (size <= std::numeric_limits<uint8_t>::max()) {
-    push<PickleOpCode>(PickleOpCode::LONG1);
-    push<uint8_t>(size);
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        data.size() > std::numeric_limits<uint32_t>::max(),
-        "Cannot pickle a long with a size larger than 4 bytes")
-    push<PickleOpCode>(PickleOpCode::LONG4);
-    // TODO: should this be uint32_t instead?
-    push<uint64_t>(size);
-  }
+  TORCH_INTERNAL_ASSERT(
+    size <= std::numeric_limits<uint8_t>::max(),
+    "Cannot pickle a long larger than 255 bytes");
+  push<PickleOpCode>(PickleOpCode::LONG1);
+  push<uint8_t>(size);
   pushBytes(data);
 }
 
