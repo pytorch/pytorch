@@ -68,7 +68,7 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   return lower;
 }
 
-ScalarType result_type(const TensorList& tensors) {
+ScalarType result_type(TensorList tensors) {
   auto dimResult = ScalarType::Undefined;
   auto zeroResult = ScalarType::Undefined;
   auto wrappedResult = ScalarType::Undefined;
@@ -118,7 +118,9 @@ bool can_cast(const at::ScalarType from, const at::ScalarType to) {
 }
 
 ScalarType promote_types(ScalarType type1, ScalarType type2) {
-  return promoteTypes(type1, type2);
+  ScalarType ret = promoteTypes(type1, type2);
+  TORCH_CHECK(ret != ScalarType::Undefined, "Promotion from ", type1, " and ", type2, " is unsupported.");
+  return ret;
 }
 
 }} // namespace at::native
