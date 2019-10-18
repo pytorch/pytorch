@@ -8718,7 +8718,7 @@ class TestNNDeviceType(NNTestCase):
         test('threshold', 3, 2, inplace=True)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_max_pool2d_nhwc(self):
+    def test_max_pool2d_nhwc(self, device):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
         grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32, device="cuda")
