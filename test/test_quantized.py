@@ -1633,7 +1633,7 @@ class TestQNNPackOps(TestCase):
            channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
            height=st.integers(4, 10),
            width=st.integers(4, 10),
-           kernel=st.integers(2, 4),
+           kernel=st.integers(2, 5),
            stride=st.integers(1, 2),
            padding=st.integers(1, 2),
            scale=st.floats(0.2, 1.6),
@@ -1657,7 +1657,6 @@ class TestQNNPackOps(TestCase):
             X_init = torch.from_numpy(np.random.randint(
                 0, 50, (batch_size, channels, height, width)))
 
-            padding = 0
             X = scale * (X_init - zero_point).to(dtype=torch.float)
 
             # Check constraints
@@ -1669,7 +1668,6 @@ class TestQNNPackOps(TestCase):
             assume(oH > 0)
             oW = pool_output_shape(iW, kernel, padding, stride, 1)
             assume(oW > 0)
-
             k = (kernel, kernel)
             s = (stride, stride)
             p = (padding, padding)
@@ -1679,10 +1677,12 @@ class TestQNNPackOps(TestCase):
             x_q = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                             dtype=torch.quint8)
 
-            a_pool = F.avg_pool2d(x_q.int_repr().to(torch.float), kernel_size=k, stride=s, padding=p)
+            a_pool = F.avg_pool2d(x_q.dequantize().to(torch.float), kernel_size=k, stride=s, padding=p)
             qa_pool = q_avg_pool(x_q, k, s, p)
-
-            np.testing.assert_array_almost_equal(a_pool.numpy(),
+            # Quantize Ref Output
+            a_pool_q = torch.quantize_per_tensor(a_pool, scale=scale, zero_point=zero_point,
+                                                 dtype=torch.quint8)
+            np.testing.assert_array_almost_equal(a_pool_q.int_repr().numpy(),
                                                  qa_pool.int_repr().numpy(), decimal=0)
 
 """Tests the correctness of the tensor comparators."""
