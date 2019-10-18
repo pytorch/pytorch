@@ -156,17 +156,6 @@ int64_t DistAutogradContainer::getMaxId() {
   return max_id_;
 }
 
-void DistAutogradContainer::setCurrentContextId(int64_t contextId) {
-  TORCH_INTERNAL_ASSERT(
-      current_context_id_ == kInvalidContextId,
-      "Already have an autograd context id for this thread.");
-  current_context_id_ = contextId;
-}
-
-void DistAutogradContainer::clearCurrentContext() {
-  current_context_id_ = -1;
-}
-
 } // namespace autograd
 } // namespace distributed
 } // namespace torch

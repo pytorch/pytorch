@@ -17,14 +17,15 @@ RpcWithAutograd::RpcWithAutograd(
     worker_id_t fromWorkerId,
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
-    rpc::Message&& wrappedMessage)
+    std::unique_ptr<RpcCommandBase> wrappedRpc)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
-      autogradMetadata_(autogradMetadata),
-      wrappedMessage_(std::move(wrappedMessage)) {
+      autogradMetadata_(autogradMetadata) {
+  TORCH_INTERNAL_ASSERT(wrappedRpc != nullptr, "wrappedRpc cannot be null!");
   TORCH_INTERNAL_ASSERT(
       messageType_ == MessageType::FORWARD_AUTOGRAD_REQ ||
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
+  wrappedMessage_ = std::move(*wrappedRpc).toMessage();
   tensors_ = wrappedMessage_.tensors();
   wrappedMessageType_ = wrappedMessage_.type();
 }
