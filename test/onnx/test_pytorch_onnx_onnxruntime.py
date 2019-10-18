@@ -498,15 +498,18 @@ class TestONNXRuntime(unittest.TestCase):
         # for some cases where the nearest pixel's index is
         # not calculated the same way for ONNX and PyTorch
         # (the operation involves a floor in PyTorch vs
-        # in round_prefer_floor ONNX). (The below tests
-        # do not  show this error for nearest mode for
-        # all opsets)
+        # in round_prefer_floor ONNX).
+        # The below tests do not show this error for
+        # nearest mode for all opsets; the tests are added
+        # as a reference to detect changes in the behavior of
+        # the exporter, but it is to be noted that some cases
+        # won't be matching.
         modes = ["nearest", "linear", "cubic"]
         if self.opset_version < 11:
             modes = ["nearest"]
         x = [torch.randn(1, 2, 4, requires_grad=True),
              torch.randn(1, 2, 4, 4, requires_grad=True),
-             torch.randn(1, 2, 4, 4, 6, requires_grad=True)]
+             torch.randn(1, 2, 4, 4, 4, requires_grad=True)]
 
         for mode in modes:
             for xi in x:
