@@ -367,9 +367,16 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
     for key in sorted(serialized_storages.keys()):
         # with zip_file.open('tensors/{}'.format(key), 'w') as tensor_file:
-        tensor_buf = io.BytesIO()
-        serialized_storages[key]._write_file(tensor_buf, _should_read_directly(tensor_buf))
-        write_buf('tensors/{}'.format(key), tensor_buf)
+        # tensor_buf = io.BytesIO()
+        name = 'tensors/{}'.format(key)
+        storage = serialized_storages[key]
+        # breakpoint()
+        # serialized_storages[key]._write_file(open('out.tneosr', 'wb'), True)
+        # out.write_record(name, )
+        a = torch.empty(0).set_(storage)
+        print("Saving a tensor...")
+        out.write_a_storage(name, a)
+        # torch._C.write_storage(out, storage)
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
