@@ -11,7 +11,7 @@ PixelShuffleImpl::PixelShuffleImpl(
 
 void PixelShuffleImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::PixelShuffle(upscale_factor="
-	 << options.upscale_factor() << ")";
+         << options.upscale_factor() << ")";
 }
 
 void PixelShuffleImpl::reset() {}
