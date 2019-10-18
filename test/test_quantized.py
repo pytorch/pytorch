@@ -1696,7 +1696,7 @@ class TestQNNPackOps(TestCase):
             Y = torch.mean(qX.dequantize(), dim)
             Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
             qY = torch.mean(qX, dim)
-            self.assertEqual(Y, qY.dequantize())
+            np.testing.assert_array_almost_equal(Y, qY.dequantize(), decimal=0)
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
