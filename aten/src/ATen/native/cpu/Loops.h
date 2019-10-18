@@ -46,7 +46,7 @@ namespace at { namespace native { namespace {
 template<typename dest_t>
 inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CASE)
     default:
       TORCH_CHECK(false, "Unexpected scalar type");
   }
@@ -58,7 +58,7 @@ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
 template<typename src_t>
 inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CASE)
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(CASE)
     default:
       TORCH_CHECK(false, "Unexpected scalar type");
   }
