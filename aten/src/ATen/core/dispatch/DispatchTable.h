@@ -142,12 +142,12 @@ class DispatchTable final {
    * @param stack Stack with arguments to invoke the kernel function with
    * @return Kernel function pointing to the right kernel for the given arguments.
    */
-   const KernelFunction& lookup(const Stack* stack) const {
+   const KernelFunction& lookupBoxed(const Stack* stack) const {
      return lookup_([&] () -> c10::optional<TensorTypeId> {
        if (!dispatch_strategy_.is_valid_) {
          return c10::nullopt;
        }
-       return dispatch_strategy_.get_dispatch_key(stack);
+       return dispatch_strategy_.get_dispatch_key_boxed(stack);
      });
    }
 
@@ -159,12 +159,12 @@ class DispatchTable final {
     * @return Kernel function pointing to the right kernel for the given arguments.
     */
    template<class... Args>
-   const KernelFunction& lookup(const Args&... args) const {
+   const KernelFunction& lookupUnboxed(const Args&... args) const {
      return lookup_([&] () -> c10::optional<TensorTypeId> {
        if (!dispatch_strategy_.is_valid_) {
          return c10::nullopt;
        }
-       return dispatch_strategy_.get_dispatch_key<Args...>(args...);
+       return dispatch_strategy_.get_dispatch_key_unboxed<Args...>(args...);
      });
    }
 
@@ -196,7 +196,7 @@ private:
     // as long as they only have fallback kernels and no dispatched kernels.
     bool is_valid_;
 
-    TensorTypeId get_dispatch_key(const Stack* stack) const {
+    TensorTypeId get_dispatch_key_boxed(const Stack* stack) const {
 
       TensorTypeSet ts;
       for (const auto& ivalue : torch::jit::last(*stack, num_args_)) {
@@ -216,8 +216,8 @@ private:
     }
 
     template<class... Args>
-    TensorTypeId get_dispatch_key(const Args&... args) const {
-      AT_ASSERT(sizeof...(args) == num_args_, "Wrong number of arguments");
+    TensorTypeId get_dispatch_key_unboxed(const Args&... args) const {
+      AT_ASSERT(sizeof...(args) == num_args_, "Wrong number of arguments. Schema says ", num_args_, " but was called with ", sizeof...(args));
       return at::impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(args...));
     }
   };

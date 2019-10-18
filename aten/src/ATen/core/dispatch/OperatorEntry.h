@@ -30,7 +30,7 @@ public:
   template<class Return, class... Args>
   Return callUnboxed(Args... args) const {
     return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-        return dispatchTable.lookup(args...)
+        return dispatchTable.lookupUnboxed(args...)
             .template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
     });
   }
@@ -38,14 +38,14 @@ public:
   template<class Return, class... Args>
   Return callUnboxedOnly(Args... args) const {
     return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-        return dispatchTable.lookup(args...)
+        return dispatchTable.lookupUnboxed(args...)
             .template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
     });
   }
 
   void callBoxed(Stack* stack) const {
     return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
-        dispatchTable.lookup(stack).callBoxed(stack);
+        dispatchTable.lookupBoxed(stack).callBoxed(stack);
     });
   }
 
