@@ -65,58 +65,28 @@ static constexpr int launch_bound2 = 4;
 namespace at { namespace native {
 
 // Fetch a value with type src_type from ptr, and cast it to dest_t.
+#define CASE(type, scalartype) case ScalarType::scalartype: return dest_t(*(const type *)ptr);
 template<typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
-    case ScalarType::Byte:
-      return *(const uint8_t *)ptr;
-    case ScalarType::Char:
-      return *(const int8_t *)ptr;
-    case ScalarType::Double:
-      return *(const double *)ptr;
-    case ScalarType::Float:
-      return *(const float *)ptr;
-    case ScalarType::Int:
-      return *(const int32_t *)ptr;
-    case ScalarType::Long:
-      return *(const int64_t *)ptr;
-    case ScalarType::Short:
-      return *(const int16_t *)ptr;
-    case ScalarType::Half:
-      return *(const at::Half *)ptr;
-    case ScalarType::Bool:
-      return *(const bool *)ptr;
+    AT_FORALL_GPU_SCALAR_TYPES(CASE)
     default:
       assert(false);
   }
 }
+#undef CASE
 
 // Cast a value with type src_t into dest_type, and store it to ptr.
+#define CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = value;
 template<typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-    case ScalarType::Byte:
-      *(uint8_t *)ptr = value; break;
-    case ScalarType::Char:
-      *(int8_t *)ptr = value; break;
-    case ScalarType::Double:
-      *(double *)ptr = value; break;
-    case ScalarType::Float:
-      *(float *)ptr = value; break;
-    case ScalarType::Int:
-      *(int32_t *)ptr = value; break;
-    case ScalarType::Long:
-      *(int64_t *)ptr = value; break;
-    case ScalarType::Short:
-      *(int16_t *)ptr = value; break;
-    case ScalarType::Half:
-      *(at::Half *)ptr = value; break;
-    case ScalarType::Bool:
-      *(bool *)ptr = value; break;
+    AT_FORALL_GPU_SCALAR_TYPES(CASE)
     default:
       assert(false);
   }
 }
+#undef CASE
 
 template<int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
