@@ -54,7 +54,7 @@ inline void fill_tensor(const TensorDataContainer<D>& init_list_tensor, at::Tens
 // otherwise `recursive template instantiation exceeded maximum depth`
 // error would be thrown.
 template <>
-inline void fill_tensor(const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS+1>& init_list_tensor, at::Tensor tensor) {
+inline void fill_tensor(const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS>& init_list_tensor, at::Tensor tensor) {
   TORCH_CHECK(
     false,
     "Tensor with more than ", TENSOR_CTOR_MAX_NUM_DIMS, " dimensions is not supported"); // yf225 TODO: add a test for this
@@ -95,7 +95,7 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<
 template <>
 inline std::ostream& operator<<(
     std::ostream& stream,
-    const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS+1>& init_list_tensor) {
+    const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS>& init_list_tensor) {
   TORCH_CHECK(
     false,
     "Tensor with more than ", TENSOR_CTOR_MAX_NUM_DIMS, " dimensions is not supported"); // yf225 TODO: add a test for this
