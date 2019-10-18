@@ -26,6 +26,13 @@ PythonRpcHandler::PythonRpcHandler() {
   pySerialize_ = getFunction(module, "serialize");
 }
 
+void PythonRpcHandler::cleanup() {
+  AutoGIL ag;
+  pyRunFunction_ = py::none();
+  pyLoadReturnValue_ = py::none();
+  pySerialize_ = py::none();
+}
+
 PythonRpcHandler& PythonRpcHandler::getInstance() {
   static PythonRpcHandler handler;
   return handler;
@@ -70,13 +77,6 @@ py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
   AutoGIL ag;
   return pyLoadReturnValue_(
       py::bytes(serializedObj.payload_), serializedObj.tensors_);
-}
-
-void PythonRpcHandler::cleanUp() {
-  AutoGIL ag;
-  pyRunFunction_ = py::none();
-  pyLoadReturnValue_ = py::none();
-  pySerialize_ = py::none();
 }
 
 } // namespace rpc

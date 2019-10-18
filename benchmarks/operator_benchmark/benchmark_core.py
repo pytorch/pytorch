@@ -73,7 +73,10 @@ class BenchmarkRunner(object):
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
         self.print_per_iter = False
-        if self.args.iterations:
+        # 100 is the default warmup iterations 
+        if self.args.warmup_iterations == -1: 
+            self.args.warmup_iterations = 100
+        if self.args.iterations and self.args.iterations != -1:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
         # when a specific test is selected by a user, we don't need
@@ -194,6 +197,9 @@ class BenchmarkRunner(object):
                 iters, run_time_sec, curr_test_total_time, self.has_explicit_iteration_count)
 
             if results_are_significant:
+                # Print out the last 50 values when running with AI PEP
+                if self.args.ai_pep_format:
+                    test_case._print_per_iter()
                 break
 
             # Re-estimate the hopefully-sufficient
