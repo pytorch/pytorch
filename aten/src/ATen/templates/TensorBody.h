@@ -662,3 +662,9 @@ static inline TensorTypeId legacyExtractTypeId(const Tensor& t) {
 }
 
 } // namespace at
+
+namespace torch { namespace autograd {
+
+using Variable = at::Tensor;
+
+}} // namespace torch::autograd

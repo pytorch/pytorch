@@ -4,7 +4,11 @@
 #include <functional>
 #include <memory>
 
+#include <ATen/Tensor.h>
 #include <torch/csrc/utils/hash.h>
+
+// TODO: this is orphaned right now and should go to where the actual
+// definition of Edge is
 
 // The idiomatic way of enabling use of a custom type as the key of hash
 // containers in C++11. This method removes the requirement of having to pass
