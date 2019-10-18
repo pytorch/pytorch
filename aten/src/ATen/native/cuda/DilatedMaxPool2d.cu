@@ -33,7 +33,7 @@ static __device__ inline int p_end(int size, int pad, int pooled_size, int strid
 
 // kernels borrowed from Caffe
 template <typename scalar_t, typename accscalar_t>
-__global__ void MaxPoolForwardNCHW(const int nthreads, const scalar_t* bottom_data,
+__global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom_data,
     const int num, const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
@@ -72,7 +72,7 @@ __global__ void MaxPoolForwardNCHW(const int nthreads, const scalar_t* bottom_da
 
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-__global__ void MaxPoolForwardNHWC(const scalar_t* bottom_data,
+__global__ void max_pool_forward_nhwc(const scalar_t* bottom_data,
                                    const int channels, const int height,
                                    const int width, const int pooled_height, const int pooled_width,
                                    const int kernel_h, const int kernel_w, const int stride_h,
@@ -154,7 +154,7 @@ C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 #else
 C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)
 #endif
-__global__ void MaxPoolBackwardNCHW(const int nthreads, const scalar_t* top_diff,
+__global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_diff,
     const int64_t* top_mask, const int num, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
@@ -164,7 +164,6 @@ __global__ void MaxPoolBackwardNCHW(const int nthreads, const scalar_t* top_diff
     CUDA_KERNEL_LOOP(index, height*width) {
     int h = index/width;
     int w = index - h * width;
-//get some templating performance benefits without actually templating
     int phstart = p_start(h, pad_h, kernel_h, dilation_h, stride_h);
     int phend = p_end(h, pad_h, pooled_height, stride_h);
     int pwstart = p_start(w, pad_w, kernel_w, dilation_w, stride_w);
@@ -176,7 +175,6 @@ __global__ void MaxPoolBackwardNCHW(const int nthreads, const scalar_t* top_diff
         int offset = (n * channels + c) * pooled_height * pooled_width;
         top_diff += offset;
         top_mask += offset;
-//get some templating performance benefits without actually templating
         if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
         for (int ph = phstart; ph < phend; ++ph) {
           for (int pw = pwstart; pw < pwend; ++pw) {
@@ -197,7 +195,7 @@ __global__ void MaxPoolBackwardNCHW(const int nthreads, const scalar_t* top_diff
 
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-__global__ void MaxPoolBackwardNHWC(const int nthreads, const scalar_t* top_diff,
+__global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_diff,
                                     const int64_t* top_mask, const int num, const int channels,
                                     const int height, const int width, const int pooled_height,
                                     const int pooled_width, const int kernel_h, const int kernel_w,
@@ -371,7 +369,7 @@ void max_pool2d_with_indices_out_cuda_template(
           int grid_z = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE);
           const dim3 grid(grid_x, grid_y, grid_z);
 
-          MaxPoolForwardNHWC<scalar_t, scalar_t>
+          max_pool_forward_nhwc<scalar_t, scalar_t>
           <<<grid, block, nInputPlane * block_y * block_z * (sizeof(int) + sizeof(scalar_t)), at::cuda::getCurrentCUDAStream()>>>(
               input_data,
                   nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
@@ -383,7 +381,7 @@ void max_pool2d_with_indices_out_cuda_template(
         case MemoryFormat::Contiguous: {
           const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
                                            BLOCK_THREADS);
-          MaxPoolForwardNCHW<scalar_t, scalar_t>
+          max_pool_forward_nchw<scalar_t, scalar_t>
               <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
               count, input_data,
                   nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
@@ -519,7 +517,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
           int grid_z = cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE);
           const dim3 grid(grid_x, grid_y, grid_z);
 
-          MaxPoolBackwardNHWC<scalar_t, accscalar_t>
+          max_pool_backward_nhwc<scalar_t, accscalar_t>
           <<<grid, block, nInputPlane * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>>(
               count,
                   gradOutput_data,
@@ -544,7 +542,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
           uint64_t maxGridZ = at::cuda::getCurrentDeviceProperties()->maxGridSize[2];
           if (maxGridZ < grid.z) grid.z = maxGridZ;
 
-          MaxPoolBackwardNCHW<scalar_t, accscalar_t>
+          max_pool_backward_nchw<scalar_t, accscalar_t>
           <<<grid, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
               count,
                   gradOutput_data,
@@ -555,7 +553,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
                   gradInput_data);
           break;
         }
-        default: AT_ERROR("Unsupported memory format. Supports only ChannelsLast, Contiguous");
+        default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
       }
     }
   );
