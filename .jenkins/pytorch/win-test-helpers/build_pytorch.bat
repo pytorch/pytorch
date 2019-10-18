@@ -106,7 +106,7 @@ if not "%USE_CUDA%"=="0" (
         del /S /Q %%i
       )
     )
-    :: copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
+    echo copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
   )
 
   set CUDA_NVCC_EXECUTABLE=%CUDA_PATH%\bin\nvcc
