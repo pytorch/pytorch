@@ -86,43 +86,6 @@ struct TORCH_API Variable : public at::Tensor {
   /// Default constructor.
   Variable() = default;
 
-  // Factory Functions
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  // TODO: These factory functions don't need to be friends anymore. Move them out of
-  // the Variable class.
-
-  /// Creates a `Variable` that is a *view* of another (*base*) variable.
-  /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
-  /// `is_differentiable` is a bool that specifies whether this view is
-  /// differentiable, i.e., whether the relation should be tracked by autograd.
-  /// See NOTE [ Autograd View Variables ] for details.
-  friend Variable make_variable_view(
-      Variable base,
-      at::Tensor data,
-      bool is_differentiable,
-      bool allow_tensor_metadata_change,
-      Edge gradient_edge);
-
-  /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
-  /// `requires_grad` should be
-  /// set only for leaves, and determines whether the `Variable` will accumulate
-  /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
-  /// type *must* be `Tensor`.
-  friend Variable make_variable(
-      at::Tensor data,
-      bool requires_grad,
-      bool allow_tensor_metadata_change);
-
-  /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
-  /// `gradient_edge` should be a (function, input_nr) pair specifying the function
-  /// in the autograd graph, and what particular input of that function, this
-  /// variable is connected to.
-  friend Variable make_variable(
-      at::Tensor data,
-      Edge gradient_edge,
-      bool allow_tensor_metadata_change);
-
   // Tensor Conversions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -511,6 +474,12 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
 // Factory Functions
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/// Creates a `Variable` that is a *view* of another (*base*) variable.
+/// The `gradient_edge` is an optional (gradient_function, input_number) pair.
+/// `is_differentiable` is a bool that specifies whether this view is
+/// differentiable, i.e., whether the relation should be tracked by autograd.
+/// See NOTE [ Autograd View Variables ] for details.
+
 /// NOTE: `allow_tensor_metadata_change` is set to true by default, because there
 /// are a lot of call sites to these factory functions that need to change the
 /// variable's size or storage afterwards, and they don't expect the original
@@ -547,6 +516,11 @@ inline Variable make_variable_view(
   return Variable();
 }
 
+/// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
+/// `requires_grad` should be
+/// set only for leaves, and determines whether the `Variable` will accumulate
+/// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
+/// type *must* be `Tensor`.
 inline Variable make_variable(
     at::Tensor data,
     bool requires_grad = false,
@@ -572,6 +546,10 @@ inline Variable make_variable(
   return Variable();
 }
 
+/// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
+/// `gradient_edge` should be a (function, input_nr) pair specifying the function
+/// in the autograd graph, and what particular input of that function, this
+/// variable is connected to.
 inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
