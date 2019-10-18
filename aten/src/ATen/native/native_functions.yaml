@@ -37,10 +37,11 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void
+- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()
   variants: method
 
-- func: set_data(Tensor(a!) self, Tensor new_data) -> void
+- func: set_data(Tensor(a!) self, Tensor new_data) -> ()
+  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: data(Tensor self) -> Tensor
@@ -1403,9 +1404,11 @@
 - func: _cufft_get_plan_cache_max_size(int device_index) -> int
   use_c10_dispatcher: full
 
-- func: _cufft_set_plan_cache_max_size(int device_index, int max_size) -> void
+- func: _cufft_set_plan_cache_max_size(int device_index, int max_size) -> ()
+  use_c10_dispatcher: unboxed_only
 
-- func: _cufft_clear_plan_cache(int device_index) -> void
+- func: _cufft_clear_plan_cache(int device_index) -> ()
+  use_c10_dispatcher: unboxed_only
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   variants: function, method
@@ -1459,7 +1462,7 @@
   variants: function
   device_guard: False
   supports_named_tensor: True
-  
+
 - func: is_distributed(Tensor self) -> bool
   use_c10_dispatcher: full
   variants: function, method

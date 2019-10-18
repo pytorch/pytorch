@@ -12,6 +12,8 @@ generated.  In the full build system, OUTPUT_DIR is
 torch/csrc/jit/generated/
 """
 
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import argparse
 import copy
 import re
@@ -209,7 +211,8 @@ def is_jit_arg(i, arg):
 
 def is_jit_op(decl):
     # We currently don't support functions that return nothing
-    if all(r['type'] == 'void' for r in decl['returns']):
+    assert all(r['type'] != 'void' for r in decl['returns'])
+    if len(decl['returns']) == 0:
         return False
 
     arguments = decl['arguments']
