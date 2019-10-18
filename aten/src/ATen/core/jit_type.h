@@ -1431,7 +1431,7 @@ struct CAFFE2_API ClassType : public NamedType {
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
-  size_t numAttributes() const {
+  size_t numAttributes() const override {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     return attributeNames_.size();
   }
@@ -1450,7 +1450,8 @@ struct CAFFE2_API ClassType : public NamedType {
     }
     return c10::nullopt;
   }
-  size_t getAttributeSlot(const std::string& name) const {
+
+  size_t getAttributeSlot(const std::string& name) const override {
     if (auto r = findAttributeSlot(name)) {
       return *r;
     }
