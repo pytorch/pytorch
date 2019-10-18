@@ -8,9 +8,8 @@ namespace torch {
 namespace nn {
 namespace init {
 
-enum class
-C10_DEPRECATED_MESSAGE("This enum class is deprecated and will be removed in 1.5")
-Nonlinearity {
+// This enum class is deprecated and will be removed in 1.5
+enum class Nonlinearity {
   Linear,
   Conv1D,
   Conv2D,
@@ -24,9 +23,8 @@ Nonlinearity {
   LeakyReLU
 };
 
-enum class
-C10_DEPRECATED_MESSAGE("This enum class is deprecated and will be removed in 1.5")
-FanMode { FanIn, FanOut };
+// This enum class is deprecated and will be removed in 1.5
+enum class FanMode { FanIn, FanOut };
 
 using NonlinearityType = c10::variant<
   enumtype::kLinear,
