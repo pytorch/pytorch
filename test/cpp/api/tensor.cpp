@@ -277,6 +277,11 @@ TEST(TensorTest, MultidimTensorCtor) {
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
+    auto tensor = torch::tensor({{{{{{{{}}}}, {{{{}}}}}}}});
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 1, 2, 1, 1, 1, 0}));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
     auto tensor = torch::tensor({{1, 2}});
     ASSERT_EQ(tensor.dtype(), torch::kInt);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 2}));
@@ -360,8 +365,32 @@ TEST(TensorTest, MultidimTensorCtor) {
       "Expected all elements of the tensor to have the same scalar type: Bool, but got element of scalar type: Int");
   }
   {
-    ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{{{{{{{{{{{7}}}}}}}}}}}}}}}}}}}}}),
-      "yf225 TODO some err msg");
+    auto tensor = torch::tensor({{{{{{{{{{1}}}}}}}}}});
+    ASSERT_EQ(tensor.dtype(), torch::kInt);
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 1, 1, 1, 1, 1, 1, 1, 1}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::full({1}, 1, torch::kInt).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{1}}}}}}}}}}}), "Tensor with more than 10 dimensions is not supported");
+  }
+  {
+    auto tensor = torch::tensor({{{{{{{{{{}}}}}}}}}});
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 1, 1, 1, 1, 1, 1, 1, 0}));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{}}}}}}}}}}}), "Tensor with more than 10 dimensions is not supported");
+  }
+  {
+    auto tensor = torch::tensor({{{{{{{{{{1, 2}}}}}}}}}});
+    ASSERT_EQ(tensor.dtype(), torch::kInt);
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 1, 1, 1, 1, 1, 1, 1, 2}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kInt).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{1, 2}}}}}}}}}}}), "Tensor with more than 10 dimensions is not supported");
   }
 }
 
@@ -388,6 +417,11 @@ TEST(TensorTest, PrettyPrintTensorDataContainer) {
   }
   {
     ASSERT_EQ(
+      c10::str(torch::detail::TensorDataContainer<1>({1.1})),
+      "{1.1}");
+  }
+  {
+    ASSERT_EQ(
       c10::str(torch::detail::TensorDataContainer<1>({1.1, 2.2})),
       "{1.1, 2.2}");
   }
@@ -400,6 +434,21 @@ TEST(TensorTest, PrettyPrintTensorDataContainer) {
     ASSERT_EQ(
       c10::str(torch::detail::TensorDataContainer<1>({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
       "{{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}}");
+  }
+  {
+    ASSERT_EQ(
+      c10::str(torch::detail::TensorDataContainer<1>({{{{{{{{{{1}}}}}}}}}})),
+      "{{{{{{{{{{1}}}}}}}}}}");
+  }
+  {
+    ASSERT_EQ(
+      c10::str(torch::detail::TensorDataContainer<1>({{{{{{{{{{}}}}}}}}}})),
+      "{{{{{{{{{{}}}}}}}}}}");
+  }
+  {
+    ASSERT_EQ(
+      c10::str(torch::detail::TensorDataContainer<1>({{{{{{{{{{1, 2}}}}}}}}}})),
+      "{{{{{{{{{{1, 2}}}}}}}}}}");
   }
 }
 

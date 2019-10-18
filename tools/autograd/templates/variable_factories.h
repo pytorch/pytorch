@@ -23,89 +23,14 @@ namespace torch {
 
 namespace detail {
 
-const int TENSOR_CTOR_MAX_NUM_DIMS = 10;
+const int NESTED_INIT_LIST_MAX_DEPTH = 10;
 
 enum class TensorDataContainerType { Scalar, InitList, Tensor };
-
-template <size_t D> struct TensorDataContainer;
-
-template <size_t D>
-inline void fill_tensor(const TensorDataContainer<D>& init_list_tensor, at::Tensor tensor) {
-  size_t index = 0;
-  for (const auto& elem : init_list_tensor.init_list()) {
-    if (elem.type() == TensorDataContainerType::Scalar) {
-      at::NoGradGuard guard;
-      tensor[index].fill_(elem.scalar());
-    } else if (elem.type() == TensorDataContainerType::InitList) {
-      fill_tensor(elem, tensor[index]);
-    } else if (elem.type() == TensorDataContainerType::Tensor) {
-      TORCH_INTERNAL_ASSERT(
-        false,
-        "TensorDataContainer is already a Tensor type, `fill_tensor` should not be called");
-    } else {
-      TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
-    }
-    index++;
-  }
-}
-
-// NOTE: We add an explicit template specialization for `fill_tensor`
-// to specify the maximum # of dimensions allowed for the tensor,
-// otherwise `recursive template instantiation exceeded maximum depth`
-// error would be thrown.
-template <>
-inline void fill_tensor(const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS>& init_list_tensor, at::Tensor tensor) {
-  TORCH_CHECK(
-    false,
-    "Tensor with more than ", TENSOR_CTOR_MAX_NUM_DIMS, " dimensions is not supported"); // yf225 TODO: add a test for this
-}
-
-template <size_t D>
-inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<D>& init_list_tensor) {
-  if (init_list_tensor.type() == TensorDataContainerType::Scalar) {
-    AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, init_list_tensor.scalar_type(), "TensorDataContainer_pretty_print_scalar", [&] {
-      stream << init_list_tensor.scalar().template to<scalar_t>();
-    });
-  } else if (init_list_tensor.type() == TensorDataContainerType::InitList) {
-    stream << "{";
-    for (const TensorDataContainer<D+1>* it = init_list_tensor.init_list().begin(); it != init_list_tensor.init_list().end(); it++) {
-      stream << *it;
-      if (std::next(it) != init_list_tensor.init_list().end()) stream << ", ";
-    }
-    stream << "}";
-  } else if (init_list_tensor.type() == TensorDataContainerType::Tensor) {
-    auto tensor = init_list_tensor.tensor();
-    stream << "{";
-    for (int64_t i = 0; i < tensor.sizes()[0]; i++) {
-      AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, init_list_tensor.scalar_type(), "TensorDataContainer_pretty_print_tensor_item", [&] {
-        stream << tensor[i].template item<scalar_t>();
-      });
-    }
-    stream << "}";
-  } else {
-    TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
-  }
-  return stream;
-}
-
-// NOTE: We add an explicit template specialization for `operator<<`
-// to specify the maximum # of dimensions allowed for the tensor,
-// otherwise `recursive template instantiation exceeded maximum depth`
-// error would be thrown.
-template <>
-inline std::ostream& operator<<(
-    std::ostream& stream,
-    const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS>& init_list_tensor) {
-  TORCH_CHECK(
-    false,
-    "Tensor with more than ", TENSOR_CTOR_MAX_NUM_DIMS, " dimensions is not supported"); // yf225 TODO: add a test for this
-  return stream;
-}
 
 // We use `TensorDataContainer` to support converting the following data container types
 // into the equivalent Tensor:
 //
-// 1. Arbitrarily nested braced-init-list (e.g. `{{1, 2}, {3, 4}}`).
+// 1. Arbitrarily nested braced-init-list (e.g. `{{1, 2}, {3, 4}}`) up to `NESTED_INIT_LIST_MAX_DEPTH` dimensions.
 // 2. `at::ArrayRef` of supported tensor data types.
 // 3. `std::vector` of supported tensor data types.
 //
@@ -237,9 +162,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
   }
 
   at::Tensor tensor(const at::TensorOptions& options = {}) const {
-    if (type_ == TensorDataContainerType::Tensor) {
-      return tensor_.to(options);
-    } else if (type_ == TensorDataContainerType::Scalar) {
+    if (type_ == TensorDataContainerType::Scalar) {
       at::AutoNonVariableTypeMode non_var_type_mode(true);
       return at::scalar_tensor(scalar_, options.is_variable(false));
     } else if (type_ == TensorDataContainerType::InitList) {
@@ -253,19 +176,151 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         at::AutoNonVariableTypeMode non_var_type_mode(true);
         return at::empty(sizes_, options.device(at::kCPU).is_variable(false));
       })();
-      fill_tensor(*this, tensor);
+      fill_tensor(tensor);
       return tensor.to(options.device());
+    } else if (type_ == TensorDataContainerType::Tensor) {
+      return tensor_.to(options);
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
+    }
+  }
+
+  void pretty_print_recursive(std::ostream& stream) const {
+    if (type_ == TensorDataContainerType::Scalar) {
+      AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, scalar_type_, "TensorDataContainer_pretty_print_scalar", [&] {
+        stream << scalar_.template to<scalar_t>();
+      });
+    } else if (type_ == TensorDataContainerType::InitList) {
+      stream << "{";
+      for (const TensorDataContainer<D+1>* it = init_list_.begin(); it != init_list_.end(); it++) {
+        stream << *it;
+        if (std::next(it) != init_list_.end()) stream << ", ";
+      }
+      stream << "}";
+    } else if (type_ == TensorDataContainerType::Tensor) {
+      stream << "{";
+      for (int64_t i = 0; i < tensor_.sizes()[0]; i++) {
+        AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, scalar_type_, "TensorDataContainer_pretty_print_tensor_item", [&] {
+          stream << tensor_[i].template item<scalar_t>();
+        });
+      }
+      stream << "}";
     } else {
       TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
     }
   }
  private:
+  void fill_tensor(at::Tensor tensor) const {
+    if (type_ == TensorDataContainerType::Scalar) {
+      at::NoGradGuard guard;
+      tensor.fill_(scalar_);
+    } else if (type_ == TensorDataContainerType::InitList) {
+      size_t index = 0;
+      for (const auto& elem : init_list_) {
+        elem.fill_tensor(tensor[index]);
+        index++;
+      }
+    } else if (type_ == TensorDataContainerType::Tensor) {
+      TORCH_INTERNAL_ASSERT(
+        false,
+        "TensorDataContainer is already a Tensor type, `fill_tensor` should not be called");
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
+    }
+  }
+
   std::vector<int64_t> sizes_;
   c10::Scalar scalar_;
   c10::ScalarType scalar_type_;
   std::initializer_list<TensorDataContainer<D+1>> init_list_;
   TensorDataContainerType type_;
   at::Tensor tensor_;
+
+  friend class TensorDataContainer<(D > 1) ? D-1 : D>;
+};
+
+template <size_t D>
+inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<D>& init_list_tensor) {
+  init_list_tensor.pretty_print_recursive(stream);
+  return stream;
+}
+
+// NOTE: The innermost braced-init-list must satisfy one of the following conditions:
+//
+// 1. It contains no value (i.e. `{}`).
+// 2. It contains only scalar values (e.g. `{1.1, 2.2}`).
+//
+// Case #1 is handled by the upper dimension `TensorDataContainer<D-1>`'s default constructor,
+// while case #2 is handled by this dimension `TensorDataContainer<D>`s scalar constructor.
+//
+// Currently, we only support braced-init-lists that are up to `NESTED_INIT_LIST_MAX_DEPTH` in depth.
+// Following the above reasoning, `TensorDataContainer<NESTED_INIT_LIST_MAX_DEPTH+1>` should only
+// accept scalars, and we throw "dimension exceeded" error in other constructors.
+template<>
+class TensorDataContainer<NESTED_INIT_LIST_MAX_DEPTH+1> {
+ public:
+  TensorDataContainer() {
+    TORCH_CHECK(
+      false,
+      "Tensor with more than ",
+      NESTED_INIT_LIST_MAX_DEPTH,
+      " dimensions is not supported");
+  }
+#define TENSOR(T, S) \
+  TensorDataContainer(T value) : sizes_(), scalar_(value), scalar_type_(at::k##S), type_(TensorDataContainerType::Scalar) {}
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+#undef TENSOR
+  // NOTE: This constructor accepts a `std::initializer_list` of its own
+  // (different from the template version), so that the compiler won't go off
+  // and continue to instantiate `TensorDataContainer` of the next dimension,
+  // which would cause infinite recursion.
+  TensorDataContainer(std::initializer_list<TensorDataContainer<NESTED_INIT_LIST_MAX_DEPTH+1>> init_list) {
+    TORCH_CHECK(
+      false,
+      "Tensor with more than ",
+      NESTED_INIT_LIST_MAX_DEPTH,
+      " dimensions is not supported");
+  }
+
+  const c10::Scalar& scalar() const {
+    return scalar_;
+  }
+
+  const std::vector<int64_t>& sizes() const {
+    return sizes_;
+  }
+
+  const c10::ScalarType& scalar_type() const {
+    return scalar_type_;
+  }
+
+  const TensorDataContainerType& type() const {
+    return type_;
+  }
+
+  void fill_tensor(at::Tensor tensor) const {
+    if (type_ == TensorDataContainerType::Scalar) {
+      at::NoGradGuard guard;
+      tensor.fill_(scalar_);
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Only scalar type is supported for this TensorDataContainer");
+    }
+  }
+
+  void pretty_print_recursive(std::ostream& stream) const {
+    if (type_ == TensorDataContainerType::Scalar) {
+      AT_DISPATCH_ALL_TYPES_AND3(at::kBool, at::kHalf, at::kBFloat16, scalar_type_, "TensorDataContainer_pretty_print_scalar", [&] {
+        stream << scalar_.template to<scalar_t>();
+      });
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "Only scalar type is supported for this TensorDataContainer");
+    }
+  }
+ private:
+  std::vector<int64_t> sizes_;
+  c10::Scalar scalar_;
+  c10::ScalarType scalar_type_;
+  TensorDataContainerType type_;
 };
 
 } // namespace detail
