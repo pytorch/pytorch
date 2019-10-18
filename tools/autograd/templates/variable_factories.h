@@ -50,6 +50,9 @@ inline void fill_tensor(const TensorDataContainer<D>& init_list_tensor, at::Tens
 }
 
 // NOTE: We add an explicit template specialization for `fill_tensor`
+// to specify the maximum # of dimensions allowed for the tensor,
+// otherwise `recursive template instantiation exceeded maximum depth`
+// error would be thrown.
 template <>
 inline void fill_tensor(const TensorDataContainer<TENSOR_CTOR_MAX_NUM_DIMS+1>& init_list_tensor, at::Tensor tensor) {
   TORCH_CHECK(
@@ -85,6 +88,10 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<
   return stream;
 }
 
+// NOTE: We add an explicit template specialization for `operator<<`
+// to specify the maximum # of dimensions allowed for the tensor,
+// otherwise `recursive template instantiation exceeded maximum depth`
+// error would be thrown.
 template <>
 inline std::ostream& operator<<(
     std::ostream& stream,
@@ -97,11 +104,13 @@ inline std::ostream& operator<<(
 
 // We use `TensorDataContainer` to support converting the following data container types
 // into the equivalent Tensor:
+//
 // 1. Arbitrarily nested braced-init-list (e.g. `{{1, 2}, {3, 4}}`).
 // 2. `at::ArrayRef` of supported tensor data types.
 // 3. `std::vector` of supported tensor data types.
 //
 // At any time, a `TensorDataContainer` object represents one of the following:
+//
 // 1. A scalar with value `scalar()` and type `scalar_type()`.
 // 2. A Tensor represented in `std::initializer_list<TensorDataContainer>` form,
 //    with value `init_list()`, Tensor scalar type `scalar_type()`, and Tensor sizes `sizes()`.
@@ -128,9 +137,11 @@ inline std::ostream& operator<<(
 //
 // At this point, theoretically there are two plausible ways for `{1}` to be matched to one of the
 // constructors of `TensorDataContainer<2>`:
+//
 // 1. It can be a list-initialization of a scalar value, thus matching `TensorDataContainer<2>(int value)`.
 // 2. It can be converted to `std::initializer_list<TensorDataContainer<3>>`, thus matching
 //    `TensorDataContainer<2>(std::initializer_list<TensorDataContainer<3>>)`.
+//
 // How does the compiler decide which one to choose? According to `https://en.cppreference.com/w/cpp/language/list_initialization`,
 // braced-init-list always prefers the constructor that takes `std::initializer_list`. Hence we happily
 // move forward with constructor #2, and it calls the following:
@@ -147,6 +158,14 @@ inline std::ostream& operator<<(
 // and since for braced-init-list the `TensorDataContainer<1>(std::initializer_list<TensorDataContainer<2>>)`
 // constructor is always preferred over all other constructors, it will take the `std::initializer_list` path
 // and all is good again.
+//
+// P.S. You might ask: why do we need to templatize `TensorDataContainer`, and why can't we just provide a
+// `TensorDataContainer(std::initializer_list<TensorDataContainer>>)` constructor to reach the innermost
+// dimension of an arbitrarily nested braced-init-list? The answer is that for a braced-init-list
+// like `{{1}, {2}}`, when the compiler is handling the inner braced-init-list `{1}` and `{2}`, it seems
+// to always prefer the scalar constructor `TensorDataContainer(int)` instead of the `std::initializer_list`
+// constructor, thus producing a tensor with the wrong sizes. If we templatize `TensorDataContainer` over
+// the # of tensor dimensions, such problem doesn't happen.
 template <size_t D>
 struct TensorDataContainer {
   // NOTE: For tensors with zero-size dimensions (e.g. `torch::tensor({{}, {}})`),
