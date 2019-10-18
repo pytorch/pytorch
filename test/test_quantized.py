@@ -541,13 +541,9 @@ class TestQuantizedOps(TestCase):
                         count_include_pad=count_include_pad, divisor_override=divisor_override)
             qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
                                                dtype=torch_type)
-            print(qX)
-            print(qX.int_repr())
-            print(qX_ref.int_repr())
-            print(qX_hat.int_repr())
-            print("======")
+
             self.assertEqual(qX_ref.int_repr(), qX_hat.int_repr(), prec=1.0,
-                             message="{} results are off".format(name, qX_hat.int_repr(), X_ref))
+                             message=error_message.format(name, qX_hat.int_repr(), qX_ref.int_repr()))
             self.assertEqual(scale, qX_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
             self.assertEqual(zero_point, qX_hat.q_zero_point(),
