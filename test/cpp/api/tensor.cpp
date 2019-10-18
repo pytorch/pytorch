@@ -359,6 +359,10 @@ TEST(TensorTest, MultidimTensorCtor) {
     ASSERT_THROWS_WITH(torch::tensor({{{true, 2}}}),
       "Expected all elements of the tensor to have the same scalar type: Bool, but got element of scalar type: Int");
   }
+  {
+    ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{{{{{{{{{{{7}}}}}}}}}}}}}}}}}}}}}),
+      "yf225 TODO some err msg");
+  }
 }
 
 TEST(TensorTest, MultidimTensrCtor_CUDA) {
