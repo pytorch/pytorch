@@ -407,20 +407,20 @@ Vec256<std::complex<double>> inline operator^(const Vec256<std::complex<double>>
   return _mm256_xor_pd(a, b);
 }
 
-template <>
-inline void convert(const std::complex<double>* src, std::complex<double>* dst, int64_t n) {
-  int64_t i;
-  const double* src_d = reinterpret_cast<const double*>(src);
-  double* dst_d = reinterpret_cast<double*>(dst);
-#pragma unroll
-  for (i = 0; i <= (n - Vec256<double>::size()); i += Vec256<double>::size()) {
-    _mm256_storeu_pd(dst_d + i, _mm256_loadu_pd(src_d + i));
-  }
-#pragma unroll
-  for (; i < n; i++) {
-    dst[i] = src[i];
-  }
-}
+//template <>
+//inline void convert(const std::complex<double>* src, std::complex<double>* dst, int64_t n) {
+//  int64_t i;
+//  const double* src_d = reinterpret_cast<const double*>(src);
+//  double* dst_d = reinterpret_cast<double*>(dst);
+//#pragma unroll
+//  for (i = 0; i <= (n - Vec256<double>::size()); i += Vec256<double>::size()) {
+//    _mm256_storeu_pd(dst_d + i, _mm256_loadu_pd(src_d + i));
+//  }
+//#pragma unroll
+//  for (; i < n; i++) {
+//    dst[i] = src[i];
+//  }
+//}
 
 #ifdef __AVX2__
 template <> inline Vec256<std::complex<double>> fmadd(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b, const Vec256<std::complex<double>>& c) {
