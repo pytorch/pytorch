@@ -162,15 +162,18 @@ EnforceWarningBuffer::EnforceWarningBuffer() noexcept(true): prev_handler(c10::W
 EnforceWarningBuffer::~EnforceWarningBuffer() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler);
 
+  std::unique_lock<std::mutex> lock(warning_buffer_mutex);
+
+  bool has_warnings;
   {
     std::unique_lock<std::mutex> lock(warning_buffer_mutex);
-    auto has_warnings = warning_buffer.size() > 0;
+    has_warnings = warning_buffer.size() > 0;
   }
+
 
   if(has_warnings) {
     AutoGIL gil;
     std::unique_lock<std::mutex> lock(warning_buffer_mutex);
-
 
     PyObject *ptype, *pvalue, *ptraceback;
     PyErr_Fetch(&ptype, &pvalue, &ptraceback);
