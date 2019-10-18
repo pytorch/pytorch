@@ -3958,13 +3958,16 @@ class TestAutogradDeviceType(TestCase):
         output = input.to(device=devices[1]) + input.to(device=devices[1])
         output.backward()
 
-    def test_copy__bfloat16(self, device):
+    def test_copy_(self, device):
+        # At the time of writing this test, copy_ is not generated from native_functions.yaml
+        # there was a bug that bfloat16 was not recognized as floating.
         x = torch.randn(10, device=device, requires_grad=True)
-        y = torch.empty(10, device=device, dtype=torch.bfloat16)
-        y.copy_(x)
-        self.assertTrue(y.requires_grad)
-        z = x.to(torch.bfloat16)
-        self.assertTrue(z.requires_grad)
+        for dt in [torch.float, torch.double, torch.half, torch.bfloat16]:
+            y = torch.empty(10, device=device, dtype=dt)
+            y.copy_(x)
+            self.assertTrue(y.requires_grad)
+            z = x.to(torch.bfloat16)
+            self.assertTrue(z.requires_grad)
 
     @onlyCUDA
     def test_cross_device_reentrant_autograd(self, device):
