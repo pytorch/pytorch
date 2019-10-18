@@ -1,6 +1,7 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/autograd/autograd.h>
 
 using namespace at;
 using namespace torch::autograd::generated;

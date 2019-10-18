@@ -296,7 +296,7 @@ class AnyModule::Value {
   /// Constructs the `Value` from an `autograd::Variable`, first converting it
   /// to a `torch::Tensor`.
   explicit Value(autograd::Variable variable)
-      : Value(Tensor(std::move(variable))) {}
+      : Value(std::move(variable)) {}
 
   /// \internal
   /// The static type of the object we store in the `Value`, which erases the
