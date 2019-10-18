@@ -205,6 +205,51 @@ TEST_F(FunctionalTest, AdaptiveAvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 3, 3, 3}));
 }
 
+TEST_F(FunctionalTest, L1Loss) {
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::l1_loss(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, MSELoss) {
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::mse_loss(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, BCELoss) {
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::binary_cross_entropy(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, KLDivLoss) {
+  KLDivLoss loss;
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = F::kl_div(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::kFloat);
   auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);
@@ -336,6 +381,31 @@ TEST_F(FunctionalTest, CosineEmbeddingLoss) {
   auto expected = torch::tensor({0.1004}, torch::kFloat);
 
   ASSERT_TRUE(output.allclose(expected, 1e-4));
+}
+
+TEST_F(FunctionalTest, MultiLabelMarginLossDefaultOptions) {
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = F::multilabel_margin_loss(input, target);
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, MultiLabelMarginLossNoReduction) {
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = F::multilabel_margin_loss(
+    input, target, torch::Reduction::None);
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
 TEST_F(FunctionalTest, TripletMarginLoss) {

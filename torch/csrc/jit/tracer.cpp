@@ -288,13 +288,16 @@ static void gatherParametersAndBuffers(
 
   state->setValue(self.module_object(), self_value);
 
-  for (script::Slot s : self.get_slots()) {
-    if (s.type()->isSubtypeOf(TensorType::get())) {
+  auto self_ty = self.type();
+  for (const script::NameValue& s : self.get_slots()) {
+    if (s.value.type()->isSubtypeOf(TensorType::get())) {
       addInput(
-          state, s.value(), s.type(), g.insertGetAttr(self_value, s.name()));
-    } else if (s.entity_type() == script::EntityType::MODULE) {
+          state, s.value, s.value.type(), g.insertGetAttr(self_value, s.name));
+    } else if (self_ty->is_module(self_ty->getAttributeSlot(s.name))) {
       gatherParametersAndBuffers(
-          state, g.insertGetAttr(self_value, s.name()), s.to_module());
+          state,
+          g.insertGetAttr(self_value, s.name),
+          script::Module(s.value.toObject()));
     }
   }
 }
