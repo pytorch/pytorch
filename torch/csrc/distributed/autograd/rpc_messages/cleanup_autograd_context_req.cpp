@@ -33,8 +33,7 @@ std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::
 
   // convert ivalue to int and construct request
   int64_t context_id = ivalue_context_id.toInt();
-  return std::unique_ptr<CleanupAutogradContextReq>(
-      new CleanupAutogradContextReq(context_id));
+  return c10::guts::make_unique<CleanupAutogradContextReq>(context_id);
 }
 
 } // namespace autograd
