@@ -26,7 +26,7 @@ inline Tensor _pad_circular(Tensor input, IntArrayRef padding) {
 inline Tensor pad(const Tensor& input, const PadOptions& options) {
   TORCH_CHECK(options.pad().size() % 2 == 0, "Padding length must be divisible by 2");
   TORCH_CHECK(options.pad().size() / 2 <= input.dim(), "Padding length too large");
-  if (options.mode() == "constant") {
+  if (c10::get_if<enumtype::kConstant>(&options.mode())) {
     return torch::constant_pad_nd(input, options.pad(), options.value());
   } else {
     TORCH_CHECK(options.value() == 0, "Padding mode \"", mode, "\" doesn't take in value argument");

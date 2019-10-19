@@ -1,6 +1,8 @@
 #pragma once
 
+#include <c10/util/variant.h>
 #include <torch/arg.h>
+#include <torch/enum.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/expanding_array.h>
 #include <torch/types.h>
@@ -16,7 +18,11 @@ struct TORCH_API PadOptions {
   TORCH_ARG(IntArrayRef, pad);
 
   /// "constant", "reflect", "replicate" or "circular". Default: "constant"
-  TORCH_ARG(std::string, mode) = "constant";
+  TORCH_ARG(c10::variant<
+    enumtype::kConstant,
+    enumtype::kReflect,
+    enumtype::kReplicate,
+    enumtype::kCircular>, mode) = torch::kConstant;
 
   /// fill value for "constant" padding. Default: 0
   TORCH_ARG(double, value) = 0;
