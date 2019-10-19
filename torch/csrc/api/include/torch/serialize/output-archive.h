@@ -40,6 +40,9 @@ class TORCH_API OutputArchive final {
     return cu_;
   }
 
+  /// Writes an `IValue` to the `OutputArchive`.
+  void write(const std::string& key, const c10::IValue& ivalue);
+
   /// Writes a `(key, tensor)` pair to the `OutputArchive`, and marks it as
   /// being or not being a buffer (non-differentiable tensor).
   void write(
@@ -58,6 +61,10 @@ class TORCH_API OutputArchive final {
   /// Saves the `OutputArchive` into a serialized representation into the given
   /// `stream`.
   void save_to(std::ostream& stream);
+
+  /// Saves the `OutputArchive` into a serialized representation using the
+  /// given writer function.
+  void save_to(const std::function<size_t(const void*, size_t)>& func);
 
   /// Forwards all arguments to `write()`.
   /// Useful for generic code that can be re-used for both `OutputArchive` and

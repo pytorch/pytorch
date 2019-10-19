@@ -44,9 +44,54 @@ def get_trainer_version_based_on_optim(optim_def):
         return "fp32"
 
 
-def get_sparse_lookup_predictor_version(version):
-    assert version in {'fp32', 'fp16', 'uint8rowwise', 'fused_uint8rowwise'},\
-        "Unexpected version of sparse_lookup layer {0}".format(version)
+def get_sparse_lookup_predictor_version(
+    version,
+    blob_size=None,
+    min_blob_size_4bits=None,
+    embedding_dim=None,
+    sparse_feature_name=None,
+):
+    assert version in {
+        'fp32', 'fp16', 'uint8rowwise', 'fused_uint8rowwise', 'fused_uint4rowwise'
+    }, "Unexpected version of sparse_lookup layer {0}".format(version)
+    if version == 'fused_uint4rowwise':
+        if (
+            blob_size is not None
+            and min_blob_size_4bits is not None
+            and embedding_dim is not None
+        ):
+            if blob_size < min_blob_size_4bits:
+                logger.info(
+                    "{} fall back to uint8 because lookup table size {} < min_blob_size_4bits {}".format(
+                        sparse_feature_name,
+                        blob_size,
+                        min_blob_size_4bits,
+                    )
+                )
+                version = 'fused_uint8rowwise'
+
+            if embedding_dim % 2 == 1:
+                logger.info(
+                    "{} fall back to uint8 because lookup table dimension {} is not divisible by 2".format(
+                        sparse_feature_name, embedding_dim
+                    )
+                )
+                version = 'fused_uint8rowwise'
+        else:
+            raise ValueError(
+                (
+                    "When 4 bit quantization is enabled for {}, "
+                    "(i.e., Sparse lookup predictor version:{}), "
+                    "requires arguments blob_size:{}, "
+                    "min_blob_size_4bits:{}, embedding_dim:{}"
+                ).format(
+                    sparse_feature_name,
+                    version,
+                    blob_size,
+                    min_blob_size_4bits,
+                    embedding_dim
+                )
+            )
     return version
 
 
@@ -85,7 +130,7 @@ class SparseLookup(ModelLayer):
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
-                 name='sparse_lookup', regularizer=None, **kwargs):
+                 name='sparse_lookup', regularizer=None, use_external_weights=False, **kwargs):
 
         super(SparseLookup, self).__init__(model, name, input_record, **kwargs)
 
@@ -101,22 +146,38 @@ class SparseLookup(ModelLayer):
 
         if reducer == "PositionWeighted":
             assert _is_id_score_list(self.input_record), (
-                "PositionWeighted only support IdScoreList, but got {} for {}" +
-                "please use PositionWeighted layer to convert IdList " +
-                "to IdScoreList").format(repr(self.input_record), self.sparse_key)
+                "PositionWeighted only support IdScoreList, but got {} for {}"
+                + "please use PositionWeighted layer to convert IdList "
+                + "to IdScoreList"
+            ).format(repr(self.input_record), self.sparse_key)
             self.external_weights = self.input_record.values()
 
         elif reducer == "RecencyWeighted":
             assert _is_id_score_list(self.input_record), (
                 "RecencyWeighted only supports IdScoreList, "
-                "while the sparse feature {} is not.".format(self.sparse_key))
+                "while the sparse feature {} is not.".format(self.sparse_key)
+            )
+            self.external_weights = self.input_record.values()
+        # TODO: create a new type of reducer with external weights to wrap
+        # this and the above two cases since essentially their input formats
+        # are the same.
+        elif use_external_weights:
+            assert _is_id_score_list(self.input_record), (
+                "Use_external_weights only supports IdScoreList, "
+                "while the sparse feature {} is not.".format(self.sparse_key)
+            )
+            assert reducer in ["Sum", "WeightedSum"], (
+                "Use_external_weights only supports Sum reducer, "
+                "while the reducer is {}.".format(reducer)
+            )
             self.external_weights = self.input_record.values()
         self.reducer = reducer
+        self.use_external_weights = use_external_weights
 
         input_dim = get_categorical_limit(self.input_record)
-        assert input_dim > 0, (
-            "{} should have categorical limit > 0, but got {}".format(
-                self.sparse_key, input_dim))
+        assert input_dim > 0, "{} should have categorical limit > 0, but got {}".format(
+            self.sparse_key, input_dim
+        )
 
         self.input_dim = input_dim
         self.shape = [input_dim] + inner_shape
@@ -130,14 +191,16 @@ class SparseLookup(ModelLayer):
         self.weight_init = weight_init or default_init_op
 
         self.evicted_values = None
-        if schema.equal_schemas(self.input_record, IdListWithEvicted) or \
-            schema.equal_schemas(self.input_record, IdScoreListWithEvicted,
-                                 check_field_types=False):
+        if schema.equal_schemas(
+            self.input_record, IdListWithEvicted
+        ) or schema.equal_schemas(
+            self.input_record, IdScoreListWithEvicted, check_field_types=False
+        ):
             self.evicted_values = self.input_record._evicted_values
 
         # If fp16 is used, make sure fp16 init op is used
         if self.trainer_version == "fp16":
-            assert self.reducer in self._fp16_compatible_reducers, (
+            assert self.reducer in self._fp16_compatible_reducers or use_external_weights, (
                 "Fp16 training is enabled. The reducer specified is not supported. "
                 "Got {}. Supported reducers: {}. Right now, in general, sum, mean, "
                 "positional pooling are supported. Attention is not. Please check "
@@ -259,6 +322,10 @@ class SparseLookup(ModelLayer):
         elif version == 'fused_uint8rowwise':
             gathered_w = net.Gather([self.w, in_indices], 'gathered_w')
             return net.Fused8BitRowwiseQuantizedToFloat(gathered_w, out)
+        elif version == 'fused_uint4rowwise':
+            gathered_w = net.Gather([self.w, in_indices], 'gathered_w')
+            return net.Fused4BitRowwiseQuantizedToFloat(gathered_w, out)
+
         else:
             raise "Unsupported version of operators in SparseLookup " +\
                 "layer: {0} for sparse feature {1}".format(
@@ -266,13 +333,19 @@ class SparseLookup(ModelLayer):
                 )
 
     def _sparse_lengths_weighted_reducer(
-            self, in_indices, weights, reducer,
-            net, version, grad_on_weights=0):
+        self,
+        in_indices,
+        weights,
+        reducer,
+        net,
+        version,
+        grad_on_weights=0,
+    ):
         op_input = [
             self.w,
             weights,
             in_indices,
-            self.input_record.lengths()
+            self.input_record.lengths(),
         ]
         layer_name = 'SparseLengths' + reducer
 
@@ -301,6 +374,9 @@ class SparseLookup(ModelLayer):
                 op_input, self.output_schema.field_blobs())
         elif version == 'fused_uint8rowwise':
             net.__getattr__(layer_name + 'Fused8BitRowwise')(
+                op_input, self.output_schema.field_blobs())
+        elif version == 'fused_uint4rowwise':
+            net.__getattr__(layer_name + 'Fused4BitRowwise')(
                 op_input, self.output_schema.field_blobs())
         else:
             raise "Unsupported version of operator in SparseLookUp " +\
@@ -342,6 +418,9 @@ class SparseLookup(ModelLayer):
                     op_input, self.output_schema.field_blobs())
             elif version == 'fused_uint8rowwise':
                 net.__getattr__(layer_name + 'Fused8BitRowwise')(
+                    op_input, self.output_schema.field_blobs())
+            elif version == 'fused_uint4rowwise':
+                net.__getattr__(layer_name + 'Fused4BitRowwise')(
                     op_input, self.output_schema.field_blobs())
             else:
                 raise "Unsupported version of operator in SparseLookUp " +\
@@ -391,6 +470,12 @@ class SparseLookup(ModelLayer):
                 self.input_record.values(),
                 self.reducer, net, version)
 
+        elif self.reducer in ['PositionWeighted', 'RecencyWeighted'] or self.use_external_weights:
+            self._sparse_lengths_weighted_reducer(
+                self.input_record.keys(),
+                self.external_weights,
+                'WeightedSum', net, version, grad_on_weights=1)
+
         elif self.reducer in ['Sum', 'Mean']:
             op_input = [self.w,
                         self.input_record.keys(),
@@ -409,17 +494,14 @@ class SparseLookup(ModelLayer):
             elif version == 'fused_uint8rowwise':
                 net.__getattr__(layer_name + 'Fused8BitRowwise')(
                     op_input, self.output_schema.field_blobs())
+            elif version == 'fused_uint4rowwise':
+                net.__getattr__(layer_name + 'Fused4BitRowwise')(
+                    op_input, self.output_schema.field_blobs())
             else:
                 raise "Unsupported version of operator in SparseLookUp " +\
                     "layer: {0} for sparse feature {1}".format(
                         version, self.sparse_key
                     )
-
-        elif self.reducer in ['PositionWeighted', 'RecencyWeighted']:
-            self._sparse_lengths_weighted_reducer(
-                self.input_record.keys(),
-                self.external_weights,
-                'WeightedSum', net, version, grad_on_weights=1)
 
         elif self.reducer == 'None':
             # Gather operator will gather the embedding for each id of
@@ -432,8 +514,8 @@ class SparseLookup(ModelLayer):
                     self.reducer, self.sparse_key
                 )
 
-    def _add_ops(self, net, version='fp32'):
-        if self.evicted_values:
+    def _add_ops(self, net, version='fp32', is_train=True):
+        if self.evicted_values and is_train:
             net.CopyRowsToTensor(
                 [self.w, self.evicted_values.get(), self.reinit_vec], [self.w])
         if _is_id_list(self.input_record):
@@ -444,18 +526,30 @@ class SparseLookup(ModelLayer):
             raise "Unsupported input type {0}".format(self.input_record)
 
     def add_train_ops(self, net):
-        self._add_ops(net, self.trainer_version)
+        self._add_ops(net, self.trainer_version, is_train=True)
 
     def add_ops(self, net):
-        cur_scope = get_current_scope()
+        version_info = get_current_scope().get(
+            get_sparse_lookup_predictor_version.__name__, {'version': 'fp32'}
+        )
+        lookup_table_blob_size = self.shape[0] * self.shape[1]
         version = get_sparse_lookup_predictor_version(
-            **cur_scope.get(get_sparse_lookup_predictor_version.__name__,
-                            {'version': 'fp32'}))
+            version_info['version'],
+            blob_size=lookup_table_blob_size,
+            min_blob_size_4bits=(
+                version_info['min_blob_size_4bits']
+                if 'min_blob_size_4bits' in version_info
+                else None
+            ),
+            embedding_dim=self.shape[1],
+            sparse_feature_name=self.sparse_key,
+        )
 
         # TODO(amalevich): Layer should not be responsible for decision about
         # quantization.
         if not self.support_8bit() and version in {'uint8rowwise',
-                                                   'fused_uint8rowwise'}:
-            version = 'fp32'
+                                                   'fused_uint8rowwise',
+                                                   'fused_uint4rowwise'}:
+            version = 'fp16'
 
-        self._add_ops(net, version)
+        self._add_ops(net, version, is_train=False)

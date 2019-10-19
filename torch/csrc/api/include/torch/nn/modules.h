@@ -19,3 +19,5 @@
 #include <torch/nn/modules/padding.h>
 #include <torch/nn/modules/pooling.h>
 #include <torch/nn/modules/rnn.h>
+#include <torch/nn/modules/pixelshuffle.h>
+#include <torch/nn/modules/activation.h>

@@ -41,6 +41,11 @@ struct infer_function_traits<Result (*)(Args...)> {
   using type = function_traits<Result(Args...)>;
 };
 
+template <typename Result, typename... Args>
+struct infer_function_traits<Result (Args...)> {
+  using type = function_traits<Result(Args...)>;
+};
+
 template <typename T>
 using infer_function_traits_t = typename infer_function_traits<T>::type;
 

@@ -255,7 +255,11 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, A
 
 // NB: Deleted newWithSizeNd variants
 
-SparseTensor clone_sparse(const SparseTensor& self) {
+SparseTensor clone_sparse(const SparseTensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "unsupported memory format option ",
+      optional_memory_format.value());
   SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), self.options());
   copy_into_sparse(other, self._indices(), self._values(), true);
   return other._coalesced_(self.is_coalesced());
@@ -281,6 +285,7 @@ namespace {
   }
 }
 
+// Invoked from native/Resize.cpp (no dynamic dispatch necessary)
 SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     sparse_resize_(self, src.sizes(), src.sparse_dim(), src.dense_dim());
