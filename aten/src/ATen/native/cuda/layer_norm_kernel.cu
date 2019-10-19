@@ -352,10 +352,10 @@ void LayerNormBackwardKernelImplInternal(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
     const auto kAccType = X.scalar_type() == kHalf ? kFloat : X.scalar_type();
-    Tensor ds = at::empty({N}, X.options().dtype(kAccType));
-    Tensor db = at::empty({N}, X.options().dtype(kAccType));
-    Tensor scale = at::empty({N}, X.options().dtype(kAccType));
-    Tensor bias = at::empty({N}, X.options().dtype(kAccType));
+    Tensor ds = at::empty({M}, X.options().dtype(kAccType));
+    Tensor db = at::empty({M}, X.options().dtype(kAccType));
+    Tensor scale = at::empty({M}, X.options().dtype(kAccType));
+    Tensor bias = at::empty({M}, X.options().dtype(kAccType));
     T_ACC* ds_data = ds.template data_ptr<T_ACC>();
     T_ACC* db_data = db.template data_ptr<T_ACC>();
     T_ACC* scale_data = scale.template data_ptr<T_ACC>();
