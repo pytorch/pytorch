@@ -123,7 +123,7 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
  public:
   RNNImpl(int64_t input_size, int64_t hidden_size)
       : RNNImpl(RNNOptions(input_size, hidden_size)) {}
-  explicit RNNImpl(const RNNOptions& options);
+  explicit RNNImpl(const RNNOptions& options_);
 
   /// Pretty prints the `RNN` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
@@ -152,7 +152,7 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  public:
   LSTMImpl(int64_t input_size, int64_t hidden_size)
       : LSTMImpl(LSTMOptions(input_size, hidden_size)) {}
-  explicit LSTMImpl(const LSTMOptions& options);
+  explicit LSTMImpl(const LSTMOptions& options_);
 
   /// Applies the `LSTM` module to an input sequence and input state.
   /// The `input` should follow a `(sequence, batch, features)` layout unless
@@ -176,7 +176,7 @@ class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
  public:
   GRUImpl(int64_t input_size, int64_t hidden_size)
       : GRUImpl(GRUOptions(input_size, hidden_size)) {}
-  explicit GRUImpl(const GRUOptions& options);
+  explicit GRUImpl(const GRUOptions& options_);
 
   /// Applies the `GRU` module to an input sequence and input state.
   /// The `input` should follow a `(sequence, batch, features)` layout unless

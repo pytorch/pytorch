@@ -52,6 +52,7 @@ TensorProto BackendTransformerBase::wrapShapeInfoIntoTensorProto(
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
   }
+  t.add_int32_data(static_cast<int32_t>(shape_info.dim_type));
   return t;
 }
 
@@ -81,6 +82,7 @@ QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
   for (const auto i : shape_info.shape.dims()) {
     t.add_dims(i);
   }
+  t.add_data(static_cast<int32_t>(shape_info.dim_type));
   return t;
 }
 
@@ -164,11 +166,9 @@ void BackendTransformerBase::addShapeToNet(
   for (const auto& kv : shape_hints) {
     if (!kv.second.is_quantized) {
       auto t = wrapShapeInfoIntoTensorProto(kv.first, kv.second);
-      t.add_int32_data(static_cast<int32_t>(kv.second.dim_type));
       shape_arg->mutable_tensors()->Add()->CopyFrom(t);
     } else {
       auto t = wrapShapeInfoIntoQTensorProto(kv.first, kv.second);
-      t.add_data(static_cast<int32_t>(kv.second.dim_type));
       qshape_arg->mutable_qtensors()->Add()->CopyFrom(t);
     }
   }

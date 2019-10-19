@@ -246,14 +246,18 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         std::string(NCCL_BLOCKING_WAIT));
   }
 
+#ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
+#endif
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   terminateWatchdog_.store(true);
   watchdogCV_.notify_one();
+#ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
+#endif
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
@@ -314,7 +318,7 @@ std::exception_ptr ProcessGroupNCCL::checkForNCCLErrorsInternal(
     ncclResult_t ncclAsyncErr = ncclComm->checkForNcclError();
     if (ncclAsyncErr != ncclSuccess) {
       return std::make_exception_ptr(std::runtime_error(
-          "NCCL error: " + std::string(ncclGetErrorString(ncclAsyncErr))));
+          "NCCL error: " + ncclGetErrorWithVersion(ncclAsyncErr)));
     }
   }
 

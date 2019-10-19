@@ -17,14 +17,17 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 class DNNLowPMulOpTest(hu.HypothesisTestCase):
     @given(
         N=st.integers(32, 256),
+        is_empty=st.booleans(),
         in_quantized=st.booleans(),
         out_quantized=st.booleans(),
         in_place=st.sampled_from([(False, False), (True, False), (False, True)]),
         **hu.gcs_cpu_only
     )
     def test_dnnlowp_elementwise_mul_int(
-        self, N, in_quantized, out_quantized, in_place, gc, dc
+        self, N, is_empty, in_quantized, out_quantized, in_place, gc, dc
     ):
+        if is_empty:
+            N = 0
         # FIXME: DNNLOWP Mul doesn't support inplace operation and
         # dequantize_output=1 at the same time
         if in_place[0] or in_place[1]:
@@ -36,12 +39,14 @@ class DNNLowPMulOpTest(hu.HypothesisTestCase):
         max_ = min_ + 255
         A = np.round(np.random.rand(N) * (max_ - min_) + min_)
         A = A.astype(np.float32)
-        A[0] = min_
-        A[1] = max_
+        if N != 0:
+            A[0] = min_
+            A[1] = max_
 
         B = np.round(np.random.rand(N) * 255 - 128).astype(np.float32)
-        B[0] = -128
-        B[1] = 127
+        if N != 0:
+            B[0] = -128
+            B[1] = 127
 
         Output = collections.namedtuple("Output", ["Y", "engine"])
         outputs = []

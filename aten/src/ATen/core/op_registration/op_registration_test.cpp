@@ -10,7 +10,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
-#include <ATen/core/op_registration/test_helpers.h>
+#include <ATen/core/boxing/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
 #include <functional>
@@ -511,30 +511,26 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallOutOfSc
 }
 
 bool called_stackbased_kernel = false;
-void stackBasedKernel(c10::Stack* stack, c10::KernelCache* cache) {
+void stackBasedKernel(c10::OperatorKernel* functor, c10::Stack* stack) {
   called_stackbased_kernel = true;
-}
-
-std::unique_ptr<c10::KernelCache> noCache() {
-  return nullptr;
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndNoneCanInferSchema_thenFails) {
   bool called_kernel = false;
   expectThrows<c10::Error>([&] {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
-      .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel, &noCache)
-      .kernel(c10::TensorTypeId::CUDATensorId, &stackBasedKernel, &noCache)
-      .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel, &noCache));
+      .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel)
+      .kernel(c10::TensorTypeId::CUDATensorId, &stackBasedKernel)
+      .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel));
   }, "Cannot infer operator schema for this kind of kernel in registration of operator _test::dummy");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndNoneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel, &noCache)
-    .kernel(c10::TensorTypeId::CUDATensorId, &stackBasedKernel, &noCache)
-    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel, &noCache));
+    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel)
+    .kernel(c10::TensorTypeId::CUDATensorId, &stackBasedKernel)
+    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -558,9 +554,9 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndNoneCanI
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndOnlyOneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
-    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel, &noCache)
+    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel)
     .kernel<MockKernel>(c10::TensorTypeId::CUDATensorId, &called_kernel)
-    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel, &noCache));
+    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -584,9 +580,9 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndOnlyOneCan
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndOnlyOneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel, &noCache)
+    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel)
     .kernel<MockKernel>(c10::TensorTypeId::CUDATensorId, &called_kernel)
-    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel, &noCache));
+    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -639,7 +635,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernel_thenCanCallAutograd
   ASSERT_TRUE(op.has_value());
 
   called_autograd = false;
-  c10::Dispatcher::singleton().lookup(*op, TensorTypeId::VariableTensorId).callUnboxed<void, Tensor>(dummyTensor(TensorTypeId::VariableTensorId));
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, TensorTypeId::VariableTensorId, dummyTensor(TensorTypeId::VariableTensorId));
   EXPECT_TRUE(called_autograd);
 }
 
@@ -652,7 +648,7 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
   ASSERT_TRUE(op.has_value());
 
   called_catchall = called_autograd = false;
-  c10::Dispatcher::singleton().lookup(*op, TensorTypeId::VariableTensorId).callUnboxed<void, Tensor>(dummyTensor(TensorTypeId::VariableTensorId));
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, TensorTypeId::VariableTensorId, dummyTensor(TensorTypeId::VariableTensorId));
   EXPECT_FALSE(called_catchall);
   EXPECT_TRUE(called_autograd);
 }
