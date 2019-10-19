@@ -42,7 +42,7 @@ namespace at { namespace native { namespace {
 
 
 // Fetch a value with type src_type from ptr, and cast it to dest_t.
-#define CASE(type, scalartype) case ScalarType::scalartype: return *(const type *)ptr;
+#define CASE(type, scalartype) case ScalarType::scalartype: return static_cast<dest_t>(*(const type *)ptr);
 template<typename dest_t>
 inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
@@ -55,7 +55,7 @@ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
 
 
 // Cast a value with type src_t into dest_type, and store it to ptr.
-#define CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = value; return;
+#define CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast<type>(value); return;
 template<typename src_t>
 inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {

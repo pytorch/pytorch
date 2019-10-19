@@ -34,10 +34,6 @@ inline C10_HOST_DEVICE Half::operator float() const {
 #endif
 }
 
-inline C10_HOST_DEVICE Half::operator BFloat16() const {
-  return BFloat16(float(*this));
-}
-
 #if defined(__CUDACC__) || defined(__HIPCC__)
 inline C10_HOST_DEVICE Half::Half(const __half& value) {
   x = *reinterpret_cast<const unsigned short*>(&value);

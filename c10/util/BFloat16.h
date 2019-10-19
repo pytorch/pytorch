@@ -80,10 +80,8 @@ struct alignas(2) BFloat16 {
   constexpr C10_HOST_DEVICE BFloat16(unsigned short bits, from_bits_t) : x(bits){};
   inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
-  inline C10_HOST_DEVICE operator Half() const;
 };
 
 } // namespace c10
 
-#include <c10/util/Half.h>
 #include <c10/util/BFloat16-inl.h>

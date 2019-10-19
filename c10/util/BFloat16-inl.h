@@ -16,10 +16,6 @@ inline C10_HOST_DEVICE BFloat16::operator float() const {
   return detail::f32_from_bits(x);
 }
 
-inline C10_HOST_DEVICE BFloat16::operator Half() const {
-  return Half(float(*this));
-}
-
 /// Arithmetic
 
 inline C10_HOST_DEVICE BFloat16 operator+(const BFloat16& a, const BFloat16& b) {
