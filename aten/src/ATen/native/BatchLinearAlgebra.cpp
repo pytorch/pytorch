@@ -1090,19 +1090,23 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   auto m = self.size(-2);
   auto n = self.size(-1);
   auto mn = std::min(m, n);
-  auto mx = std::max(m, n);
-  int64_t lrwork; // These settings are valid for on LAPACK 3.6+
-  if (jobz == 'N'){
-    lrwork = 7 * mn;
-  }else if (mx > 10 * mn){
-    lrwork = 7 * mn * mn + 7 * mn;
-  } else {
-    lrwork = std::max(7 * mn * mn + 7 * mn, 2 * mx * mn + 2 *mn * mn + mn);
-  }
-  Tensor rwork = at::empty({std::max(int64_t(1), lrwork)}, at::kInt);
-  auto rwork_data = rwork.data_ptr<int>();
   Tensor iwork = at::empty({8*mn}, at::kInt);
   auto iwork_data = iwork.data_ptr<int>();
+  Tensor rwork;
+  int* rwork_data = nullptr;
+  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+    auto mx = std::max(m, n);
+    int64_t lrwork; // These settings are valid for on LAPACK 3.6+
+    if (jobz == 'N'){
+      lrwork = 7 * mn;
+    }else if (mx > 10 * mn){
+      lrwork = 7 * mn * mn + 7 * mn;
+    } else {
+      lrwork = std::max(7 * mn * mn + 7 * mn, 2 * mx * mn + 2 *mn * mn + mn);
+    }
+    rwork = at::empty({std::max(int64_t(1), lrwork)}, at::kInt);
+    rwork_data = rwork.data_ptr<int>();
+  }
 
   // Run once, first to get the optimum work size.
   // Since we deal with batches of matrices with the same dimensions, doing this outside
