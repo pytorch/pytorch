@@ -15,6 +15,8 @@
 #include <torch/csrc/jit/instruction.h>
 
 #include <caffe2/core/types.h>
+#include <caffe2/proto/caffe2_pb.h>
+#include <caffe2/proto/torch_pb.h>
 #include <caffe2/serialize/inline_container.h>
 #include <onnx/onnx_pb.h>
 
