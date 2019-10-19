@@ -96,7 +96,7 @@ SPECIALIZE_PROMOTION_DISABLED_TYPE(at::BFloat16)
   }                                                                                 \
   template<>                                                                        \
   inline void cast_and_store(const ScalarType dest_type, void *ptr, type value) {   \
-    switch (src_type) {                                                             \
+    switch (dest_type) {                                                            \
       case ScalarType::ComplexFloat: *(std::complex<float> *)ptr = value; return;   \
       case ScalarType::ComplexDouble: *(std::complex<double> *)ptr = value; return; \
       default:                                                                      \
