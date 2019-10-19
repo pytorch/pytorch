@@ -363,11 +363,11 @@ void Engine::thread_on_exception(
     std::shared_ptr<GraphTask> graph_task,
     std::shared_ptr<Node> fn,
     std::exception& e) {
-  graph_task->set_exception(e, fn);
+  graph_task->set_exception(std::current_exception(), fn);
 }
 
 void GraphTask::set_exception(
-    const std::exception& e,
+    std::exception_ptr eptr,
     std::shared_ptr<Node> fn) {
   // Lock mutex for writing to exception_
   std::lock_guard<std::mutex> lock(mutex_);
@@ -375,7 +375,7 @@ void GraphTask::set_exception(
     if (AnomalyMode::is_enabled() && fn) {
       fn->metadata()->print_stack();
     }
-    exception_ = std::make_exception_ptr(e);
+    exception_ = eptr;
     has_error_ = true;
     if (exit_on_error_) {
       // Notify other threads if we are supposed to exit on errors.

@@ -441,7 +441,7 @@ class DistAutogradTest(object):
             if self.rank % 2 == 0:
                 # Wait a bit for all other nodes to die.
                 time.sleep(5)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
                     dist_autograd.backward([res.sum()])

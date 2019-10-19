@@ -108,7 +108,8 @@ void DistAutogradContext::outStandingRpcCallback(const rpc::Message& message) {
   if (message.type() == rpc::MessageType::EXCEPTION) {
     // If we have an error, let the local autograd engine know about it.
     std::string err(message.payload().begin(), message.payload().end());
-    graphTask_->set_exception(std::runtime_error(err), nullptr);
+    graphTask_->set_exception(
+        std::make_exception_ptr(std::runtime_error(err)), nullptr);
   }
 }
 
