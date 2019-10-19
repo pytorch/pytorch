@@ -163,12 +163,17 @@ ProcessGroupAgent::ProcessGroupAgent(
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() {
+  std::cout << "in destructor\n";
   LOG(INFO) << "Shutting down process group agent without joining";
-  // shutdown_ = true;
-  // threadPool_.waitWorkComplete(); // test
-  // if (listenerThread_.joinable()) {
-  //   listenerThread_.join();
-  // }
+  shutdown_ = true;
+  std::cout << "waiting work complete \n";
+  threadPool_.waitWorkComplete(); // test
+  std::cout << "done waiting work complete, checking if needed to join\n";
+  if (listenerThread_.joinable()) {
+    std::cout << "running join...\n";
+    listenerThread_.join();
+  }
+  std::cout << "done, finally\n";
 }
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
@@ -390,17 +395,18 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 }
 
 void ProcessGroupAgent::listenLoop() {
+  std::cout << "called listenLooop\n";
   while (!shutdown_) {
+    std::cout << "looping...\n";
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
-    // pg_->recvAnysource(preamble, pg_->getRank())->wait();
-    auto work = pg_->recvAnysource(preamble, pg_->getRank());
-    while (!work->isCompleted() && !shutdown_) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(sleepMillis_));
-    }
+    pg_->recvAnysource(preamble, pg_->getRank())->wait();
     if (shutdown_) {
+      std::cout << "got shutdown, leaving this\n";
       return;
     }
+
+    std::cout << "got work to do\n";
 
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 

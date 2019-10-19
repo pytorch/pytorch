@@ -378,10 +378,13 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
 void ProcessGroupGloo::RecvWork::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
   try {
+    std::cout << "starting to wait recv\n";
     buffer_->waitRecv(&srcRank_);
   } catch (...) {
     exception_ = std::current_exception();
   }
+
+  std::cout << "in processgroupgloo:recvwork::wait\n";
 
   completed_ = true;
   if (exception_) {
