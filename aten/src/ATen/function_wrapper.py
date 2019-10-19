@@ -1,8 +1,6 @@
 # HEY! Trying to understand what this file does?  Read
 # "what has to be done to add a Operation ..." first!
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import re
 from code_template import CodeTemplate
 

@@ -12,8 +12,6 @@ generated.  In the full build system, OUTPUT_DIR is
 torch/csrc/jit/generated/
 """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import argparse
 import copy
 import re
