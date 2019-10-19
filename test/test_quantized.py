@@ -502,7 +502,6 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
-                       elements=st.floats(-100, 100, allow_nan=False),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            kernel=st.sampled_from((3, 5)),
            stride=st.sampled_from((None, 1, 2)),
@@ -552,7 +551,6 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=5, max_side=10),
-                       elements=st.floats(-100, 100, allow_nan=False),
                        qparams=hu.qparams(dtypes=torch.qint8)),
            kernel=st.sampled_from((4, 5)),
            stride=st.sampled_from((None, 1, 2)),
@@ -597,8 +595,8 @@ class TestQuantizedOps(TestCase):
             qX_ref = torch.quantize_per_tensor(X_ref, scale=X_hat.q_scale(), zero_point=X_hat.q_zero_point(),
                                                dtype=torch_type)
 
-            self.assertEqual(qX_ref.int_repr(), X_hat.int_repr().to(torch.double), prec=1.0,
-                             message="{} results are off".format(name))
+            self.assertEqual(qX_ref.int_repr().to(torch.double), X_hat.int_repr().to(torch.double), prec=1.0,
+                             message=error_message.format(name, X_hat.int_repr(), qX_ref.int_repr()))
             self.assertEqual(scale, X_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, X_hat.q_scale()))
             self.assertEqual(zero_point, X_hat.q_zero_point(),
