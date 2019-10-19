@@ -18,11 +18,12 @@ struct TORCH_API PadOptions {
   TORCH_ARG(IntArrayRef, pad);
 
   /// "constant", "reflect", "replicate" or "circular". Default: "constant"
-  TORCH_ARG(c10::variant<
+  typedef c10::variant<
     enumtype::kConstant,
     enumtype::kReflect,
     enumtype::kReplicate,
-    enumtype::kCircular>, mode) = torch::kConstant;
+    enumtype::kCircular> mode_t;
+  TORCH_ARG(mode_t, mode) = torch::kConstant;
 
   /// fill value for "constant" padding. Default: 0
   TORCH_ARG(double, value) = 0;
