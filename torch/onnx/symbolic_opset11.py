@@ -199,7 +199,7 @@ def _prepare_onnx_paddings(g, dim, pad):
     paddings = g.op("Concat", pad, g.op("ConstantOfShape", extension, value_t=torch.tensor([0])), axis_i=0)
     # ext_pad = g.op("Transpose", ext_pad, perm_i=[1, 0])
     # Reshape and reverse order and collate first beginnings and then ends
-    # paddings = [[..., 0, dim_n - 1_begin, dim_n_begin]
+    # paddings = [[..., 0, dim_n-1_begin, dim_n_begin],
     #               [..., 0, dim_n-1_end, dim_n_end]]
     # Reshape back to 1-D paddings = [..., 0, dim_n - 1_begin, dim_n_begin, ..., 0, dim_n - 1_end, dim_n_end]
     paddings = g.op("Reshape", paddings, g.op("Constant", value_t=torch.tensor([-1, 2])))
