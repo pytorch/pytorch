@@ -24,7 +24,7 @@ class AmpScaler(object):
     """
     ``torch.float16`` has a limited dynamic range.  Late in training, when gradient magnitudes become small,
     gradient values may underflow in ``float16`` regions of the backward pass.
-    
+
     :class:`AmpScaler` performs dynamic gradient scaling to mitigate underflow.
 
     Here's how that looks in a simple example::
@@ -319,7 +319,7 @@ class AmpScaler(object):
         """
         return self._enabled
 
-    def _check_inf(self, optimizer):
+    def _check_inf_per_device(self, optimizer):
         dummy_rscale = torch.full((1,), 1.0, dtype=torch.float32, device="cuda")
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
 

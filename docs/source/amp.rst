@@ -9,8 +9,8 @@ Automatic Mixed Precision package - torch.cuda.amp
 
 ``torch.cuda.amp`` provides convenience methods for mixed precision.  Mixed precision uses ``torch.float16``
 (a.k.a. ``torch.half``) for some operations like linear layers and convolutions, to improve throughput
-and reduce the memory footprint.  Operations like reductions that benefit from the precision and range of
-``torch.float32`` (a.k.a. ``torch.float``) are carried out in ``float32``.
+and reduce the memory footprint.  Operations that require additional precision and range, like reductions,
+are carried out in ``torch.float32`` (a.k.a. ``torch.float``).
 On Nvidia GPUs, mixed precision can improve performance.
 
 By default, you don't need to call ``.half()`` on your model(s) or data to use the routines below.
