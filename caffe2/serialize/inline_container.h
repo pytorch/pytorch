@@ -90,7 +90,8 @@ namespace caffe2 {
 namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x1L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x2L;
+constexpr uint64_t kProducedFileFormatVersion = 0x1L;
 
 // Writer-specific constants
 constexpr uint64_t kFieldAlignment = 64;
@@ -107,7 +108,9 @@ class CAFFE2_API PyTorchStreamReader final {
   bool hasRecord(const std::string& name);
 
   ~PyTorchStreamReader();
-
+  uint64_t version() const {
+    return version_;
+  }
  private:
   void init();
   size_t read(uint64_t pos, char* buf, size_t n);
@@ -118,7 +121,9 @@ class CAFFE2_API PyTorchStreamReader final {
   istream_read_func(void* pOpaque, uint64_t file_ofs, void* pBuf, size_t n);
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
+  std::string archive_name_plus_slash_;
   std::unique_ptr<ReadAdapterInterface> in_;
+  int64_t version_;
 };
 
 class CAFFE2_API PyTorchStreamWriter final {
