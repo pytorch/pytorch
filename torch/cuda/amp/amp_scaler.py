@@ -247,9 +247,10 @@ class AmpScaler(object):
             if isinstance(new_scale, float):
                 self._scale = torch.full((1,), new_scale, dtype=torch.float32, device="cuda")
             else:
-                reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor."
+                reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor with requires_grad=False."
                 assert isinstance(new_scale, torch.cuda.FloatTensor), reason
                 assert new_scale.numel() == 1, reason
+                assert new_scale.requires_grad == False, reason
                 self._scale = new_scale
         else:
             # Consume shared inf/nan data collected from optimizers to update the scale.
