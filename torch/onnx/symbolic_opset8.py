@@ -74,6 +74,22 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
+def __interpolate(g, input, size, scale_factor, mode , align_corners):
+    align_corners = sym_help._maybe_get_const(align_corners, 'b')
+    if not sym_help._is_none(align_corners) and align_corners:
+        return _unimplemented("interpolate", "align_corners == True")
+
+    if not sym_help._is_none(scale_factor) and sym_help._is_value(scale_factor):
+        return _unimplemented("interpolate", "dynamic scales in opset 8")
+
+    if not sym_help._is_none(size) and sym_help._is_value(size):
+        return _unimplemented("interpolate", "dynamic size in opset 8")
+
+    scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
+                                                             mode , align_corners)
+    return g.op("Upsample", input, mode_s=mode, scales_f=scales)
+
+
 # NOTE: We should create a wrapper for this kind of operation, after resolving the shape/type propagation
 #       issue for "cast" operators. Some symbolic functions depend on shape information of input tensor, which
 #       is lost after casting.
@@ -205,6 +221,8 @@ def flatten(g, input, start_dim, end_dim):
 
 
 def _constant_fill(g, sizes, dtype, const_value):
+    if dtype is None:
+        dtype = 6  # float
     if not sym_help.scalar_type_to_pytorch_type[dtype].is_floating_point:
         result = g.op(
             "ConstantFill", sizes, dtype_i=sym_help.cast_pytorch_to_onnx["Float"], input_as_shape_i=1, value_f=const_value)
