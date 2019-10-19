@@ -162,7 +162,7 @@ ProcessGroupAgent::ProcessGroupAgent(
 }
 
 ProcessGroupAgent::~ProcessGroupAgent() {
-  LOG(INFO) << "Shutting down process group agent without joining" << std::endl;
+  LOG(INFO) << "Shutting down process group agent without joining";
   shutdown_ = true;
   threadPool_.waitWorkComplete(); // test
   listenerThread_.join();
