@@ -184,7 +184,8 @@ def round(g, self):
 # Arguments:
 #     dim: the dimension of the tensor.
 #     pad: the paddings in pytorch.
-#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
+#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ..., dim_m_begin, dim_m_end,
+#          where m is in range [0, n].
 def _prepare_onnx_paddings(g, dim, pad):
     # The desired order of paddings is
     # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
