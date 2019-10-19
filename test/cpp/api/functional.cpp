@@ -1116,15 +1116,15 @@ TEST_F(FunctionalTest, Threshold) {
 TEST_F(FunctionalTest, Pad) {
   auto t4d = torch::empty({3, 3, 4, 2});
   std::vector<int64_t> p1d = {1, 1}; // pad last dim by 1 on each side
-  auto out1 = F::pad(t4d, PadOptions(p1d).mode("constant").value(0));  // effectively zero padding
+  auto out1 = F::pad(t4d, PadOptions(p1d).mode(torch::kConstant).value(0));  // effectively zero padding
   ASSERT_EQ(out1.sizes(), torch::IntArrayRef({3, 3, 4, 4}));
 
   std::vector<int64_t> p2d = {1, 1, 2, 2}; // pad last dim by (1, 1) and 2nd to last by (2, 2)
-  auto out2 = F::pad(t4d, PadOptions(p2d).mode("constant").value(0));
+  auto out2 = F::pad(t4d, PadOptions(p2d).mode(torch::kConstant).value(0));
   ASSERT_EQ(out2.sizes(), torch::IntArrayRef({3, 3, 8, 4}));
 
   t4d = torch::empty({3, 3, 4, 2});
   std::vector<int64_t> p3d = {0, 1, 2, 1, 3, 3}; // pad by (0, 1), (2, 1), and (3, 3)
-  auto out3 = F::pad(t4d, PadOptions(p3d).mode("constant").value(0));
+  auto out3 = F::pad(t4d, PadOptions(p3d).mode(torch::kConstant).value(0));
   ASSERT_EQ(out3.sizes(), torch::IntArrayRef({3, 9, 7, 3}));
 }
