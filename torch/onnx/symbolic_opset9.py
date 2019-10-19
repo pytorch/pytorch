@@ -505,6 +505,7 @@ def softmax(g, input, dim, dtype=None):
     # otherwise compute softmax using a subgraph with other operators
     input_dim = input.type().dim()
     if input_dim:
+        # TODO: remove this as onnx opset 11 spec allows negative axes
         if dim < 0:
             dim = input_dim + dim
         if input_dim == dim + 1:
@@ -834,6 +835,7 @@ def where(g, condition, self, other):
 def log_softmax(g, input, dim, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
+    # TODO: remove this as onnx opset 11 spec allows negative axes
     if dim < 0:
         dim = input.type().dim() + dim
     if input.type().dim() != dim + 1:
@@ -1666,6 +1668,7 @@ def erf(g, input):
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
+    # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0 :
         end_dim = dim + end_dim
     # use ONNX's Flatten operator for cases where the output shape is 2D

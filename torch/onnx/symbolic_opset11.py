@@ -184,7 +184,8 @@ def round(g, self):
 # Arguments:
 #     dim: the dimension of the tensor.
 #     pad: the paddings in pytorch.
-#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
+#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ..., dim_m_begin, dim_m_end,
+#          where m is in range [0, n].
 def _prepare_onnx_paddings(g, dim, pad):
     # The desired order of paddings is
     # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
@@ -197,8 +198,8 @@ def _prepare_onnx_paddings(g, dim, pad):
     # Concat pad with extension: paddings = [dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, 0, 0, ... ]
     paddings = g.op("Concat", pad, g.op("ConstantOfShape", extension, value_t=torch.tensor([0])), axis_i=0)
     # Reshape and reverse order and collate first beginnings and then ends
-    # paddings = [[..., 0, dim_n - 1_begin, dim_n_begin]
-    #               [..., 0, dim_n - 1_end, dim_n_end]]
+    # paddings = [[..., 0, dim_n-1_begin, dim_n_begin],
+    #               [..., 0, dim_n-1_end, dim_n_end]]
     # Reshape back to 1-D paddings = [..., 0, dim_n - 1_begin, dim_n_begin, ..., 0, dim_n - 1_end, dim_n_end]
     paddings = g.op("Reshape", paddings, g.op("Constant", value_t=torch.tensor([-1, 2])))
     paddings = g.op("Transpose", torch.onnx.symbolic_opset10.flip(g, paddings, [0]), perm_i=[1, 0])
@@ -209,6 +210,7 @@ def _prepare_onnx_paddings(g, dim, pad):
 
 def constant_pad_nd(g, input, padding, value=None):
     mode = "constant"
+    value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, input)
     pad = _prepare_onnx_paddings(g, input.type().dim(), padding)
     return g.op("Pad", input, pad, value, mode_s=mode)
