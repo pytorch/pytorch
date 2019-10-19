@@ -126,20 +126,7 @@ void DistAutogradContext::outStandingRpcCallback(const rpc::Message& message) {
   if (message.type() == rpc::MessageType::EXCEPTION) {
     // If we have an error, let the local autograd engine know about it.
     std::string err(message.payload().begin(), message.payload().end());
-    auto exception = std::runtime_error(err);
-
-    // Enqueue 'ErrorFunc' on the local autograd engine.
-    auto& localEngine = torch::autograd::Engine::get_default_engine();
-    auto errorFunc = std::make_shared<ErrorFunc>(exception);
-
-    // Increment out standing tasks for this function and set appropriate
-    // exec_info_ for this function to execute.
-    graphTask_->outstanding_tasks_++;
-    // Lock mutex for writing to exec_info_.
-    std::lock_guard<std::mutex> lock(graphTask_->mutex_);
-    graphTask_->exec_info_[errorFunc.get()].needed_ = true;
-    localEngine.enqueue_blocked_task_on_cpu(torch::autograd::NodeTask(
-        graphTask_.get(), errorFunc, torch::autograd::InputBuffer(0)));
+    graphTask_->set_exception(std::runtime_error(err), nullptr);
   }
 }
 

@@ -94,6 +94,10 @@ struct GraphTask {
     return exec_info_.empty();
   }
 
+  // Set an appropriate exception on this graph_task which was encountered while
+  // running the provided function.
+  void set_exception(const std::exception& e, std::shared_ptr<Node> fn);
+
   // Whether or not to stop execution for this GraphTask when an error is
   // encountered.
   bool exit_on_error_;
@@ -113,7 +117,7 @@ struct GraphTask {
 };
 
 struct NodeTask {
-  GraphTask* base_;
+  std::weak_ptr<GraphTask> base_;
   std::shared_ptr<Node> fn_;
   // This buffer serves as an implicit "addition" node for all of the
   // gradients flowing here.  Once all the dependencies are finished, we
@@ -126,7 +130,7 @@ struct NodeTask {
   int getReentrantDepth() const;
 
   NodeTask(
-      GraphTask* base,
+      std::weak_ptr<GraphTask> base,
       std::shared_ptr<Node> fn,
       InputBuffer inputs,
       bool isShutdownTask = false)
@@ -161,7 +165,7 @@ struct TORCH_API Engine {
   // for the graph. This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
   variable_list execute_with_graph_task(
-      GraphTask& graph_task,
+      std::shared_ptr<GraphTask> graph_task,
       std::shared_ptr<Node> graph_root);
 
   // Enqueues a blocked task for execution on the CPU thread. A blocked task is
@@ -188,15 +192,23 @@ struct TORCH_API Engine {
 
 protected:
   void compute_dependencies(Node* root, GraphTask& task);
-  void evaluate_function(NodeTask& task);
+  void evaluate_function(
+      std::shared_ptr<GraphTask> graph_task,
+      Node* func,
+      InputBuffer& inputs);
   ReadyQueue& ready_queue(at::Device device);
   ReadyQueue& ready_queue_by_index(int device_index);
   void start_threads();
   virtual void thread_init(int device);
-  virtual void thread_main(GraphTask *graph_task);
-  virtual void thread_on_exception(NodeTask& task, std::exception& e);
+  virtual void thread_on_exception(
+      std::shared_ptr<GraphTask> graph_task,
+      std::shared_ptr<Node> fn,
+      std::exception& e);
+  virtual void thread_main(
+      std::shared_ptr<GraphTask> task,
+      bool reentrant_thread);
   void reentrant_thread_init();
-  void add_thread_pool_task(GraphTask *graph_task);
+  void add_thread_pool_task(std::weak_ptr<GraphTask> graph_task);
   void set_device(int device);
 
   // Ensures ready_queues_ are initialized only once
@@ -221,7 +233,7 @@ protected:
     std::mutex mutex_;
     // Workers will process the GraphTasks added to this queue. A GraphTask is
     // allocated inside Engine::execute and lives for the duration of execute
-    std::queue<GraphTask*> graphtasks_queue_;
+    std::queue<std::weak_ptr<GraphTask>> graphtasks_queue_;
 
     ThreadPoolShared() : num_workers_(0) {}
  };

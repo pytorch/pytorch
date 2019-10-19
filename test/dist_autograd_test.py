@@ -423,7 +423,7 @@ class DistAutogradTest(object):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @dist_init(sync_at_shutdown=False)
+    @dist_init(clean_shutdown=False)
     @unittest.skipIf(TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP,
                      "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     def test_backward_node_failure(self):
@@ -440,7 +440,7 @@ class DistAutogradTest(object):
             # Kill all odd rank nodes.
             if self.rank % 2 == 0:
                 # Wait a bit for all other nodes to die.
-                time.sleep(3)
+                time.sleep(5)
                 with self.assertRaises(RuntimeError):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
