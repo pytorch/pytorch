@@ -48,6 +48,7 @@ blacklist = [
     '__init_subclass__',
     '__new__',
     '__subclasshook__',
+    'cdist',
     'clamp',
     'clamp_',
     'device',
@@ -416,6 +417,7 @@ def gen_pyi(declarations_path, out):
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
+        'numel': ['def numel(self: Tensor) -> _int: ...'],
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
@@ -489,8 +491,6 @@ def gen_pyi(declarations_path, out):
                    'def stride(self, _int) -> _int: ...'],
         'new_ones': ['def new_ones(self, size: {}, {}) -> Tensor: ...'.
                      format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
-        'new_zeros': ['def new_zeros(self, size: {}, {}) -> Tensor: ...'.
-                      format(type_to_python('IntArrayRef'), FACTORY_PARAMS)],
         'new_tensor': ["def new_tensor(self, data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)],
         # clamp has no default values in the Declarations
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
@@ -503,6 +503,7 @@ def gen_pyi(declarations_path, out):
         'requires_grad_': ['def requires_grad_(self, mode: _bool=True) -> Tensor: ...'],
         'element_size': ['def element_size(self) -> _int: ...'],
         'dim': ['def dim(self) -> _int: ...'],
+        'numel': ['def numel(self) -> _int: ...'],
         'ndimension': ['def ndimension(self) -> _int: ...'],
         'nelement': ['def nelement(self) -> _int: ...'],
         'cuda': ['def cuda(self, device: Optional[_device]=None, non_blocking: _bool=False) -> Tensor: ...'],

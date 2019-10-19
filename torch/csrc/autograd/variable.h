@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/cpp_hook.h>
 
 #include <ATen/ATen.h>
+#include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 
 #include <memory>
@@ -180,10 +181,15 @@ struct TORCH_API Variable : public at::Tensor {
   /// Gets the raw gradient function pointer, whatever it currently is.
   Node* grad_fn_unsafe() const;
 
+private:
   /// Set the gradient accumulator of the `Variable`. This is only applicable to
   /// leaf variables. Interior variables should call `set_gradient_edge()`.
   void set_grad_accumulator(std::weak_ptr<Node> grad_accumulator);
 
+  // Only user of set_grad_accumulator
+  friend class SavedVariable;
+
+public:
   /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
   /// if it still exists. If the gradient accumulator function has been
   /// destroyed, returns a `nullptr`.
@@ -326,7 +332,10 @@ struct TORCH_API Variable : public at::Tensor {
   PyObject* pyobj() const noexcept;
   void set_pyobj(PyObject* pyobj) noexcept;
 
+ private:
   struct AutogradMeta;
+
+ public:
   Variable::AutogradMeta* get_autograd_meta() const noexcept;
 
  private:
@@ -348,7 +357,7 @@ struct TORCH_API Variable : public at::Tensor {
 /// metadata fields that are necessary for tracking the Variable's autograd history.
 
 struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
-  std::string name;
+  std::string name_;
 
   Variable grad_;
   std::shared_ptr<Node> grad_fn_;
@@ -633,6 +642,9 @@ inline std::shared_ptr<Node> Variable::try_get_grad_accumulator() const {
 
 inline Variable Variable::detach() const {
   auto var = make_variable_view(*this, *this, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false, Edge());
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names(var, *this);
+#endif
   return var;
 }
 
@@ -736,11 +748,11 @@ inline const Variable& Variable::base() const {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::set_name(const std::string& name) {
-  get_autograd_meta()->name = name;
+  get_autograd_meta()->name_ = name;
 }
 
 inline const std::string& Variable::name() const noexcept {
-  return get_autograd_meta()->name;
+  return get_autograd_meta()->name_;
 }
 
 inline void Variable::set_pyobj(PyObject* pyobj) noexcept {

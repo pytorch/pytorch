@@ -113,6 +113,23 @@ class RNNBase(torch.nn.Module):
                     self._all_weight_names.extend([ih_name, hh_name])
                     self._all_weight_values.extend([ih, hh])
 
+    def _get_name(self):
+        return 'DynamicQuantizedRNN'
+
+    def extra_repr(self):
+        s = '{input_size}, {hidden_size}'
+        if self.num_layers != 1:
+            s += ', num_layers={num_layers}'
+        if self.bias is not True:
+            s += ', bias={bias}'
+        if self.batch_first is not False:
+            s += ', batch_first={batch_first}'
+        if self.dropout != 0:
+            s += ', dropout={dropout}'
+        if self.bidirectional is not False:
+            s += ', bidirectional={bidirectional}'
+        return s.format(**self.__dict__)
+
     def check_input(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> None
         expected_input_dim = 2 if batch_sizes is not None else 3
@@ -168,7 +185,6 @@ class RNNBase(torch.nn.Module):
             self.dropout,
             self.bidirectional,
             self._all_weight_names,
-            self.__overloads__,
             self.training,
             self.dtype,
         )
@@ -192,47 +208,42 @@ class RNNBase(torch.nn.Module):
         self.dropout = vals[6]
         self.bidirectional = vals[7]
         self._all_weight_names = vals[8]
-        self.__overloads__ = vals[9]
-        self.training = vals[10]
-        self.dtype = vals[11]
+        self.training = vals[9]
+        self.dtype = vals[10]
 
         self._all_weight_values = []
         for i in range(len(self._all_weight_names)):
             self._all_weight_values.append(torch.ops.quantized.linear_prepack(*dynamic_vals[i]))
 
     @classmethod
-    def from_float(cls, mod, dtype=torch.qint8):
+    def from_float(cls, mod):
         assert type(mod) == torch.nn.LSTM, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM'
         assert hasattr(
             mod, 'qconfig'), 'Input float module must have qconfig defined'
 
+        if mod.qconfig is not None and mod.qconfig.weight is not None:
+            weight_observer = mod.qconfig.weight()
+        else:
+            # We have the circular import issues if we import the qconfig in the beginning of this file:
+            # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
+            # import until we need it.
+            from torch.quantization.qconfig import default_dynamic_qconfig
+            weight_observer = default_dynamic_qconfig.weight()
+
+        dtype = weight_observer.dtype
         supported_scalar_types = [torch.qint8, torch.float16]
         if dtype not in supported_scalar_types:
-            raise RuntimeError('Unsupported dtype: {}'.format(dtype))
-
-        # When dtype = torch.float16, we don't need weight_observer
-        if dtype == torch.qint8:
-            if mod.qconfig is not None and mod.qconfig.weight() is not None:
-                weight_observer = mod.qconfig.weight()
-            else:
-                # We have the circular import issues if we import the qconfig in the beginning of this file:
-                # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
-                # import until we need it.
-                from torch.quantization.QConfig import default_dynamic_qconfig
-                weight_observer = default_dynamic_qconfig.weight()
-            assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
+            raise RuntimeError('Unsupported dtype for dynamic RNN quantization: {}'.format(dtype))
 
         if mod.mode == 'LSTM':
             qRNNBase = LSTM(mod.input_size, mod.hidden_size, mod.num_layers,
                             mod.bias, mod.batch_first, mod.dropout, mod.bidirectional, dtype)
+        else:
+            raise NotImplementedError('Only LSTM is supported for QuantizedRNN for now')
 
         num_directions = 2 if mod.bidirectional else 1
 
         assert mod.bias
-
-        # TODO: support more than just LSTM
-        if qRNNBase.mode != 'LSTM':
-            raise RuntimeError('Only LSTM is supported for QuantizedRNN')
 
         qRNNBase._all_weight_names = []
         qRNNBase._all_weight_values = []
@@ -254,7 +265,7 @@ class RNNBase(torch.nn.Module):
                         #   w_ih, w_hh
                         weight_observer(weight)
                         wt_scale, wt_zp = weight_observer.calculate_qparams()
-                        qweight = torch.quantize_linear(
+                        qweight = torch.quantize_per_tensor(
                             weight.float(), float(wt_scale), int(wt_zp), torch.qint8)
                         packed_weight = \
                             torch.ops.quantized.linear_prepack(qweight, bias)
@@ -296,6 +307,9 @@ class LSTM(RNNBase):
 
     def __init__(self, *args, **kwargs):
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
+
+    def _get_name(self):
+        return 'DynamicQuantizedLSTM'
 
     def forward_impl(self, input, hx, batch_sizes, max_batch_size, sorted_indices):
         # type: (Tensor, Optional[Tuple[Tensor, Tensor]], Optional[Tensor], int, Optional[Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]  # noqa
@@ -372,5 +386,5 @@ class LSTM(RNNBase):
             return self.forward_tensor(input, hx)
 
     @classmethod
-    def from_float(cls, mod, dtype=torch.qint8):
-        return super(LSTM, cls).from_float(mod, dtype)
+    def from_float(cls, mod):
+        return super(LSTM, cls).from_float(mod)
