@@ -1685,18 +1685,25 @@ class TestQNNPackOps(TestCase):
             np.testing.assert_array_almost_equal(a_pool_q.int_repr().numpy(),
                                                  qa_pool.int_repr().numpy(), decimal=0)
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
-                                              min_side=1, max_side=4),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
-    def test_mean(self, X):
+
+    @given(batch_size=st.integers(1, 5),
+           channels=st.sampled_from([2, 4, 5, 8, 16, 32]),
+           height=st.integers(4, 10),
+           width=st.integers(4, 10),
+           scale=st.floats(0.02, 2.6),
+           zero_point=st.integers(0, 25))
+    def test_mean(self, batch_size, channels, height, width, scale, zero_point):
         with override_quantized_engine('qnnpack'):
             dim = (2, 3)
-            X, (scale, zero_point, torch_type) = X
-            qX = torch.quantize_per_tensor(torch.tensor(X).float(), scale, zero_point, torch_type)
+            X_init = torch.from_numpy(np.random.randint(
+                0, 50, (batch_size, channels, height, width)))
+            X = scale * (X_init - zero_point).to(dtype=torch.float)
+
+            qX = torch.quantize_per_tensor(X, scale, zero_point, torch.quint8)
             Y = torch.mean(qX.dequantize(), dim)
-            Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
+            Y = torch.quantize_per_tensor(Y, scale, zero_point, torch.quint8)
             qY = torch.mean(qX, dim)
-            np.testing.assert_array_almost_equal(Y, qY.dequantize(), decimal=0)
+            np.testing.assert_array_almost_equal(Y.int_repr().numpy(), qY.int_repr().numpy(), decimal=0)
 
 """Tests the correctness of the tensor comparators."""
 class TestComparatorOps(TestCase):
