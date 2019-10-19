@@ -6,7 +6,6 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-#include <atomic>
 #include <thread>
 
 namespace torch {
@@ -39,7 +38,8 @@ class ProcessGroupAgent : public RpcAgent {
   ProcessGroupAgent(
       std::string workerName,
       std::shared_ptr<c10d::ProcessGroup> pg,
-      int numSendRecvThreads = 4, int sleepMillis = 100);
+      int numSendRecvThreads = 4,
+      int sleepMillis = 100);
 
   ~ProcessGroupAgent() override;
 
@@ -119,7 +119,12 @@ class ProcessGroupAgent : public RpcAgent {
   MessageCounter recvCounts_;
 
   std::atomic<int64_t> nextId_;
-  std::atomic<bool> shutdown;
+  // tracks whether we should shutdown the listenerThread_ that processes
+  // incoming messages.
+  std::atomic<bool> shutdown_;
+  // amount of time in milliseconds to sleep for while waiting for work in the
+  // listenerThread.
+  int sleepMillis_;
   // one mutex per ProcessGroup rank, as ProcessGroup::send is not thread-safe
   // when using the same tag.
   std::vector<std::mutex> sendMutexes_;
@@ -134,9 +139,6 @@ class ProcessGroupAgent : public RpcAgent {
   //     NB: Ideally, this should be addressed by supporting asynchronous UDF.
   //         This is just a temporary solution for (2).
   ThreadPool threadPool_;
-  // amount of time to sleep for in between checking if work has become
-  // available in listenLoop.
-  int sleepMillis_;
   std::unordered_map<int64_t, std::shared_ptr<FutureMessage>> futures_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
