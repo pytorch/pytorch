@@ -20,12 +20,12 @@ namespace enumtype { \
   */ \
   struct k##name { k##name() {} }; \
 } \
-TORCH_API extern enumtype::k##name k##name; \
+TORCH_API extern const enumtype::k##name k##name; \
 }
 
 #define TORCH_ENUM_DEFINE(name) \
 namespace torch { \
-enumtype::k##name k##name; \
+const enumtype::k##name k##name; \
 }
 
 #define TORCH_ENUM_PRETTY_PRINT(name) \
