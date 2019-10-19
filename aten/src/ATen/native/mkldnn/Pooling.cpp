@@ -77,6 +77,29 @@ Tensor& mkldnn_adaptive_avg_pool2d_out(
       "mkldnn_adaptive_avg_pool2d_out: ATen not compiled with MKLDNN support");
 }
 
+Tensor dnnl_max_pool2d(
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool ceil_mode) {
+  AT_ERROR(
+      "dnnl_max_pool2d: ATen not compiled with MKLDNN support");
+}
+
+Tensor dnnl_avg_pool2d(
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    bool ceil_mode,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
+  AT_ERROR(
+      "dnnl_avg_pool2d: ATen not compiled with MKLDNN support");
+}
+
 } // namespace native
 } // namespace at
 

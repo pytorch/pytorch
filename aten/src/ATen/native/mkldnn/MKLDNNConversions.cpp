@@ -144,7 +144,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   AT_ERROR("mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
 }
 
-Tensor _dnnl_reorder(
+Tensor dnnl_reorder(
     const Tensor& input, int64_t from, int64_t to, int64_t groups) {
   AT_ERROR("_dnnl_reorder: MKL-DNN build is disabled");
 }
