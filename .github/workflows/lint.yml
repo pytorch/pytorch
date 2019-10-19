@@ -106,16 +106,12 @@ jobs:
       - name: Checkout PR tip
         run: |
           set -eux
-          if [ -z "${GITHUB_HEAD_REF}" ]; then
-            # We are on master, just set the SHA from our current location
-            echo ::set-output name=commit_sha::${GITHUB_SHA}
-          else
-            # We are on a PR, so actions/checkout leaves us on merge commit.
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # We are on a PR, so actions/checkout leaves us on a merge commit.
             # Check out the actual tip of the branch.
-            PR_TIP=$(git rev-parse HEAD^2)
-            git checkout ${PR_TIP}
-            echo ::set-output name=commit_sha::${PR_TIP}
+            git checkout ${{ github.event.pull_request.head.sha }}
           fi
+          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
         id: get_pr_tip
       - name: Run flake8
         run: |
@@ -146,16 +142,12 @@ jobs:
       - name: Checkout PR tip
         run: |
           set -eux
-          if [ -z "${GITHUB_HEAD_REF}" ]; then
-            # We are on master, just set the SHA from our current location
-            echo ::set-output name=commit_sha::${GITHUB_SHA}
-          else
-            # We are on a PR, so actions/checkout leaves us on merge commit.
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # We are on a PR, so actions/checkout leaves us on a merge commit.
             # Check out the actual tip of the branch.
-            PR_TIP=$(git rev-parse HEAD^2)
-            git checkout ${PR_TIP}
-            echo ::set-output name=commit_sha::${PR_TIP}
+            git checkout ${{ github.event.pull_request.head.sha }}
           fi
+          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
         id: get_pr_tip
       - name: Run flake8
         run: |
@@ -189,20 +181,23 @@ jobs:
       - name: Checkout PR tip
         run: |
           set -eux
-          if [ -z "${GITHUB_HEAD_REF}" ]; then
-            # We are on master, just set the SHA from our current location
-            echo ::set-output name=commit_sha::${GITHUB_SHA}
-          else
-            # We are on a PR, so actions/checkout leaves us on merge commit.
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # We are on a PR, so actions/checkout leaves us on a merge commit.
             # Check out the actual tip of the branch.
-            PR_TIP=$(git rev-parse HEAD^2)
-            git checkout ${PR_TIP}
-            echo ::set-output name=commit_sha::${PR_TIP}
+            git checkout ${{ github.event.pull_request.head.sha }}
           fi
+          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
         id: get_pr_tip
       - name: Install dependencies
         run: |
           set -eux
+          # Install CUDA
+          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/cuda-ubuntu1804.pin
+          sudo mv cuda-ubuntu1804.pin /etc/apt/preferences.d/cuda-repository-pin-600
+          sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
+          sudo add-apt-repository "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/ /"
+          sudo apt-get update
+          sudo apt-get --no-install-recommends -y install cuda
           # Install dependencies
           pip install pyyaml
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
@@ -223,11 +218,9 @@ jobs:
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
 
-            mkdir build
-            pushd build
+            export USE_NCCL=0
             # We really only need compile_commands.json, so no need to build!
-            time cmake ..
-            popd
+            time python setup.py --cmake-only build
 
             # Generate ATen files.
             time python aten/src/ATen/gen.py \
