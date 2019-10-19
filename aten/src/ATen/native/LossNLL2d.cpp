@@ -183,17 +183,12 @@ void nll_loss2d_backward_out_cpu_template(
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
-  CheckedFrom c = "nll_loss2d_backward";
-  auto input_arg = TensorArg(input, "input", 2);
-  auto grad_input_arg = TensorArg(grad_input, "grad_input", 0);
-
   check_inputs_nll_loss2d(input, target, weight);
   
   grad_input.resize_as_(input);
   grad_input.zero_();
 
-  TORCH_CHECK(grad_input.is_contiguous(), "gradInput must be contiguous");
-  checkSameSize(c, input_arg, grad_input_arg);
+  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
 
   AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::BFloat16,
