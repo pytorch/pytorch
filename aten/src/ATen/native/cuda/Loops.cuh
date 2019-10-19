@@ -35,6 +35,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/DynamicTypeCast.h>
 
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
@@ -63,31 +64,6 @@ static constexpr int launch_bound2 = 4;
 
 
 namespace at { namespace native {
-
-// Fetch a value with type src_type from ptr, and cast it to dest_t.
-#define CASE(type, scalartype) case ScalarType::scalartype: return dest_t(*(const type *)ptr);
-template<typename dest_t>
-C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
-  switch (src_type) {
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, CASE)
-    default:
-      assert(false);
-  }
-  return dest_t(0);  // control flow won't reach here, but compiler would complain not returning
-}
-#undef CASE
-
-// Cast a value with type src_t into dest_type, and store it to ptr.
-#define CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = value; return;
-template<typename src_t>
-C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
-  switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, CASE)
-    default:
-      assert(false);
-  }
-}
-#undef CASE
 
 template<int nt, int vt, typename func_t>
 C10_LAUNCH_BOUNDS_2(nt, launch_bound2)
@@ -145,7 +121,7 @@ template <typename traits, typename func_t, typename index_t, size_t... I>
 C10_HOST_DEVICE typename traits::result_type
 invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i,
             c10::guts::index_sequence<I...>) {
-  return f(fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])...);
+  return f(c10::fetch_and_cast<typename traits::template arg<I>::type>(dtypes[I], data[I] + i * strides[I])...);
 }
 
 template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
@@ -186,7 +162,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
       launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         void* out = data[0] + strides[0] * idx;
         arg0_t result = invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
-        cast_and_store<arg0_t>(dtypes[0], out, result);
+        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else {
       launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
@@ -201,7 +177,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
         auto offsets = offset_calc.get(idx);
         void* out = data[0] + offsets[0];
         arg0_t result = invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
-        cast_and_store<arg0_t>(dtypes[0], out, result);
+        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else {
       launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {

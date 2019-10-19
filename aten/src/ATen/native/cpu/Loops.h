@@ -32,6 +32,7 @@
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cpu/vec256/vec256.h>
+#include <c10/util/DynamicTypeCast.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -40,50 +41,52 @@
 
 namespace at { namespace native { namespace {
 
-
-// Fetch a value with type src_type from ptr, and cast it to dest_t.
-#define CASE(type, scalartype) case ScalarType::scalartype: return static_cast<dest_t>(*(const type *)ptr);
-template<typename dest_t>
-inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
-  switch (src_type) {
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CASE)
-    default:
-      TORCH_CHECK(false, "Unexpected scalar type");
-  }
-}
-#undef CASE
-
-
-// Cast a value with type src_t into dest_type, and store it to ptr.
-#define CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast<type>(value); return;
-template<typename src_t>
-inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
-  switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CASE)
-    default:
-      TORCH_CHECK(false, "Unexpected scalar type");
-  }
-}
-#undef CASE
-
-#define SPECIALIZE_PROMOTION_DISABLED_TYPE(type)                                  \
+#define SPECIALIZE_QINTS(type, _unused_scalartype)                                \
   template<>                                                                      \
-  inline type fetch_and_cast(const ScalarType src_type, const void *ptr) {        \
+  inline type c10::fetch_and_cast(const ScalarType src_type, const void *ptr) {        \
     TORCH_CHECK(false, "Unexpected scalar type");                                 \
     return type(0);                                                               \
   }                                                                               \
   template<>                                                                      \
-  inline void cast_and_store(const ScalarType dest_type, void *ptr, type value) { \
+  inline void c10::cast_and_store(const ScalarType dest_type, void *ptr, type value) { \
     TORCH_CHECK(false, "Unexpected scalar type");                                 \
   }
 
+AT_FORALL_QINT_TYPES(SPECIALIZE_QINTS)
 
-SPECIALIZE_PROMOTION_DISABLED_TYPE(c10::qint8)
-SPECIALIZE_PROMOTION_DISABLED_TYPE(c10::quint8)
-SPECIALIZE_PROMOTION_DISABLED_TYPE(c10::qint32)
-SPECIALIZE_PROMOTION_DISABLED_TYPE(std::complex<float>)
-SPECIALIZE_PROMOTION_DISABLED_TYPE(std::complex<double>)
-#undef SPECIALIZE_PROMOTION_DISABLED_TYPE
+#define AT_FORALL_COMPLEX_TYPES(_)             \
+  _(at::ComplexHalf, ComplexHalf)              \
+  _(std::complex<float>, ComplexFloat)         \
+  _(std::complex<double>, ComplexDouble)
+
+// SPECIALIZE_PROMOTION_DISABLED_TYPE(c10::qint8)
+// SPECIALIZE_PROMOTION_DISABLED_TYPE(c10::quint8)
+// SPECIALIZE_PROMOTION_DISABLED_TYPE(c10::qint32)
+// SPECIALIZE_PROMOTION_DISABLED_TYPE(std::complex<float>)
+// SPECIALIZE_PROMOTION_DISABLED_TYPE(std::complex<double>)
+// #undef SPECIALIZE_PROMOTION_DISABLED_TYPE
+
+// #define CASE(type, scalartype) case ScalarType::scalartype: return static_cast<dest_t>(*(const type *)ptr);
+// template<typename dest_t>
+// inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
+//   switch (src_type) {
+//     AT_FORALL_QINT_TYPES(CASE)
+//     default:
+//       TORCH_CHECK(false, "Unexpected scalar type");
+//   }
+// }
+
+// // Cast a value with type src_t into dest_type, and store it to ptr.
+// #define CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast<type>(value); return;
+// template<typename src_t>
+// inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
+//   switch (dest_type) {
+//     AT_FORALL_QINT_TYPES(CASE)
+//     default:
+//       TORCH_CHECK(false, "Unexpected scalar type");
+//   }
+// }
+// #undef CASE
 
 using namespace vec256;
 
