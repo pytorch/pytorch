@@ -6,13 +6,42 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+inline Tensor l1_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const L1LossOptions& options = {}) {
+  return torch::l1_loss(input, target, options.reduction());
+}
+
+inline Tensor kl_div(
+    const Tensor& input,
+    const Tensor& target,
+    const KLDivLossOptions& options = {}) {
+  return torch::kl_div(input, target, options.reduction());
+}
+
+inline Tensor mse_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const MSELossOptions& options = {}) {
+  return torch::mse_loss(input, target, options.reduction());
+}
+
+inline Tensor binary_cross_entropy(
+    const Tensor& input,
+    const Tensor& target,
+    const BCELossOptions& options = {}) {
+  return torch::binary_cross_entropy(
+      input, target, options.weight(), options.reduction());
+}
+
 inline Tensor hinge_embedding_loss(
-    const Tensor& x1,
-    const Tensor& x2,
-    const HingeEmbeddingLossOptions& options) {
+    const Tensor& input,
+    const Tensor& target,
+    const HingeEmbeddingLossOptions& options = {}) {
   return torch::hinge_embedding_loss(
-      x1,
-      x2,
+      input,
+      target,
       options.margin(),
       torch::enumtype::_convert_reduction_variant_type_to_enum(options.reduction()));
 }
