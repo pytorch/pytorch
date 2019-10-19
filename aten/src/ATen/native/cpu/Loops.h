@@ -86,9 +86,9 @@ SPECIALIZE_PROMOTION_DISABLED_TYPE(std::complex<float>)
 SPECIALIZE_PROMOTION_DISABLED_TYPE(std::complex<double>))
 #undef SPECIALIZE_PROMOTION_DISABLED_TYPE
 
-operator std::complex<float>(const std::complex<double> value) {
-  return std::complex<float>(value.real, value.imag);
-}
+// operator std::complex<float>(const std::complex<double> value) {
+//   return std::complex<float>(value.real, value.imag);
+// }
 
 // #define SPECIALIZE_COMPLEX(type)                                                    \
 //   template<>                                                                        \
