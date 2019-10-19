@@ -542,7 +542,7 @@ class TestQuantizedOps(TestCase):
             qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
                                                dtype=torch_type)
 
-            self.assertEqual(qX_ref.int_repr(), qX_hat.int_repr(), prec=1.0,
+            self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), prec=1.0,
                              message=error_message.format(name, qX_hat.int_repr(), qX_ref.int_repr()))
             self.assertEqual(scale, qX_hat.q_scale(),
                              message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
