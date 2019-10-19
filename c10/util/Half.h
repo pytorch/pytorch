@@ -321,6 +321,8 @@ namespace detail {
 
 } // namespace detail
 
+struct BFloat16;
+
 struct alignas(2) Half {
   unsigned short x;
 
@@ -339,6 +341,7 @@ struct alignas(2) Half {
   constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits){};
   inline C10_HOST_DEVICE Half(float value);
   inline C10_HOST_DEVICE operator float() const;
+  inline C10_HOST_DEVICE operator BFloat16() const;
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_HOST_DEVICE Half(const __half& value);
@@ -507,4 +510,5 @@ C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace c10
 
+#include <c10/util/BFloat16.h>
 #include <c10/util/Half-inl.h>
