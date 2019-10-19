@@ -6,15 +6,41 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+inline Tensor l1_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const L1LossOptions& options = {}) {
+  return torch::l1_loss(input, target, options.reduction());
+}
+
+inline Tensor kl_div(
+    const Tensor& input,
+    const Tensor& target,
+    const KLDivLossOptions& options = {}) {
+  return torch::kl_div(input, target, options.reduction());
+}
+
+inline Tensor mse_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const MSELossOptions& options = {}) {
+  return torch::mse_loss(input, target, options.reduction());
+}
+
+inline Tensor binary_cross_entropy(
+    const Tensor& input,
+    const Tensor& target,
+    const BCELossOptions& options = {}) {
+  return torch::binary_cross_entropy(
+      input, target, options.weight(), options.reduction());
+}
+
 inline Tensor hinge_embedding_loss(
-    const Tensor& x1,
-    const Tensor& x2,
-    const HingeEmbeddingLossOptions& options) {
+    const Tensor& input,
+    const Tensor& target,
+    const HingeEmbeddingLossOptions& options = {}) {
   return torch::hinge_embedding_loss(
-      x1,
-      x2,
-      options.margin(),
-      options.reduction());
+      input, target, options.margin(), options.reduction());
 }
 
 inline Tensor multi_margin_loss(
@@ -43,6 +69,20 @@ inline Tensor cosine_embedding_loss(
     const CosineEmbeddingLossOptions& options) {
   return torch::cosine_embedding_loss(
       input1, input2, target, options.margin(), options.reduction());
+}
+
+inline Tensor multilabel_margin_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const MultiLabelMarginLossOptions& options = {}) {
+  return torch::multilabel_margin_loss(input, target, options.reduction());
+}
+
+inline Tensor soft_margin_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const SoftMarginLossOptions& options = {}) {
+  return torch::soft_margin_loss(input, target, options.reduction());
 }
 
 inline Tensor multilabel_soft_margin_loss(

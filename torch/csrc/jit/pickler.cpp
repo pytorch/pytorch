@@ -233,13 +233,13 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // typename
   pushString("storage");
   // data_type
-  std::stringstream data_type;
-  data_type << toString(tensor.scalar_type()) << "Storage";
-  pushGlobal("torch", data_type.str());
+  std::string data_type =
+    std::string(toString(tensor.scalar_type())).append("Storage");
+  pushGlobal("torch", data_type);
   // root_key
   pushString(std::to_string(tensor_data_.size()));
   // location
-  std::stringstream ss;
+  std::ostringstream ss;
   ss << tensor.device();
   pushString(ss.str());
   // size
@@ -271,9 +271,9 @@ void Pickler::pushBytes(const std::string& string) {
 void Pickler::pushGlobal(
     const std::string& module_name,
     const std::string& class_name) {
-  std::stringstream ss;
-  ss << module_name << "\n" << class_name << "\n";
-  std::string key = ss.str();
+  std::string key;
+  key.reserve(module_name.size() + class_name.size() + 2);
+  key.append(module_name).append("\n").append(class_name).append("\n");
   auto memo_entry = memoized_globals_map_.find(key);
   if (memo_entry == memoized_globals_map_.end()) {
     push<PickleOpCode>(PickleOpCode::GLOBAL);
@@ -415,17 +415,11 @@ void Pickler::pushDouble(double value) {
 void Pickler::pushLong(const std::string& data) {
   uint64_t size = data.size();
 
-  if (size <= std::numeric_limits<uint8_t>::max()) {
-    push<PickleOpCode>(PickleOpCode::LONG1);
-    push<uint8_t>(size);
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        data.size() > std::numeric_limits<uint32_t>::max(),
-        "Cannot pickle a long with a size larger than 4 bytes")
-    push<PickleOpCode>(PickleOpCode::LONG4);
-    // TODO: should this be uint32_t instead?
-    push<uint64_t>(size);
-  }
+  TORCH_INTERNAL_ASSERT(
+    size <= std::numeric_limits<uint8_t>::max(),
+    "Cannot pickle a long larger than 255 bytes");
+  push<PickleOpCode>(PickleOpCode::LONG1);
+  push<uint8_t>(size);
   pushBytes(data);
 }
 
