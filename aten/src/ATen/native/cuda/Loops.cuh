@@ -151,7 +151,7 @@ template <typename func_t, typename index_t, typename traits = function_traits<f
 C10_HOST_DEVICE typename traits::result_type
 invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], const ScalarType dtypes[], int i) {
   using Indices = c10::guts::make_index_sequence<traits::arity>;
-  return invoke_impl<traits>(f, data, strides, i, Indices{});
+  return invoke_impl<traits>(f, data, strides, dtypes, i, Indices{});
 }
 
 template <typename func_t>
