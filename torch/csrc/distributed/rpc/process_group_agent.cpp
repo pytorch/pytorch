@@ -126,6 +126,7 @@ ProcessGroupAgent::ProcessGroupAgent(
       sendCounts_(pg_->getSize()),
       recvCounts_(pg_->getSize()),
       nextId_(0),
+      shutdown_(false),
       sleepMillis_(sleepMillis),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
@@ -163,9 +164,11 @@ ProcessGroupAgent::ProcessGroupAgent(
 
 ProcessGroupAgent::~ProcessGroupAgent() {
   LOG(INFO) << "Shutting down process group agent without joining";
-  shutdown_ = true;
-  threadPool_.waitWorkComplete(); // test
-  listenerThread_.join();
+  // shutdown_ = true;
+  // threadPool_.waitWorkComplete(); // test
+  // if (listenerThread_.joinable()) {
+  //   listenerThread_.join();
+  // }
 }
 
 const WorkerInfo& ProcessGroupAgent::getWorkerInfo(
@@ -390,7 +393,7 @@ void ProcessGroupAgent::listenLoop() {
   while (!shutdown_) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
-    pg_->recvAnysource(preamble, pg_->getRank())->wait();
+    // pg_->recvAnysource(preamble, pg_->getRank())->wait();
     auto work = pg_->recvAnysource(preamble, pg_->getRank());
     while (!work->isCompleted() && !shutdown_) {
       std::this_thread::sleep_for(std::chrono::milliseconds(sleepMillis_));
