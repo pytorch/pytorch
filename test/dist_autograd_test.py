@@ -361,6 +361,27 @@ class DistAutogradTest(object):
             ctx = dist_autograd._retrieve_context(ctx_ids[1])
             self._verify_graph_for_nested_rpc_call(ctx)
 
+    @dist_init
+    def test_no_graph_with_tensors_not_require_grad(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=False)
+            t2 = torch.zeros(3, 3, requires_grad=False)
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         _set_rpc_done, args=(context_id, 1))
+
+            ctx = dist_autograd._current_context()
+            send_functions = ctx._send_functions()
+            self.assertEqual(len(send_functions), 0)
+            recv_functions = ctx._recv_functions()
+            self.assertEqual(len(recv_functions), 0)
+
+            # Wait for the prev rank to be done with rpc.
+            self._check_rpc_done(1)
+            # prev context id is not passed over as tensors do not require grads
+            with self.assertRaises(RuntimeError):
+                ctx = dist_autograd._retrieve_context(ctx_ids[1])
 
     @dist_init
     def test_rpc_complex_args(self):
@@ -409,20 +430,9 @@ class DistAutogradTest(object):
                     "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
             # no worker ids should be recorded.
-            # no send and recv functions are attached.
             ctx = dist_autograd._current_context()
             worker_ids = ctx._known_worker_ids()
             self.assertEqual(len(worker_ids), 0)
-            send_functions = ctx._send_functions()
-            self.assertEqual(len(send_functions), 0)
-            recv_functions = ctx._recv_functions()
-            self.assertEqual(len(recv_functions), 0)
-
-            # Wait for the prev rank to be done with rpc.
-            self._check_rpc_done(1)
-            # prev context id is not passed over as tensors do not require grads
-            with self.assertRaises(RuntimeError):
-                ctx = dist_autograd._retrieve_context(ctx_ids[1])
 
             # worker_ids should be recorded when tensors do require grad
             t1.requires_grad = True
