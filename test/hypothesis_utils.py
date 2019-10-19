@@ -8,8 +8,6 @@ from hypothesis import strategies as st
 from hypothesis.extra import numpy as stnp
 from hypothesis.searchstrategy import SearchStrategy
 
-from common_quantized import _calculate_dynamic_qparams, _calculate_dynamic_per_channel_qparams
-
 # Setup for the hypothesis tests.
 # The tuples are (torch_quantized_dtype, zero_point_enforce), where the last
 # element is enforced zero_point. If None, any zero_point point within the
@@ -184,8 +182,6 @@ def tensor(draw, shapes=None, elements=None, qparams=None):
     arr_strategy = stnp.arrays(dtype=np.float32, elements=elements,
                                shape=_shape, fill=st.nothing())
     X = draw(arr_strategy)
-    # Recompute the scale and zero_points according to the X statistics.
-    # scale, zp = _calculate_dynamic_qparams(X, qparams[2])
     scale, zp = qparams[:2]
     enforced_zp = _ENFORCED_ZERO_POINT.get(qparams[2], None)
     if enforced_zp is not None:
@@ -213,7 +209,7 @@ def per_channel_tensor(draw, shapes=None, elements=None, qparams=None):
     X = draw(stnp.arrays(dtype=np.float32, elements=elements, shape=_shape,
                          fill=st.nothing()))
     # Recompute the scale and zero_points according to the X statistics.
-    scale, zp = _calculate_dynamic_per_channel_qparams(X, qparams[2])
+    scale, zp = qparams[:2]
     enforced_zp = _ENFORCED_ZERO_POINT.get(qparams[2], None)
     if enforced_zp is not None:
         zp = enforced_zp

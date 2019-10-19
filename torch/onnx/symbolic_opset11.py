@@ -180,6 +180,42 @@ def round(g, self):
     return g.op("Round", self)
 
 
+def arange(g, *args):
+    def _get_arange_dtype(dtype):
+        dtype = sym_help._maybe_get_const(dtype, 'i')
+        return dtype
+
+    if len(args) == 5:
+        # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[1])
+        type, end, start, step = sym_help._arange_cast_helper(g, end=args[0], dtype=dtype)
+        start_default = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[type]))
+        delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[type]))
+        arange_tensor = g.op("Range", start_default, end, delta_default)
+    elif len(args) == 6:
+        # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[2])
+        type, end, start, step = sym_help._arange_cast_helper(g, start=args[0], end=args[1], dtype=dtype)
+        delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[type]))
+        arange_tensor = g.op("Range", start, end, delta_default)
+    elif len(args) == 7:
+        # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[3])
+        type, end, start, step = sym_help._arange_cast_helper(g, start=args[0], end=args[1], step=args[2], dtype=dtype)
+        arange_tensor = g.op("Range", start, end, step)
+    else:
+        raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
+    return arange_tensor
+
+@parse_args('v', 'i')
+def _dim_arange(g, like, dim):
+    like_shape = g.op('Shape', like)
+    stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("_caffe2::Range", stop)
+    return arange(g, stop, 4, None, None, None)
+
+
 def size(g, self, dim):
     return sym_help._size_helper(g, self, dim)
 
