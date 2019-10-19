@@ -5,6 +5,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
@@ -120,6 +121,11 @@ struct ConstantPropagator {
     for (size_t i = 0; i < outputs.size(); ++i) {
       auto new_output = tryInsertConstant(*graph, outputs[i]);
       if (new_output) {
+        GRAPH_UPDATE(
+            "Folding %",
+            n->outputs()[i]->debugName(),
+            " with ",
+            getHeader((*new_output)->node()));
         if (outputs[i].isNone()) {
           (*new_output)->setType(n->outputs()[i]->type());
         }
@@ -129,6 +135,11 @@ struct ConstantPropagator {
         // forwards tuples later in the graph, such as a Tuple index
         auto tuple_val = n->outputs()[i];
         if (auto new_tup = tryInsertTuple(outputs[i], tuple_val)) {
+          GRAPH_UPDATE(
+              "Folding tuple %",
+              n->outputs()[i]->debugName(),
+              " with ",
+              getHeader(new_tup->node()));
           tuple_val = new_tup;
         }
         tuples[tuple_val] = std::move(outputs[i]);
@@ -155,6 +166,15 @@ struct ConstantPropagator {
     bool cond_val = constant_as<bool>(start_cond).value_or(true);
 
     bool loop_might_run = cond_val && iter_len > 0;
+    if (!loop_might_run) {
+      GRAPH_UPDATE(
+          "Removing unexecuted loop: ",
+          *node,
+          "\ntripcount: ",
+          trip_count,
+          " and start_cond: ",
+          getHeader(start_cond->node()));
+    }
     return !loop_might_run;
   }
 
@@ -178,6 +198,11 @@ struct ConstantPropagator {
   void inlineIf(Node* n) {
     auto input_bool = constant_as<bool>(n->input());
     AT_ASSERT(input_bool);
+    GRAPH_UPDATE(
+        "Folding if ",
+        getHeader(n->input()->node()),
+        " where condition = ",
+        *input_bool);
     size_t block_index = *input_bool ? 0 : 1;
     ConstantPropagation(n->blocks().at(block_index));
     inlineIfBody(n->blocks().at(block_index));
@@ -319,6 +344,7 @@ void ConstantPropagation(std::shared_ptr<Graph>& graph) {
   ConstantPropagator cp(graph);
   cp.run();
   EliminateDeadCode(graph);
+  GRAPH_DUMP("After ConstantPropagation: ", graph);
 }
 } // namespace jit
 } // namespace torch

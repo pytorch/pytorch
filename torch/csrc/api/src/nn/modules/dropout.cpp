@@ -12,7 +12,7 @@ namespace torch {
 namespace nn {
 namespace detail {
 template <typename Derived>
-DropoutImplBase<Derived>::DropoutImplBase(DropoutOptions options_)
+DropoutImplBase<Derived>::DropoutImplBase(const DropoutOptions& options_)
     : options(options_) {
   TORCH_CHECK(options.rate() >= 0, "Dropout rate must not be less than zero");
   TORCH_CHECK(options.rate() <= 1, "Dropout rate must not be greater than one");
@@ -25,7 +25,7 @@ template class DropoutImplBase<DropoutImpl>;
 template class DropoutImplBase<FeatureDropoutImpl>;
 } // namespace detail
 
-DropoutImpl::DropoutImpl(DropoutOptions options_) : DropoutImplBase(options_) {}
+DropoutImpl::DropoutImpl(const DropoutOptions& options_) : DropoutImplBase(options_) {}
 
 Tensor DropoutImpl::forward(const Tensor& input) {
   return torch::dropout(input, options.rate(), this->is_training());
@@ -35,7 +35,7 @@ void DropoutImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Dropout(rate=" << options.rate() << ")";
 }
 
-FeatureDropoutImpl::FeatureDropoutImpl(DropoutOptions options_)
+FeatureDropoutImpl::FeatureDropoutImpl(const DropoutOptions& options_)
     : DropoutImplBase(options_) {}
 
 Tensor FeatureDropoutImpl::forward(const Tensor& input) {

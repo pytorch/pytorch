@@ -264,12 +264,12 @@ class BlobReference(object):
         if op_type.startswith('__'):
             raise AttributeError('Attribute {} not found.'.format(op_type))
         if self._from_net is None:
-            raise RuntimeError(
+            raise AttributeError(
                 'You cannot use a blob reference that does not have a net '
                 'source to create operators. Create the operator from an '
                 'explicit net object.')
         if not IsOperator(op_type):
-            raise RuntimeError(
+            raise AttributeError(
                 'Method ' + op_type + ' is not a registered operator.' +
                 ' Did you mean: [' +
                 ",".join(workspace.C.nearby_opnames(op_type)) + ']'

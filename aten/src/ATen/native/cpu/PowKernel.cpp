@@ -35,10 +35,8 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
 }
 
 void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
-  // Casting exponent to double(not tensor.dtype) allows powering integral
-  // tensors to float exponent e.g. tensor([4]).pow(0.5) will be tensor([2])
-  const auto exp = exp_scalar.to<double>();
   if (isFloatingType(iter.dtype())) {
+    const auto exp = exp_scalar.to<double>();
     // Floating types allow AVX2 vector optimizations for pow/sqrt/rsqrt:
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "pow", [&]() {
       using Vec = Vec256<scalar_t>;
@@ -98,55 +96,85 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
     // Trying to implement pow/sqrt/rsqrt as loop in vec256_int.h does not allow
     // powering integral tensor to float exponent. That's why we need this code
     // duplication:
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
-      if (exp == 0.5) {
-        cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t {
-            return std::sqrt(static_cast<long double>(base));
-          }
-        );
-      } else if (exp == 2) {
-        cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t {
-            const auto ld_base = static_cast<long double>(base);
-            return ld_base * ld_base;
-          }
-        );
-      } else if (exp == 3) {
-        cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t {
-            const auto ld_base = static_cast<long double>(base);
-            return ld_base * ld_base * ld_base;
-          }
-        );
-      } else if (exp == -0.5) {
-        cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t {
-            return 1.0 / std::sqrt(static_cast<long double>(base));
-          }
-        );
-      } else if (exp == -1) {
-        cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t {
-            return 1.0 / static_cast<long double>(base);
-          }
-        );
-      } else if (exp == -2) {
-        cpu_kernel(iter,
-          [](scalar_t base) -> scalar_t {
-            const auto ld_base = static_cast<long double>(base);
-            return 1.0 / (ld_base * ld_base);
-          }
-        );
-      } else {
-        cpu_kernel(iter,
-          [=](scalar_t base) -> scalar_t {
-            return std::pow(static_cast<long double>(base),
-                            static_cast<long double>(exp));
-          }
-        );
-      }
-    });
+
+    if (exp_scalar.isIntegral(true) && exp_scalar.to<int64_t>() >= 0) {
+      // Specifically deal with an integer to the power of a positive integer for better efficiency.
+      const auto exp = exp_scalar.to<int64_t>();
+
+      AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
+        switch (exp) {
+          case 2:
+            cpu_kernel(iter,
+              [](scalar_t base) -> scalar_t {
+                return base * base;
+              }
+            );
+            break;
+          case 3:
+            cpu_kernel(iter,
+              [](scalar_t base) -> scalar_t {
+                return base * base * base;
+              }
+            );
+            break;
+          default:
+            cpu_kernel(iter,
+              [=](scalar_t base) -> scalar_t {
+                return std::pow(base, exp);
+              }
+            );
+        }
+      });
+    } else {
+      // Casting exponent to double(not tensor.dtype) allows powering integral
+      // tensors to float exponent e.g. tensor([4]).pow(0.5) will be tensor([2])
+      const auto exp = exp_scalar.to<double>();
+      AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "pow", [&]() {
+        if (exp == 2) {
+          cpu_kernel(iter,
+            [](scalar_t base) -> scalar_t {
+              return base * base;
+            }
+          );
+        } else if (exp == 3) {
+          cpu_kernel(iter,
+            [](scalar_t base) -> scalar_t {
+              return base * base * base;
+            }
+          );
+        } else if (exp == 0.5) {
+          cpu_kernel(iter,
+            [](scalar_t base) -> scalar_t {
+              return std::sqrt(static_cast<long double>(base));
+            }
+          );
+        } else if (exp == -0.5) {
+          cpu_kernel(iter,
+            [](scalar_t base) -> scalar_t {
+              return 1.0 / std::sqrt(static_cast<long double>(base));
+            }
+          );
+        } else if (exp == -1) {
+          cpu_kernel(iter,
+            [](scalar_t base) -> scalar_t {
+              return 1.0 / static_cast<long double>(base);
+            }
+          );
+        } else if (exp == -2) {
+          cpu_kernel(iter,
+            [](scalar_t base) -> scalar_t {
+              return 1.0 / (base * base);
+            }
+          );
+        } else {
+          cpu_kernel(iter,
+            [=](scalar_t base) -> scalar_t {
+              return std::pow(static_cast<long double>(base), exp);
+            }
+          );
+        }
+      });
+    }
   }
 }
 
