@@ -1027,6 +1027,42 @@ TEST_F(ModulesTest, L1Loss) {
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 
+TEST_F(ModulesTest, MSELoss) {
+  MSELoss loss;
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = loss->forward(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, BCELoss) {
+  BCELoss loss;
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = loss->forward(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, KLDivLoss) {
+  KLDivLoss loss;
+  auto input = torch::randn({5,6}, torch::requires_grad());
+  auto target = torch::empty({5,6}).random_(2);
+  auto output = loss->forward(torch::sigmoid(input), target);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_EQ(output.sizes(), torch::IntArrayRef());
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, HingeEmbeddingLoss) {
   HingeEmbeddingLoss loss(HingeEmbeddingLossOptions().margin(2));
   auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::requires_grad());
@@ -1069,6 +1105,32 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
   ASSERT_EQ(input2.sizes(), input2.grad().sizes());
 }
 
+TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
+  MultiLabelMarginLoss loss;
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
+  MultiLabelMarginLoss loss(torch::Reduction::None);
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, TripletMarginLoss) {
   TripletMarginLoss loss(TripletMarginLossOptions().margin(1.0));
   auto anchor = torch::tensor({{3., 3.}}, torch::requires_grad());
@@ -1096,12 +1158,38 @@ TEST_F(ModulesTest, CosineSimilarity) {
   ASSERT_EQ(input1.sizes(), input1.grad().sizes());
 }
 
+TEST_F(ModulesTest, SoftMarginLossDefaultOptions) {
+  SoftMarginLoss loss;
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({1.3767317}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
   MultiLabelSoftMarginLoss loss;
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.7608436}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, SoftMarginLossNoReduction) {
+  SoftMarginLoss loss(torch::Reduction::None);
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({2.1269281, 0.01814993, 0.3132617, 3.0485873}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
@@ -1711,6 +1799,26 @@ TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=sum)");
 }
 
+TEST_F(ModulesTest, PrettyPrintL1Loss) {
+  ASSERT_EQ(
+      c10::str(L1Loss()),
+      "torch::nn::L1Loss()");
+}
+TEST_F(ModulesTest, PrettyPrintKLDivLoss) {
+  ASSERT_EQ(
+      c10::str(KLDivLoss()),
+      "torch::nn::KLDivLoss()");
+}
+TEST_F(ModulesTest, PrettyPrintMSELoss) {
+  ASSERT_EQ(
+      c10::str(MSELoss()),
+      "torch::nn::MSELoss()");
+}
+TEST_F(ModulesTest, PrettyPrintBCELoss) {
+  ASSERT_EQ(
+      c10::str(BCELoss()),
+      "torch::nn::BCELoss()");
+}
 TEST_F(ModulesTest, PrettyPrintHingeEmbeddingLoss) {
   ASSERT_EQ(
       c10::str(HingeEmbeddingLoss(HingeEmbeddingLossOptions().margin(4))),
@@ -1729,8 +1837,16 @@ TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
       "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
 }
 
+TEST_F(ModulesTest, PrettyPrintMultiLabelMarginLoss) {
+  ASSERT_EQ(c10::str(MultiLabelMarginLoss()), "torch::nn::MultiLabelMarginLoss()");
+}
+
 TEST_F(ModulesTest, PrettyPrintMultiLabelSoftMarginLoss) {
   ASSERT_EQ(c10::str(MultiLabelSoftMarginLoss()), "torch::nn::MultiLabelSoftMarginLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintSoftMarginLoss) {
+  ASSERT_EQ(c10::str(SoftMarginLoss()), "torch::nn::SoftMarginLoss()");
 }
 
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
