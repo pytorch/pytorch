@@ -73,6 +73,7 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const vo
     default:
       assert(false);
   }
+  return dest_t(0);  // control flow won't reach here, but compiler would complain not returning
 }
 #undef CASE
 
