@@ -439,113 +439,123 @@ namespace {
     }
 
     Tensor input_ = input;
-    if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
-      // special case for tensor memory format in channels_last
-      TORCH_CHECK(input.ndimension() == 4,
-        "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+    switch (input.suggest_memory_format()) {
+      case at::MemoryFormat::ChannelsLast: {
+        // special case for tensor memory format in channels_last
+        TORCH_CHECK(input.ndimension() == 4,
+          "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
 
-      int sizeB = input_.size(0);
-      int sizeC = input_.size(1);
-      int isizeH = input_.size(2);
-      int isizeW = input_.size(3);
+        int sizeB = input_.size(0);
+        int sizeC = input_.size(1);
+        int isizeH = input_.size(2);
+        int isizeW = input_.size(3);
 
-      int64_t istrideB = input_.stride(0);
-      int64_t istrideC = input_.stride(1);
-      int64_t istrideH = input_.stride(2);
-      int64_t istrideW = input_.stride(3);
+        int64_t istrideB = input_.stride(0);
+        int64_t istrideC = input_.stride(1);
+        int64_t istrideH = input_.stride(2);
+        int64_t istrideW = input_.stride(3);
 
-      int osizeH = output_size[0];
-      int osizeW = output_size[1];
+        int osizeH = output_size[0];
+        int osizeW = output_size[1];
 
-      // preserve channels_last stride on output tensor;
-      if (!output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-        output.resize_({sizeB, sizeC, osizeH, osizeW}).as_strided_({sizeB, sizeC, osizeH, osizeW}, {sizeC*osizeH*osizeW, 1, osizeW*sizeC, sizeC});
+        // preserve channels_last stride on output tensor;
+        if (!output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+          // TODO: modify this after resize_ added `memory_format` tag
+          output.resize_({sizeB, sizeC, osizeH, osizeW}).as_strided_({sizeB, sizeC, osizeH, osizeW}, {sizeC*osizeH*osizeW, 1, osizeW*sizeC, sizeC});
+        }
+
+        const int max_threads = std::min<int>(
+            at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+        int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+
+        // Launch kernel on output tensor elements. Logic behind launch config:
+        // output tensor size NCHW, strides NHWC;
+        // Launch on:
+        // N -> grid.x
+        // H -> grid.z * block.z
+        // W -> grid.y * block.y
+        // C -> block.x
+        // encourage larger block_y & block_z for better cache hit while maintain
+        // reasonable block_x for coalesced memory access;
+        int block_x = std::min<int>(
+            maxThreadsDim[0], std::min<int>(lastPow2(sizeC), at::cuda::warp_size()));
+        int block_y = std::min<int>(
+            maxThreadsDim[1], std::min<int>(lastPow2(osizeW), max_threads / block_x));
+        int block_z = std::min<int>(
+            maxThreadsDim[2], std::min<int>(lastPow2(osizeH), max_threads / block_x / block_y));
+        block_x = std::min<int>(
+            maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z));
+        const dim3 block(block_x, block_y, block_z);
+        int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
+        int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
+        int grid_x = sizeB*kernel_stride_C;
+        int grid_y = cuda::ATenCeilDiv(osizeW, block_y*BLOCK_STRIDE);
+        int grid_z = cuda::ATenCeilDiv(osizeH, block_z*BLOCK_STRIDE);
+        const dim3 grid(grid_x, grid_y, grid_z);
+
+        // we are dealing with packed tensor here. max index is the same as numel.
+        // TODO: to really support input tensor large enought to go beyond int32,
+        // we will need to restrict out shared memory usage and adjust the launch
+        // config;
+        AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
+        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+            input_.scalar_type(), "adaptive_avg_pool2d_nhwc_cuda", [&] {
+              adaptiveaveragepoolnhwc<int32_t><<<grid, block, kernel_size_C * block_x * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>> (
+                input_.data_ptr<scalar_t>(),
+                output.data_ptr<scalar_t>(),
+                sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
+                kernel_stride_C, kernel_size_C,
+                istrideB, istrideC, istrideH, istrideW);
+              }
+          );
+        break;
       }
+      case at::MemoryFormat::Contiguous: {
+        TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+          "non-empty 3D or 4D (batch mode) tensor expected for input");
+        int64_t grid_x = input.size(-3);
+        if (input.ndimension() == 4) {
+           input_ = input.contiguous();
+           grid_x *= input_.size(-4);
+        }
+        int64_t sizeD  = input_.size(-3);
+        int64_t isizeH = input_.size(-2);
+        int64_t isizeW = input_.size(-1);
 
-      const int max_threads = std::min<int>(
-          at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
-      int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+        int64_t istrideD = input_.stride(-3);
+        int64_t istrideH = input_.stride(-2);
+        int64_t istrideW = input_.stride(-1);
 
-      // Launch kernel on output tensor elements. Logic behind launch config:
-      // output tensor size NCHW, strides NHWC;
-      // Launch on:
-      // N -> grid.x
-      // H -> grid.z * block.z
-      // W -> grid.y * block.y
-      // C -> block.x
-      // encourage larger block_y & block_z for better cache hit while maintain
-      // reasonable block_x for coalesced memory access;
-      int block_x = std::min<int>(
-          maxThreadsDim[0], std::min<int>(lastPow2(sizeC), at::cuda::warp_size()));
-      int block_y = std::min<int>(
-          maxThreadsDim[1], std::min<int>(lastPow2(osizeW), max_threads / block_x));
-      int block_z = std::min<int>(
-          maxThreadsDim[2], std::min<int>(lastPow2(osizeH), max_threads / block_x / block_y));
-      block_x = std::min<int>(
-          maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z));
-      const dim3 block(block_x, block_y, block_z);
-      int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
-      int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
-      int grid_x = sizeB*kernel_stride_C;
-      int grid_y = cuda::ATenCeilDiv(osizeW, block_y*BLOCK_STRIDE);
-      int grid_z = cuda::ATenCeilDiv(osizeH, block_z*BLOCK_STRIDE);
-      const dim3 grid(grid_x, grid_y, grid_z);
+        int64_t osizeH = output_size[0];
+        int64_t osizeW = output_size[1];
+        if (input.ndimension() == 4) {
+           output.resize_({input_.size(-4), sizeD, osizeH, osizeW});
+        } else {
+           output.resize_({sizeD, osizeH, osizeW});
+        }
+        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+            input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
+              scalar_t *input_data = input_.data_ptr<scalar_t>();
+              scalar_t *output_data = output.data_ptr<scalar_t>();
 
-      // we are dealing with packed tensor here. max index is the same as numel.
-      // TODO: to really support input tensor large enought to go beyond int32,
-      // we will need to restrict out shared memory usage and adjust the launch
-      // config;
-      AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-          input_.scalar_type(), "adaptive_avg_pool2d_nhwc_cuda", [&] {
-            adaptiveaveragepoolnhwc<int32_t><<<grid, block, kernel_size_C * block_x * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>> (
-              input_.data_ptr<scalar_t>(),
-              output.data_ptr<scalar_t>(),
-              sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
-              kernel_stride_C, kernel_size_C,
-              istrideB, istrideC, istrideH, istrideW);
-            }
-        );
-    } else {
-      TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
-        "non-empty 3D or 4D (batch mode) tensor expected for input");
-      int64_t grid_x = input.size(-3);
-      if (input.ndimension() == 4) {
-         input_ = input.contiguous();
-         grid_x *= input_.size(-4);
+              // cuda blocks & threads:
+              int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
+              dim3 blocks(grid_x, blocksH);
+              dim3 threads(32, 8);
+
+              // run averagepool kernel
+              adaptiveaveragepool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                input_data, output_data,
+                isizeH, isizeW, osizeH, osizeW,
+                istrideD, istrideH, istrideW);
+              }
+          );
+        break;
       }
-      int64_t sizeD  = input_.size(-3);
-      int64_t isizeH = input_.size(-2);
-      int64_t isizeW = input_.size(-1);
-
-      int64_t istrideD = input_.stride(-3);
-      int64_t istrideH = input_.stride(-2);
-      int64_t istrideW = input_.stride(-1);
-
-      int64_t osizeH = output_size[0];
-      int64_t osizeW = output_size[1];
-      if (input.ndimension() == 4) {
-         output.resize_({input_.size(-4), sizeD, osizeH, osizeW});
-      } else {
-         output.resize_({sizeD, osizeH, osizeW});
-      }
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-          input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
-            scalar_t *input_data = input_.data_ptr<scalar_t>();
-            scalar_t *output_data = output.data_ptr<scalar_t>();
-
-            // cuda blocks & threads:
-            int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
-            dim3 blocks(grid_x, blocksH);
-            dim3 threads(32, 8);
-
-            // run averagepool kernel
-            adaptiveaveragepool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-              input_data, output_data,
-              isizeH, isizeW, osizeH, osizeW,
-              istrideD, istrideH, istrideW);
-            }
-        );
+      default:
+        TORCH_CHECK(
+          false,
+          "Unsupported memory format. Supports only ChannelsLast, Contiguous");
     }
     THCudaCheck(cudaGetLastError());
   }
@@ -561,119 +571,129 @@ namespace {
     checkAllSameGPU("cudnn_adaptive_avg_pooling2d_out",
                     {grad_input_arg, grad_output_arg, input_arg});
 
-    if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
-      // special case for tensor memory format in channels_last
-      TORCH_CHECK(input.ndimension() == 4,
-        "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
+    switch (input.suggest_memory_format()) {
+      case at::MemoryFormat::ChannelsLast: {
+        // special case for tensor memory format in channels_last
+        TORCH_CHECK(input.ndimension() == 4,
+          "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
 
-      int sizeB = input.size(0);
-      int sizeC = input.size(1);
-      int isizeH = input.size(2);
-      int isizeW = input.size(3);
+        int sizeB = input.size(0);
+        int sizeC = input.size(1);
+        int isizeH = input.size(2);
+        int isizeW = input.size(3);
 
-      Tensor gradOutput = gradOutput_;
+        Tensor gradOutput = gradOutput_;
 
-      int64_t ostrideB = gradOutput.stride(0);
-      int64_t ostrideC = gradOutput.stride(1);
-      int64_t ostrideH = gradOutput.stride(2);
-      int64_t ostrideW = gradOutput.stride(3);
+        int64_t ostrideB = gradOutput.stride(0);
+        int64_t ostrideC = gradOutput.stride(1);
+        int64_t ostrideH = gradOutput.stride(2);
+        int64_t ostrideW = gradOutput.stride(3);
 
-      int osizeH = gradOutput.size(-2);
-      int osizeW = gradOutput.size(-1);
+        int osizeH = gradOutput.size(-2);
+        int osizeW = gradOutput.size(-1);
 
-      // preserve channels_last stride on input tensor;
-      if (!gradInput.is_contiguous(at::MemoryFormat::ChannelsLast)) {
-        gradInput.as_strided_(
-            {sizeB, sizeC, isizeH, isizeW},
-            {sizeC*isizeH*isizeW, 1, isizeW*sizeC, sizeC});
+        // preserve channels_last stride on input tensor;
+        if (!gradInput.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+          gradInput.as_strided_(
+              {sizeB, sizeC, isizeH, isizeW},
+              {sizeC*isizeH*isizeW, 1, isizeW*sizeC, sizeC});
+        }
+
+        const int max_threads = std::min<int>(
+            at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
+        int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+
+        // Launch kernel on input tensor elements. Logic behind launch config:
+        // input tensor size NCHW, strides NHWC;
+        // Launch on:
+        // N(C) -> grid.x (striding on C to reduce sh_mem usage)
+        // H    -> grid.z * block.z
+        // W    -> grid.y * block.y
+        // C    -> block.x
+        // encourage larger block_y & block_z for better cache hit while maintain
+        // reasonable block_x for coalesced memory access;
+        int block_x = std::min<int>(
+            maxThreadsDim[0], std::min<int>(lastPow2(sizeC), at::cuda::warp_size()));
+        int block_y = std::min<int>(
+            maxThreadsDim[1], std::min<int>(lastPow2(isizeW), max_threads / block_x));
+        int block_z = std::min<int>(
+            maxThreadsDim[2], std::min<int>(lastPow2(isizeH), max_threads / block_x / block_y));
+        block_x = std::min<int>(
+            maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z));
+        const dim3 block(block_x, block_y, block_z);
+        int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
+        int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
+        int grid_x = sizeB*kernel_stride_C;
+        int grid_y = cuda::ATenCeilDiv(isizeW, block_y*BLOCK_STRIDE);
+        int grid_z = cuda::ATenCeilDiv(isizeH, block_z*BLOCK_STRIDE);
+        const dim3 grid(grid_x, grid_y, grid_z);
+
+        // we are dealing with packed tensor here. max index is the same as numel.
+        // TODO: to really support input tensor large enought to go beyond int32,
+        // we will need to restrict out shared memory usage and adjust the launch
+        // config;
+        AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
+        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+            input.scalar_type(), "adaptive_avg_pool2d_backward_nhwc_cuda", [&] {
+              adaptiveaveragegradinputnhwc<int32_t><<<grid, block, (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t), at::cuda::getCurrentCUDAStream()>>> (
+                gradInput.data_ptr<scalar_t>(),
+                gradOutput.data_ptr<scalar_t>(),
+                sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
+                kernel_stride_C, kernel_size_C,
+                ostrideB, ostrideC, ostrideH, ostrideW);
+              }
+          );
+        break;
       }
+      case at::MemoryFormat::Contiguous: {
+        bool atomic = true; // suboptimal, but without atomic it doesn't pass the tests
 
-      const int max_threads = std::min<int>(
-          at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
-      int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+        Tensor gradOutput = gradOutput_.contiguous();
 
-      // Launch kernel on input tensor elements. Logic behind launch config:
-      // input tensor size NCHW, strides NHWC;
-      // Launch on:
-      // N(C) -> grid.x (striding on C to reduce sh_mem usage)
-      // H    -> grid.z * block.z
-      // W    -> grid.y * block.y
-      // C    -> block.x
-      // encourage larger block_y & block_z for better cache hit while maintain
-      // reasonable block_x for coalesced memory access;
-      int block_x = std::min<int>(
-          maxThreadsDim[0], std::min<int>(lastPow2(sizeC), at::cuda::warp_size()));
-      int block_y = std::min<int>(
-          maxThreadsDim[1], std::min<int>(lastPow2(isizeW), max_threads / block_x));
-      int block_z = std::min<int>(
-          maxThreadsDim[2], std::min<int>(lastPow2(isizeH), max_threads / block_x / block_y));
-      block_x = std::min<int>(
-          maxThreadsDim[0], std::min<int>(lastPow2(sizeC), max_threads / block_y / block_z));
-      const dim3 block(block_x, block_y, block_z);
-      int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
-      int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
-      int grid_x = sizeB*kernel_stride_C;
-      int grid_y = cuda::ATenCeilDiv(isizeW, block_y*BLOCK_STRIDE);
-      int grid_z = cuda::ATenCeilDiv(isizeH, block_z*BLOCK_STRIDE);
-      const dim3 grid(grid_x, grid_y, grid_z);
+        int64_t sizeD  = input.size(-3);
+        int64_t isizeH = input.size(-2);
+        int64_t isizeW = input.size(-1);
 
-      // we are dealing with packed tensor here. max index is the same as numel.
-      // TODO: to really support input tensor large enought to go beyond int32,
-      // we will need to restrict out shared memory usage and adjust the launch
-      // config;
-      AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-          input.scalar_type(), "adaptive_avg_pool2d_backward_nhwc_cuda", [&] {
-            adaptiveaveragegradinputnhwc<int32_t><<<grid, block, (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t), at::cuda::getCurrentCUDAStream()>>> (
-              gradInput.data_ptr<scalar_t>(),
-              gradOutput.data_ptr<scalar_t>(),
-              sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
-              kernel_stride_C, kernel_size_C,
-              ostrideB, ostrideC, ostrideH, ostrideW);
+        int64_t osizeH = gradOutput.size(-2);
+        int64_t osizeW = gradOutput.size(-1);
+
+        int64_t grid_x = sizeD;
+        if (input.ndimension() == 4) grid_x *= input.size(-4);
+
+          //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
+        AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+            input.scalar_type(), "adaptive_avg_pool2d_backward_cuda", [&] {
+              scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+              scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+
+              // cuda blocks & threads:
+              int blocksH = std::max((int)(16L / sizeD), 1);
+              dim3 blocks(grid_x, blocksH);
+              dim3 threads(32, 8);
+
+              if(atomic)
+              {
+                // run updateGradInput kernel, accumulate gradients atomically
+                atomicadaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                  gradInput_data, gradOutput_data,
+                  isizeH, isizeW, osizeH, osizeW);
+              }
+              else
+              {
+                // run updateGradInput kernel
+                adaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                  gradInput_data, gradOutput_data,
+                  isizeH, isizeW, osizeH, osizeW);
+              }
             }
-        );
-    } else {
-      bool atomic = true; // suboptimal, but without atomic it doesn't pass the tests
+          );
+        break;
+      }
+      default:
+        TORCH_CHECK(
+          false,
+          "Unsupported memory format. Supports only ChannelsLast, Contiguous");
 
-      Tensor gradOutput = gradOutput_.contiguous();
-
-      int64_t sizeD  = input.size(-3);
-      int64_t isizeH = input.size(-2);
-      int64_t isizeW = input.size(-1);
-
-      int64_t osizeH = gradOutput.size(-2);
-      int64_t osizeW = gradOutput.size(-1);
-
-      int64_t grid_x = sizeD;
-      if (input.ndimension() == 4) grid_x *= input.size(-4);
-
-        //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-          input.scalar_type(), "adaptive_avg_pool2d_backward_cuda", [&] {
-            scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-            scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-
-            // cuda blocks & threads:
-            int blocksH = std::max((int)(16L / sizeD), 1);
-            dim3 blocks(grid_x, blocksH);
-            dim3 threads(32, 8);
-
-            if(atomic)
-            {
-              // run updateGradInput kernel, accumulate gradients atomically
-              atomicadaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                gradInput_data, gradOutput_data,
-                isizeH, isizeW, osizeH, osizeW);
-            }
-            else
-            {
-              // run updateGradInput kernel
-              adaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                gradInput_data, gradOutput_data,
-                isizeH, isizeW, osizeH, osizeW);
-            }
-          }
-        );
     }
     THCudaCheck(cudaGetLastError());
   }
