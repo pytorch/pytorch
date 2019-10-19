@@ -6,7 +6,7 @@ namespace jit {
 
 #if defined(_WIN32)
 void runJITCPPTests(bool runCuda) {
-  TORCH_INTERNAL_ASSERT("JIT tests not yet supported on Windows");
+  TORCH_INTERNAL_ASSERT(false, "JIT tests not yet supported on Windows");
 }
 #else
 #define JIT_TEST(name) test##name();

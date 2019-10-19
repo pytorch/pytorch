@@ -4,7 +4,7 @@ namespace c10 {
 namespace impl {
 
 namespace {
-  std::string listAllDispatchKeys(const ska::flat_hash_map<TensorTypeId, std::list<DispatchTableEntry>>& kernels) {
+  std::string listAllDispatchKeys(const ska::flat_hash_map<TensorTypeId, std::list<KernelFunction>>& kernels) {
     if (kernels.size() == 0) {
       return "";
     }
@@ -35,14 +35,14 @@ void OperatorEntry::prepareForDeregistration() {
   TORCH_INTERNAL_ASSERT(catchAllKernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have catch-all kernel. The operator schema is ", toString(schema_));
 }
 
-RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, DispatchTableEntry kernel) {
+RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, KernelFunction kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
   auto& k = kernels_[dispatch_key];
   k.push_front(kernel);
-  std::list<DispatchTableEntry>::iterator inserted = k.begin();
+  std::list<KernelFunction>::iterator inserted = k.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
   updateDispatchTable_(dispatch_key);
@@ -54,13 +54,13 @@ RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, 
   });
 }
 
-RegistrationHandleRAII OperatorEntry::registerCatchallKernel(DispatchTableEntry kernel) {
+RegistrationHandleRAII OperatorEntry::registerCatchallKernel(KernelFunction kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   // Add the kernel to the kernels list,
   // possibly creating the list if this is the first kernel.
   catchAllKernels_.push_front(kernel);
-  std::list<DispatchTableEntry>::iterator inserted = catchAllKernels_.begin();
+  std::list<KernelFunction>::iterator inserted = catchAllKernels_.begin();
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
   updateCatchallDispatchTable_();
@@ -72,7 +72,7 @@ RegistrationHandleRAII OperatorEntry::registerCatchallKernel(DispatchTableEntry 
   });
 }
 
-void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<DispatchTableEntry>::iterator kernel) {
+void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<KernelFunction>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   auto found = kernels_.find(dispatch_key);
@@ -87,7 +87,7 @@ void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<Dispa
   updateDispatchTable_(dispatch_key);
 }
 
-void OperatorEntry::deregisterCatchallKernel_(std::list<DispatchTableEntry>::iterator kernel) {
+void OperatorEntry::deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   catchAllKernels_.erase(kernel);

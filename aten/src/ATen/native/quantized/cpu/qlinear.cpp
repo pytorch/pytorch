@@ -1,8 +1,10 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
 #include <algorithm>
 #include <string>
@@ -79,35 +81,6 @@ class QLinearInt8 final : public torch::OperatorKernel {
     }
     int32_t output_zero_point_int32 = static_cast<int32_t>(output_zero_point);
 
-    // This operation does the following:
-    // 1) Creates a "row buffer" vector with offset values that must be added
-    //    to the integer matrix multiplication operation to ensure correctness.
-    //    This "row buffer" is also called the row offset, and it is needed when
-    //    we use affine quantization for weights.
-    // 2) Packs the resulting quantized matrix into vector-register and cache
-    //    friendly tiles.
-    //
-    //  Note this is not executed eagerly, but rather within the fbgemmPacked
-    //  call below.
-    fbgemm::PackAWithRowOffset<uint8_t> packA(
-        /*trans=*/fbgemm::matrix_op_t::NoTranspose,
-        /*nRow=*/M,
-        /*nCol=*/K,
-        /*smat=*/input_ptr,
-        /*ld=*/K,
-        /*pmat=*/nullptr); // Currently, packA manages ownership of `pmat`.
-                           // TODO: Consider a way to pre-allocate and reuse
-                           // pmat buffer.
-
-    // ReQuantizeOutput requires pointers to the zero point values,
-    // since in the case of rowwise quantization these will be arrays rather
-    // than scalars. But in this case, we're doing whole-tensor quantization so
-    // we just pass a pointer to the scale values (and internally
-    // ReQuantizeOutput won't index past 0.
-
-    // This is the end of the pipeline, pass the resulting matrix through.
-    fbgemm::DoNothing<> doNothingObj{};
-
     const float* bias_ptr = nullptr;
     at::Tensor bias;
     if (pack_ptr.bias.has_value()) {
@@ -133,79 +106,114 @@ class QLinearInt8 final : public torch::OperatorKernel {
         output_scale,
         output_zero_point);
 
-    auto buffer = at::zeros_like(output, output.options().dtype(at::kInt));
+    auto buffer = at::empty(out_sizes, output.options().dtype(at::kInt));
 
-    if (pack_ptr.q_scheme == kPerTensorAffine) {
-      // Process the per tensor quantization.
-      //
-      // After the uint8 * int8 matrix multiplication is performed, this
-      // operation does:
-      //  1) Add in row and column offsets to the rows and columns,
-      //  respectively.
-      //  2) Add in the bias term.
-      fbgemm::ReQuantizeOutput<
-          ReluFused,
-          fbgemm::QuantizationGranularity::TENSOR,
-          float>
-          outputProcObj(
-              doNothingObj,
-              output_multiplier_float.data(),
-              output_zero_point_int32,
-              input_zero_point_int32,
-              pack_ptr.w_zp.data(),
-              packA.getRowOffsetBuffer(),
-              col_offsets.data(),
-              bias_ptr,
-              N, /* nCol */
-              1 /* groups */,
-              act_times_w_scale.data());
+    int num_tasks = at::get_num_threads();
+    at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+      for (int task_id = begin; task_id < end; ++task_id) {
+        // This operation does the following:
+        // 1) Creates a "row buffer" vector with offset values that must be
+        //    added to the integer matrix multiplication operation to ensure
+        //    correctness. This "row buffer" is also called the row offset, and
+        //    it is needed when we use affine quantization for weights.
+        // 2) Packs the resulting quantized matrix into vector-register and
+        //    cache friendly tiles.
+        //
+        //  Note this is not executed eagerly, but rather within the
+        //  fbgemmPacked call below.
+        fbgemm::PackAWithRowOffset<uint8_t> packA(
+            /*trans=*/fbgemm::matrix_op_t::NoTranspose,
+            /*nRow=*/M,
+            /*nCol=*/K,
+            /*smat=*/input_ptr,
+            /*ld=*/K,
+            /*pmat=*/nullptr); // Currently, packA manages ownership of `pmat`.
+                               // TODO: Consider a way to pre-allocate and reuse
+                               // pmat buffer.
 
-      // Do the GEMM
-      fbgemm::fbgemmPacked(
-          /*packA=*/packA,
-          /*packB=*/*packB,
-          /*C=*/reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-          /*C_buffer=*/buffer.data_ptr<int32_t>(),
-          /*ldc=*/N,
-          /*outProcess=*/outputProcObj,
-          /*thread_id=*/0,
-          /*num_threads=*/1);
-    } else if (pack_ptr.q_scheme == kPerChannelAffine) {
-      // Process the per channel quantization.
-      //
-      // After the uint8 * int8 matrix multiplication is performed, this
-      // operation does:
-      //  1) Add in row and column offsets to the rows and columns,
-      //  respectively.
-      //  2) Add in the bias term.
-      fbgemm::ReQuantizeOutput<
-          ReluFused,
-          fbgemm::QuantizationGranularity::OUT_CHANNEL,
-          float>
-          outputProcObj(
-              doNothingObj,
-              output_multiplier_float.data(),
-              output_zero_point_int32,
-              input_zero_point_int32,
-              pack_ptr.w_zp.data(),
-              packA.getRowOffsetBuffer(),
-              col_offsets.data(),
-              bias_ptr,
-              N, /*nCol=*/
-              1, /* groups*/
-              act_times_w_scale.data());
+        // ReQuantizeOutput requires pointers to the zero point values,
+        // since in the case of rowwise quantization these will be arrays rather
+        // than scalars. But in this case, we're doing whole-tensor quantization
+        // so we just pass a pointer to the scale values (and internally
+        // ReQuantizeOutput won't index past 0.
 
-      // Do the GEMM
-      fbgemm::fbgemmPacked(
-          /*packA=*/packA,
-          /*packB=*/*packB,
-          /*C=*/reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
-          /*C_buffer=*/buffer.data_ptr<int32_t>(),
-          /*ldc=*/N,
-          /*outProcess=*/outputProcObj,
-          /*thread_id=*/0,
-          /*num_threads=*/1);
-    }
+        // This is the end of the pipeline, pass the resulting matrix through.
+        fbgemm::DoNothing<> doNothingObj{};
+
+        if (pack_ptr.q_scheme == kPerTensorAffine) {
+          // Process the per tensor quantization.
+          //
+          // After the uint8 * int8 matrix multiplication is performed, this
+          // operation does:
+          //  1) Add in row and column offsets to the rows and columns,
+          //  respectively.
+          //  2) Add in the bias term.
+          fbgemm::ReQuantizeOutput<
+              ReluFused,
+              fbgemm::QuantizationGranularity::TENSOR,
+              float>
+              outputProcObj(
+                  doNothingObj,
+                  output_multiplier_float.data(),
+                  output_zero_point_int32,
+                  input_zero_point_int32,
+                  pack_ptr.w_zp.data(),
+                  packA.getRowOffsetBuffer(),
+                  col_offsets.data(),
+                  bias_ptr,
+                  N, /* nCol */
+                  1 /* groups */,
+                  act_times_w_scale.data());
+
+          // Do the GEMM
+          fbgemm::fbgemmPacked(
+              /*packA=*/packA,
+              /*packB=*/*packB,
+              /*C=*/reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+              /*C_buffer=*/buffer.data_ptr<int32_t>(),
+              /*ldc=*/N,
+              /*outProcess=*/outputProcObj,
+              /*thread_id=*/task_id,
+              /*num_threads=*/num_tasks);
+        } else if (pack_ptr.q_scheme == kPerChannelAffine) {
+          // Process the per channel quantization.
+          //
+          // After the uint8 * int8 matrix multiplication is performed, this
+          // operation does:
+          //  1) Add in row and column offsets to the rows and columns,
+          //  respectively.
+          //  2) Add in the bias term.
+          fbgemm::ReQuantizeOutput<
+              ReluFused,
+              fbgemm::QuantizationGranularity::OUT_CHANNEL,
+              float>
+              outputProcObj(
+                  doNothingObj,
+                  output_multiplier_float.data(),
+                  output_zero_point_int32,
+                  input_zero_point_int32,
+                  pack_ptr.w_zp.data(),
+                  packA.getRowOffsetBuffer(),
+                  col_offsets.data(),
+                  bias_ptr,
+                  N, /*nCol=*/
+                  1, /* groups*/
+                  act_times_w_scale.data());
+
+          // Do the GEMM
+          fbgemm::fbgemmPacked(
+              /*packA=*/packA,
+              /*packB=*/*packB,
+              /*C=*/reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+              /*C_buffer=*/buffer.data_ptr<int32_t>(),
+              /*ldc=*/N,
+              /*outProcess=*/outputProcObj,
+              /*thread_id=*/task_id,
+              /*num_threads=*/num_tasks);
+        }
+      }
+    });
+
     return output;
   }
 #endif
@@ -225,15 +233,47 @@ class QLinearInt8 final : public torch::OperatorKernel {
     auto packB = pack_ptr.w.get();
     auto kernel_zp = pack_ptr.w_zp;
     auto kernel_scale = pack_ptr.w_scale;
+    size_t rows_w = pack_ptr.bias.size(0);
+    size_t cols_w = input_contig.size(input_contig.dim() - 1);
+    auto input_scale = input_contig.q_scale();
+
+    if (!pack_ptr.input_scale.has_value() ||
+        pack_ptr.input_scale.value() != input_scale) {
+      // Get the original weight and adjust it to uint8 from int8
+      auto weight_contig = pack_ptr.orig_weight;
+      auto bias_fp32 = pack_ptr.bias;
+      int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+      Tensor qnnp_weight = at::_empty_affine_quantized(
+          weight_contig.sizes(),
+          at::device(kCPU).dtype(kQUInt8),
+          kernel_scale,
+          kernel_zp);
+      auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+      auto wt_numel = weight_contig.numel();
+      for (int i = 0; i < wt_numel; ++i) {
+        qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
+      }
+      // Original bias was float, so we requantize it here.
+      auto bias = at::quantize_per_tensor(
+          bias_fp32, kernel_scale * input_scale, 0, kQInt32);
+      // Update the input scale to not pack again.
+      pack_ptr.input_scale = input_scale;
+      pack_ptr.w.reset();
+      pack_ptr.w = guts::make_unique<qnnpack::PackBMatrix>(
+          cols_w /* input_channels */,
+          rows_w /* output_channels */,
+          kernel_zp,
+          kernel_scale,
+          (uint8_t*)qnnp_w_data,
+          (int32_t*)bias.data_ptr<c10::qint32>());
+      packB = pack_ptr.w.get();
+    }
 
     size_t rows_input = 1;
     size_t cols_input = input_contig.size(input_contig.dim() - 1);
     for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
       rows_input *= input_contig.size(i);
     }
-
-    size_t rows_w = packB->getOutputChannels();
-    size_t cols_w = packB->getInputChannels();
 
     TORCH_CHECK(
         cols_input == cols_w,
@@ -258,6 +298,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
         ? activationLimits(output_scale, output_zero_point, Activation::RELU)
               .second
         : std::numeric_limits<uint8_t>::max();
+    TORCH_INTERNAL_ASSERT(packB != nullptr, "Packed Weights are NULL");
     const pytorch_qnnp_status runStatus = qnnpack::qnnpackLinear(
         rows_input /* batch_size */,
         cols_input /* input_channels */,
@@ -275,7 +316,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
         packB->getPackedWeights(),
         (uint8_t*)output.data_ptr<c10::quint8>(),
         rows_w /* output_stride */,
-        nullptr /* threadpool */);
+        caffe2::mobile_pthreadpool() /* threadpool */);
 
     TORCH_INTERNAL_ASSERT(
         runStatus == pytorch_qnnp_status_success,
@@ -303,10 +344,10 @@ class QLinearInt8 final : public torch::OperatorKernel {
           input, packed_weight, output_scale, output_zero_point);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::linear ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 

@@ -877,3 +877,10 @@ Utilities
 
 .. autoclass:: Flatten
     :members:
+
+
+Quantized Functions
+--------------------
+
+Quantization refers to techniques for performing computations and storing tensors at lower bitwidths than
+floating point precision. PyTorch supports both per tensor and per channel asymmetric linear quantization. To learn more how to use quantized functions in PyTorch, please refer to the :ref:`quantization-doc` documentation.

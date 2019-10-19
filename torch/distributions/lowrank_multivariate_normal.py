@@ -47,6 +47,7 @@ class LowRankMultivariateNormal(Distribution):
     r"""
     Creates a multivariate normal distribution with covariance matrix having a low-rank form
     parameterized by :attr:`cov_factor` and :attr:`cov_diag`::
+
         covariance_matrix = cov_factor @ cov_factor.T + cov_diag
 
     Example:
@@ -69,6 +70,7 @@ class LowRankMultivariateNormal(Distribution):
         `matrix determinant lemma <https://en.wikipedia.org/wiki/Matrix_determinant_lemma>`_.
         Thanks to these formulas, we just need to compute the determinant and inverse of
         the small size "capacitance" matrix::
+
             capacitance = I + cov_factor.T @ inv(cov_diag) @ cov_factor
     """
     arg_constraints = {"loc": constraints.real,

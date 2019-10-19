@@ -42,45 +42,37 @@ DimnameList default_names(size_t len) {
   return DimnameList(&all_unnamed.front(), len);
 }
 
-void check_names_valid_for(const Tensor& tensor, DimnameList names) {
-  return impl::check_names_valid_for(tensor.unsafeGetTensorImpl(), names);
-}
-
-namespace impl {
-
-// Two Dimnames cannot be in the same Tensor if one of them can refer to the other.
-// In practice, this constraint means that a Tensor cannot have duplicate names
-// unless they are tagged and the tags are different.
-static DimnameList::const_iterator find_incompatible_name(
-    DimnameList::const_iterator begin,
-    DimnameList::const_iterator end,
-    const Dimname& target) {
-  return std::find_if(begin, end,
-      [&target](const Dimname& candidate) {
-        return target.can_refer_to(candidate) || candidate.can_refer_to(target);
-      });
-}
-
 static void check_unique_names(DimnameList names) {
   // Strategy: Compare each element with the ones that come after it.
   // Although this is O(N^2), in practice N is small (no more than 25).
   for (auto it = names.begin(); it != names.end(); ++it) {
-    auto dup = find_incompatible_name(it + 1, names.end(), *it);
+    if (it->isWildcard()) continue;
+    auto dup = std::find(it + 1, names.end(), *it);
     while (dup != names.end()) {
-      // Simple error message if you're not using tags
-      TORCH_CHECK(it->type() == NameType::TAGGED || dup->type() == NameType::TAGGED,
+      TORCH_CHECK(false,
           "Cannot construct a tensor with duplicate names. Got names: ",
           names, ".");
-
-      // Complicated error message if you're using tags
-      TORCH_CHECK(false,
-          "Cannot construct a tensor with duplicate names unless they are tagged ",
-          "and have different tags. Got names: ", names, ", offending names: (",
-          *it, " and ", *dup, ").");
-      dup = find_incompatible_name(dup + 1, names.end(), *it);
     }
   }
 }
+
+void check_names_valid_for(const Tensor& tensor, DimnameList names) {
+  return impl::check_names_valid_for(tensor.unsafeGetTensorImpl(), names);
+}
+
+void check_names_valid_for(int64_t tensor_dim, DimnameList names) {
+  TORCH_CHECK(
+      tensor_dim <= kMaxNamedTensorDim,
+      "Named tensors only support up to ", kMaxNamedTensorDim, " dims: "
+      "Attempted to create a tensor with dim ", tensor_dim, " with names ", names);
+  TORCH_CHECK(tensor_dim == names.size(),
+      "Number of names (", names.size(), ") and "
+      "number of dimensions in tensor (", tensor_dim, ") ",
+      "do not match. Attempted to create a tensor with names ", names);
+  check_unique_names(names);
+}
+
+namespace impl {
 
 static NamedTensorMeta* get_named_tensor_meta(TensorImpl* impl) {
   if (!NamesMode::is_enabled()) {
@@ -97,16 +89,7 @@ static const NamedTensorMeta* get_named_tensor_meta(const TensorImpl* impl) {
 }
 
 void check_names_valid_for(TensorImpl* impl, DimnameList names) {
-  auto ndim = impl->dim();
-  TORCH_CHECK(
-      ndim <= kMaxNamedTensorDim,
-      "Named tensors only support up to ", kMaxNamedTensorDim, " dims: "
-      "Attempted to create a tensor with dim ", ndim, " with names ", names);
-  TORCH_CHECK(ndim == names.size(),
-      "Number of names (", names.size(), ") and "
-      "number of dimensions in tensor (", ndim, ") ",
-      "do not match. Attempted to create a tensor with names ", names);
-  check_unique_names(names);
+  check_names_valid_for(impl->dim(), names);
 }
 
 void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names) {

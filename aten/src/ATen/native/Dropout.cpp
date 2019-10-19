@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace at { namespace native {
 
@@ -82,10 +83,19 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 } // anomymous namepsace
 
 Tensor dropout(const Tensor& input, double p, bool train) {
-  if (train && is_fused_kernel_acceptable(input, p)) {
-    return std::get<0>(at::_fused_dropout(input, 1 - p));
-  }
-  return _dropout<false>(input, p, train);
+  auto result = [&]() {
+#ifdef BUILD_NAMEDTENSOR
+    NoNamesGuard guard;
+#endif
+    if (train && is_fused_kernel_acceptable(input, p)) {
+      return std::get<0>(at::_fused_dropout(input, 1 - p));
+    }
+    return _dropout<false>(input, p, train);
+  }();
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names(result, input);
+#endif
+  return result;
 }
 
 Tensor& dropout_(Tensor& input, double p, bool train) {
