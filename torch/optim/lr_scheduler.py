@@ -595,6 +595,7 @@ class CyclicLR(_LRScheduler):
     `step` should be called after a batch has been used for training.
 
     This class has three built-in policies, as put forth in the paper:
+
     "triangular":
         A basic triangular cycle w/ no amplitude scaling.
     "triangular2":
@@ -942,6 +943,7 @@ class OneCycleLR(_LRScheduler):
     This scheduler is not chainable.
 
     This class has two built-in annealing strategies:
+
     "cos":
         Cosine annealing
     "linear":
@@ -949,11 +951,13 @@ class OneCycleLR(_LRScheduler):
 
     Note also that the total number of steps in the cycle can be determined in one
     of two ways (listed in order of precedence):
+
     1) A value for total_steps is explicitly provided.
     2) A number of epochs (epochs) and a number of steps per epoch
        (steps_per_epoch) are provided.
        In this case, the number of total steps is inferred by
        total_steps = epochs * steps_per_epoch
+
     You must either provide a value for total_steps or provide a value for both
     epochs and steps_per_epoch.
 
