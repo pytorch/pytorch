@@ -46,57 +46,66 @@ namespace at { namespace native { namespace {
 template<typename dest_t>
 inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
-    AT_FORALL_SCALAR_TYPES_EXCEPT_COMPLEX_AND_QINTS(CASE)
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, CASE)
     default:
       TORCH_CHECK(false, "Unexpected scalar type");
   }
 }
 #undef CASE
 
-template<>
-inline c10::qint8 fetch_and_cast(const ScalarType src_type, const void *ptr) {
-  TORCH_CHECK(false, "Unexpected scalar type");
-  return c10::qint8(0);
-}
-
-template<>
-inline c10::quint8 fetch_and_cast(const ScalarType src_type, const void *ptr) {
-  TORCH_CHECK(false, "Unexpected scalar type");
-  return c10::quint8(0);
-}
-
-template<>
-inline c10::qint32 fetch_and_cast(const ScalarType src_type, const void *ptr) {
-  TORCH_CHECK(false, "Unexpected scalar type");
-  return c10::qint32(0);
-}
 
 // Cast a value with type src_t into dest_type, and store it to ptr.
 #define CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = value; return;
 template<typename src_t>
 inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-    AT_FORALL_SCALAR_TYPES_EXCEPT_COMPLEX_AND_QINTS(CASE)
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, CASE)
     default:
       TORCH_CHECK(false, "Unexpected scalar type");
   }
 }
 #undef CASE
 
-template<>
-inline void cast_and_store(const ScalarType dest_type, void *ptr, c10::qint8 value) {
-  TORCH_CHECK(false, "Unexpected scalar type");
-}
+#define SPECIALIZE_PROMOTION_DISABLED_TYPE(type)                                  \
+  template<>                                                                      \
+  inline type fetch_and_cast(const ScalarType src_type, const void *ptr) {        \
+    TORCH_CHECK(false, "Unexpected scalar type");                                 \
+    return type(0);                                                               \
+  }                                                                               \
+  template<>                                                                      \
+  inline void cast_and_store(const ScalarType dest_type, void *ptr, type value) { \
+    TORCH_CHECK(false, "Unexpected scalar type");                                 \
+  }
 
-template<>
-inline void cast_and_store(const ScalarType dest_type, void *ptr, c10::quint8 value) {
-  TORCH_CHECK(false, "Unexpected scalar type");
-}
 
-template<>
-inline void cast_and_store(const ScalarType dest_type, void *ptr, c10::qint32 value) {
-  TORCH_CHECK(false, "Unexpected scalar type");
-}
+SPECIALIZE_PROMOTION_DISABLED_TYPES(c10::qint8)
+SPECIALIZE_PROMOTION_DISABLED_TYPES(c10::quint8)
+SPECIALIZE_PROMOTION_DISABLED_TYPES(c10::qint32)
+#undef SPECIALIZE_PROMOTION_DISABLED_TYPES
+
+#define SPECIALIZE_COMPLEX(type)                                                    \
+  template<>                                                                        \
+  inline type fetch_and_cast(const ScalarType src_type, const void *ptr) {          \
+    switch (src_type) {                                                             \
+      case ScalarType::ComplexFloat: return *(const std::complex<float> *)ptr;      \
+      case ScalarType::ComplexDouble: return *(const std::complex<double> *)ptr;    \
+      default:                                                                      \
+        TORCH_CHECK(false, "Unexpected scalar type");                               \
+    }                                                                               \
+  }                                                                                 \
+  template<>                                                                        \
+  inline void cast_and_store(const ScalarType dest_type, void *ptr, type value) {   \
+    switch (src_type) {                                                             \
+      case ScalarType::ComplexFloat: *(std::complex<float> *)ptr = value; return;   \
+      case ScalarType::ComplexDouble: *(std::complex<double> *)ptr = value; return; \
+      default:                                                                      \
+        TORCH_CHECK(false, "Unexpected scalar type");                               \
+    }                                                                               \
+  }
+
+SPECIALIZE_COMPLEX(std::complex<float>)
+SPECIALIZE_COMPLEX(std::complex<double>)
+#undef SPECIALIZE_COMPLEX
 
 using namespace vec256;
 

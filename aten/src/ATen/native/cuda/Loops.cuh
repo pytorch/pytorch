@@ -69,7 +69,7 @@ namespace at { namespace native {
 template<typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
-    AT_FORALL_GPU_SCALAR_TYPES(CASE)
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, CASE)
     default:
       assert(false);
   }
@@ -81,7 +81,7 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const vo
 template<typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
-    AT_FORALL_GPU_SCALAR_TYPES(CASE)
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, CASE)
     default:
       assert(false);
   }

@@ -56,29 +56,6 @@ namespace c10 {
   _(bool, Bool)                                                    \
   _(at::BFloat16, BFloat16)
 
-#define AT_FORALL_GPU_SCALAR_TYPES(_)                           \
-  _(uint8_t, Byte) /* 0 */                                      \
-  _(int8_t, Char) /* 1 */                                       \
-  _(int16_t, Short) /* 2 */                                     \
-  _(int, Int) /* 3 */                                           \
-  _(int64_t, Long) /* 4 */                                      \
-  _(at::Half, Half) /* 5 */                                     \
-  _(float, Float) /* 6 */                                       \
-  _(double, Double) /* 7 */                                     \
-  _(bool, Bool)                                                 \
-
-#define AT_FORALL_SCALAR_TYPES_EXCEPT_COMPLEX_AND_QINTS(_)         \
-  _(uint8_t, Byte)                                                 \
-  _(int8_t, Char)                                                  \
-  _(int16_t, Short)                                                \
-  _(int, Int)                                                      \
-  _(int64_t, Long)                                                 \
-  _(at::Half, Half)                                                \
-  _(float, Float)                                                  \
-  _(double, Double)                                                \
-  _(bool, Bool)                                                    \
-  _(at::BFloat16, BFloat16)
-
 
 enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1, n) n,
