@@ -82,31 +82,37 @@ SPECIALIZE_PROMOTION_DISABLED_TYPE(c10::qint8)
 SPECIALIZE_PROMOTION_DISABLED_TYPE(c10::quint8)
 SPECIALIZE_PROMOTION_DISABLED_TYPE(c10::qint32)
 SPECIALIZE_PROMOTION_DISABLED_TYPE(at::BFloat16)
+SPECIALIZE_PROMOTION_DISABLED_TYPE(std::complex<float>)
+SPECIALIZE_PROMOTION_DISABLED_TYPE(std::complex<double>))
 #undef SPECIALIZE_PROMOTION_DISABLED_TYPE
 
-#define SPECIALIZE_COMPLEX(type)                                                    \
-  template<>                                                                        \
-  inline type fetch_and_cast(const ScalarType src_type, const void *ptr) {          \
-    switch (src_type) {                                                             \
-      case ScalarType::ComplexFloat: return *(const std::complex<float> *)ptr;      \
-      case ScalarType::ComplexDouble: return *(const std::complex<double> *)ptr;    \
-      default:                                                                      \
-        TORCH_CHECK(false, "Unexpected scalar type");                               \
-    }                                                                               \
-  }                                                                                 \
-  template<>                                                                        \
-  inline void cast_and_store(const ScalarType dest_type, void *ptr, type value) {   \
-    switch (dest_type) {                                                            \
-      case ScalarType::ComplexFloat: *(std::complex<float> *)ptr = value; return;   \
-      case ScalarType::ComplexDouble: *(std::complex<double> *)ptr = value; return; \
-      default:                                                                      \
-        TORCH_CHECK(false, "Unexpected scalar type");                               \
-    }                                                                               \
-  }
+operator std::complex<float>(const std::complex<double> value) {
+  return std::complex<float>(value.real, value.imag);
+}
 
-SPECIALIZE_COMPLEX(std::complex<float>)
-SPECIALIZE_COMPLEX(std::complex<double>)
-#undef SPECIALIZE_COMPLEX
+// #define SPECIALIZE_COMPLEX(type)                                                    \
+//   template<>                                                                        \
+//   inline type fetch_and_cast(const ScalarType src_type, const void *ptr) {          \
+//     switch (src_type) {                                                             \
+//       case ScalarType::ComplexFloat: return *(const std::complex<float> *)ptr;      \
+//       case ScalarType::ComplexDouble: return *(const std::complex<double> *)ptr;    \
+//       default:                                                                      \
+//         TORCH_CHECK(false, "Unexpected scalar type");                               \
+//     }                                                                               \
+//   }                                                                                 \
+//   template<>                                                                        \
+//   inline void cast_and_store(const ScalarType dest_type, void *ptr, type value) {   \
+//     switch (dest_type) {                                                            \
+//       case ScalarType::ComplexFloat: *(std::complex<float> *)ptr = value; return;   \
+//       case ScalarType::ComplexDouble: *(std::complex<double> *)ptr = value; return; \
+//       default:                                                                      \
+//         TORCH_CHECK(false, "Unexpected scalar type");                               \
+//     }                                                                               \
+//   }
+
+// SPECIALIZE_COMPLEX(std::complex<float>)
+// SPECIALIZE_COMPLEX(std::complex<double>)
+// #undef SPECIALIZE_COMPLEX
 
 using namespace vec256;
 
