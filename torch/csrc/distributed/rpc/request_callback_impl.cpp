@@ -196,7 +196,7 @@ Message RequestCallbackImpl::processRpc(
       // to clean up their context.
       DistAutogradContainer::getInstance().releaseContextIfPresent(
           cleanupContextId);
-      return c10::guts::make_unique<CleanupAutogradContextResp>();
+      return std::move(CleanupAutogradContextResp()).toMessage();
     }
     default: {
       TORCH_INTERNAL_ASSERT(

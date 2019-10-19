@@ -285,6 +285,9 @@ class DistAutogradTest(object):
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
             self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
+            # this barrier is needed so one worker does not clean up their
+            # autograd context before another worker tries to access it.
+            dist.barrier()
 
         # autograd context should be cleaned up by now.
         with self.assertRaises(RuntimeError):
@@ -352,6 +355,9 @@ class DistAutogradTest(object):
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
             self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
+            # this barrier is needed so one worker does not clean up their
+            # autograd context before another worker tries to access it.
+            dist.barrier()
 
     # Rank0->Rank1->Rank0
     @dist_init
@@ -387,6 +393,9 @@ class DistAutogradTest(object):
             self._check_rpc_done(1)
             ctx = dist_autograd._retrieve_context(ctx_ids[1])
             self._verify_graph_for_nested_rpc_call(ctx)
+            # this barrier is needed so one worker does not clean up their
+            # autograd context before another worker tries to access it.
+            dist.barrier()
 
     @dist_init
     def test_no_graph_with_tensors_not_require_grad(self):
