@@ -771,6 +771,7 @@ TEST_F(FunctionalTest, PReLU) {
   const auto y = F::prelu(x, w);
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({42, 24}));
   const auto y_exp = (x < 0) * w * x  + (x >= 0) * x;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
 TEST_F(FunctionalTest, Linear) {
