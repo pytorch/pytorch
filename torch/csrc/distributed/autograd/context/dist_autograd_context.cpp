@@ -7,24 +7,6 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
-namespace {
-
-// Autograd function used to enqueue an error on the local autograd engine.
-class ErrorFunc : public torch::autograd::Node {
- public:
-  explicit ErrorFunc(const std::runtime_error& error) : error_(error) {}
-
-  torch::autograd::variable_list apply(
-      torch::autograd::variable_list&& grads) override {
-    throw error_;
-  }
-
- private:
-  std::runtime_error error_;
-};
-
-} // anonymous namespace.
-
 DistAutogradContext::DistAutogradContext(int64_t contextId)
     : contextId_(contextId) {}
 

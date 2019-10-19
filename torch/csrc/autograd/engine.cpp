@@ -521,21 +521,18 @@ void Engine::evaluate_function(
     InputBuffer& inputs) {
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
-  {
-    // Lock mutex for writing to graph_task->captured_vars_ and looking up
-    // exec_info_.
-    std::lock_guard<std::mutex> lock(graph_task->mutex_);
-    if (!exec_info_.empty()) {
-      auto& fn_info = exec_info_.at(func);
-      if (auto* capture_vec = fn_info.captures_.get()) {
-        for (auto capture : *capture_vec) {
-          graph_task->captured_vars_[capture.output_idx_] =
-              inputs[capture.input_idx_];
-        }
+  if (!exec_info_.empty()) {
+    auto& fn_info = exec_info_.at(func);
+    if (auto* capture_vec = fn_info.captures_.get()) {
+      // Lock mutex for writing to graph_task->captured_vars_.
+      std::lock_guard<std::mutex> lock(graph_task->mutex_);
+      for (auto capture : *capture_vec) {
+        graph_task->captured_vars_[capture.output_idx_] =
+            inputs[capture.input_idx_];
       }
-      if (!fn_info.needed_)
-        return;
     }
+    if (!fn_info.needed_)
+      return;
   }
 
   // Switches to a function's CUDA stream (if applicable) before calling it

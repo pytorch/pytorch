@@ -99,7 +99,8 @@ struct GraphTask {
   void set_exception(const std::exception& e, std::shared_ptr<Node> fn);
 
   // Whether or not to stop execution for this GraphTask when an error is
-  // encountered.
+  // encountered. When set to true, this would cause Engine::execute() to throw
+  // an exception as soon as the autograd engine receives an exception.
   bool exit_on_error_;
 
   GraphTask(
