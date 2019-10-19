@@ -29,36 +29,40 @@ inline Tensor pad(const Tensor& input, const PadOptions& options) {
   if (c10::get_if<enumtype::kConstant>(&options.mode())) {
     return torch::constant_pad_nd(input, options.pad(), options.value());
   } else {
-    TORCH_CHECK(options.value() == 0, "Padding mode \"", mode, "\" doesn't take in value argument");
+    TORCH_CHECK(
+      options.value() == 0,
+      "Padding mode \"",
+      c10::visit(torch::enumtype::enum_name{}, options.mode()),
+      "\" doesn't take in value argument");
     if (input.dim() == 3) {
       TORCH_CHECK(options.pad().size() == 2, "3D tensors expect 2 values for padding");
-      if (options.mode() == "reflect") {
+      if (c10::get_if<enumtype::kReflect>(&options.mode())) {
         return torch::reflection_pad1d(input, options.pad());
-      } else if (options.mode() == "replicate") {
+      } else if (c10::get_if<enumtype::kReplicate>(&options.mode())) {
         return torch::replication_pad1d(input, options.pad());
-      } else if (options.mode() == "circular") {
+      } else if (c10::get_if<enumtype::kCircular>(&options.mode())) {
         return _pad_circular(input, options.pad());
       } else {
         TORCH_CHECK(false, "NotImplementedError");
       }
     } else if (input.dim() == 4) {
       TORCH_CHECK(options.pad().size() == 4, "4D tensors expect 4 values for padding");
-      if (options.mode() == "reflect") {
+      if (c10::get_if<enumtype::kReflect>(&options.mode())) {
         return torch::reflection_pad2d(input, options.pad());
-      } else if (options.mode() == "replicate") {
+      } else if (c10::get_if<enumtype::kReplicate>(&options.mode())) {
         return torch::replication_pad2d(input, options.pad());
-      } else if (options.mode() == "circular") {
+      } else if (c10::get_if<enumtype::kCircular>(&options.mode())) {
         return _pad_circular(input, options.pad());
       } else {
         TORCH_CHECK(false, "NotImplementedError");
       }
     } else if (input.dim() == 5) {
       TORCH_CHECK(options.pad().size() == 6, "5D tensors expect 6 values for padding");
-      if (options.mode() == "reflect") {
+      if (c10::get_if<enumtype::kReflect>(&options.mode())) {
         TORCH_CHECK(false, "NotImplementedError");
-      } else if (options.mode() == "replicate") {
+      } else if (c10::get_if<enumtype::kReplicate>(&options.mode())) {
         return torch::replication_pad3d(input, options.pad());
-      } else if (options.mode() == "circular") {
+      } else if (c10::get_if<enumtype::kCircular>(&options.mode())) {
         return _pad_circular(input, options.pad());
       } else {
         TORCH_CHECK(false, "NotImplementedError");
