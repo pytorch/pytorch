@@ -60,8 +60,6 @@ namespace detail {
   }
 } // namespace detail
 
-struct Half;
-
 struct alignas(2) BFloat16 {
   uint16_t x;
 
@@ -83,5 +81,6 @@ struct alignas(2) BFloat16 {
 };
 
 } // namespace c10
+
 
 #include <c10/util/BFloat16-inl.h>

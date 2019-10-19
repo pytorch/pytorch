@@ -321,8 +321,6 @@ namespace detail {
 
 } // namespace detail
 
-struct BFloat16;
-
 struct alignas(2) Half {
   unsigned short x;
 
