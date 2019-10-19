@@ -103,7 +103,7 @@ TEST_F(FunctionalTest, SoftMarginLossNoReduction) {
   auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output =
-      F::soft_margin_loss(input, target, torch::Reduction::None);
+      F::soft_margin_loss(input, target, torch::kNone);
   auto expected = torch::tensor({2.1269281, 0.01814993, 0.3132617, 3.0485873}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -399,7 +399,7 @@ TEST_F(FunctionalTest, MultiLabelMarginLossNoReduction) {
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = F::multilabel_margin_loss(
-    input, target, torch::Reduction::None);
+    input, target, torch::kNone);
   auto expected = torch::tensor({0.8500}, torch::kFloat);
   auto s = output.sum();
   s.backward();

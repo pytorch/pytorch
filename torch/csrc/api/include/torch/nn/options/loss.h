@@ -10,13 +10,11 @@ namespace nn {
 
 /// Options for a L1 loss module.
 struct TORCH_API L1LossOptions {
-  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
-
-  L1LossOptions(
-    reduction_t reduction = torch::kMean)
-      : reduction_(reduction) {}
+  L1LossOptions() : reduction_(torch::kMean) {}
+  TORCH_CTOR_REDUCTION_ARG3(L1LossOptions, reduction, kNone, kMean, kSum)
 
   /// Specifies the reduction to apply to the output.
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
   TORCH_ARG(reduction_t, reduction);
 };
 
@@ -24,32 +22,39 @@ struct TORCH_API L1LossOptions {
 
 /// Options for a KLDiv loss module.
 struct TORCH_API KLDivLossOptions {
-  KLDivLossOptions(Reduction::Reduction reduction = Reduction::Mean)
-      : reduction_(reduction) {}
+  KLDivLossOptions() : reduction_(torch::kMean) {}
+  TORCH_CTOR_REDUCTION_ARG4(KLDivLossOptions, reduction, kNone, kBatchMean, kSum, kMean)
 
   /// Specifies the reduction to apply to the output.
-  TORCH_ARG(Reduction::Reduction, reduction);
+  /// ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``. Default: ``'mean'``
+  typedef c10::variant<enumtype::kNone, enumtype::kBatchMean, enumtype::kSum, enumtype::kMean> reduction_t;
+  TORCH_ARG(reduction_t, reduction);
 };
 
 // ============================================================================
 
 /// Options for a MSE loss module.
 struct TORCH_API MSELossOptions {
-  MSELossOptions(Reduction::Reduction reduction = Reduction::Mean)
-      : reduction_(reduction) {}
+  MSELossOptions() : reduction_(torch::kMean) {}
+  TORCH_CTOR_REDUCTION_ARG3(MSELossOptions, reduction, kNone, kMean, kSum)
 
   /// Specifies the reduction to apply to the output.
-  TORCH_ARG(Reduction::Reduction, reduction);
+  /// ``'none'`` | ``'mean'`` | ``'sum'``. Default: ``'mean'``
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+  TORCH_ARG(reduction_t, reduction);
 };
 
 // ============================================================================
 
 /// Options for a BCE loss module.
 struct TORCH_API BCELossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
   /// A manual rescaling weight given to the loss of each batch element.
   TORCH_ARG(Tensor, weight) = {};
   /// Specifies the reduction to apply to the output.
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  /// ``'none'`` | ``'mean'`` | ``'sum'``. Default: ``'mean'``
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
 // ============================================================================
@@ -102,15 +107,14 @@ struct TORCH_API CosineEmbeddingLossOptions {
 
 /// Options for a multi-label margin loss functional and module.
 struct TORCH_API MultiLabelMarginLossOptions {
-  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
-
-  MultiLabelMarginLossOptions(reduction_t reduction = torch::kMean)
-    : reduction_(reduction) {}
+  MultiLabelMarginLossOptions() : reduction_(torch::kMean) {}
+  TORCH_CTOR_REDUCTION_ARG3(MultiLabelMarginLossOptions, reduction, kNone, kMean, kSum)
 
   /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
   TORCH_ARG(reduction_t, reduction);
 };
 
@@ -118,15 +122,14 @@ struct TORCH_API MultiLabelMarginLossOptions {
 
 /// Options for a soft margin loss functional and module.
 struct TORCH_API SoftMarginLossOptions {
-  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
-
-  SoftMarginLossOptions(reduction_t reduction = torch::kMean)
-    : reduction_(reduction) {}
+  SoftMarginLossOptions() : reduction_(torch::kMean) {}
+  TORCH_CTOR_REDUCTION_ARG3(SoftMarginLossOptions, reduction, kNone, kMean, kSum)
 
   /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
   TORCH_ARG(reduction_t, reduction);
 };
 
