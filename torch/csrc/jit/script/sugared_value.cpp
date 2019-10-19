@@ -212,6 +212,7 @@ void SimpleValue::setAttr(
             << "Classes that recursively contain instances of themselves"
             << " are not yet supported";
       }
+
       classType->addAttribute(field, newValue->type());
       expectedType = newValue->type();
 

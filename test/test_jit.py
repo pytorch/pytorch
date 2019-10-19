@@ -14,7 +14,7 @@ from torch import Tensor
 from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
 from torch._six import inf, PY2, PY37, StringIO
 from torch.autograd import Variable, Function
-from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
+from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
 from torch.jit.frontend import NotSupportedError
 from torch.onnx import OperatorExportTypes
 from torch.testing import FileCheck
@@ -28,7 +28,7 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
-from torch.quantization._quantize_script import fold_prepack
+from torch.quantization._quantize_script import fold_prepack, ConvPackedParams, LinearPackedParams
 
 # Testing utils
 import jit_utils
@@ -71,6 +71,7 @@ import types
 import unittest
 import warnings
 import zipfile
+import re
 
 try:
     import torchvision
@@ -1430,7 +1431,12 @@ graph(%input, %weight):
                               ('conv', QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
             m = torch.jit.script(M())
             ref_res = get_forward(m._c)(data)
-            fold_prepack(m)
+            linear_packed_params = torch.jit.script(LinearPackedParams())._c
+            conv_packed_params = torch.jit.script(ConvPackedParams())._c
+            # fold_prepack(m)
+            torch._C._jit_pass_fold_prepack(m._c,
+                                            linear_packed_params,
+                                            conv_packed_params)
             res = get_forward(m._c)(data)
             # check attribute and graph
             packed_module_list = [x for x, _ in m._c._get_modules()
@@ -3667,6 +3673,33 @@ def foo(x):
         x = torch.rand(3, 4)
         self.assertEqual(bar(x), (x * x + 3 * x) * (x * x + 3 * x))
 
+    def test_static_methods(self):
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            @staticmethod
+            def my_method(x):
+                return x + 100
+
+            def forward(self, x):
+                return x + M.my_method(x)
+
+        class N(nn.Module):
+            def __init__(self):
+                super(N, self).__init__()
+
+            @staticmethod
+            def my_method(x):
+                return x * 100
+
+            def forward(self, x):
+                return x - M.my_method(x) + N.my_method(x)
+
+        self.checkModule(M(), (torch.ones(2, 2),))
+
+        self.checkModule(N(), (torch.ones(2, 2),))
+
     def test_invalid_prefix_annotation(self):
         with self.assertRaisesRegex(RuntimeError, "annotation prefix in line"):
             with self.capture_stdout() as captured:
@@ -3688,6 +3721,44 @@ def foo(x):
                 def invalid_prefix_annotation3(a):
                     #     type: (Int) -> Int
                     return a + 2
+
+    def test_unmatched_type_annotation(self):
+        message1 = re.escape("Number of type annotations (2) did not match the number of function parameters (1):")
+        message2 = re.escape("""
+            def invalid2(a):
+            ~~~~~~~~~~~~~~ <--- HERE
+                # type: (Int, Int) -> Int
+                return a + 2
+        """.strip())
+        message3 = re.escape("""
+            def invalid4(a):
+            ~~~~~~~~~~~~~~ <--- HERE
+                # type: (Int, Int) -> Int
+                return a + 2
+        """.strip())
+        with self.assertRaisesRegex(RuntimeError, message1):
+            @torch.jit.script
+            def invalid1(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, message2):
+            @torch.jit.script
+            def invalid2(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+
+        with self.assertRaisesRegex(RuntimeError, message1):
+            def invalid3(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+            torch.jit.script(invalid3)
+
+        with self.assertRaisesRegex(RuntimeError, message3):
+            def invalid4(a):
+                # type: (Int, Int) -> Int
+                return a + 2
+            torch.jit.script(invalid4)
 
     def test_is_optional(self):
         ann = Union[List[int], List[float]]
@@ -6943,6 +7014,27 @@ a")
         self.assertEqual(foo2(3, 4), 7)
         self.assertEqual(foo2(None, 4), 0)
         self.assertEqual(foo2(4, None), 0)
+
+        @torch.jit.script
+        def any_refinement(a, b):
+            # type: (Any, Any) -> int
+            if isinstance(a, int) and isinstance(b, int):
+                return a + b
+            return 0
+
+        self.assertEqual(any_refinement(3, 4), 7)
+        self.assertEqual(any_refinement(3, "hi"), 0)
+
+    def test_any_in_class_fails(self):
+        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
+            @torch.jit.script
+            class Foo(object):
+                def __init__(self, a):
+                    # type: (Tuple[int,Any]) -> None
+                    self.a = a
+
+                def hi(self):
+                    pass
 
     def test_isinstance(self):
         # test isinstance operator for static type checking
@@ -18968,6 +19060,21 @@ class TestClassType(JitTestCase):
             return foo.foo
 
         self.assertEqual(fn(1), 3)
+
+    def test_staticmethod(self):
+        class X(object):
+            def __init__(self, x):
+                # type: (int) -> None
+                self.x = x
+
+            @staticmethod
+            def identity(x):
+                return x
+
+        def fn(x, y):
+            return X.identity(x)
+
+        self.checkScript(fn, (torch.randn(2, 2), torch.randn(2, 2)))
 
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
