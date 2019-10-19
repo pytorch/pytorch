@@ -81,6 +81,7 @@ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
 SPECIALIZE_PROMOTION_DISABLED_TYPES(c10::qint8)
 SPECIALIZE_PROMOTION_DISABLED_TYPES(c10::quint8)
 SPECIALIZE_PROMOTION_DISABLED_TYPES(c10::qint32)
+SPECIALIZE_PROMOTION_DISABLED_TYPES(at::BFloat16)
 #undef SPECIALIZE_PROMOTION_DISABLED_TYPES
 
 #define SPECIALIZE_COMPLEX(type)                                                    \
