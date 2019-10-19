@@ -529,6 +529,8 @@ inline IValue toIValue(
       AT_ERROR("Function Values aren't yet supported");
     case TypeKind::CapsuleType:
       AT_ERROR("Capsule Values aren't supported");
+    case TypeKind::MobileType:
+      AT_ERROR("Mobile Values aren't supported");
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
   }
