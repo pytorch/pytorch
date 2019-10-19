@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include <c10/util/variant.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #define TORCH_ENUM_DECLARE(name) \
@@ -26,7 +27,7 @@ const enumtype::k##name k##name; \
 }
 
 #define TORCH_ENUM_PRETTY_PRINT(name) \
-const char* operator()(enumtype::k##name& v) const { \
+const char* operator()(const enumtype::k##name& v) const { \
   return #name; \
 }
 
@@ -43,6 +44,9 @@ TORCH_ENUM_DECLARE(ReLU)
 TORCH_ENUM_DECLARE(LeakyReLU)
 TORCH_ENUM_DECLARE(FanIn)
 TORCH_ENUM_DECLARE(FanOut)
+TORCH_ENUM_DECLARE(Sum)
+TORCH_ENUM_DECLARE(Mean)
+TORCH_ENUM_DECLARE(Max)
 
 namespace torch {
 namespace enumtype {
@@ -60,6 +64,9 @@ struct enum_name {
   TORCH_ENUM_PRETTY_PRINT(LeakyReLU)
   TORCH_ENUM_PRETTY_PRINT(FanIn)
   TORCH_ENUM_PRETTY_PRINT(FanOut)
+  TORCH_ENUM_PRETTY_PRINT(Sum)
+  TORCH_ENUM_PRETTY_PRINT(Mean)
+  TORCH_ENUM_PRETTY_PRINT(Max)
 };
 } // namespace enumtype
 } // namespace torch

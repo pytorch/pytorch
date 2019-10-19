@@ -25,7 +25,10 @@ TEST(EnumTest, AllEnums) {
     torch::enumtype::kReLU,
     torch::enumtype::kLeakyReLU,
     torch::enumtype::kFanIn,
-    torch::enumtype::kFanOut
+    torch::enumtype::kFanOut,
+    torch::enumtype::kSum,
+    torch::enumtype::kMean,
+    torch::enumtype::kMax
   > v;
 
   TORCH_ENUM_PRETTY_PRINT_TEST(Linear)
@@ -41,4 +44,7 @@ TEST(EnumTest, AllEnums) {
   TORCH_ENUM_PRETTY_PRINT_TEST(LeakyReLU)
   TORCH_ENUM_PRETTY_PRINT_TEST(FanIn)
   TORCH_ENUM_PRETTY_PRINT_TEST(FanOut)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Sum)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Mean)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Max)
 }
