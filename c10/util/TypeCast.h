@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
