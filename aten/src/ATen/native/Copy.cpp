@@ -9,7 +9,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/EnableNamedTensor.h>
-#include <c10/util/DynamicTypeCast.h>
 
 namespace {
 
