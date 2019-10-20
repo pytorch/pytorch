@@ -146,32 +146,10 @@ static void validate_dtype(OperandInfo& op, ScalarType common_dtype, int ninputs
   }
 }
 
-static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype) {
-  if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype)
-  {
-    op.dtype = common_dtype;
-    op.original_tensor = op.tensor;
-    if (!op.is_output) {
-      op.tensor = op.tensor.to(common_dtype);
-    } else {
-      op.tensor =
-          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype));
-    }
-    auto original_element_size = op.original_tensor.element_size();
-    auto new_element_size = op.tensor.element_size();
-
-    // stride size (in bytes) can change if we change the dtype.
-    for( size_t i=0; i < op.stride_bytes.size(); i++ ) {
-      auto stride = op.stride_bytes[i] / original_element_size;
-      op.stride_bytes[i] = stride * new_element_size;
-    }
-  }
-}
-
 void TensorIterator::compute_types() {
   bool missing_dtypes = false;
   bool missing_output_dtypes = false;
-  ScalarType common_dtype = dtype();
+  common_dtype_ = dtype();
   for (auto& op : operands_) {
     if (!op.tensor.defined() && !op.is_type_defined()) {
       missing_dtypes = true;
@@ -192,14 +170,14 @@ void TensorIterator::compute_types() {
     auto operands = compute_common_dtype_only_for_inputs ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
     auto common_type = compute_common_type_(operands);
     auto common_device = std::get<0>(common_type);
-    common_dtype = std::get<1>(common_type);
+    common_dtype_ = std::get<1>(common_type);
     bool has_cpu_scalar = false;
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
         op.device = common_device;
-        op.dtype = common_dtype;
+        op.dtype = common_dtype_;
       } else if (compute_common_dtype &&
-                 (op.device != common_device || op.dtype != common_dtype)) {
+                 (op.device != common_device || op.dtype != common_dtype_)) {
         if (allow_cpu_scalars_ && op.tensor.defined() && op.tensor.dim() == 0 &&
             common_device.is_cuda() && op.tensor.device().is_cpu() &&
             !has_cpu_scalar) {
@@ -209,7 +187,7 @@ void TensorIterator::compute_types() {
           has_cpu_scalar = true;
         } else if (promote_gpu_output_dtypes_ && op.tensor.defined() &&
             !op.is_output &&
-            op.tensor.scalar_type() == kHalf && common_dtype == kFloat &&
+            op.tensor.scalar_type() == kHalf && common_dtype_ == kFloat &&
             op.tensor.device().is_cuda() && common_device.is_cuda()) {
           // allow input tensor type upcasting for fp16 to fp32 in fused kernel
           // on GPU
@@ -220,17 +198,14 @@ void TensorIterator::compute_types() {
           if (compute_common_dtype_only_for_inputs && op.is_output) {
             op.dtype = op.tensor.scalar_type();
           } else {
-            op.dtype = common_dtype;
+            op.dtype = common_dtype_;
           }
         }
       }
 
       if (!std::get<2>(common_type)) {
         if (!compute_common_dtype_only_for_inputs) {
-          validate_dtype(op, common_dtype, ninputs());
-        }
-        if (!compute_common_dtype_only_for_inputs || !op.is_output) {
-          maybe_promote_common_dtype(op, common_dtype);
+          validate_dtype(op, common_dtype_, ninputs());
         }
       }
 
