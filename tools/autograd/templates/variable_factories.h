@@ -92,7 +92,7 @@ enum class TensorDataContainerType { Scalar, InitList, Tensor };
 // constructor, thus producing a tensor with the wrong sizes. If we templatize `TensorDataContainer` over
 // the # of tensor dimensions, such problem doesn't happen.
 template <size_t D>
-class TensorDataContainer {
+struct TensorDataContainer {
   // NOTE: For tensors with zero-size dimensions (e.g. `torch::tensor({{}, {}})`),
   // the innermost empty braced-init-list `{}` matches the default constructor of
   // the innermost `TensorDataContainer`.
@@ -236,7 +236,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
   TensorDataContainerType type_;
   at::Tensor tensor_;
 
-  friend class TensorDataContainer<(D > 1) ? D-1 : D>;
+  friend struct TensorDataContainer<(D > 1) ? D-1 : D>;
 };
 
 template <size_t D>
@@ -257,8 +257,7 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer<
 // Following the above reasoning, `TensorDataContainer<NESTED_INIT_LIST_MAX_DEPTH+1>` should only
 // accept scalars, and we throw "dimension exceeded" error in other constructors.
 template<>
-class TensorDataContainer<NESTED_INIT_LIST_MAX_DEPTH+1> {
- public:
+struct TensorDataContainer<NESTED_INIT_LIST_MAX_DEPTH+1> {
   TensorDataContainer() {
     TORCH_CHECK(
       false,
@@ -316,6 +315,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       TORCH_INTERNAL_ASSERT(false, "Only scalar type is supported for this TensorDataContainer");
     }
   }
+
  private:
   std::vector<int64_t> sizes_;
   c10::Scalar scalar_;
