@@ -93,10 +93,6 @@ struct CAFFE2_API OperandInfo {
   /// coalescing.
   Tensor tensor;
 
-  // Save the original tensor operand in cases when an output is modified
-  // (e.g. if dtype is changed)
-  Tensor original_tensor;
-
   /// The desired device and type for the operand. For inputs, this specifies that
   /// the input should be converted to this type if necessary. For outputs, this
   /// specifies which type to allocate. Note that there is very limited support
@@ -190,6 +186,7 @@ struct CAFFE2_API TensorIterator {
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
   ScalarType dtype(int arg=0) const { return operands_[arg].tensor.scalar_type(); }
+  ScalarType common_dtype() const { return common_dtype_; }
   ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
@@ -203,17 +200,6 @@ struct CAFFE2_API TensorIterator {
   Tensor output(int arg=0) const {
     AT_ASSERT(arg < num_outputs_);
     return operands_[arg].tensor;
-  }
-
-  void cast_outputs() {
-    if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_ALL) {
-      for(int i=0; i < noutputs(); i++) {
-        if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
-          operands_[i].original_tensor.copy_(operands_[i].tensor);
-          operands_[i].tensor = operands_[i].original_tensor;
-        }
-      }
-    }
   }
 
   Tensor input(int arg=0) const {
@@ -285,6 +271,18 @@ struct CAFFE2_API TensorIterator {
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
 
+  bool has_promotion() const {
+    if (common_dtype_ == ScalarType::Undefined) {
+      return false;
+    }
+    for (auto& op : operands_) {
+      if (op.tensor.scalar_type() != common_dtype_) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void set_check_mem_overlap(bool check_mem_overlap) {
     check_mem_overlap_ = check_mem_overlap;
   }
@@ -347,6 +345,7 @@ protected:
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
   CommonDTypeStrategy compute_common_dtype_strategy_ = CommonDTypeStrategy::COMPUTE_ALL;
+  ScalarType common_dtype_ = ScalarType::Undefined;
   bool has_coalesced_dimensions_ = false;
   bool accumulate_ = false;
   bool resize_outputs_ = true;

@@ -32,6 +32,7 @@
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cpu/vec256/vec256.h>
+#include <c10/util/TypeCast.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
@@ -51,11 +52,27 @@ dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
         (data[INDEX] + i * strides[INDEX])...);
 }
 
+template <typename traits, std::size_t... INDEX>
+typename traits::ArgsTuple
+dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, const ScalarType* dtypes, int64_t i,
+                 c10::guts::index_sequence<INDEX...>) {
+  return std::make_tuple(
+      fetch_and_cast<typename traits::template arg<INDEX>::type>(dtypes[INDEX],
+        data[INDEX] + i * strides[INDEX])...);
+}
+
 template <typename traits>
 typename traits::ArgsTuple
 dereference(char* C10_RESTRICT data[], const int64_t* strides, int64_t i) {
   using Indices = c10::guts::make_index_sequence<traits::arity>;
   return dereference_impl<traits>(data, strides, i, Indices{});
+}
+
+template <typename traits>
+typename traits::ArgsTuple
+dereference(char* C10_RESTRICT data[], const int64_t* strides, const ScalarType* dtypes, int64_t i) {
+  using Indices = c10::guts::make_index_sequence<traits::arity>;
+  return dereference_impl<traits>(data, strides, dtypes, i, Indices{});
 }
 
 template <typename traits, std::size_t... INDEX>
@@ -96,6 +113,23 @@ execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t
 }
 
 template <typename func_t,
+    typename std::enable_if<!std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
+static inline void
+execute_op(char* C10_RESTRICT data[], const int64_t* strides, const ScalarType *dtypes, int64_t i, int64_t n, func_t op) {
+  using traits = function_traits<func_t>;
+  using result_type = typename traits::result_type;
+  for (; i < n; i++) {
+    void* out_ptr = data[0] + i * strides[0];
+    result_type result = c10::guts::apply(op, dereference<traits>(
+        &data[1],
+        &strides[1],
+        &dtypes[1],
+        i));
+    cast_and_store<result_type>(dtypes[0], out_ptr, result);
+  }
+}
+
+template <typename func_t,
     typename std::enable_if<std::is_void<typename function_traits<func_t>::result_type>::value>::type* = nullptr>
 static inline void
 execute_op(char* C10_RESTRICT data[], const int64_t* strides, int64_t i, int64_t n, func_t op) {
@@ -124,6 +158,22 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
   }
 
   execute_op(data, strides, i, n, op);
+}
+
+template <typename func_t>
+static inline void
+basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, const ScalarType *dtypes, int64_t i, int64_t n, func_t op) {
+  using traits = function_traits<func_t>;
+  constexpr int ntensors = traits::arity + 1;
+
+  // Copying strides to temporary array helps auto vectorization in older GCC
+  // versions.
+  int64_t strides[ntensors];
+  for (int arg = 0; arg < ntensors; arg++) {
+    strides[arg] = strides_[arg];
+  }
+
+  execute_op(data, strides, dtypes, i, n, op);
 }
 
 // Explicitly vectorized loop implementation. All inputs and outputs must be
@@ -186,25 +236,55 @@ static inline void unroll_contiguous_scalar_checks(
 template <typename func_t>
 void cpu_kernel(TensorIterator& iter, func_t op) {
   using traits = function_traits<func_t>;
-  TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
+  constexpr int ntensors = traits::arity + 1;
+  TORCH_INTERNAL_ASSERT(iter.ntensors() >= ntensors);
 
-  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
-    if (is_contiguous<traits>(strides)) {
-      basic_loop(data, strides, 0, n, op);
-    } else {
-      using Indices = c10::guts::make_index_sequence<traits::arity>;
-      unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
-        basic_loop(data, strides, 0, n, op);
-      });
+  if (iter.has_promotion()) {
+    at::detail::Array<ScalarType, ntensors> dtypes;
+    for (int i = 0; i < ntensors; i++) {
+      dtypes[i] = iter.tensor(i).scalar_type();
     }
-  });
-  iter.cast_outputs();
+    iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+      if (is_contiguous<traits>(strides)) {
+        basic_loop(data, strides, dtypes.data, 0, n, op);
+      } else {
+        using Indices = c10::guts::make_index_sequence<traits::arity>;
+        unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
+          basic_loop(data, strides, dtypes.data, 0, n, op);
+        });
+      }
+    });
+  } else {
+    iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+      if (is_contiguous<traits>(strides)) {
+        basic_loop(data, strides, 0, n, op);
+      } else {
+        using Indices = c10::guts::make_index_sequence<traits::arity>;
+        unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t _idx) {
+          basic_loop(data, strides, 0, n, op);
+        });
+      }
+    });
+  }
 }
 
 template <typename func_t, typename vec_func_t>
 void cpu_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
   using traits = function_traits<func_t>;
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
+
+  // TODO(@zasdfgbnm): vectorized loop is not supported for now when
+  // there is type promotion. Supporting this will requires extending
+  // the loading and storing so that we do:
+  // Step 1: vector load original dtype
+  // Step 2: vector casting to common dtype
+  // Step 3: compute vop
+  // Step 3: vector casting to target dtype
+  // Step 5: vector store
+  if (iter.has_promotion()) {
+    cpu_kernel(iter, op);
+    return;
+  }
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
@@ -220,7 +300,6 @@ void cpu_kernel_vec(TensorIterator& iter, func_t op, vec_func_t vop) {
       });
     }
   });
-  iter.cast_outputs();
 }
 
 template <typename func_t>
@@ -239,7 +318,6 @@ void cpu_serial_kernel(TensorIterator& iter, func_t op) {
       });
     }
   }, {0, iter.numel()});
-  iter.cast_outputs();
 }
 
 }}}  // namespace at::native::<anonymous>
