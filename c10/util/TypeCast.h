@@ -105,7 +105,6 @@ inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, voi
 }
 #endif
 
-#ifndef C10_HOST_DEVICE
 #define DEFINE_UNCASTABLE(T, _)                                                   \
 template<>                                                                        \
 C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType, const void *) {      \
@@ -118,7 +117,6 @@ C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType, void *, T) {    
 }
 
 AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
-#endif
 
 #undef FETCH_AND_CAST_CASE
 #undef FETCH_AND_CAST_COMPLEX_CASE
