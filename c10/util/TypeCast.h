@@ -46,7 +46,7 @@ using inter_copy_type_t = typename inter_copy_type<T>::type;
 template <typename dest_t, typename src_t>
 inline dest_t static_cast_with_inter_type(src_t src) {
   return static_cast<dest_t>(
-    static_cast<inter_copy_type_t<dest_t>>(src);
+    static_cast<inter_copy_type_t<dest_t>>(src));
 }
 
 #ifdef C10_HOST_DEVICE
