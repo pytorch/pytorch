@@ -87,7 +87,7 @@ C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType, const void *) {    
   return T(0); /* just to avoid compiler warning */                               \
 }                                                                                 \
 template<>                                                                        \
-C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType, void *, src_t) {  \
+C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType, void *, T) {      \
   ERROR_UNSUPPORTED_CAST                                                          \
 }
 
