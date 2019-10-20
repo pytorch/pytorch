@@ -471,14 +471,14 @@ TEST(CustomAutogradTest, DeepReentrant) {
       }
       {
         at::AutoGradMode enable_grad(true);
-        apply(ctx->saved_data["x"].toTensor()).sum().backward();
+        apply(ctx->saved_data["x"].toTensor())[0].sum().backward();
         return grad_output;
       }
     }
   };
 
   // This should not stack overflow
-  auto v = torch::tensor(8193, torch::requires_grad());
+  auto v = torch::tensor({8193}, torch::requires_grad());
   DeepReenter::apply(v).sum().backward();
 }
 
@@ -512,14 +512,14 @@ TEST(CustomAutogradTest, ReentrantPriority) {
       }
       {
         at::AutoGradMode enable_grad(true);
-        apply(ctx->saved_data["x"].toTensor()).sum().backward();
+        apply(ctx->saved_data["x"].toTensor())[0].sum().backward();
         return grad_output;
       }
     }
   };
 
-  auto a = MyFunction::apply(torch::tensor(6, torch::requires_grad()));
-  auto b = Reenter::apply(torch::tensor(9, torch::requires_grad()));
+  auto a = MyFunction::apply(torch::tensor({6}, torch::requires_grad()));
+  auto b = Reenter::apply(torch::tensor({9}, torch::requires_grad()));
   auto v = a*b;
   v.backward();
 

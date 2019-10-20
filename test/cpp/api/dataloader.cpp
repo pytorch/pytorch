@@ -616,8 +616,8 @@ struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
   ~UnCopyableDataset() = default;
 
   Example<> get(size_t index) override {
-    return {torch::tensor(static_cast<int64_t>(index)),
-            torch::tensor(static_cast<int64_t>(index))};
+    return {torch::tensor({static_cast<int64_t>(index)}),
+            torch::tensor({static_cast<int64_t>(index)})};
   }
 
   torch::optional<size_t> size() const override {
@@ -636,7 +636,7 @@ TEST(DataTest, MapDoesNotCopy) {
 
   auto data = dataset.get_batch(1).at(0).data;
   ASSERT_EQ(data.numel(), 1);
-  ASSERT_EQ(data.item<float>(), 7);
+  ASSERT_EQ(data[0].item<float>(), 7);
 }
 
 TEST(DataTest, QueuePushAndPopFromSameThread) {
