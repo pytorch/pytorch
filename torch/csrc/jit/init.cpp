@@ -224,7 +224,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_remove_inplace_ops",
-          [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
+          [](const std::shared_ptr<Graph> &g) { return RemoveInplaceOps(g); })
       .def("_jit_pass_constant_pooling", ConstantPooling)
       .def(
           "_jit_pass_peephole",
@@ -239,7 +239,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_lint", LintGraph)
       .def(
           "_jit_pass_complete_shape_analysis",
-          [](std::shared_ptr<Graph> graph, py::tuple inputs, bool with_grad) {
+          [](const std::shared_ptr<Graph> &graph, const py::tuple &inputs, bool with_grad) {
             ArgumentSpecCreator arg_spec_creator(*graph);
             Stack stack;
             stack.reserve(inputs.size()); // captures?
