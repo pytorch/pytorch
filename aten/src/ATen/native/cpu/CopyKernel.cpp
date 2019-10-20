@@ -4,6 +4,7 @@
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/util/TypeCast.h>
 
 namespace at {
 namespace native {
@@ -15,7 +16,7 @@ void copy_kernel_cast(TensorIterator& iter) {
       AT_DISPATCH_COMPLEX_TYPES(iter.dtype(1), "copy_kernel_cast", [&] {
         cpu_kernel(iter, [=](scalar_t a) -> self_T {
             return static_cast<self_T>(
-                static_cast<at::native::inter_copy_type_t<self_T>>(std::real(a)));
+                static_cast<c10::inter_copy_type_t<self_T>>(std::real(a)));
           });
         });
     }
@@ -29,7 +30,7 @@ void copy_kernel_cast(TensorIterator& iter) {
         [&] {
           cpu_kernel(iter, [=](scalar_t a) -> self_T {
             return static_cast<self_T>(
-                static_cast<at::native::inter_copy_type_t<self_T>>(a));
+                static_cast<c10::inter_copy_type_t<self_T>>(a));
           });
         });
     }

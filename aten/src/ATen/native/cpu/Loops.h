@@ -32,7 +32,7 @@
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cpu/vec256/vec256.h>
-#include <c10/util/DynamicTypeCast.h>
+#include <c10/util/TypeCast.h>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
