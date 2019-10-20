@@ -23,7 +23,7 @@ namespace torch {
 
 namespace detail {
 
-const int NESTED_INIT_LIST_MAX_DEPTH = 10;
+#define NESTED_INIT_LIST_MAX_DEPTH 10
 
 enum class TensorDataContainerType { Scalar, InitList, Tensor };
 
