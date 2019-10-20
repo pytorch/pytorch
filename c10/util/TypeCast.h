@@ -62,7 +62,9 @@ template<typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, FETCH_AND_CAST_CASE)
+#ifndef C10_HOST_DEVICE
     AT_FORALL_COMPLEX_TYPES(FETCH_AND_CAST_COMPLEX_CASE)
+#endif
     default:;
   }
   ERROR_UNSUPPORTED_CAST
