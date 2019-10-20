@@ -63,11 +63,36 @@ struct TORCH_API LeakyReLUOptions {
 
 // ============================================================================
 
+/// Options for Gumbel Softmax functional and module.
+struct GumbelSoftmaxOptions {
+  /// non-negative scalar temperature
+  TORCH_ARG(double, tau) = 1.0;
+
+  /// returned samples will be discretized as one-hot vectors,
+  /// but will be differentiated as if it is the soft sample in autograd. Default: False
+  TORCH_ARG(bool, hard) = false;
+
+  /// dimension along which softmax will be computed. Default: -1
+  TORCH_ARG(int, dim) = -1;
+};
+
+// ============================================================================
+
 /// Options for the Softmax functional and module.
 struct TORCH_API SoftmaxOptions {
   SoftmaxOptions(int64_t dim);
 
-  // Dimension along which Softmax will be computed.
+  /// Dimension along which Softmax will be computed.
+  TORCH_ARG(int64_t, dim);
+};
+
+// ============================================================================
+
+/// Options for the Softmin functional and module.
+struct TORCH_API SoftminOptions {
+  SoftminOptions(int64_t dim);
+
+  /// Dimension along which Softmin will be computed.
   TORCH_ARG(int64_t, dim);
 };
 
@@ -133,6 +158,44 @@ struct TORCH_API RReLUOptions {
 struct TORCH_API CELUOptions {
   /// The `alpha` value for the CELU formulation. Default: 1.0
   TORCH_ARG(double, alpha) = 1.0;
+
+  /// can optionally do the operation in-place. Default: False
+  TORCH_ARG(bool, inplace) = false;
+};
+
+// ============================================================================
+
+/// Options for Softplus functional and module.
+struct TORCH_API SoftplusOptions {
+  /// the `beta` value for the Softplus formulation. Default: 1
+  TORCH_ARG(double, beta) = 1.0;
+
+  /// values above this revert to a linear function. Default: 20
+  TORCH_ARG(double, threshold) = 20.0;
+};
+
+// ============================================================================
+
+/// Options for Softshrink functional and module.
+struct TORCH_API SoftshrinkOptions {
+  /* implicit */ SoftshrinkOptions(double lambda = 0.5);
+
+  /// the `lambda` value for the Softshrink formulation. Default: 0.5
+  TORCH_ARG(double, lambda);
+};
+
+// ============================================================================
+
+/// Options for Threshold functional and module.
+struct ThresholdOptions {
+  ThresholdOptions(double threshold, double value)
+   : threshold_(threshold), value_(value) {}
+
+  /// The value to threshold at
+  TORCH_ARG(double, threshold);
+
+  /// The value to replace with
+  TORCH_ARG(double, value);
 
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace) = false;

@@ -10,7 +10,6 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
-#include <ATen/ThreadLocalDebugInfo.h>
 #include <c10/util/Exception.h>
 #include <c10/core/Stream.h>
 #include <c10/core/Event.h>
@@ -36,9 +35,6 @@
 
 namespace torch { namespace autograd {
 
-// NB: -1 indicates the CPU worker!
-static constexpr int NO_DEVICE = -2;
-
 // Threads spawned by the engine are assigned a constant 'worker_device'
 // specifying what device they process work for.  This variable is initialized
 // at thread creation time and is constant afterwards.  This is used when
@@ -61,26 +57,6 @@ static thread_local bool checkpoint_valid = true;
 static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for workder_device
 static thread_local int total_depth = 0;
-
-struct NodeTask {
-  GraphTask* base_;
-  std::shared_ptr<Node> fn_;
-  // This buffer serves as an implicit "addition" node for all of the
-  // gradients flowing here.  Once all the dependencies are finished, we
-  // use the contents of this buffer to run the function.
-  InputBuffer inputs_;
-  // When worker receives a task with isShutdownTask = true, it will immediately
-  // exit. The engine sends a shutdown task to every queue upon its destruction.
-  bool isShutdownTask_;
-
-  int getReentrantDepth() const;
-
-  NodeTask(GraphTask* base, std::shared_ptr<Node> fn, InputBuffer inputs, bool isShutdownTask = false)
-    : base_(base)
-    , fn_(std::move(fn))
-    , inputs_(std::move(inputs))
-    , isShutdownTask_(isShutdownTask) {}
-};
 
 // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
 // Shutdown tasks are first and then empty NodeTask are next.
@@ -107,7 +83,11 @@ struct ReadyQueue {
   // To protect read and writes to heap_
   std::mutex mutex_;
 
-  void push(NodeTask item);
+  // incrementOutstandingTasks indicates whether or not we should increment
+  // 'outstanding_tasks_' for the associated GraphTask. This should mostly
+  // always be true, see the doc for 'enqueue_blocked_task_on_cpu' for when we
+  // might set this to false.
+  void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
   NodeTask pop();
 };
@@ -171,83 +151,17 @@ struct ReadyQueue {
 // the leaf streams with the default streams is sufficient to implement
 // the historic behavior.
 
-// GraphTask holds metadata needed for a single execution of backward()
-struct GraphTask {
-  std::exception_ptr exception_;
-  // Indicates if an error occurred while executing any task.  When this is
-  // true, it signals all threads to stop executing.
-  std::atomic_bool has_error_;
-  std::atomic<uint64_t> outstanding_tasks_;
-  // It is safe to read grad_mode_ and keep_graph_ without synchronization
-  bool keep_graph_;
-  bool grad_mode_;
-
-  // To protect reads/writes to no_ready_, dependencies_ , captured_vars_ and
-  // exception_
-  std::mutex mutex_;
-  // Notified when a task finishes executing.  Check outstanding_tasks_ to see
-  // if all tasks are done.
-  std::condition_variable not_done_;
-  std::unordered_map<Node*, InputBuffer> not_ready_;
-  std::unordered_map<Node*, int> dependencies_;
-
-  struct ExecInfo {
-    struct Capture {
-      Capture(int input_idx, int output_idx) : input_idx_(input_idx), output_idx_(output_idx) {}
-      int input_idx_; // within Node inputs
-      int output_idx_; // within the output vector of a GraphTask
-    };
-
-    bool should_execute() const {
-      return needed_ || captures_;
-    }
-
-    bool needed_ = false;
-    std::unique_ptr<std::vector<Capture>> captures_;
-  };
-  // Exec info has a bit complicated semantics. If it's empty, it means the task is
-  // run in a "default" mode, which means that all next_edges we encounter should
-  // get executed. If it's not empty, only functions that have an entry and this entry
-  // has needed == True should be executed.
-  // exec_info_.empty() means it's .backward(), otherwise it's .grad().
-  // exec_info_ is safe to read without synchronization
-  std::unordered_map<Node*, ExecInfo> exec_info_;
-  std::vector<Variable> captured_vars_;
-  std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_ =
-      at::getThreadLocalDebugInfo();
-  std::unordered_set<c10::Stream> leaf_streams;
-
-  void init_to_execute(Node& graph_root, const edge_list& outputs);
-
-  // The value of worker_device in the thread that created this task.
-  // See Note [Reentrant backwards]
-  // Safe to read owner_ and reentrant_depth_ without synchronizaton
-  int owner_;
-  // The number of parent graph tasks for this graph task
-  const int reentrant_depth_;
-
-  bool can_checkpoint() {
-    return exec_info_.empty();
-  }
-
-  GraphTask(bool keep_graph, bool grad_mode, int reentrant_depth)
-    : has_error_(false)
-    , outstanding_tasks_(0)
-    , keep_graph_(keep_graph)
-    , grad_mode_(grad_mode)
-    , owner_(NO_DEVICE)
-    , reentrant_depth_(reentrant_depth) {}
-};
-
 int NodeTask::getReentrantDepth() const {
   return base_->reentrant_depth_;
 }
 
-auto ReadyQueue::push(NodeTask item) -> void {
+auto ReadyQueue::push(NodeTask item, bool incrementOutstandingTasks) -> void {
   {
     // Lock mutex for writing to heap_
     std::lock_guard<std::mutex> lock(mutex_);
-    ++item.base_->outstanding_tasks_;
+    if (incrementOutstandingTasks) {
+      ++item.base_->outstanding_tasks_;
+    }
     heap_.push(std::move(item));
   }
   not_empty_.notify_one();
@@ -458,8 +372,10 @@ static bool is_compatible_type(const at::DeprecatedTypeProperties& expected, con
       expected == actual.toBackend(toDense(actual.backend())));
 }
 
-template<typename F>
-static void validate_outputs(const edge_list& edges, variable_list& grads, const F& format_error) {
+void validate_outputs(
+    const edge_list& edges,
+    variable_list& grads,
+    const std::function<std::string(const std::string&)>& format_error) {
   if (grads.size() != edges.size()) {
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
@@ -622,6 +538,7 @@ auto Engine::evaluate_function(NodeTask& task) -> void {
     bool is_ready = false;
     auto& dependencies = task.base_->dependencies_;
     auto it = dependencies.find(next.function.get());
+
     if (it == dependencies.end()) {
       auto name = next.function->name();
       throw std::runtime_error(std::string("dependency not found for ") + name);
@@ -717,8 +634,6 @@ auto Engine::execute(const edge_list& roots,
                      bool keep_graph,
                      bool create_graph,
                      const edge_list& outputs) -> variable_list {
-  std::call_once(start_threads_flag_, &Engine::start_threads, this);
-
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(roots, const_cast<variable_list&>(inputs), [](const std::string& msg) {
     return msg;
@@ -729,15 +644,30 @@ auto Engine::execute(const edge_list& roots,
   ClearCallbacks _cb_guard(final_callbacks_, post_callbacks_lock_);
 
   GraphTask graph_task(keep_graph, create_graph, worker_device == NO_DEVICE ? 0 : total_depth+1);
-  // Lock mutex while GraphTask is being set up
-  std::unique_lock<std::mutex> lock(graph_task.mutex_);
 
   // Now compute the dependencies for all executable functions and queue the root
   auto graph_root = std::make_shared<GraphRoot>(roots, inputs);
   compute_dependencies(graph_root.get(), graph_task);
+
   if (!outputs.empty()) {
     graph_task.init_to_execute(*graph_root, outputs);
   }
+  return execute_with_graph_task(graph_task, graph_root);
+}
+
+void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
+  std::call_once(start_threads_flag_, &Engine::start_threads, this);
+  ready_queue(at::kCPU).push(
+      std::move(task), /* incrementOutstandingTasks */ false);
+}
+
+variable_list Engine::execute_with_graph_task(
+    GraphTask& graph_task,
+    std::shared_ptr<Node> graph_root) {
+  std::call_once(start_threads_flag_, &Engine::start_threads, this);
+  // Lock mutex for GraphTask.
+  std::unique_lock<std::mutex> lock(graph_task.mutex_);
+
   ready_queue(at::kCPU).push(NodeTask(&graph_task, std::move(graph_root), InputBuffer(0)));
 
   // Not a worker

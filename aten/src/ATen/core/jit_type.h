@@ -782,6 +782,19 @@ private:
   c10::optional<QualifiedName> name_;
 };
 
+// Any should never appear in a named type like a class, namedtuple or
+// interface. If it does, then dynamic type information will be lost in the
+// Pickler, leading to hard-to-track-down bugs that will only occur
+// after saving or loading a model. This is because we rely on the
+// static types in named types to reconstruct type tags of loaded
+// values. Lifting this restriction requires solving the serialization
+// problem first.
+CAFFE2_API void checkNoAny(
+    const Type& base,
+    const char* what,
+    const std::string& attrname,
+    const TypePtr& attrtype);
+
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
@@ -1304,10 +1317,6 @@ inline TypePtr getTypePtr() {
   return detail::getTypePtr_<T>::call();
 }
 
-CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
-CAFFE2_API TypePtr attemptToRecoverType(const IValue& input_ivalue);
-CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
-
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
   MatchTypeReturn(std::string reason) : reason_(std::move(reason)) {}
@@ -1407,9 +1416,7 @@ struct CAFFE2_API ClassType : public NamedType {
 
   Function* getMethod(const std::string& name) const;
   const std::vector<Function*>& methods() const;
-  void addMethod(Function* method) {
-    methods_.push_back(method);
-  }
+  void addMethod(Function* method);
 
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
@@ -1512,6 +1519,12 @@ struct CAFFE2_API ClassType : public NamedType {
 
   bool is_module() const {
     return bool(parameterSlots_);
+  }
+  bool is_module(size_t slot) const {
+    if (auto cls = getAttribute(slot)->cast<at::ClassType>()) {
+      return cls->is_module();
+    }
+    return false;
   }
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(
