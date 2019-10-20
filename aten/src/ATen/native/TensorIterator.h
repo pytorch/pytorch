@@ -272,6 +272,9 @@ struct CAFFE2_API TensorIterator {
   bool is_final_output() const { return final_output_; }
 
   bool has_promotion() const {
+    if (common_dtype_ == ScalarType::Undefined) {
+      return false;
+    }
     for (auto& op : operands_) {
       if (op.tensor.scalar_type() != common_dtype_) {
         return true;
