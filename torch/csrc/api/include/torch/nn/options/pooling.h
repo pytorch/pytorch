@@ -150,7 +150,7 @@ using MaxUnpool3dOptions = MaxUnpoolOptions<3>;
 template <size_t D>
 struct LPPoolOptions {
   LPPoolOptions(float norm_type, ExpandingArray<D> kernel_size)
-      : kernel_size_(kernel_size), stride_(kernel_size), norm_type_(norm_type) {}
+      : norm_type_(norm_type), kernel_size_(kernel_size), stride_(kernel_size) {}
 
   TORCH_ARG(float, norm_type);
 
