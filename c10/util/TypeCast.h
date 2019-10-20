@@ -44,7 +44,7 @@ template <typename T>
 using inter_copy_type_t = typename inter_copy_type<T>::type;
 
 template <typename dest_t, typename src_t>
-inline dest_t static_cast_with_inter_type(src_t src) {
+C10_HOST_DEVICE inline dest_t static_cast_with_inter_type(src_t src) {
   return static_cast<dest_t>(
     static_cast<inter_copy_type_t<dest_t>>(src));
 }
@@ -82,6 +82,8 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
   ERROR_UNSUPPORTED_CAST
 }
 
+#ifndef C10_HOST_DEVICE
+
 #define DEFINE_UNCASTABLE(T, _)                                                   \
 template<>                                                                        \
 C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType, const void *) {      \
@@ -94,6 +96,8 @@ C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType, void *, T) {    
 }
 
 AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
+
+#endif
 
 #undef FETCH_AND_CAST_CASE
 #undef FETCH_AND_CAST_COMPLEX_CASE
