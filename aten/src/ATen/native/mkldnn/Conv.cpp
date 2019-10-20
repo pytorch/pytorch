@@ -290,7 +290,7 @@ Tensor mkldnn_convolution(
     IntArrayRef dilation,
     int64_t groups) {
   auto output = native::dnnl_conv2d(
-      input, weight, bias, padding, stride, dilation, groups);
+      input, weight, bias, stride, padding, dilation, groups);
 
   if (input.is_mkldnn()) {
     return output;
