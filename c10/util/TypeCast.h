@@ -107,12 +107,12 @@ inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, voi
 
 #define DEFINE_UNCASTABLE(T, _)                                                   \
 template<>                                                                        \
-C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType, const void *) {      \
+inline T fetch_and_cast<T>(const ScalarType, const void *) {      \
   ERROR_UNSUPPORTED_CAST                                                          \
   return T(0); /* just to avoid compiler warning */                               \
 }                                                                                 \
 template<>                                                                        \
-C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType, void *, T) {      \
+inline void cast_and_store<T>(const ScalarType, void *, T) {      \
   ERROR_UNSUPPORTED_CAST                                                          \
 }
 
