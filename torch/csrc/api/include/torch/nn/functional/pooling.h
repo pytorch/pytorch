@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/nn/functional/activation.h>
 #include <torch/nn/options/pooling.h>
 
 namespace torch {
@@ -222,7 +223,7 @@ inline Tensor lp_pool1d(const Tensor& input, const LPPool1dOptions& options) {
     input.pow(options.norm_type()),
     AvgPool1dOptions(options.kernel_size()).stride(options.stride()).padding(0).ceil_mode(options.ceil_mode()));
 
-  return (torch::sign(out) * torch::relu(torch::abs(out))).mul((*options.kernel_size())[0]).pow(1. / options.norm_type());
+  return (torch::sign(out) * relu(torch::abs(out))).mul((*options.kernel_size())[0]).pow(1. / options.norm_type());
 }
 
 } // namespace functional
