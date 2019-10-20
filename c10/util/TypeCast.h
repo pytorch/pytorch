@@ -84,7 +84,6 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
   ERROR_UNSUPPORTED_CAST
 }
 
-#ifndef C10_HOST_DEVICE
 template<>
 inline void cast_and_store<std::complex<float>>(const ScalarType dest_type, void *ptr, std::complex<float> value_) {
   auto value = std::real(value_);
@@ -103,7 +102,6 @@ inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, voi
   }
   ERROR_UNSUPPORTED_CAST
 }
-#endif
 
 #define DEFINE_UNCASTABLE(T, scalartype_)                                         \
 template<>                                                                        \
