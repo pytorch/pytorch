@@ -105,15 +105,16 @@ inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, voi
 }
 #endif
 
-#define DEFINE_UNCASTABLE(T, _)                                                   \
+#define DEFINE_UNCASTABLE(T, scalartype_)                                         \
 template<>                                                                        \
-inline T fetch_and_cast<T>(const ScalarType, const void *) {                      \
-  ERROR_UNSUPPORTED_CAST                                                          \
-  return T(0); /* just to avoid compiler warning */                               \
+inline T fetch_and_cast<T>(const ScalarType src_type, const void *ptr) {          \
+  assert(ScalarType::scalartype_ == src_type);                                    \
+  return *(const T *)ptr;                                                         \
 }                                                                                 \
 template<>                                                                        \
-inline void cast_and_store<T>(const ScalarType, void *, T) {                      \
-  ERROR_UNSUPPORTED_CAST                                                          \
+inline void cast_and_store<T>(const ScalarType dest_type, void *ptr, T value) {   \
+  assert(ScalarType::scalartype_ == dest_type);                                   \
+  *(T *)ptr = value;                                                              \
 }
 
 AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
