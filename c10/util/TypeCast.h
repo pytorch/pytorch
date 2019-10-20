@@ -84,6 +84,27 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
   ERROR_UNSUPPORTED_CAST
 }
 
+#ifndef C10_HOST_DEVICE
+template<>
+inline void cast_and_store<std::complex<float>>(const ScalarType dest_type, void *ptr, std::complex<float> value_) {
+  auto value = std::real(value_);
+  switch (dest_type) {
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
+    default:;
+  }
+  ERROR_UNSUPPORTED_CAST
+}
+template<>
+inline void cast_and_store<std::complex<double>>(const ScalarType dest_type, void *ptr, std::complex<double> value_) {
+  auto value = std::real(value_);
+  switch (dest_type) {
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
+    default:;
+  }
+  ERROR_UNSUPPORTED_CAST
+}
+#endif
+
 #define DEFINE_UNCASTABLE(T, _)                                                   \
 template<>                                                                        \
 C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType, const void *) {      \
