@@ -130,14 +130,14 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
   }
 
 #define TENSOR(T, S) \
-  TensorDataContainer(at::ArrayRef<T> values) { \
+  explicit TensorDataContainer(at::ArrayRef<T> values) { \
     at::AutoNonVariableTypeMode non_var_type_mode(true);  \
     type_ = TensorDataContainerType::Tensor; \
     sizes_ = {(int64_t)values.size()}; \
     scalar_type_ = at::k##S; \
     tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU).is_variable(false));       \
   } \
-  TensorDataContainer(std::vector<T> values) : TensorDataContainer(at::ArrayRef<T>(values)) {}
+  explicit TensorDataContainer(std::vector<T> values) : TensorDataContainer(at::ArrayRef<T>(values)) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
