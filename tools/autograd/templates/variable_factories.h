@@ -92,7 +92,7 @@ enum class TensorDataContainerType { Scalar, InitList, Tensor };
 // constructor, thus producing a tensor with the wrong sizes. If we templatize `TensorDataContainer` over
 // the # of tensor dimensions, such problem doesn't happen.
 template <size_t D>
-struct TensorDataContainer {
+class TensorDataContainer {
   // NOTE: For tensors with zero-size dimensions (e.g. `torch::tensor({{}, {}})`),
   // the innermost empty braced-init-list `{}` matches the default constructor of
   // the innermost `TensorDataContainer`.
