@@ -49,12 +49,40 @@ inline dest_t static_cast_with_inter_type(src_t src) {
     static_cast<inter_copy_type_t<dest_t>>(src);
 }
 
-// Fetch a value with type src_type from ptr, and cast it to dest_t.
+template <typename self_T>
+void copy_kernel_cast(TensorIterator& iter) {
+    if (isComplexType(iter.dtype(1))) {
+      AT_DISPATCH_COMPLEX_TYPES(iter.dtype(1), "copy_kernel_cast", [&] {
+        cpu_kernel(iter, [=](scalar_t a) -> self_T {
+            return static_cast<self_T>(
+                static_cast<c10::inter_copy_type_t<self_T>>(std::real(a)));
+          });
+        });
+    }
+    else {
+      AT_DISPATCH_ALL_TYPES_AND3(
+        ScalarType::Half,
+        ScalarType::Bool,
+        ScalarType::BFloat16,
+        iter.dtype(1),
+        "copy_kernel_cast",
+        [&] {
+          cpu_kernel(iter, [=](scalar_t a) -> self_T {
+            return static_cast<self_T>(
+                static_cast<c10::inter_copy_type_t<self_T>>(a));
+          });
+        });
+    }
+}
+
+// Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
 #define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t>(*(const type *)ptr);
+#define FETCH_AND_CAST_COMPLEX_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t>(std::real(*(const type *)ptr));
 template<typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, FETCH_AND_CAST_CASE)
+    AT_FORALL_COMPLEX_TYPES(FETCH_AND_CAST_COMPLEX_CASE)
     default:;
   }
 #ifdef C10_HOST_DEVICE
@@ -65,8 +93,8 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const vo
   return dest_t(0); // just to avoid compiler warning
 }
 
-// Cast a value with type src_t into dest_type, and store it to ptr.
-#define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast<type>(value); return;
+// Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
+#define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast_with_inter_type<type>(value); return;
 template<typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {
@@ -80,7 +108,8 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
 #endif
 }
 
-// #undef FETCH_AND_CAST_CASE
-// #undef CAST_AND_STORE_CASE
+#undef FETCH_AND_CAST_CASE
+#undef CAST_AND_STORE_CASE
+#undef FETCH_AND_CAST_COMPLEX_CASE
 
 }  // namespace c10
