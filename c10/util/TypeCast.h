@@ -49,31 +49,11 @@ inline dest_t static_cast_with_inter_type(src_t src) {
     static_cast<inter_copy_type_t<dest_t>>(src);
 }
 
-template <typename self_T>
-void copy_kernel_cast(TensorIterator& iter) {
-    if (isComplexType(iter.dtype(1))) {
-      AT_DISPATCH_COMPLEX_TYPES(iter.dtype(1), "copy_kernel_cast", [&] {
-        cpu_kernel(iter, [=](scalar_t a) -> self_T {
-            return static_cast<self_T>(
-                static_cast<c10::inter_copy_type_t<self_T>>(std::real(a)));
-          });
-        });
-    }
-    else {
-      AT_DISPATCH_ALL_TYPES_AND3(
-        ScalarType::Half,
-        ScalarType::Bool,
-        ScalarType::BFloat16,
-        iter.dtype(1),
-        "copy_kernel_cast",
-        [&] {
-          cpu_kernel(iter, [=](scalar_t a) -> self_T {
-            return static_cast<self_T>(
-                static_cast<c10::inter_copy_type_t<self_T>>(a));
-          });
-        });
-    }
-}
+#ifdef C10_HOST_DEVICE
+#define ERROR_UNSUPPORTED_CAST assert(false);
+#else
+#define ERROR_UNSUPPORTED_CAST TORCH_CHECK(false, "Unexpected scalar type");
+#endif
 
 // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
 #define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t>(*(const type *)ptr);
@@ -85,11 +65,7 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const vo
     AT_FORALL_COMPLEX_TYPES(FETCH_AND_CAST_COMPLEX_CASE)
     default:;
   }
-#ifdef C10_HOST_DEVICE
-  assert(false);
-#else
-  TORCH_CHECK(false, "Unexpected scalar type");
-#endif
+  ERROR_UNSUPPORTED_CAST
   return dest_t(0); // just to avoid compiler warning
 }
 
@@ -101,15 +77,26 @@ C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, CAST_AND_STORE_CASE)
     default:;
   }
-#ifdef C10_HOST_DEVICE
-  assert(false);
-#else
-  TORCH_CHECK(false, "Unexpected scalar type");
-#endif
+  ERROR_UNSUPPORTED_CAST
 }
 
+#define DEFINE_UNCASTABLE(T, _)                                                   \
+template<>                                                                        \
+C10_HOST_DEVICE inline T fetch_and_cast<T>(const ScalarType, const void *) {      \
+  ERROR_UNSUPPORTED_CAST                                                          \
+  return T(0); /* just to avoid compiler warning */                               \
+}                                                                                 \
+template<>                                                                        \
+C10_HOST_DEVICE inline void cast_and_store<T>(const ScalarType, void *, src_t) {  \
+  ERROR_UNSUPPORTED_CAST                                                          \
+}
+
+AT_FORALL_QINT_TYPES(DEFINE_UNCASTABLE)
+
 #undef FETCH_AND_CAST_CASE
-#undef CAST_AND_STORE_CASE
 #undef FETCH_AND_CAST_COMPLEX_CASE
+#undef CAST_AND_STORE_CASE
+#undef DEFINE_UNCASTABLE
+#undef ERROR_UNSUPPORTED_CAST
 
 }  // namespace c10
