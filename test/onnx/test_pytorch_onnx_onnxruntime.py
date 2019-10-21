@@ -751,7 +751,6 @@ class TestONNXRuntime(unittest.TestCase):
         values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
         self.run_test(ScatterModel(), input=(input, indices, values))
 
-    # enable test for opset 11 when GatherElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gather(self):
         class GatherModel(torch.nn.Module):
