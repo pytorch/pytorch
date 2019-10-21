@@ -263,6 +263,18 @@ inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
     enumtype::reduction_get_enum(options.reduction()));
 }
 
+inline Tensor nll_loss(
+    const Tensor& input,
+    const Tensor& target,
+    const NLLLossOptions& options = {}) {
+  return torch::nll_loss(
+      input,
+      target,
+      options.weight(),
+      options.ignore_index(),
+      options.reduction());
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

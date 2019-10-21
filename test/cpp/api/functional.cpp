@@ -537,6 +537,20 @@ TEST_F(FunctionalTest, TripletMarginLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
+TEST_F(FunctionalTest, NLLLoss) {
+  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315},
+                               {-3.7038, -0.1038, -2.6038},
+                              {-2.3422, -1.3422, -0.4422}},
+                             torch::kFloat);
+  auto target = torch::tensor({1, 0, 2}, torch::kLong);
+  auto output = F::nll_loss(
+      input, target, NLLLossOptions());
+  auto expected = torch::tensor({2.4257501}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, MaxUnpool1d) {
   auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);

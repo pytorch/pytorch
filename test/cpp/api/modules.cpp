@@ -1497,6 +1497,22 @@ TEST_F(ModulesTest, TripletMarginLoss) {
   ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
 }
 
+TEST_F(ModulesTest, NLLLoss) {
+  NLLLoss loss;
+  auto input = torch::tensor({{-0.1315, -3.1315, -2.5315}, 
+                              {-3.7038, -0.1038, -2.6038},
+                              {-2.3422, -1.3422, -0.4422}},
+                             torch::kFloat);
+  auto target = torch::tensor({1, 0, 2}, torch::kLong);
+  auto output = loss->forward(input, target);
+  auto expected = torch::tensor({2.4257501}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
@@ -2855,6 +2871,12 @@ TEST_F(ModulesTest, PrettyPrintMultiLabelSoftMarginLoss) {
 
 TEST_F(ModulesTest, PrettyPrintSoftMarginLoss) {
   ASSERT_EQ(c10::str(SoftMarginLoss()), "torch::nn::SoftMarginLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintLoss) {
+  ASSERT_EQ(
+      c10::str(NLLLoss(NLLLossOptions().ignore_index(-100))),
+      "torch::nn::NLLLoss(ignore_index=-100)");
 }
 
 TEST_F(ModulesTest, PrettyPrintCosineSimilarity) {
