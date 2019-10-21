@@ -233,13 +233,13 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // typename
   pushString("storage");
   // data_type
-  std::stringstream data_type;
-  data_type << toString(tensor.scalar_type()) << "Storage";
-  pushGlobal("torch", data_type.str());
+  std::string data_type =
+    std::string(toString(tensor.scalar_type())).append("Storage");
+  pushGlobal("torch", data_type);
   // root_key
   pushString(std::to_string(tensor_data_.size()));
   // location
-  std::stringstream ss;
+  std::ostringstream ss;
   ss << tensor.device();
   pushString(ss.str());
   // size
@@ -271,9 +271,9 @@ void Pickler::pushBytes(const std::string& string) {
 void Pickler::pushGlobal(
     const std::string& module_name,
     const std::string& class_name) {
-  std::stringstream ss;
-  ss << module_name << "\n" << class_name << "\n";
-  std::string key = ss.str();
+  std::string key;
+  key.reserve(module_name.size() + class_name.size() + 2);
+  key.append(module_name).append("\n").append(class_name).append("\n");
   auto memo_entry = memoized_globals_map_.find(key);
   if (memo_entry == memoized_globals_map_.end()) {
     push<PickleOpCode>(PickleOpCode::GLOBAL);
