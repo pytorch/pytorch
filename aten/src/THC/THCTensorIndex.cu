@@ -184,11 +184,11 @@ __global__ void indexAddSmallIndex24(TensorInfo<T, IndexType> dst,
          linearIndex += gridDim.x * blockDim.x) {
       IndexType dstOffset =
         IndexToOffset<T, IndexType, DstDim>::get24(linearIndex, dst);
-      dstOffset += dstIndex * dst.strides[dstAddDim];
+      dstOffset = mad24(dstIndex, dst.strides[dstAddDim], dstOffset);
 
       IndexType srcOffset =
         IndexToOffset<T, IndexType, SrcDim>::get24(linearIndex, src);
-      srcOffset += srcIndex * src.strides[srcAddDim];
+      srcOffset = mad24(srcIndex, src.strides[srcAddDim], srcOffset);
 
       atomicAdd(&dst.data[dstOffset], src.data[srcOffset]);
     }
@@ -445,11 +445,11 @@ __global__ void indexSelectSmallIndex24(TensorInfo<T, IndexType> dst,
          linearIndex += gridDim.x * blockDim.x) {
       IndexType dstOffset =
         IndexToOffset<T, IndexType, DstDim>::get24(linearIndex, dst);
-      dstOffset += dstIndex * dst.strides[dstSelectDim];
+      dstOffset = mad24(dstIndex, dst.strides[dstSelectDim], dstOffset);
 
       IndexType srcOffset =
         IndexToOffset<T, IndexType, SrcDim>::get24(linearIndex, src);
-      srcOffset += srcIndex * src.strides[srcSelectDim];
+      srcOffset = mad24(srcIndex, src.strides[srcSelectDim], srcOffset);
 
       dst.data[dstOffset] = src.data[srcOffset];
     }
