@@ -367,6 +367,8 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
   return static_cast<const Variable&>(tensor);
 }
 
+void _create_cpp_hook(const at::Tensor& self);
+
 }} // namespace torch::autograd
 
 // NB: These template definitions shouldn't live here, but they require access
@@ -374,15 +376,13 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
 // AutogradMeta is available inline, move these back to Tensor.h
 namespace at {
 
-void _create_cpp_hook(const Tensor& self);
-
 template <typename T>
 auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_void_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
   auto &list = get_autograd_meta()->cpp_hooks_list_;
   if(!list) {
-    _create_cpp_hook(*this);
+    torch::autograd::_create_cpp_hook(*this);
   }
   unsigned idx = list->hooks_list_.size();
   // Return the grad argument in case of a hook with void return type to have an
@@ -400,7 +400,7 @@ auto Tensor::register_hook(T&& hook) const -> Tensor::hook_return_var_t<T> {
                            "doesn't require gradient");
   auto &list = get_autograd_meta()->cpp_hooks_list_;
   if(!list) {
-    _create_cpp_hook(*this);
+    torch::autograd::_create_cpp_hook(*this);
   }
   unsigned idx = list->hooks_list_.size();
   list->hooks_list_.push_back(hook);
