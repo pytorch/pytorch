@@ -44,6 +44,7 @@ jobs:
             set -x
             choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
             choco install -y 7zip curl awscli
+            choco upgrade -y visualstudio2019community
             .jenkins/pytorch/win-build.sh
   pytorch_windows_test:
     executor: windows-gpu-prototype
