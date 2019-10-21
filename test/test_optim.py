@@ -1512,6 +1512,7 @@ class TestLRScheduler(TestCase):
                 lrs = []
                 for i in range(10):
                     lrs.append(optimizer.param_groups[0]["lr"])
+                    optimizer.step()
                     scheduler.step()
 
                 initial_lr, max_lr, last_lr = lrs[0], max(lrs), lrs[-1]
