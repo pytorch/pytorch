@@ -104,11 +104,10 @@ def prepare_script(model, qconfig_dict, inplace=False):
                                         True)
     return model
 
-def fold_prepack(model):
-    if linear_packed_params and conv_packed_params:
-        torch._C._jit_pass_fold_prepack(model._c,
-                                        linear_packed_params,
-                                        conv_packed_params)
+def fold_prepack(model, linear_packed_params, conv_packed_params):
+    torch._C._jit_pass_fold_prepack(model._c,
+                                    linear_packed_params,
+                                    conv_packed_params)
 
 def convert_script(model, inplace=False):
     _check_is_script_module(model)
@@ -117,7 +116,7 @@ def convert_script(model, inplace=False):
     torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', True)
     if 'fbgemm' in torch.backends.quantized.supported_engines:
         torch._C._jit_pass_insert_prepack_unpack(model._c)
-        fold_prepack(model)
+        fold_prepack(model, linear_packed_params, conv_packed_params)
 
     return model
 
