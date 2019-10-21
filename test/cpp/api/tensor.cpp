@@ -345,6 +345,10 @@ TEST(TensorTest, MultidimTensorCtor) {
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
+    ASSERT_THROWS_WITH(torch::tensor({1.1, {1.1}}),
+      "some message");
+  }
+  {
     ASSERT_THROWS_WITH(torch::tensor({{{2, 3, 4}, {{5, 6}, {7}}}}),
       "Expected all sub-lists to have sizes: 2 (e.g. {5, 6}), but got sub-list {7} with sizes: 1");
   }
