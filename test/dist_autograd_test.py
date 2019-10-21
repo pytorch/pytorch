@@ -4,6 +4,7 @@ import time
 import unittest
 
 import torch
+import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 from dist_utils import INIT_METHOD_TEMPLATE, dist_init
@@ -19,6 +20,13 @@ import threading
 rpc_done = [False, False, False, False]
 ctx_ids = [-1, -1, -1, -1]
 
+known_context_ids = []
+
+# we don't need a lock here since the GIL is held while executing remote
+# python UDFs, so access to known_context_ids is serialized across several workers.
+def _store_context_id(context_id):
+    global known_context_ids
+    known_context_ids.append(context_id)
 
 # Send rpc done info and context_id to
 # dst_rank = (self.rank + rank_distance) % self.world_size
@@ -40,6 +48,25 @@ def my_py_nested_call(t1, t2, dst, world_size, hops):
                             args=(t1, t2, next_dst, world_size, hops - 1))
     else:
         return rpc.rpc_sync("worker{}".format(next_dst), torch.add, args=(t1, t2))
+
+# after dist autograd context is cleaned up, it should be cleaned up on other
+# nodes. This helper allows timeout_seconds for those RPCs to be completed, and
+# ensures that all the contexts have been cleaned up in that timeframe.any
+def _all_contexts_cleaned_up(num_contexts, timeout_seconds=10):
+    global known_context_ids
+    start = time.time()
+    context_id_to_raised = {}
+    while time.time() - start < timeout_seconds:
+        for context_id in known_context_ids:
+            try:
+                dist_autograd._retrieve_context(context_id)
+            except RuntimeError:
+                context_id_to_raised[context_id] = True
+        if len(context_id_to_raised) == num_contexts:
+            break
+    # all contexts have been cleaned up if trying to retrieve any context resulted in a RuntimeError.
+    success = len(context_id_to_raised) == num_contexts and all(context_id_to_raised.values())
+    return success
 
 
 from torch.autograd import Function
@@ -258,6 +285,9 @@ class DistAutogradTest(object):
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
             self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
+            # this barrier is needed so one worker does not clean up their
+            # autograd context before another worker tries to access it.
+            dist.barrier()
 
         # autograd context should be cleaned up by now.
         with self.assertRaises(RuntimeError):
@@ -325,6 +355,9 @@ class DistAutogradTest(object):
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
             self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
+            # this barrier is needed so one worker does not clean up their
+            # autograd context before another worker tries to access it.
+            dist.barrier()
 
     # Rank0->Rank1->Rank0
     @dist_init
@@ -360,6 +393,9 @@ class DistAutogradTest(object):
             self._check_rpc_done(1)
             ctx = dist_autograd._retrieve_context(ctx_ids[1])
             self._verify_graph_for_nested_rpc_call(ctx)
+            # this barrier is needed so one worker does not clean up their
+            # autograd context before another worker tries to access it.
+            dist.barrier()
 
     @dist_init
     def test_no_graph_with_tensors_not_require_grad(self):
@@ -415,6 +451,24 @@ class DistAutogradTest(object):
             self.assertEqual(len(worker_ids), 1)
             dst_rank = (self.rank + 1) % self.world_size
             self.assertEqual(worker_ids[0], dst_rank)
+
+
+    @dist_init
+    def test_context_cleanup_many_workers(self):
+        global known_context_ids
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=True)
+            t2 = torch.zeros(3, 3, requires_grad=True)
+            for dst_rank in dst_ranks:
+                ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+                rpc.rpc_sync("worker{}".format(dst_rank), _store_context_id, args=(context_id,))
+        # the thread's context id should be cleaned up
+        with self.assertRaises(RuntimeError):
+            dist_autograd._retrieve_context(context_id)
+        # check that all contexts have been cleaned up.
+        success = _all_contexts_cleaned_up(num_contexts=len(dst_ranks))
+        self.assertTrue(success)
 
     @dist_init
     def test_worker_ids_recorded(self):
