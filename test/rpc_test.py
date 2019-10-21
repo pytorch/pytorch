@@ -106,6 +106,10 @@ def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     complex_tensors = tensor_class_input.tensors
     return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
 
+def timeout_function(timeout):
+    import time
+    time.sleep(timeout)
+
 
 def my_rref_function(rref_a, rref_b):
     return rref_a.to_here() + rref_b.to_here()
@@ -338,6 +342,20 @@ class RpcTest(object):
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+    @dist_init
+    def test_future_timer(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        fut = rpc.rpc_async(
+            "worker{}".format(dst_rank),
+            timeout_function,
+            args=(5,)
+        )
+        from datetime import timedelta
+        print(fut.check_time_elapsed(timedelta(seconds=0)))
+        fut.wait()
+
 
     @dist_init
     def test_nonzero(self):

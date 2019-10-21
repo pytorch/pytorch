@@ -13,6 +13,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/types.h>
 
+#include <pybind11/chrono.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -79,7 +81,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "wait",
               [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "check_time_elapsed",
+              [&](FutureMessage& fut, const std::chrono::seconds& timeout)
+                  -> bool { return fut.checkTimeElapsed(timeout); });
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
