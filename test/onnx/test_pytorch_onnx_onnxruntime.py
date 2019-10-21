@@ -697,7 +697,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # enable test for opset 11 when GatherElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_gather(self):
         class GatherModel(torch.nn.Module):
             def forward(self, input, indices):
