@@ -320,12 +320,6 @@ Tensor qnnpack_avg_pool2d(
   const auto scale = input_contig.q_scale();
   const auto zero_point = input_contig.q_zero_point();
 
-  // TODO fix the kernels. Currently it appears that if input zero point and
-  // padding are non-zero, qnnpack does not treat the extra padded values as 0,
-  // but possibly scales them based on input_zero_point, producing incorrect results.
-  TORCH_CHECK(
-      padW == 0 && padH == 0, "qnnpack_avg_pool2d(): currently does "
-      "not support non-zero padding");
   TORCH_CHECK(
       oH > 0 && oW > 0,
       "qnnpack_avg_pool2d(): the resulting output Tensor size should be >= 0");
