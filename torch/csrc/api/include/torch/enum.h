@@ -27,8 +27,9 @@ const enumtype::k##name k##name; \
 }
 
 #define TORCH_ENUM_PRETTY_PRINT(name) \
-const char* operator()(const enumtype::k##name& v) const { \
-  return "k" + #name; \
+std::string operator()(const enumtype::k##name& v) const { \
+  std::string k("k");
+  return k + #name; \
 }
 
 TORCH_ENUM_DECLARE(Linear)
