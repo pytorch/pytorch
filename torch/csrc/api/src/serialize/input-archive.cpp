@@ -20,7 +20,7 @@ InputArchive::InputArchive() {}
 
 void InputArchive::read(const std::string& key, c10::IValue& ivalue) {
   if (auto named_attr = module_.find_attribute(key)) {
-    ivalue = named_attr->value();
+    ivalue = *named_attr;
   } else {
     TORCH_CHECK(
       false,
@@ -39,8 +39,7 @@ bool InputArchive::try_read(
   if (!param && !buffer) return false;
 
   // clang-format off
-  auto read_param = is_buffer ? buffer : param;
-  auto read_tensor = read_param->value().toTensor();
+  auto read_tensor = is_buffer ? *buffer : *param;
   TORCH_CHECK(
       bool(buffer) == is_buffer,
       "Expected deserialized tensor for key '", key,
