@@ -85,7 +85,7 @@ Tensor embedding_dense_backward_cpu(
   checkScalarType("embedding_backward", indices_arg, kLong);
 
   auto indices_contig = indices.contiguous();
-  auto indices_data = indices_contig.data<int64_t>();
+  auto indices_data = indices_contig.data_ptr<int64_t>();
   int64_t numel = indices.numel();
 
   std::unique_ptr<int64_t[]> counts;
@@ -140,7 +140,7 @@ Tensor & embedding_renorm_cpu_(
   auto indices_contig = indices.contiguous();
 
   auto num_indices = indices.numel();
-  auto data_ptr = indices_contig.data<int64_t>();
+  auto data_ptr = indices_contig.data_ptr<int64_t>();
   auto sorted_indices = std::vector<int64_t>(data_ptr, data_ptr + num_indices);
   std::sort(sorted_indices.begin(), sorted_indices.end(), std::less<int64_t>());
 

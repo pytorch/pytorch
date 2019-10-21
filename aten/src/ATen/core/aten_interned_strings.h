@@ -41,6 +41,8 @@ _(aten, _cat) \
 _(aten, _ceil) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
+_(aten, convolution_overrideable) \
+_(aten, convolution_backward_overrideable) \
 _(aten, _convolution_nogroup) \
 _(aten, _copy_ignoring_overlaps) \
 _(aten, _cos) \
@@ -498,6 +500,7 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
+_(aten, bitwise_not) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \
@@ -576,7 +579,6 @@ _(aten, rrelu_with_noise) \
 _(aten, rrelu_with_noise_backward) \
 _(aten, rrelu_with_noise_forward) \
 _(aten, rsqrt) \
-_(aten, s_native_addmm) \
 _(aten, scatter) \
 _(aten, scatter_add) \
 _(aten, select) \

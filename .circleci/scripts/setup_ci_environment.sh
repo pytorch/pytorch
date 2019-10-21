@@ -45,7 +45,7 @@ retry () {
 retry sudo pip -q install awscli==1.16.35
 
 if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
-  DRIVER_FN="NVIDIA-Linux-x86_64-410.104.run"
+  DRIVER_FN="NVIDIA-Linux-x86_64-430.40.run"
   wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
   sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
   nvidia-smi
@@ -54,7 +54,6 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
   echo "declare -x IN_CIRCLECI=1" > /home/circleci/project/env
   echo "declare -x COMMIT_SOURCE=${CIRCLE_BRANCH:-}" >> /home/circleci/project/env
-  echo "declare -x PYTHON_VERSION=${PYTHON_VERSION:-}" >> /home/circleci/project/env
   echo "declare -x SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> /home/circleci/project/env
   if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
     echo "declare -x TORCH_CUDA_ARCH_LIST=5.2" >> /home/circleci/project/env
@@ -67,12 +66,14 @@ if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
     # This IAM user allows write access to S3 bucket for sccache & bazels3cache
     set +x
+    echo "declare -x XLA_CLANG_CACHE_S3_BUCKET_NAME=${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}" >> /home/circleci/project/env
     echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}" >> /home/circleci/project/env
     echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_AND_XLA_BAZEL_S3_BUCKET_V2:-}" >> /home/circleci/project/env
     set -x
   else
     # This IAM user allows write access to S3 bucket for sccache
     set +x
+    echo "declare -x XLA_CLANG_CACHE_S3_BUCKET_NAME=${XLA_CLANG_CACHE_S3_BUCKET_NAME:-}" >> /home/circleci/project/env
     echo "declare -x AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}" >> /home/circleci/project/env
     echo "declare -x AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}" >> /home/circleci/project/env
     set -x

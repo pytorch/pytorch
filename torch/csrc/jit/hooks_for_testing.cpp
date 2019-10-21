@@ -7,7 +7,7 @@ namespace jit {
 static ModuleHook emit_module_callback;
 void didFinishEmitModule(script::Module module) {
   if (emit_module_callback) {
-    emit_module_callback(std::move(module));
+    emit_module_callback(module);
   }
 }
 

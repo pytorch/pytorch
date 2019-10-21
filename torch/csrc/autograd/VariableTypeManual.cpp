@@ -21,16 +21,18 @@ std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::
 }
 }
 
-std::vector<at::DeprecatedTypeProperties*> VariableType::allCPUTypes() {
+namespace VariableType {
+
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
   return allTypesForBackends({ Backend::CPU, Backend::SparseCPU });
 }
 
-std::vector<at::DeprecatedTypeProperties*> VariableType::allCUDATypes() {
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
   at::globalContext().lazyInitCUDA();
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
 
-const Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
+const Variable & checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
@@ -40,7 +42,7 @@ const Variable & VariableType::checked_cast_variable(const Tensor & t, const cha
   return as_variable_ref(t);
 }
 
-Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, int pos) {
+Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
@@ -50,22 +52,22 @@ Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, in
   return as_variable_ref(t);
 }
 
-const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
+const Tensor & unpack(const Tensor & t, const char * name, int pos) {
   return checked_cast_variable(t, name, pos);
 }
 
-Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
+Tensor & unpack(Tensor & t, const char * name, int pos) {
   return checked_cast_variable(t, name, pos);
 }
 
-Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
+Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     return Tensor();
   }
   return unpack(t, name, pos);
 }
 
-std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name, int pos) {
+std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
@@ -81,7 +83,7 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   return ret;
 }
 
-void VariableType::backward(
+void backward(
     const Tensor& self,
     const Tensor& gradient,
     bool keep_graph,
@@ -89,12 +91,28 @@ void VariableType::backward(
   as_variable_ref(self).backward(gradient, keep_graph, create_graph);
 }
 
-void VariableType::set_data(const Tensor & self, const Tensor & new_data) {
+void set_data(const Tensor & self, const Tensor & new_data) {
   as_variable_ref(self).set_data(new_data);
 }
 
+Tensor data(const Tensor & self) {
+  return as_variable_ref(self).variable_data();
+}
+
+bool is_leaf(const Tensor & self) {
+  return as_variable_ref(self).is_leaf();
+}
+
+int64_t output_nr(const Tensor & self) {
+  return as_variable_ref(self).output_nr();
+}
+
+int64_t _version(const Tensor & self) {
+  return as_variable_ref(self).current_version();
+}
+
 // We don't have an outplace copy, so this can't be generated automatically
-Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blocking) {
+Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
   if(torch::jit::tracer::isTracing()) {
     const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
@@ -125,7 +143,7 @@ Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blockin
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->src_type = &src.type();
+    grad_fn->src_options = src.options();
     grad_fn->src_device = src.device();
   }
   {
@@ -140,7 +158,7 @@ Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blockin
   return self;
 }
 
-Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) {
+Tensor & resize_(Tensor & self, IntArrayRef size) {
   auto& self_ = unpack(self, "self", 0);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
@@ -157,7 +175,7 @@ Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) {
   return self;
 }
 
-Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) {
+Tensor & resize_as_(Tensor & self, const Tensor & the_template) {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (as_variable_ref(self).requires_grad()) {
@@ -174,7 +192,7 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) {
   return self;
 }
 
-Tensor VariableType::detach(const Tensor & self) {
+Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
 
   torch::jit::Node* node = nullptr;
@@ -195,7 +213,7 @@ Tensor VariableType::detach(const Tensor & self) {
   return std::move(result);
 }
 
-Tensor & VariableType::detach_(Tensor & self) {
+Tensor & detach_(Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
 
   torch::jit::Node* node = nullptr;
@@ -215,5 +233,7 @@ Tensor & VariableType::detach_(Tensor & self) {
   }
   return self;
 }
+
+}  // namespace VariableType
 
 }} // namespace torch::autograd

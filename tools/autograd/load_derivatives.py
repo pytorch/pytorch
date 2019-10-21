@@ -208,7 +208,7 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
                            'Available signatures: {}'.format(signature, specification, ', '.join(avail)))
 
     canonical = canonical_declaration(declarations, defn_name)
-    if 'grad_input_mask' in [a['name'] for a in canonical['arguments']]:
+    if 'grad_input_mask' in (a['name'] for a in canonical['arguments']):
         raise RuntimeError("Schema for {} has an argument named grad_input_mask, "
                            "but this name would be shadowed by our codegen. "
                            "Please use a different name in native_functions.yaml."

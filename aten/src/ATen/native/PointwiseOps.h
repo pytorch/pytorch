@@ -13,5 +13,6 @@ namespace native {
 using pointwise_fn = void (*)(TensorIterator&, Scalar scalar);
 
 DECLARE_DISPATCH(pointwise_fn, addcmul_stub);
+DECLARE_DISPATCH(pointwise_fn, addcdiv_stub);
 } // namespace native
 } // namespace at

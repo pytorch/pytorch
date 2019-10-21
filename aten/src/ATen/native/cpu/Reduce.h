@@ -13,7 +13,8 @@ using namespace vec256;
 #define VEC_LOOP_HEADER(func_t, data) \
   using scalar_t = typename function_traits<func_t>::result_type; \
   using Vec = Vec256<scalar_t>; \
-  char* out_ptr = data[0];
+  char* out_ptr = data[0]; \
+  (void) out_ptr;
 
 // reduction that is contiguous over the input in dim 0
 template <typename traits>
@@ -109,7 +110,7 @@ static inline void vectorized_outer_reduction(char** data, int64_t inner_stride,
 
 template<typename traits, typename res_t>
 static void set_result(const int index, const res_t result, const TensorIterator &iter, const int num_outputs) {
-  static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
+  // static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
   if (index < num_outputs) {
     char *out = (char *) iter.data_ptr(index);
     *(res_t *) out = result;
@@ -131,7 +132,7 @@ for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, c
 template<typename traits, std::size_t i = 0, typename... tuple_t>
 static inline typename std::enable_if<i < sizeof...(tuple_t), std::size_t>::type
 for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIterator &iter, const int num_outputs) {
-  if (i < num_outputs) {
+  if (i < (size_t)num_outputs) {
     set_result<traits>(i, std::get<i>(t), iter, num_outputs);
     return for_each_in_tuple<traits, i + 1, tuple_t...>(t, iter, num_outputs);
   }
@@ -142,7 +143,7 @@ template<typename traits, typename... res_t>
 static void set_results(const std::tuple<res_t...>& result, const TensorIterator &iter, const int num_outputs) {
   AT_ASSERT(num_outputs >= 1);
   std::size_t result_size = for_each_in_tuple<traits>(result, iter, num_outputs);
-  AT_ASSERT(num_outputs == result_size);
+  AT_ASSERT((size_t)num_outputs == result_size);
 }
 
 template <typename T, typename... Args>
@@ -153,12 +154,13 @@ struct all_same : c10::guts::conjunction<
 // data_t is the input/output data type.
 // acc_t is a type that contains all the necessary data
 // to continue reducing.
+// index_t is a one-dimensional index
 //
 // ops_t is such that &ops_t::reduce, &ops_t::combine, and &ops_t::project exist and satisfy
 // the following.
-// reduce: (acc_t, data_t) -> acc_t adds one data point to the accumulated value.
+// reduce: (acc_t, data_t, index_t) -> acc_t adds one data point to the accumulated value.
 // combine: (acc_t, acc_t) -> acc_t combines two accumulated values into one.
-// project: acc_t -> data_t finishes the reduction, getting the required output.
+// project: acc_t -> out_t finishes the reduction, getting the required output.
 //
 // Additionally, acc_t must be default-constructible:
 // acc_t {} is an identity for combine,
@@ -203,12 +205,12 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
   iter.foreach_reduced_elt([&ops, &init, num_outputs](TensorIterator &sub_iter) {
     auto reduction_body = [&ops, &sub_iter, num_outputs](acc_t acc, int64_t begin, int64_t end) -> acc_t {
       int ntensors = sub_iter.ntensors();
-      sub_iter.serial_for_each([&acc, &ops, num_outputs, ntensors](char** data, const int64_t* strides, int64_t size) {
+      sub_iter.serial_for_each([&acc, &ops, num_outputs, ntensors, begin](char** data, const int64_t* strides, int64_t size) {
         AT_ASSERT(ntensors - num_outputs == 1);
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];
         for (int64_t i = 0; i < size; ++i) {
-          acc = ops.reduce(acc, *(data_t*)in);
+          acc = ops.reduce(acc, *(data_t*)in, begin + i);
           in += stride;
         }
       }, {begin, end});

@@ -2,12 +2,14 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/ExpandUtils.h>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
@@ -38,7 +40,7 @@ namespace {
     IntTensor csr = at::empty({dim+1}, CUDA(kInt));
     IntTensor rowIndicesInt = at::empty({rowIndices.size(0)}, CUDA(kInt));
     rowIndicesInt.copy_(rowIndices);
-    sparse::cuda::Xcoo2csr(rowIndicesInt.data<int32_t>(), nnz, dim, csr.data<int32_t>());
+    sparse::cuda::Xcoo2csr(rowIndicesInt.data_ptr<int32_t>(), nnz, dim, csr.data_ptr<int32_t>());
     return csr;
   }
 }
@@ -51,7 +53,7 @@ namespace {
 // --------------------------------------------------------------------
 
 Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseTensor& sparse_, const Tensor& dense, Scalar beta, Scalar alpha) {
-  AT_ASSERT(t.is_cuda()); // dispatch argument
+  TORCH_CHECK(t.is_cuda(), "addmm: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "addmm: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(sparse_.is_cuda(), "addmm: expected 'mat1' to be CUDA, but got CPU");
   TORCH_CHECK(dense.is_cuda(), "addmm: expected 'mat2' to be CUDA, but got CPU");
@@ -136,19 +138,32 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
             k,
             nnz,
             cast_alpha,
-            values.data<scalar_t>(),
-            csr.data<int32_t>(),
-            colIndicesInt.data<int32_t>(),
-            dense_.data<scalar_t>(),
+            values.data_ptr<scalar_t>(),
+            csr.data_ptr<int32_t>(),
+            colIndicesInt.data_ptr<int32_t>(),
+            dense_.data_ptr<scalar_t>(),
             (transpose_dense == 'n' ? dense_.stride(1) : dense_.stride(0)),
             cast_beta,
-            r__.data<scalar_t>(),
+            r__.data_ptr<scalar_t>(),
             r__.stride(1));
         }
       });
 
   r_.copy_(r__);
   return r_;
+}
+
+Tensor& addmm_out_sparse_dense_cuda(
+    Tensor& result,
+    const Tensor& self,
+    const SparseTensor& mat1,
+    const Tensor& mat2,
+    Scalar beta,
+    Scalar alpha
+) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_out_sparse_dense_cuda(result, b_self, mat1, mat2, beta, alpha);
 }
 
 Tensor s_addmm_sparse_dense_cuda(
@@ -163,6 +178,18 @@ Tensor s_addmm_sparse_dense_cuda(
   return r;
 }
 
+Tensor addmm_sparse_dense_cuda(
+    const Tensor& self,
+    const SparseTensor& mat1,
+    const Tensor& mat2,
+    Scalar beta,
+    Scalar alpha
+) {
+  Tensor b_self;
+  std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+  return s_addmm_sparse_dense_cuda(b_self, mat1, mat2, beta, alpha);
+}
+
 Tensor& s_addmm_sparse_dense_cuda_(
     Tensor& t,
     const SparseTensor& sparse,
@@ -173,6 +200,8 @@ Tensor& s_addmm_sparse_dense_cuda_(
   return s_addmm_out_sparse_dense_cuda(t, t, sparse, dense, beta, alpha);
 }
 
+// NB: Purposely no broadcasting version of addmm inplace
+
 // Deleted sspaddmm (sparse, dense) -> sparse
 
 // --------------------------------------------------------------------
@@ -180,7 +209,7 @@ Tensor& s_addmm_sparse_dense_cuda_(
 // --------------------------------------------------------------------
 
 SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse_, const Tensor& dense/* , Scalar alpha */) {
-  AT_ASSERT(sparse_.is_cuda()); // dispatch argument
+  TORCH_CHECK(sparse_.is_cuda(), "hspmm: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "hspmm: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(dense.is_cuda(), "hspmm: expected 'mat2' to be CUDA, but got CPU");
 
@@ -224,7 +253,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   indices.copy_(dstIndices);
   // Replace destination indices with 0, 1, 2, 3, ... and compute output values
   // tensor with sparse * dense multiplication
-  thrust::device_ptr<int64_t> indicesIter(dstIndices.data<int64_t>());
+  thrust::device_ptr<int64_t> indicesIter(dstIndices.data_ptr<int64_t>());
   thrust::sequence(policy, indicesIter, indicesIter + nnz);
 
   std::vector<int64_t> new_size = get_sparse_impl(newSparse)->sizes().vec();
@@ -249,9 +278,9 @@ SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) 
 // --------------------------------------------------------------------
 
 Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseTensor& sparse, at::Scalar value) {
-  AT_ASSERT(dense.is_cuda()); // dispatch argument
-  TORCH_CHECK(sparse.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
-  TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
+  TORCH_CHECK(dense.is_cuda(), "add: expected 'self' to be a CUDA tensor, but got a CPU tensor");
+  TORCH_CHECK(sparse.is_cuda(), "add: expected 'other' to be a CUDA tensor, but got a CPU tensor");
+  TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be a CUDA tensor, but got a CPU tensor");
 
   TORCH_CHECK(cuda::check_device({sparse, r_, dense}));
 
@@ -350,8 +379,17 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
 // add(SparseTensor, SparseTensor, Scalar)  [broadcasts]
 // --------------------------------------------------------------------
 
+Tensor& add_out_dense_sparse_cuda(Tensor& r, const Tensor& dense, const SparseTensor& sparse_, Scalar value);
+
 SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const SparseTensor& src, Scalar value) {
-  AT_ASSERT(t.is_cuda()); // dispatch argument
+  if (!t.is_sparse()) {
+    return add_out_dense_sparse_cuda(r_, t, src, value);
+  }
+
+  // TODO: This test seems a bit goofy
+  TORCH_CHECK(src.is_sparse(), "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
+
+  TORCH_CHECK(t.is_cuda(), "add: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(src.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
 
@@ -410,7 +448,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
     return mul_out_sparse_zerodim(r_, src_, t_);
   }
 
-  AT_ASSERT(t_.is_cuda()); // dispatch argument
+  TORCH_CHECK(t_.is_cuda(), "mul: expected 'self' to be CUDA, but got CPU");
   TORCH_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
   TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
@@ -600,12 +638,12 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
 
       auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v); // flatten indices on all sparse_dim of grad, output indices is coalesced and sorted
       auto input_indices_1D = flatten_indices_by_dims(input_indices, input_sizes, sparse_dims_to_keep_v);
-      thrust_ptr grad_indices_iter(grad_indices_1D.data<int64_t>());
-      thrust_ptr input_indices_iter(input_indices_1D.data<int64_t>());
+      thrust_ptr grad_indices_iter(grad_indices_1D.data_ptr<int64_t>());
+      thrust_ptr input_indices_iter(input_indices_1D.data_ptr<int64_t>());
 
       // store lower_bound of input indices at grad indices
       LongTensor input_indices_pos = at::empty_like(input_indices_1D);
-      thrust_ptr input_indices_pos_iter(input_indices_pos.data<int64_t>());
+      thrust_ptr input_indices_pos_iter(input_indices_pos.data_ptr<int64_t>());
       thrust::lower_bound(policy,
                           grad_indices_iter, grad_indices_iter + grad_nnz,
                           input_indices_iter, input_indices_iter + input_nnz,
