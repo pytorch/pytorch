@@ -1114,17 +1114,89 @@ TEST_F(FunctionalTest, Threshold) {
 }
 
 TEST_F(FunctionalTest, Pad) {
-  auto t4d = torch::empty({3, 3, 4, 2});
-  std::vector<int64_t> p1d = {1, 1}; // pad last dim by 1 on each side
-  auto out1 = F::pad(t4d, PadOptions(p1d).mode(torch::kConstant).value(0));  // effectively zero padding
-  ASSERT_EQ(out1.sizes(), torch::IntArrayRef({3, 3, 4, 4}));
+  {
+    auto input = torch::arange(6, torch::kDouble).reshape({1, 2, 3});
+    auto output = F::pad(input, PadOptions({1, 2}).mode(torch::kCircular));
+    auto expected = torch::tensor({{{2., 0., 1., 2., 0., 1.},
+                                    {5., 3., 4., 5., 3., 4.}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 2, 6}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(16, torch::kDouble).reshape({2, 2, 2, 2});
+    auto output = F::pad(input, PadOptions({1, 1, 1, 1}).mode(torch::kReflect));
+    auto expected = torch::tensor(
+       {{{{ 3.,  2.,  3.,  2.},
+          { 1.,  0.,  1.,  0.},
+          { 3.,  2.,  3.,  2.},
+          { 1.,  0.,  1.,  0.}},
 
-  std::vector<int64_t> p2d = {1, 1, 2, 2}; // pad last dim by (1, 1) and 2nd to last by (2, 2)
-  auto out2 = F::pad(t4d, PadOptions(p2d).mode(torch::kConstant).value(0));
-  ASSERT_EQ(out2.sizes(), torch::IntArrayRef({3, 3, 8, 4}));
+         {{ 7.,  6.,  7.,  6.},
+          { 5.,  4.,  5.,  4.},
+          { 7.,  6.,  7.,  6.},
+          { 5.,  4.,  5.,  4.}}},
 
-  t4d = torch::empty({3, 3, 4, 2});
-  std::vector<int64_t> p3d = {0, 1, 2, 1, 3, 3}; // pad by (0, 1), (2, 1), and (3, 3)
-  auto out3 = F::pad(t4d, PadOptions(p3d).mode(torch::kConstant).value(0));
-  ASSERT_EQ(out3.sizes(), torch::IntArrayRef({3, 9, 7, 3}));
+        {{{11., 10., 11., 10.},
+          { 9.,  8.,  9.,  8.},
+          {11., 10., 11., 10.},
+          { 9.,  8.,  9.,  8.}},
+
+         {{15., 14., 15., 14.},
+          {13., 12., 13., 12.},
+          {15., 14., 15., 14.},
+          {13., 12., 13., 12.}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({2, 2, 4, 4}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(12, torch::kDouble).reshape({1, 1, 2, 2, 3});
+    auto output = F::pad(input, PadOptions({1, 2, 2, 1, 1, 2}).mode(torch::kReplicate));
+    auto expected = torch::tensor(
+       {{{{{ 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 3.,  3.,  4.,  5.,  5.,  5.},
+           { 3.,  3.,  4.,  5.,  5.,  5.}},
+
+          {{ 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 3.,  3.,  4.,  5.,  5.,  5.},
+           { 3.,  3.,  4.,  5.,  5.,  5.}},
+
+          {{ 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 9.,  9., 10., 11., 11., 11.},
+           { 9.,  9., 10., 11., 11., 11.}},
+
+          {{ 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 9.,  9., 10., 11., 11., 11.},
+           { 9.,  9., 10., 11., 11., 11.}},
+
+          {{ 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 9.,  9., 10., 11., 11., 11.},
+           { 9.,  9., 10., 11., 11., 11.}}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 5, 5, 6}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto t4d = torch::empty({3, 3, 4, 2});
+    std::vector<int64_t> p1d = {1, 1}; // pad last dim by 1 on each side
+    auto out1 = F::pad(t4d, PadOptions(p1d).mode(torch::kConstant).value(0));  // effectively zero padding
+    ASSERT_EQ(out1.sizes(), torch::IntArrayRef({3, 3, 4, 4}));
+
+    std::vector<int64_t> p2d = {1, 1, 2, 2}; // pad last dim by (1, 1) and 2nd to last by (2, 2)
+    auto out2 = F::pad(t4d, PadOptions(p2d).mode(torch::kConstant).value(0));
+    ASSERT_EQ(out2.sizes(), torch::IntArrayRef({3, 3, 8, 4}));
+
+    t4d = torch::empty({3, 3, 4, 2});
+    std::vector<int64_t> p3d = {0, 1, 2, 1, 3, 3}; // pad by (0, 1), (2, 1), and (3, 3)
+    auto out3 = F::pad(t4d, PadOptions(p3d).mode(torch::kConstant).value(0));
+    ASSERT_EQ(out3.sizes(), torch::IntArrayRef({3, 9, 7, 3}));
+  }
 }
