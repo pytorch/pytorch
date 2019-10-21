@@ -12,7 +12,7 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 
-LayerNormImpl::LayerNormImpl(const LayerNormOptions& options_) : options(options_) {
+LayerNormImpl::LayerNormImpl(const LayerNormOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
   reset();
 }
 
