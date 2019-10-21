@@ -455,12 +455,20 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
       srcSelectDimSize);
 
 #ifdef __HIP_PLATFORM_HCC__
+#define SMALL_INDEX24(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
+  indexSelectSmallIndex24<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM> \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(              \
+      dstInfo, srcInfo, indicesInfo,                               \
+      dstSelectDim, srcSelectDim, static_cast<TYPE>(sliceSize),    \
+      srcSelectDimSize);
+
+
 #define LARGE_INDEX24(TENSOR_TYPE, TYPE,                           \
                       DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)     \
   indexSelectLargeIndex24<TENSOR_TYPE, TYPE,                       \
                           DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR> \
-    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(            \
-      dstInfo, srcInfo, indicesInfo,                             \
+    <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(              \
+      dstInfo, srcInfo, indicesInfo,                               \
       dstSelectDim, srcSelectDim, static_cast<TYPE>(dstTotalSize), \
       static_cast<TYPE>((IDX_IS_MAJOR) ? sliceSize : numIndices),  \
       srcSelectDimSize);
@@ -648,9 +656,15 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
       (IDX_IS_MAJOR) ? sliceSize : numIndices,                \
       dstAddDimSize);
 #ifdef __HIP_PLATFORM_HCC__
+#define SMALL_INDEX24(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
+  indexAddSmallIndex24<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM> \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(         \
+      dstInfo, srcInfo, indicesInfo,                          \
+      dstAddDim, srcAddDim, sliceSize, dstAddDimSize);
+
 #define LARGE_INDEX24(TENSOR_TYPE, TYPE,                      \
                     DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)  \
-  indexAddLargeIndex24<TENSOR_TYPE, TYPE,                       \
+  indexAddLargeIndex24<TENSOR_TYPE, TYPE,                     \
                      DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR> \
     <<<largeIndexGrid, largeIndexBlock, 0, stream>>>(         \
       dstInfo, srcInfo, indicesInfo,                          \
@@ -688,13 +702,13 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
     // indices to choose
     if (numIndices <= 16) {
       if (dstInfo.dims == 1 && srcInfo.dims == 1 && indContig) {
-        SMALL_INDEX(scalar_t, unsigned int, 1, 1, -2);
+        SMALL_INDEX24(scalar_t, unsigned int, 1, 1, -2);
       } else if (dstInfo.dims == 2 && srcInfo.dims == 2 && indContig) {
-        SMALL_INDEX(scalar_t, unsigned int, 2, 2, -2);
+        SMALL_INDEX24(scalar_t, unsigned int, 2, 2, -2);
       } else if (dstInfo.dims == 3 && srcInfo.dims == 3 && indContig) {
-        SMALL_INDEX(scalar_t, unsigned int, 3, 3, -2);
+        SMALL_INDEX24(scalar_t, unsigned int, 3, 3, -2);
       } else {
-        SMALL_INDEX(scalar_t, unsigned int, -1, -1, -1);
+        SMALL_INDEX24(scalar_t, unsigned int, -1, -1, -1);
       }
     } else {
       bool indexIsMajor = THCTensor_(indexShouldBeMajor)(dstInfo, dstAddDim);
