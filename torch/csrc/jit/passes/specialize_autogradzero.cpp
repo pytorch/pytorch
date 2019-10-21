@@ -76,72 +76,6 @@ void specializeAutogradZero(Graph &g) {
     auto n = *it;
 
     switch (n->kind()) {
-      case prim::GradOf: {
-        
-        auto all_zeros =
-            std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-              return state[v] == State::Zero;
-            });
-
-        auto all_nonzeros =
-            std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-              return state[v] == State::Nonzero;
-            });
-        // Property 1: if all the gradInputs to the GradOf are Zero
-        // then the gradOutputs are also zero and will be represented as
-        // AutogradZero nodes
-        if (all_zeros) {
-          auto zero = g.createAutogradZero()->insertAfter(n)->output();
-          state[zero] = State::Zero;
-          for (auto o : n->outputs()) {
-            o->replaceAllUsesWith(zero);
-          }
-        } else if (all_nonzeros) {
-          auto body = n->blocks().at(0);
-          for (auto input : n->inputs()) {
-            // we should never get into a situation when specializing a GradOf
-            // where we do not know if a value is Nonzero since at the top level
-            // a gradient graph is composed of Linear nodes and AutogradAdds
-            // and LinearNodes only appear in these graphs
-
-            AT_ASSERT(state[input] != State::Unknown);
-          }
-          // hoist the nodes in the GradOf body to be before the linear block
-          for (auto it = body->nodes().begin(); it != body->nodes().end();) {
-            auto block_node = *it++;
-            block_node->moveBefore(n);
-          }
-
-          for (size_t i = 0; i < n->outputs().size(); ++i) {
-            n->outputs().at(i)->replaceAllUsesWith(body->outputs().at(i));
-            state[body->outputs().at(i)] = State::Nonzero;
-          }
-            
-
-        } else {
-          WithInsertPoint guard(*it);
-          auto cond = g.insertNode(g.create(prim::AutogradAnyNonZero, it->inputs()))
-                          ->output()
-                          ->setType(IntType::get());
-          auto if_stat =
-              g.insertNode(g.create(prim::If, {cond}, it->outputs().size()));
-          if_stat->addBlock()->cloneFrom(
-              it->blocks().at(0), [](Value* v) { return v; });
-          auto else_block = if_stat->addBlock();
-          auto undef = g.createAutogradZero()
-                          ->insertBefore(else_block->return_node())
-                          ->output();
-          for (size_t i = 0; i < it->outputs().size(); ++i) {
-            else_block->registerOutput(undef);
-            if_stat->outputs().at(i)->copyMetadata(it->outputs().at(i));
-          }
-          it->replaceAllUsesWith(if_stat);
-          for (auto o : if_stat->outputs()) {
-            state[o] = State::Unknown;
-          }
-        }
-        it.destroyCurrent();
-      } break;
       case prim::AutogradAdd: {
         auto a = n->input(0);
         auto b = n->input(1);
@@ -198,6 +132,50 @@ void specializeAutogradZero(Graph &g) {
                   : State::Unknown;
         }
       } break;
+      case prim::If: {
+        auto if_input = n->input(0)->node();  
+        if (if_input->kind() == prim::AutogradAnyNonZero)
+        {
+          auto all_zeros =
+              std::all_of(if_input->inputs().begin(), if_input->inputs().end(), [&](Value* v) {
+                return state[v] == State::Zero;
+              });
+
+          auto all_nonzeros =
+              std::all_of(if_input->inputs().begin(), if_input->inputs().end(), [&](Value* v) {
+                return state[v] == State::Nonzero;
+              });
+          // Property 1: if all the gradInputs to the GradOf are Zero
+          // then the gradOutputs are also zero and will be represented as
+          // AutogradZero nodes
+          if (all_zeros) {
+            auto zero = g.createAutogradZero()->insertAfter(n)->output();
+            state[zero] = State::Zero;
+            for (auto o : n->outputs()) {
+              o->replaceAllUsesWith(zero);
+            }
+            it.destroyCurrent();
+            break;
+          }
+          
+          if (all_nonzeros) {
+            auto body = n->blocks().at(0);
+            // hoist the nodes in the GradOf body to be before the linear block
+            for (auto it = body->nodes().begin(); it != body->nodes().end();) {
+              auto block_node = *it++;
+              block_node->moveBefore(n);
+            }
+
+            for (size_t i = 0; i < n->outputs().size(); ++i) {
+              n->outputs().at(i)->replaceAllUsesWith(body->outputs().at(i));
+              state[body->outputs().at(i)] = State::Nonzero;
+            }
+            it.destroyCurrent();
+            break;
+          }
+        }
+        //fallthrough
+      } 
       default:
         for (auto o : n->outputs()) {
           state[o] = State::Unknown;

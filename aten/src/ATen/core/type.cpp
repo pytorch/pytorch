@@ -29,12 +29,18 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
       out << ")";
     }
-    if (value->undefined() && *value->undefined()) {
-      out << "[Undefined]";
-    }
-    if (!value->undefined().has_value()) {
-      out << "[Undefined?]";
-    }
+
+    // out << "[";
+    // if (value->undefined() && *value->undefined()) {
+    //   out << "U";
+    // }
+    // if (!value->undefined().has_value()) {
+    //   out << "U?";
+    // }
+    // if (value->requires_grad()){
+    //   out << "R";
+    // }
+    // out << "]";
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";

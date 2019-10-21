@@ -181,8 +181,10 @@ struct BailOutGraphBuilderForNode {
 // resume execution of the unoptimized(deoptimized)
 // version of an original graph from a particular point
 struct BailOutInserter {
-  explicit BailOutInserter(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)), bailout_index_(0) {}
+  explicit BailOutInserter(std::shared_ptr<Graph> graph, std::shared_ptr<Graph> unoptimized_graph)
+      : graph_(std::move(graph)),
+      unoptimized_graph_(std::move(unoptimized_graph)),
+      bailout_index_(0) {}
 
   void run() {
     liveness_sets_ = BuildLivenessSets(graph_);
@@ -247,7 +249,10 @@ struct BailOutInserter {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       if (it->kind() == prim::Guard) {
         auto bailout_node = b->owningGraph()->create(prim::BailOut);
+        auto bi = it->i(attr::index);
+        bailout_node->i_(attr::index, bi);
         bailouts_.push_back(bailout_node);
+        
 
         const auto& live_inputs = liveness_sets_[*it];
 
@@ -278,7 +283,9 @@ struct BailOutInserter {
         }
 
         bailout_node->output()->setType(it->output()->type());
-        bailout_node->i_(attr::index, bailout_index_++);
+        
+        //bailout_node->i_(attr::index, bailout_index_++);
+        
         // we can't immediately replace nodes since this action will corrupt
         // the liveness sets of following BailOut nodes if any of their
         // arguments are BailOut nodes themselves
@@ -293,6 +300,7 @@ struct BailOutInserter {
   }
 
   std::shared_ptr<Graph> graph_;
+  std::shared_ptr<Graph> unoptimized_graph_;
   std::map<Node*, Node*> subgraphs;
   std::size_t bailout_index_;
   std::unordered_map<Node*, std::vector<Value*>> liveness_sets_;
@@ -300,8 +308,8 @@ struct BailOutInserter {
   std::map<Value*, Value*> replacements_;
 };
 
-void InsertBailOuts(std::shared_ptr<Graph> graph) {
-  BailOutInserter ibo(std::move(graph));
+void InsertBailOuts(std::shared_ptr<Graph> graph, std::shared_ptr<Graph> unoptimized_graph) {
+  BailOutInserter ibo(std::move(graph), std::move(unoptimized_graph));
   ibo.run();
 }
 
@@ -309,7 +317,7 @@ void InsertBailOuts(std::shared_ptr<Graph> graph) {
 // index matches the given `index`
 static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
   for (auto n : b->nodes()) {
-    if (n->kind() == prim::BailOut && n->hasAttribute(attr::index) &&
+    if ((n->kind() == prim::BailOut || n->kind() == prim::Guard) && n->hasAttribute(attr::index) &&
         n->i(attr::index) == index) {
       return n;
     }
@@ -326,7 +334,7 @@ static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
 // to its users
 static void removeBailouts(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::BailOut) {
+    if (it->kind() == prim::BailOut || it->kind() == prim::Guard) {
       // clear profiling information
       it->inputs().at(0)->setType(TensorType::get());
       it->output()->replaceAllUsesWith(it->inputs().at(0));
@@ -355,7 +363,8 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
       orig_bailout_node->inputs().at(0)->type()->cast<FunctionType>() ==
       nullptr);
   TORCH_INTERNAL_ASSERT(
-      orig_bailout_node && orig_bailout_node->kind() == prim::BailOut &&
+      orig_bailout_node && (orig_bailout_node->kind() == prim::BailOut || 
+      orig_bailout_node->kind() == prim::Guard) &&
       bailout_index == orig_bailout_node->i(attr::index));
   BailOutGraphBuilderForNode bg(orig, target);
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);

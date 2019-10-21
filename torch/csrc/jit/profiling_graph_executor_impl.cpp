@@ -54,7 +54,11 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     if (!pr_) {
       pr_ = ProfilingRecord::instrumentGraph(prepareGraph(graph, stack));
       auto copy = pr_->graph()->copy();
-      //LowerGradOf(*copy);
+      
+
+      // std::cout << "after instrumentation:\n";
+      // copy->dump();
+      LowerGradOf(*copy);
       specializeAutogradZero(*copy);
       runRequiredPasses(copy);
       // RemoveExpands(copy);
@@ -90,7 +94,8 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     return *optimized_plan_;
   }
 
-
+  // std::cout << "before insert guards:\n";
+  // copy->dump();
   // insert bailouts
   InsertGuards(copy);
   auto unoptimized_graph = copy->copy();
@@ -109,18 +114,22 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   
   //LowerGradOf(*copy);
 
-  // constant fold into ConstantChunk
-  //CanonicalizeOps(copy);
+
+  
   // remove foldable ifs to help EliminateRedundantGuards
   //ConstantPropagation(copy);
 
   LowerGradOf(*copy);
+  // constant fold into ConstantChunk
+  // this optimization doesn't use any profiling information
+  CanonicalizeOps(copy);
   EliminateRedundantGuards(copy);
   
   if (getProfilingMode()) {
     InsertBailOuts(copy, unoptimized_graph);
     GRAPH_DUMP("After InsertBailOuts: ", copy);
   }
+
   specializeAutogradZero(*copy);
   runRequiredPasses(copy);
   // if (!getProfilingMode()) {
@@ -173,6 +182,7 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   GraphExecutorState state;
   TORCH_INTERNAL_ASSERT(optimized_plan_);
   auto opt_plan = *optimized_plan_;
+  std::cout << "getting DebugState for " << this << std::endl;
   state.execution_plans.emplace(ArgumentSpec{0, 0}, opt_plan);
   return state;
 }

@@ -704,7 +704,15 @@ static bool mayIntroduceGradient(const Block* b) {
 }
 
 bool needsGradient(const std::shared_ptr<const Graph>& graph) {
+
   std::cout << "running a gradient!\n";
+
+  const static auto* cdfg = std::getenv("NGE");
+  if (cdfg) {
+    std::cout << "NGE\n";
+    return false;
+  }
+
   if (!autograd::GradMode::is_enabled()) {
     std::cout << "is_enabled false\n";
     return false;

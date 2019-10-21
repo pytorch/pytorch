@@ -25,6 +25,8 @@ struct GuardElimination {
     // graph_->dump();
     // GRAPH_DUMP("After moveGuardsToDefs", graph_);
     coalesceGuards(graph_->block());
+    // std::cout << "after coalesceGuards\n";
+    // graph_->dump();
     GRAPH_DUMP("After coalesceGuards", graph_);
     static const auto* pavg = getenv("PGE");
     if (pavg) {
@@ -75,7 +77,7 @@ struct GuardElimination {
       }
     }
 
-    if (b->owningNode() && isLoweredGradOf(b->owningNode())) {
+    if (b->owningNode() && isLoweredGradOf(b->owningNode()) /*b->owningNode()->kind() == prim::If*/) {
 
       for (auto it = b->nodes().begin(); it != b->nodes().end();) {
         auto block_node = *it++;
@@ -231,9 +233,13 @@ private:
     case aten::sign:
     case aten::pow:
     case aten::relu:
+    case aten::threshold:
     case aten::avg_pool2d:
     case prim::AutogradAdd:
     case prim::AutogradZero:
+    case aten::rand_like:
+    case aten::erf:
+    case aten::erfc:
       return checkInputs(n, no_exceptions);
     case aten::cat:
       // check that the dimension argument is constant
@@ -266,6 +272,27 @@ private:
         }
       }
       return false;
+
+    // this is checked by one of the tests in test_jit_fuser.py
+    case prim::ListUnpack: 
+    {
+      // check if the input is a constant chunk
+      // used for LSTM fusions
+      auto chunk = n->input(0)->node();
+      if (chunk->kind() != aten::chunk) {
+        return false;
+      }
+      return checkInputs(chunk, no_exceptions);
+    }
+    // this is checked by one of the tests in test_jit_fuser.py
+    case aten::broadcast_tensors:
+    {
+      auto list_construct = n->input(0)->node();
+      if (list_construct->kind() != prim::ListConstruct) {
+        return false;
+      }
+      return checkInputs(list_construct, no_exceptions);
+    }
     case prim::Guard:
     case prim::GradOf:
       return true;

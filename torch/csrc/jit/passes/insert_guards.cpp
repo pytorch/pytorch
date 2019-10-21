@@ -14,6 +14,8 @@ struct GuardInserter {
   }
 
  private:
+
+ int64_t index_{0};
   void removeProfilingNodes(Block* b) {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
       if (it->kind() == prim::profile) {
@@ -33,6 +35,7 @@ struct GuardInserter {
         auto pttp = n->output()->type()->cast<TensorType>();
         if (pttp) {
           auto guard = graph_->create(prim::Guard, {n->input()}, 1);
+          guard->i_(attr::index, index_++);
           auto go = guard->output();
           go->setType(pttp);
           guard->insertBefore(n);

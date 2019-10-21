@@ -1122,7 +1122,13 @@ bool AliasDb::tryMove(
   auto curNode = toMove->next_in_graph[direction];
   // Move forward one node at a time
   while (curNode != movePoint) {
+    if (curNode->kind() == prim::If && toMove->kind() == prim::Guard) {
+      std::cout << "moving across guard across if\n";
+    }
     if (workingSet.dependsOn(curNode)) {
+      if (curNode->kind() == prim::If && toMove->kind() == prim::Guard) {
+        std::cout << "adding if as a dependency\n";
+      }      
       // If we can't move past this node, add it to the working set
       workingSet.add(curNode);
     }

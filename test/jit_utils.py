@@ -428,7 +428,7 @@ class JitTestCase(TestCase):
                    inputs_require_grads=True, check_tolerance=1e-5, export_import=True,
                    _force_outplace=False):
         
-        print ("entering checkTrace")
+        #print ("entering checkTrace")
         # TODO: check gradients for parameters, not just inputs
         def allSum(vs):
             # drop allows us to remove some values from ever being used
@@ -469,14 +469,14 @@ class JitTestCase(TestCase):
             print(ge.graph)
 
 
-        print("no gradient case")
+        #print("no gradient case")
         # test no gradients case
         outputs = func(*nograd_inputs)
         outputs_ge = ge(*nograd_inputs)
         self.assertEqual(outputs, outputs_ge)
 
 
-        print("gradient case")
+        #print("gradient case")
         # test single grad case
         outputs = func(*recording_inputs)
         if inputs_require_grads:
@@ -514,7 +514,7 @@ class JitTestCase(TestCase):
 
         # test the grad grad case
 
-        print ("gradient gradient case")
+        #print ("gradient gradient case")
         outputs = func(*recording_inputs)
         l1 = allSum(outputs)
         if inputs_require_grads:
@@ -529,7 +529,7 @@ class JitTestCase(TestCase):
             flattened_recording_inputs = flatten_inputs(recording_inputs)
 
 
-        print ("grad grad single backward")
+        #print ("grad grad single backward")
         outputs_ge = ge(*recording_inputs)
         l1_ge = allSum(outputs_ge)
         if inputs_require_grads:
@@ -538,7 +538,7 @@ class JitTestCase(TestCase):
 
 
         # os.environ["DEBUSSY"] = "1"
-        print ("grad grad double backward")
+        #print ("grad grad double backward")
         if inputs_require_grads:
             l2_ge = (allSum(grads_ge) * l1_ge)
             grads2_ge = torch.autograd.grad(l2_ge, flattened_recording_inputs, allow_unused=allow_unused)

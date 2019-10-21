@@ -45,12 +45,14 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
 
   auto pn = createProfileNode(nullptr, {i});
   auto pno = pn->addOutput();
+  auto pname = pno->debugName();
   bool first = true;
   pno->setType(TensorType::get());
-  std::function<void(Stack &)> shape_profiler = [this, pno,
+  std::function<void(Stack &)> shape_profiler = [this, pno, pname,
                                                  first](Stack &stack) mutable {
     IValue t;
     pop(stack, t);
+    //std::cout << "profiling value %" << pname << std::endl;
     if (t.isTensor()) {
 
       if (t.toTensor().defined()) {
@@ -75,6 +77,7 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
 
   pn->setCallback(shape_profiler);
   pn->insertBefore(n);
+  //std::cout << "profiling node " << *pn << std::endl; 
   n->replaceInputWith(i, pn->output());
 }
 
