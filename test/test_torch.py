@@ -11360,10 +11360,8 @@ class TestTorchDeviceType(TestCase):
                                                   [2., 1.]]],
                                                 dtype=dtype,
                                                 device=device)
-            expected_unique_dim1_bool = torch.tensor([[[False, True],
-                                                       [True, True]],
-                                                     [[False, True],
-                                                       [True, True]]],
+            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]], 
+                                                      [[False, True], [True, True]]],
                                                      dtype=torch.bool,
                                                      device=device)
             expected_inverse_dim1 = torch.tensor([1, 0, 2, 0])
@@ -11548,7 +11546,7 @@ class TestTorchDeviceType(TestCase):
             else:
                 self.assertEqual(expected_y_inverse, y_inverse)
                 self.assertEqual(expected_y_counts, y_counts)
-    
+
         run_test(device, torch.float)
         run_test(device, torch.double)
         run_test(device, torch.long)
