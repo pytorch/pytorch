@@ -184,6 +184,9 @@ class ArrayRef final {
   /// @name Operator Overloads
   /// @{
   constexpr const T& operator[](size_t Index) const {
+    if (Index < 0) {
+      Index += Length;
+    }
     return Data[Index];
   }
 
@@ -195,6 +198,9 @@ class ArrayRef final {
         Index,
         "; Length = ",
         Length);
+    if (Index < 0) {
+      Index += Length;
+    }
     return Data[Index];
   }
 

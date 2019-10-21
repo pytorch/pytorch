@@ -301,6 +301,14 @@ void TestIntArrayRefExpansion(DeprecatedTypeProperties& type) {
   avg_pool3d(randn({3, 3, 3, 3, 3}, type.options()), 2, 1, 1);
 }
 
+void TestArrayRefNegativeIndex() {
+  ASSERT_TRUE(at::ArrayRef<int64_t>({1, 2})[-1] == 2);
+  ASSERT_TRUE(at::ArrayRef<int64_t>({1, 2})[-2] == 1);
+
+  ASSERT_TRUE(at::ArrayRef<int64_t>({1, 2}).at(-1) == 2);
+  ASSERT_TRUE(at::ArrayRef<int64_t>({1, 2}).at(-2) == 1);
+}
+
 void test(DeprecatedTypeProperties& type) {
   TestResize(type);
   TestOnesAndDot(type);
@@ -330,6 +338,7 @@ void test(DeprecatedTypeProperties& type) {
   TestNegativeDim(type);
   TestView(type);
   TestIntArrayRefExpansion(type);
+  TestArrayRefNegativeIndex();
 }
 
 TEST(BasicTest, BasicTestCPU) {
