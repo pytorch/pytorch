@@ -39,7 +39,7 @@ namespace {
    *    4D input, 4D output
    */
    template <typename T>
-  __global__ void adaptiveaveragepool(T *input, T *output,
+  __global__ void adaptive_average_pool(T *input, T *output,
                           int isizeH, int isizeW,
                           int osizeH, int osizeW,
                           int64_t istrideD, int64_t istrideH, int64_t istrideW)
@@ -98,7 +98,7 @@ namespace {
    *    this function computes the gradInput from gradOutput
    */
    template <typename T>
-  __global__ void adaptiveaveragegradinput(
+  __global__ void adaptive_average_gradinput(
     T *gradInput, T *gradOutput,
     int isizeH, int isizeW, int osizeH, int osizeW
   )
@@ -154,7 +154,7 @@ namespace {
    *    (uses atomic add)
    */
    template <typename T>
-  __global__ void atomicadaptiveaveragegradinput(
+  __global__ void atomic_adaptive_average_gradinput(
     T *gradInput, T *gradOutput,
     int isizeH, int isizeW, int osizeH, int osizeW
   )
@@ -215,7 +215,7 @@ namespace {
    */
    template <typename index_t, typename scalar_t>
   C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-  __global__ void adaptiveaveragepoolnhwc(const scalar_t* __restrict__ input, scalar_t* __restrict__ output,
+  __global__ void adaptive_average_pool_nhwc(const scalar_t* __restrict__ input, scalar_t* __restrict__ output,
                           int sizeB, int sizeC,
                           int isizeH, int isizeW,
                           int osizeH, int osizeW,
@@ -311,7 +311,7 @@ namespace {
    */
    template <typename index_t, typename scalar_t>
   C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
-  __global__ void adaptiveaveragegradinputnhwc(scalar_t* __restrict__ gradInput, const scalar_t* __restrict__ gradOutput,
+  __global__ void adaptive_average_gradinput_nhwc(scalar_t* __restrict__ gradInput, const scalar_t* __restrict__ gradOutput,
                           int sizeB, int sizeC,
                           int isizeH, int isizeW,
                           int osizeH, int osizeW,
@@ -500,7 +500,7 @@ namespace {
         AT_ASSERT(input_.numel() < std::numeric_limits<int32_t>::max());
         AT_DISPATCH_FLOATING_TYPES_AND_HALF(
             input_.scalar_type(), "adaptive_avg_pool2d_nhwc_cuda", [&] {
-              adaptiveaveragepoolnhwc<int32_t><<<grid, block, kernel_size_C * block_x * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>> (
+              adaptive_average_pool_nhwc<int32_t><<<grid, block, kernel_size_C * block_x * block_y * block_z * sizeof(scalar_t), at::cuda::getCurrentCUDAStream()>>> (
                 input_.data_ptr<scalar_t>(),
                 output.data_ptr<scalar_t>(),
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
@@ -544,7 +544,7 @@ namespace {
               dim3 threads(32, 8);
 
               // run averagepool kernel
-              adaptiveaveragepool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+              adaptive_average_pool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
                 input_data, output_data,
                 isizeH, isizeW, osizeH, osizeW,
                 istrideD, istrideH, istrideW);
@@ -635,7 +635,7 @@ namespace {
         AT_ASSERT(input.numel() < std::numeric_limits<int32_t>::max());
         AT_DISPATCH_FLOATING_TYPES_AND_HALF(
             input.scalar_type(), "adaptive_avg_pool2d_backward_nhwc_cuda", [&] {
-              adaptiveaveragegradinputnhwc<int32_t><<<grid, block, (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t), at::cuda::getCurrentCUDAStream()>>> (
+              adaptive_average_gradinput_nhwc<int32_t><<<grid, block, (kernel_size_C * block_x * block_y * block_z + osizeH + osizeW) * sizeof(scalar_t) + 2 * isizeW * sizeof(int32_t), at::cuda::getCurrentCUDAStream()>>> (
                 gradInput.data_ptr<scalar_t>(),
                 gradOutput.data_ptr<scalar_t>(),
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
@@ -674,14 +674,14 @@ namespace {
               if(atomic)
               {
                 // run updateGradInput kernel, accumulate gradients atomically
-                atomicadaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                atomic_adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
                   gradInput_data, gradOutput_data,
                   isizeH, isizeW, osizeH, osizeW);
               }
               else
               {
                 // run updateGradInput kernel
-                adaptiveaveragegradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
                   gradInput_data, gradOutput_data,
                   isizeH, isizeW, osizeH, osizeW);
               }
