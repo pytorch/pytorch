@@ -69,6 +69,9 @@ def type_argument_translations(arg):
     elif t == 'int64_t?':
         raise RuntimeError("Please use int? and not int64_t?. "
                            "See [temp translations] for details.")
+    # Enables Dimname[] by translating to legacy DimnameList.
+    elif t == 'Dimname[]':
+        t = 'DimnameList'
     elif t == 'Dimname[]?':
         t = 'DimnameList?'
     # Enables float by translating to legacy double.
