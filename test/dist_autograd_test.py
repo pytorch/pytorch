@@ -15,6 +15,7 @@ import threading
 # sent from prev rank respectively.
 # rpc_done[2] and ctx_ids[2] represents for prev of prev rank.
 # rpc_done[3] and ctx_ids[3] represents for prev of prev of prev rank.
+# rpc_done[0] and ctx_ids[0] represents for current rank, but mostly not used.
 rpc_done = [False, False, False, False]
 ctx_ids = [-1, -1, -1, -1]
 
@@ -163,8 +164,8 @@ class DistAutogradTest(object):
         self.assertEqual(ret.grad_fn, recv_function)
 
     # For a context passed from previous nested chain calls, this rank
-    # recevied two tensors t1 and t2, execute torch.add(t1, t2) and send result
-    # tensor t3 back.
+    # receives two tensors t1 and t2, executes torch.add(t1, t2) and sends
+    # result tensor t3 back.
     # For this context in this rank, it expects graph like this:
     #  send and recv functions:
     #       rpcSendBackward
@@ -191,15 +192,15 @@ class DistAutogradTest(object):
         self.assertEqual(next_funcs[0][0], next_funcs[1][0])
 
     # For a context passed from previous nested chain calls, this rank
-    # recevied two tensors t1 and t2, forwarding t1 and t2 tensors using
+    # receives two tensors t1 and t2, forwards t1 and t2 tensors using
     # nested rpc call to next dst. In return route, receive result tensor t3
     # from next dst and forwarding t3 back to previous calls.
     # For this context in this rank, it expects graph like this:
-    #  send and recv functions while recevive and forward t1 and t2:
+    #  send and recv functions for receving and forwarding t1 and t2:
     #       rpcSendBackward
     #          /          \
     # t1.recvRpcBackward    t2.recvRpcBackward
-    #  send and recv functions while receive and forward t3:
+    #  send and recv functions for receiving and forwarding t3:
     #       rpcSendBackward
     #             |
     #           t3.recvRpcBackward
@@ -360,6 +361,27 @@ class DistAutogradTest(object):
             ctx = dist_autograd._retrieve_context(ctx_ids[1])
             self._verify_graph_for_nested_rpc_call(ctx)
 
+    @dist_init
+    def test_no_graph_with_tensors_not_require_grad(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=False)
+            t2 = torch.zeros(3, 3, requires_grad=False)
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         _set_rpc_done, args=(context_id, 1))
+
+            ctx = dist_autograd._current_context()
+            send_functions = ctx._send_functions()
+            self.assertEqual(len(send_functions), 0)
+            recv_functions = ctx._recv_functions()
+            self.assertEqual(len(recv_functions), 0)
+
+            # Wait for the prev rank to be done with rpc.
+            self._check_rpc_done(1)
+            # prev context id is not passed over as tensors do not require grads
+            with self.assertRaises(RuntimeError):
+                ctx = dist_autograd._retrieve_context(ctx_ids[1])
 
     @dist_init
     def test_rpc_complex_args(self):
@@ -408,18 +430,9 @@ class DistAutogradTest(object):
                     "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
             # no worker ids should be recorded.
-            # no send and recv functions are attached.
             ctx = dist_autograd._current_context()
             worker_ids = ctx._known_worker_ids()
             self.assertEqual(len(worker_ids), 0)
-            send_functions = ctx._send_functions()
-            self.assertEqual(len(send_functions), 0)
-            recv_functions = ctx._recv_functions()
-            self.assertEqual(len(recv_functions), 0)
-            # prev context id is not passed over as tensors do not require grads
-            with self.assertRaises(RuntimeError):
-                ctx = dist_autograd._retrieve_context(ctx_ids[1])
-
 
             # worker_ids should be recorded when tensors do require grad
             t1.requires_grad = True
