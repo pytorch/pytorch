@@ -325,7 +325,27 @@ Tensor _histc_cuda_template(
     maxvalue = maxvalue + 1;
   }
 
-  TORCH_CHECK(!(std::isinf(minvalue) || std::isinf(maxvalue) || std::isnan(minvalue) || std::isnan(maxvalue)), "range of [", minvalue, ", ", maxvalue, "] is not finite");
+#ifndef __HIP_PLATFORM_HCC__
+  TORCH_CHECK(
+      !(THCNumerics<input_t>::isinf(minvalue) ||
+        THCNumerics<input_t>::isinf(maxvalue) ||
+        THCNumerics<input_t>::isnan(minvalue) ||
+        THCNumerics<input_t>::isnan(maxvalue)),
+      "range of [",
+      minvalue,
+      ", ",
+      maxvalue,
+      "] is not finite");
+#else
+  TORCH_CHECK(
+      !(std::isinf(minvalue) || std::isinf(maxvalue) || std::isnan(minvalue) ||
+        std::isnan(maxvalue)),
+      "range of [",
+      minvalue,
+      ", ",
+      maxvalue,
+      "] is not finite");
+#endif
   TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
 
   auto ret = cuda::CUDA_tensor_histogram<input_t, input_t, false>(
