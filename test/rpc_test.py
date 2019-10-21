@@ -273,7 +273,6 @@ class RpcTest(object):
                 init_method=self.init_method,
             )
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
         dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
 
