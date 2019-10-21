@@ -133,4 +133,4 @@ class VonMises(Distribution):
         The provided variance is the circular one.
         """
         return 1 - (_log_modified_bessel_fn(self.concentration, order=1) -
-                _log_modified_bessel_fn(self.concentration, order=0)).exp()
+                    _log_modified_bessel_fn(self.concentration, order=0)).exp()
