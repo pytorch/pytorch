@@ -243,7 +243,23 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     convert(model, mapping, inplace=True)
     return model
 
-def prepare_qat(model, mapping=DEFAULT_QAT_MODULE_MAPPING, inplace=False):
+def prepare_qat(model, mapping=None, inplace=False):
+    r"""
+    Prepares a copy of the model for quantization calibration or
+    quantization-aware training and convers it to quantized version.
+
+    Quantization configuration can be passed as an `qconfig_dict` or assigned
+    preemptively to individual submodules in `.qconfig` attribute.
+
+    Args:
+        model: input model to be modified in-place
+        mapping: dictionary that maps float modules to quantized modules to be
+                 replaced.
+        inplace: carry out model transformations in-place, the original module
+                 is mutated
+    """
+    if mapping is None:
+        mapping = DEFAULT_QAT_MODULE_MAPPING
     model = prepare(model, inplace=inplace)
     convert(model, mapping, inplace=True)
     return model
