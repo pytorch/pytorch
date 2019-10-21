@@ -116,7 +116,7 @@ __global__ void upsample_nearest3d_backward_out_frame(
 static void upsample_nearest3d_out_cuda_template(
     Tensor& output,
     const Tensor& input_,
-    IntArrayRef output_size
+    IntArrayRef output_size,
     double scales_1,
     double scales_2,
     double scales_3) {
