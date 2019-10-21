@@ -45,7 +45,6 @@ struct Refinement {
   TypePtr type() const {
     return type_;
   }
-
  private:
   std::string identifier_;
   TypePtr type_;
@@ -487,9 +486,7 @@ struct Environment {
 
     if (!retval) {
       if (auto type = resolver->resolveType(ident, range)) {
-        if (auto class_type = type->cast<ClassType>()) {
-          retval = std::make_shared<script::ClassValue>(class_type);
-        } else if (auto tuple_type = type->cast<TupleType>()) {
+        if (auto tuple_type = type->cast<TupleType>()) {
           retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
         }
       }
@@ -497,6 +494,14 @@ struct Environment {
 
     if (!retval) {
       retval = resolver->resolveValue(ident, method, range);
+    }
+
+    if (!retval) {
+      if (auto type = resolver->resolveType(ident, range)) {
+        if (auto class_type = type->cast<ClassType>()) {
+          retval = std::make_shared<script::ClassValue>(class_type);
+        }
+      }
     }
 
     if (!retval && required) {
@@ -1161,8 +1166,8 @@ struct to_ir {
   void insertRefinements(const SourceRange& loc, const RefinementSet& ref) {
     for (const Refinement& r : ref.activeRefinements()) {
       Value* v = environment_stack->getVar(r.identifier(), loc);
-      Value* output = graph->insert(prim::unchecked_unwrap_optional, {v});
-      environment_stack->setVar(loc, r.identifier(), output);
+      Value* new_v = graph->insertUncheckedCast(v, r.type());
+      environment_stack->setVar(loc, r.identifier(), new_v);
     }
   }
 
@@ -2395,6 +2400,17 @@ struct to_ir {
 
         return std::make_shared<SimpleValue>(expr);
       }
+      case prim::unchecked_cast: {
+        checkApplyNumInputs(apply, 2);
+        TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
+        Value* v = emitExpr(apply.inputs()[1]);
+        // avoid generating nested unchecked_casts because they are already
+        // inserted during serialization
+        if (v->node()->kind() != prim::unchecked_cast || *v->type() != *type) {
+          v = graph->insertUncheckedCast(v, type);
+        }
+        return std::make_shared<SimpleValue>(v);
+      } break;
       case prim::GetAttr: {
         checkApplyNumInputs(apply, 2);
         auto obj = emitSugaredExpr(apply.inputs()[0], 1);

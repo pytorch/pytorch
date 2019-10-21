@@ -405,6 +405,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/liveness.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/lower_graph.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
@@ -548,6 +549,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/random.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/enum.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
@@ -561,6 +563,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/fold.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/loss.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pixelshuffle.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
@@ -1065,8 +1068,8 @@ if(USE_CUDA)
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
-
+  target_link_libraries(
+      torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 
 endif()
 

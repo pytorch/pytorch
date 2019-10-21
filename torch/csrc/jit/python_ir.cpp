@@ -678,6 +678,8 @@ void initPythonIRBindings(PyObject* module_) {
             return self->isSubtypeOf(other);
           });
 
+  py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")
+      .def_static("get", &AnyType::get);
   py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
       .def_static("get", &NumberType::get);
   py::class_<IntType, Type, std::shared_ptr<IntType>>(m, "IntType")
