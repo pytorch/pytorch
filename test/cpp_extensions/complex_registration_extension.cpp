@@ -21,8 +21,8 @@
 #include <ATen/Config.h>
 
 namespace at {
-
-static Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+namespace {
+Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(!optional_memory_format.has_value(), "memory format is not supported")
   AT_ASSERT(options.device().is_cpu());
 
@@ -45,6 +45,7 @@ static Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
   return tensor;
+}
 }
 
 static auto complex_empty_registration = torch::RegisterOperators()
