@@ -782,6 +782,19 @@ private:
   c10::optional<QualifiedName> name_;
 };
 
+// Any should never appear in a named type like a class, namedtuple or
+// interface. If it does, then dynamic type information will be lost in the
+// Pickler, leading to hard-to-track-down bugs that will only occur
+// after saving or loading a model. This is because we rely on the
+// static types in named types to reconstruct type tags of loaded
+// values. Lifting this restriction requires solving the serialization
+// problem first.
+CAFFE2_API void checkNoAny(
+    const Type& base,
+    const char* what,
+    const std::string& attrname,
+    const TypePtr& attrtype);
+
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
@@ -1234,6 +1247,12 @@ struct getTypePtr_<at::Scalar> final {
   }
 };
 template <>
+struct getTypePtr_<at::Generator*> final {
+  static TypePtr call() {
+    return OptionalType::create(GeneratorType::get());
+  }
+};
+template <>
 struct getTypePtr_<std::string> final {
   static TypePtr call() {
     return StringType::get();
@@ -1297,10 +1316,6 @@ inline TypePtr getTypePtr() {
   // error message if not
   return detail::getTypePtr_<T>::call();
 }
-
-CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
-CAFFE2_API TypePtr attemptToRecoverType(const IValue& input_ivalue);
-CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
 
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
@@ -1401,9 +1416,7 @@ struct CAFFE2_API ClassType : public NamedType {
 
   Function* getMethod(const std::string& name) const;
   const std::vector<Function*>& methods() const;
-  void addMethod(Function* method) {
-    methods_.push_back(method);
-  }
+  void addMethod(Function* method);
 
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
@@ -1452,6 +1465,28 @@ struct CAFFE2_API ClassType : public NamedType {
       TypePtr type,
       bool is_parameter = false);
 
+  // Add attribute \p NAME if it doesn't exist or verify that it has a
+  // compatible type otherwise.
+  size_t addOrCheckAttribute(
+      const std::string& name,
+      TypePtr ty,
+      bool is_parameter = false) {
+    auto slot_idx = findAttributeSlot(name);
+    if (!slot_idx) {
+      return addAttribute(name, ty, is_parameter);
+    }
+
+    TORCH_CHECK(
+        is_parameter == this->is_parameter(*slot_idx),
+        "Parameter field mismatch for the field '",
+        name,
+        "'");
+    TypePtr atype = getAttribute(*slot_idx);
+    TORCH_CHECK(ty->isSubtypeOf(atype));
+    return *slot_idx;
+  }
+
+
   at::ArrayRef<std::string> attributeNames() const {
     return attributeNames_;
   }
@@ -1484,6 +1519,12 @@ struct CAFFE2_API ClassType : public NamedType {
 
   bool is_module() const {
     return bool(parameterSlots_);
+  }
+  bool is_module(size_t slot) const {
+    if (auto cls = getAttribute(slot)->cast<at::ClassType>()) {
+      return cls->is_module();
+    }
+    return false;
   }
   bool is_parameter(size_t slot) const {
     TORCH_INTERNAL_ASSERT(

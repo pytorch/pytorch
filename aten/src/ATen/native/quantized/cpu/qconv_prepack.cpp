@@ -177,7 +177,7 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
     if (bias_in.has_value()) {
       bias_fp32 = bias_in.value();
     } else {
-      bias_fp32 = at::zeros(out_ch, at::kFloat);
+      bias_fp32 = at::zeros(out_ch, weight.options().dtype(at::kFloat));
     }
     TORCH_CHECK(
         !bias_fp32.defined() || (bias_fp32.ndimension() == 1 && bias_fp32.size(0) == out_ch),
@@ -218,7 +218,8 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
         weight.q_scale(),
         weight_zp);
     auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
-    for (int i = 0; i < weight_contig.numel(); ++i) {
+    auto wt_numel = weight_contig.numel();
+    for (int i = 0; i < wt_numel; ++i) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
     // We set the pre-packed conv weights to nullptr below as we call pre-pack
@@ -257,10 +258,10 @@ class QConvPackWeightInt8 final : public c10::OperatorKernel {
           weight, bias, stride, padding, dilation, groups);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::conv_prepack ",
         toString(ctx.qEngine()));
-    return at::Tensor();
   }
 };
 

@@ -4,12 +4,14 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# TODO: Migrate all centos jobs to use proper devtoolset
-if [[ "$BUILD_ENVIRONMENT" == *py2-cuda9.0-cudnn7-centos7* ]]; then
-  # There is a bug in pango packge on Centos7 that causes undefined
-  # symbols, upgrading glib2 to >=2.56.1 solves the issue. See
-  # https://bugs.centos.org/view.php?id=15495
-  sudo yum install -y -q glib2-2.56.1
+if [[ "$BUILD_ENVIRONMENT" == *centos7* ]]; then
+  # CentOS has gcc 4 but we need a newer compiler. Upgrade it.
+  sudo yum install -y centos-release-scl
+  sudo yum install -y devtoolset-4\*
+  sudo yum install -y scl-utils
+
+  source scl_source enable devtoolset-4 || yes
+  gcc --version
 fi
 
 # CMAKE_ARGS are only passed to 'cmake' and the -Dfoo=bar does not work with

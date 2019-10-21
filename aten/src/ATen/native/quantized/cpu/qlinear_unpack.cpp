@@ -78,11 +78,10 @@ class QLinearUnpackWeightInt8 final : public c10::OperatorKernel {
       return qnnpack_linear_unpack(packed_weight);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::linear_unpack ",
         toString(ctx.qEngine()));
-    return std::tuple<at::Tensor, c10::optional<Tensor>>(
-        at::Tensor(), at::Tensor());
   }
 };
 

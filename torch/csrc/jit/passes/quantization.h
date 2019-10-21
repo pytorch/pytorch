@@ -16,26 +16,6 @@ using QConfigDict = std::unordered_map<std::string, QConfig>;
 using ModuleQConfigMap =
     std::unordered_map<script::ModulePtr, c10::optional<QConfig>>;
 
-/** \brief Propagates QParams through nodes that are not supposed to change it.
- *
- * An example of such node is `Split`: even though the observed distribution
- * might be different for input and output tensors, we would like to use input's
- * qparams for output as well.
- */
-TORCH_API void PropagateQuantInfo(std::shared_ptr<Graph>& graph);
-
-/** \brief Check that all expected optimizations after quant-dequant nodes
- * insertion actually happened.
- *
- * Even though semantically it would be correct to just execute the initial
- * quant-dequant nodes as is, what we really wanted when we inserted them is to
- * fuse them into adjacent non-quantized ops resulting in quantized ops. Thus,
- * if after all the cleanups, optimizations (particularly, fusion) we find
- * quant-dequant pair in the graph, it indicates that quantization didn't go as
- * planned.
- */
-TORCH_API void QuantLinting(std::shared_ptr<Graph>& graph);
-
 /** \brief Quantize model's inputs and outputs.
  *
  * This pass folds quant/dequant ops into the input/output tensors, essentially
@@ -110,14 +90,51 @@ TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
 
 /** \brief Fold quantize function call into module
  *
- *  For the graph in the specified method of module, if we find a quantize_per_tensor
- *  call on an attribute("weight") of the module, we'll quantize the attribute directly
- *  and register a new buffer "_quantized_weight" on the module and remove the
- *  quantize_per_tensor call and replace the use of the quantized weight with
+ *  For the graph of the specified method of module, if we find a
+ * quantize_per_tensor call on an attribute("weight") of the module, we'll
+ * quantize the attribute directly and register a new buffer "_quantized_weight"
+ * on the module and remove the quantize_per_tensor call and replace the use of
+ * the quantized weight with
  *  "_quantized_weight".
  */
 TORCH_API void FoldQuantizeCallIntoBuffer(script::Module& module, const std::string& method_name);
 
+/** \brief Insert prepack and unpack function in graph
+ *  We want add pack/unpack functions for quantized weight because later we want to
+ *  fold the packed weight as an attribute of the module, in order
+ *  to reduce the cost of packing the weight on the fly in quantized
+ *  models.
+ *
+ *  Each quantized op has it's corresponding prepack/unpack function,
+ *  right now, we only need to do prepack/unpack for quantized::linear
+ * and quantized::conv2d.
+ */
+TORCH_API void InsertPrepackUnpack(std::shared_ptr<Graph>& graph);
 
+/** \brief Insert pack and unpack function in all graphs
+ *   of module
+ *
+ *   Go through graphs of all the methods of all child modules
+ *   and call InsertPrepackUnpack on the graph.
+ */
+TORCH_API void InsertPrepackUnpack(script::Module& module);
+
+/** \brief Fold prepack function call into module
+ *
+ *  For the graph of the specified method, if we find a
+ * `quantized::linear_prepack` call, we'll clone the wrapper module and set the
+ * weight and bias of the module and add the wrapper module as a child to the
+ * input module. Folding is recursively applied to all methods of all child
+ * modules of the input module
+ *
+ *  Wrapper module is used to overwrite serialization for packed
+ *  weight and bias since they are not recognized by JIT, this
+ *  is a workaround, a long term solution would be to support serialization of
+ *  packed weight and bias using custom types
+ *
+ */
+TORCH_API void FoldPrepackedWeightIntoModule(
+    script::Module& module,
+    const script::Module& wrapper_module);
 } // namespace jit
 } // namespace torch

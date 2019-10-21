@@ -96,11 +96,10 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
       return qnnpack_conv_unpack(packed_weights);
     }
 #endif
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK(
+        false,
         "Didn't find engine for operation quantized::conv_unpack ",
         toString(ctx.qEngine()));
-    return std::tuple<at::Tensor, c10::optional<Tensor>>(
-        at::Tensor(), at::Tensor());
   }
 };
 

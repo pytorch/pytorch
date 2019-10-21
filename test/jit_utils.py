@@ -43,6 +43,10 @@ def execWrapper(code, glob, loc):
 def do_input_map(fn, input):
     return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
 
+def clear_class_registry():
+    torch._C._jit_clear_class_registry()
+    torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
+
 
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
@@ -84,7 +88,7 @@ class JitTestCase(TestCase):
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         self.clearHooks()
-        torch._C._jit_clear_class_registry()
+        clear_class_registry()
 
     def _isHookExceptionOk(self, e):
         se = str(e)
@@ -579,3 +583,12 @@ def enable_cpu_fuser_if(cond):
                 return fn(*args, **kwargs)
             return wrapper
         return noop_fuser
+
+def get_forward(c):
+    return c._get_method('forward')
+
+def get_forward_graph(c):
+    return c._get_method('forward').graph
+
+def get_module_method(m, module, method):
+    return m._c._get_module(module)._get_method(method)

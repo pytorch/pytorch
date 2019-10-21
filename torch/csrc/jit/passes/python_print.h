@@ -12,38 +12,28 @@ struct Method;
 struct Module;
 } // namespace script
 
-TORCH_API void PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const Function& callee,
-    bool is_method,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable = false);
+struct PythonPrintImpl;
 
-TORCH_API void PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& classType,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable = false);
+struct TORCH_API PythonPrint {
+  PythonPrint(
+      std::vector<at::Tensor>& tensor_table,
+      std::vector<c10::NamedTypePtr>& deps_table,
+      bool enforce_importable = false);
 
-TORCH_API void LEGACY_PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const c10::NamedTypePtr& type,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable = false);
+  void printNamedType(const c10::NamedTypePtr& classType);
+  void printFunction(const Function& callee);
+  void printMethod(const Function& callee);
 
-TORCH_API void LEGACY_PythonPrint(
-    std::ostream& out,
-    SourceRangeRecords& source_ranges_out,
-    const script::Module& module,
-    std::vector<at::Tensor>& tensor_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
-    bool enforce_importable);
+  std::string str() const;
+  const SourceRangeRecords& ranges() const;
+
+  ~PythonPrint();
+
+  void LEGACY_printOpVersion();
+
+ private:
+  std::shared_ptr<PythonPrintImpl> pImpl;
+};
 
 TORCH_API bool printerHasSpecialCaseFor(c10::Symbol sym);
 } // namespace jit

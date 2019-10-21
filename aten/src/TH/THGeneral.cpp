@@ -188,11 +188,6 @@ void THFree(void *ptr)
   c10::free_cpu(ptr);
 }
 
-double THLog10(const double x)
-{
-  return log10(x);
-}
-
 double THLog1p(const double x)
 {
 #if (defined(_MSC_VER) || defined(__MINGW32__))
@@ -201,11 +196,6 @@ double THLog1p(const double x)
 #else
   return log1p(x);
 #endif
-}
-
-double THLog2(const double x)
-{
-  return log2(x);
 }
 
 THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
