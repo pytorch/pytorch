@@ -163,7 +163,7 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
 };
 
 template <typename... Args>
-inline void extract_variables(std::vector<bool> &is_var, variable_list& list, Args&&... args) {
+inline void extract_vars(std::vector<bool> &is_var, variable_list& list, Args&&... args) {
   CountVariables(is_var, list).apply(std::forward<Args>(args)...);
 }
 
