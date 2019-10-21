@@ -1515,6 +1515,25 @@ TEST_F(ModulesTest, Sigmoid) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, PixelShuffle) {
+  PixelShuffle module(/*upscale_factor=*/2);
+  auto x = torch::tensor(
+    {{{{-17, 19}, {-1, 2}},
+      {{7, 14}, {-3, 1}},
+      {{0, -2}, {-12, 14}},
+      {{-15, 0}, {-3, 9}}}}, torch::kFloat);
+  auto y_exp = torch::tensor(
+    {{{{-17, 7, 19, 14},
+       {0, -15, -2, 0},
+       {-1, -3, 2, 1},
+       {-12, -3, 14, 9}}}}, torch::kFloat);
+  auto y = module(x);
+
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4}));
+  ASSERT_TRUE(y.allclose(y_exp));
+}
+
 TEST_F(ModulesTest, Softplus) {
   const auto size = 3;
   for (const auto beta : {0.5, 1.0, 2.0}) {
@@ -1996,6 +2015,11 @@ TEST_F(ModulesTest, PrettyPrintCELU) {
 
 TEST_F(ModulesTest, PrettyPrintSigmoid) {
   ASSERT_EQ(c10::str(Sigmoid()), "torch::nn::Sigmoid()");
+}
+
+TEST_F(ModulesTest, PrettyPrintPixelShuffle) {
+  ASSERT_EQ(c10::str(PixelShuffle(PixelShuffleOptions(5))),
+            "torch::nn::PixelShuffle(upscale_factor=5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintSoftplus) {
