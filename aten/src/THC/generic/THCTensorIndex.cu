@@ -503,13 +503,13 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
     // indices to choose
     if (numIndices <= 16) {
       if (dstInfo.dims == 1 && srcInfo.dims == 1 && indContig) {
-        SMALL_INDEX(scalar_t, unsigned int, 1, 1, -2);
+        SMALL_INDEX24(scalar_t, unsigned int, 1, 1, -2);
       } else if (dstInfo.dims == 2 && srcInfo.dims == 2 && indContig) {
-        SMALL_INDEX(scalar_t, unsigned int, 2, 2, -2);
+        SMALL_INDEX24(scalar_t, unsigned int, 2, 2, -2);
       } else if (dstInfo.dims == 3 && srcInfo.dims == 3 && indContig) {
-        SMALL_INDEX(scalar_t, unsigned int, 3, 3, -2);
+        SMALL_INDEX24(scalar_t, unsigned int, 3, 3, -2);
       } else {
-        SMALL_INDEX(scalar_t, unsigned int, -1, -1, -1);
+        SMALL_INDEX24(scalar_t, unsigned int, -1, -1, -1);
       }
     } else {
       bool indexIsMajor = THCTensor_(indexShouldBeMajor)(dstInfo, dstSelectDim);
