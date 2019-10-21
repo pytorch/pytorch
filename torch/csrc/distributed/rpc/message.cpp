@@ -52,6 +52,10 @@ const std::vector<char>& Message::payload() const {
   return payload_;
 }
 
+std::vector<torch::Tensor>&& Message::moveTensors() && {
+  return std::move(tensors_);
+}
+
 std::vector<torch::Tensor>& Message::tensors() {
   return tensors_;
 }
@@ -60,7 +64,7 @@ const std::vector<torch::Tensor>& Message::tensors() const {
   return tensors_;
 }
 
-const MessageType& Message::type() const {
+MessageType Message::type() const {
   return type_;
 }
 
