@@ -1,14 +1,10 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-from caffe2.python import core, workspace
-from hypothesis import given
-from hypothesis import strategies as st
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import numpy as np
+from caffe2.python import core, workspace
+from hypothesis import given, strategies as st
 
 
 def batched_boarders_and_data(
@@ -60,6 +56,47 @@ def _tensor_splits(draw):
     return (
         np.array(data).astype(np.float32), np.array(ranges),
         np.array(lengths), np.array(key).astype(np.int64)
+    )
+
+
+@st.composite
+def _bad_tensor_splits(draw):
+    lengths = draw(st.lists(st.integers(4, 6), min_size=4, max_size=4))
+    batch_size = 4
+    element_pairs = [
+        (batch, r) for batch in range(batch_size) for r in range(len(lengths))
+    ]
+    perm = draw(st.permutations(element_pairs))
+    ranges = [[(0, 0)] * len(lengths) for _ in range(batch_size)]
+    offset = 0
+
+    # Inject some bad samples depending on the batch.
+    # Batch 2: length is set to 0. This way, 25% of the samples are empty.
+    # Batch 0-1: length is set to half the original length. This way, 50% of the
+    # samples are of mismatched length.
+    for pair in perm:
+        if pair[0] == 2:
+            length = 0
+        elif pair[0] <= 1:
+            length = lengths[pair[1]] // 2
+        else:
+            length = lengths[pair[1]]
+        ranges[pair[0]][pair[1]] = (offset, length)
+        offset += length
+
+    data = draw(
+        st.lists(
+            st.floats(min_value=-1.0, max_value=1.0), min_size=offset, max_size=offset
+        )
+    )
+
+    key = draw(st.permutations(range(offset)))
+
+    return (
+        np.array(data).astype(np.float32),
+        np.array(ranges),
+        np.array(lengths),
+        np.array(key).astype(np.int64),
     )
 
 
@@ -192,7 +229,43 @@ class TestGatherRanges(serial.SerializedTestCase):
             self.assertEqual(shapes["lengths_output"], [3])
             self.assertEqual(types["lengths_output"], core.DataType.INT32)
 
+    @given(tensor_splits=_bad_tensor_splits(), **hu.gcs_cpu_only)
+    def test_empty_range_check(self, tensor_splits, gc, dc):
+        data, ranges, lengths, key = tensor_splits
+
+        workspace.FeedBlob("data", data)
+        workspace.FeedBlob("ranges", ranges)
+        workspace.FeedBlob("key", key)
+
+        def getOpWithThreshold(
+            min_observation=2, max_empty_ratio=0.3, max_mismatched_ratio=0.6
+        ):
+            return core.CreateOperator(
+                "GatherRangesToDense",
+                ["data", "ranges", "key"],
+                ["X_{}".format(i) for i in range(len(lengths))],
+                lengths=lengths,
+                min_observation=min_observation,
+                max_empty_ratio=max_empty_ratio,
+                max_mismatched_ratio=max_mismatched_ratio,
+            )
+
+        workspace.RunOperatorOnce(getOpWithThreshold())
+
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(getOpWithThreshold(max_empty_ratio=0.2))
+
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(getOpWithThreshold(max_mismatched_ratio=0.4))
+
+        workspace.RunOperatorOnce(
+            getOpWithThreshold(
+                max_empty_ratio=0.2, max_mismatched_ratio=0.4, min_observation=5
+            )
+        )
+
 
 if __name__ == "__main__":
     import unittest
+
     unittest.main()
