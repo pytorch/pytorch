@@ -385,6 +385,9 @@ TEST(TensorTest, MultidimTensorCtor) {
     ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{1}}}}}}}}}}}), "Tensor with more than 10 dimensions is not supported");
   }
   {
+    ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{{1}}}}}}}}}}}}), "Tensor with more than 10 dimensions is not supported");
+  }
+  {
     auto tensor = torch::tensor({{{{{{{{{{}}}}}}}}}});
     ASSERT_EQ(tensor.numel(), 0);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 1, 1, 1, 1, 1, 1, 1, 0}));
@@ -392,6 +395,9 @@ TEST(TensorTest, MultidimTensorCtor) {
   }
   {
     ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{}}}}}}}}}}}), "Tensor with more than 10 dimensions is not supported");
+  }
+  {
+    ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{{}}}}}}}}}}}}), "Tensor with more than 10 dimensions is not supported");
   }
   {
     auto tensor = torch::tensor({{{{{{{{{{1, 2}}}}}}}}}});
@@ -402,6 +408,9 @@ TEST(TensorTest, MultidimTensorCtor) {
   }
   {
     ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{1, 2}}}}}}}}}}}), "Tensor with more than 10 dimensions is not supported");
+  }
+  {
+    ASSERT_THROWS_WITH(torch::tensor({{{{{{{{{{{{1, 2}}}}}}}}}}}}), "Tensor with more than 10 dimensions is not supported");
   }
 }
 
