@@ -654,7 +654,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 5, 10, 10)
         self.run_test(model, x)
 
-    # enable test for opset 11 when ScatterElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter(self):
         class ScatterModel(torch.nn.Module):
@@ -682,9 +681,7 @@ class TestONNXRuntime(unittest.TestCase):
         values = torch.arange(3 * 2 * 2, dtype=torch.float32).view(3, 2, 2)
         self.run_test(ScatterModel(), (input, indices, values))
 
-    # enable test for opset 11 when ScatterElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_scatter_add(self):
         class ScatterModel(torch.nn.Module):
             def forward(self, input, indices, values):
