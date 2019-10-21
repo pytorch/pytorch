@@ -39,7 +39,7 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
       {"Storage", IntType::get()},
-      {"QScheme", IntType::get()},  // TODO This type should be removed from the schema parser, it should use the custom class mechanism instead. @jerryzh
+      {"QScheme", IntType::get()},
       {"ConstQuantizerPtr", IntType::get()},  // TODO This type should be removed from the schema parser, it should use the custom class mechanism instead. @jerryzh
       {"Device", DeviceObjType::get()},
       {"Scalar", NumberType::get()},
