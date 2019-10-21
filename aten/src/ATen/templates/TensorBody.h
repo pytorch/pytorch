@@ -610,8 +610,12 @@ class CAFFE2_API Tensor {
   void set_name(const std::string& name) const;
   const std::string& name() const noexcept;
 
-  PyObject* pyobj() const noexcept;
-  void set_pyobj(PyObject* pyobj) const noexcept;
+  PyObject* pyobj() const noexcept {
+    return impl_->pyobj();
+  }
+  void set_pyobj(PyObject* pyobj) const noexcept {
+    impl_->set_pyobj(pyobj);
+  }
 
   torch::autograd::AutogradMeta* get_autograd_meta() const noexcept;
 
