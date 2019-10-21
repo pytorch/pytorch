@@ -96,18 +96,22 @@ class DispatchTable final {
   }
 
   std::string listAllDispatchKeys() const {
-    if (kernels_.size() == 0) {
-      return "[]";
-    }
     std::ostringstream str;
-    str << "[" << toString(kernels_.begin()->first);
-    for (auto iter = ++kernels_.begin(); iter != kernels_.end(); ++iter) {
-      str << ", " << toString(iter->first);
+    str << "[";
+
+    if (kernels_.size() != 0) {
+      str << toString(kernels_.begin()->first);
+      for (auto iter = ++kernels_.begin(); iter != kernels_.end(); ++iter) {
+        str << ", " << toString(iter->first);
+      }
+    }
+    if (catchallKernel_.has_value()) {
+      if (kernels_.size() != 0) {
+        str << ", ";
+      }
+      str << "CATCH-ALL";
     }
     str << "]";
-    if (catchallKernel_.has_value()) {
-      str << ", CATCH-ALL";
-    }
     return str.str();
   }
 

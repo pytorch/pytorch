@@ -55,7 +55,8 @@ public:
 
   template<class... Args>
   c10::optional<TensorTypeId> getDispatchKeyUnboxed(const Args&... args) const {
-    AT_ASSERT(sizeof...(args) == num_args_, "Wrong number of arguments. Schema says ", num_args_, " but was called with ", sizeof...(args));
+    // nb: assertion not enabled because this is on the hot inlined path
+    // AT_ASSERT(sizeof...(args) == num_args_, "Wrong number of arguments. Schema says ", num_args_, " but was called with ", sizeof...(args));
     if (C10_UNLIKELY(!is_valid_)) {
       return c10::nullopt;
     }
