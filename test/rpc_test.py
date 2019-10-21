@@ -274,7 +274,10 @@ class RpcTest(object):
             )
 
     def test_invalid_names(self):
-        dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
+        dist.init_process_group(
+            backend=dist.Backend.GLOO,
+            init_method=self.init_method
+        )
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
             rpc.init_model_parallel(self_name="abc*")
@@ -290,11 +293,24 @@ class RpcTest(object):
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             rpc.init_model_parallel(
                 self_name="".join(["a" for _ in range(500)]),
-                backend=TEST_CONFIG.rpc_backend,
-                self_rank=self.rank,
-                init_method=self.init_method,
             )
+
+        from torch.distributed.rpc.api import _agent
+        self.assertEqual(_agent, None)
+        # join_rpc() should not do anything as _agent is None
         rpc.join_rpc()
+        # We need this barrier here because although init_process_group is
+        # blocking, it does not guarantee that all ranks are done with
+        # initialization after the call. We did run into issues with it where
+        # rank 3 crashed with "connection closed by peer" RuntimeError, which is
+        # caused by other ranks exit before rank 3 is ready. This can be fixed
+        # by adding a collective call to sync all processes.
+        #
+        # We decided not fixing this issue in init_process_group because it
+        # would add extra overhead to the call, and normal use cases won't
+        # create a progress group and exit without doing anything. Hence, it is
+        # not worthy to introduce the overhead just for this test case.
+        dist.barrier()
 
     @dist_init
     def test_add(self):
