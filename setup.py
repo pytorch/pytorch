@@ -800,6 +800,7 @@ if __name__ == '__main__':
                 'include/ATen/cuda/detail/*.h',
                 'include/ATen/cudnn/*.h',
                 'include/ATen/detail/*.h',
+                'include/Aten/native/*.h',
                 'include/caffe2/utils/*.h',
                 'include/c10/*.h',
                 'include/c10/macros/*.h',
