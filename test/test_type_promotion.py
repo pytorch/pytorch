@@ -347,6 +347,10 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.promote_types(torch.float, torch.double), torch.double)
         self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
 
+    def test_promote_self(self):
+        for dtype in torch.testing.get_all_dtypes():
+            self.assertEqual(torch.promote_types(dtype, dtype), dtype)
+
     def test_indexing(self):
         a = torch.ones(5, 2, dtype=torch.double)
         b = torch.zeros(5, dtype=torch.int)
