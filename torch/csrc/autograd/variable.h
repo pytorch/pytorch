@@ -367,7 +367,7 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
   return static_cast<const Variable&>(tensor);
 }
 
-void _create_cpp_hook(const at::Tensor& self);
+TORCH_API void _create_cpp_hook(const at::Tensor& self);
 
 }} // namespace torch::autograd
 
