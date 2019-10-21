@@ -405,6 +405,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/liveness.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/loop_unrolling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_grad_of.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/lower_graph.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/lower_tuples.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/peephole.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/remove_expands.cpp
@@ -562,6 +563,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/fold.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/loss.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pixelshuffle.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp

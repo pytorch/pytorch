@@ -28,7 +28,8 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
-from torch.quantization._quantize_script import fold_prepack, ConvPackedParams, LinearPackedParams
+from torch.quantization._quantize_script import fold_prepack, linear_packed_params, \
+    conv_packed_params
 
 # Testing utils
 import jit_utils
@@ -1430,12 +1431,7 @@ graph(%input, %weight):
                               ('conv', QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
             m = torch.jit.script(M())
             ref_res = get_forward(m._c)(data)
-            linear_packed_params = torch.jit.script(LinearPackedParams())._c
-            conv_packed_params = torch.jit.script(ConvPackedParams())._c
-            # fold_prepack(m)
-            torch._C._jit_pass_fold_prepack(m._c,
-                                            linear_packed_params,
-                                            conv_packed_params)
+            fold_prepack(m, linear_packed_params, conv_packed_params)
             res = get_forward(m._c)(data)
             # check attribute and graph
             packed_module_list = [x for x, _ in m._c._get_modules()
