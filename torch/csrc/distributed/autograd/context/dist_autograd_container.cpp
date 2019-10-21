@@ -9,6 +9,7 @@ namespace autograd {
 constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
 constexpr int kMaxWorkerId = 65535;
+const std::chrono::duration<double> kContextTimeout = std::chrono::seconds(600);
 
 constexpr int64_t kInvalidContextId = -1;
 
@@ -23,7 +24,9 @@ DistAutogradContainer::DistAutogradContainer()
       worker_id_(0),
       initialized_(false),
       next_autograd_message_id_(0),
-      max_id_(0) {}
+      max_id_(0) {
+  std::thread(&DistAutogradContainer::cleanupContextWatchdog, this);
+}
 
 DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
   std::lock_guard<std::mutex> guard(dist_container_init_lock_);
@@ -105,7 +108,7 @@ const DistAutogradContext& DistAutogradContainer::newContext() {
                           std::forward_as_tuple(next_context_id_),
                           std::forward_as_tuple(next_context_id_))
                       .first->second;
-
+  context_queue_.push(std::make_tuple(std::chrono::system_clock::now(), next_context_id_));
   current_context_id_ = next_context_id_++;
   return context;
 }
@@ -170,6 +173,16 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
   if (current_context_id_ == context_id) {
     // Reset the thread_local current context id, since it is no longer valid.
     current_context_id_ = kInvalidContextId;
+  }
+}
+
+void DistAutogradContainer::cleanupContextWatchdog() {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  if (!context_queue_.empty()) {
+    while (std::chrono::system_clock::now() - std::get<0>(context_queue_.front()) >= kContextTimeout) {
+      releaseContextIfPresent(std::get<1>(context_queue_.front()));
+      context_queue_.pop();
+    }
   }
 }
 
