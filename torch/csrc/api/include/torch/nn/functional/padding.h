@@ -7,17 +7,17 @@ namespace nn {
 namespace functional {
 
 inline Tensor _pad_circular(Tensor input, IntArrayRef padding) {
-  input = torch::cat({input, input.narrow(2, 0, padding[-1])}, /*dim=*/2);
-  input = torch::cat({input.narrow(2, -(padding[-1] + padding[-2]), -padding[-1]), input}, /*dim=*/2);
+  input = torch::cat({input, input.narrow(2, 0, padding[-1 + padding.size()])}, /*dim=*/2);
+  input = torch::cat({input.narrow(2, -(padding[-1 + padding.size()] + padding[-2 + padding.size()]), -padding[-1 + padding.size()]), input}, /*dim=*/2);
 
   if (padding.size() > 2) {
-    input = torch::cat({input, input.narrow(3, 0, padding[-3])}, /*dim=*/3);
-    input = torch::cat({input.narrow(3, -(padding[-3] + padding[-4]), -padding[-3]), input}, /*dim=*/3);
+    input = torch::cat({input, input.narrow(3, 0, padding[-3 + padding.size()])}, /*dim=*/3);
+    input = torch::cat({input.narrow(3, -(padding[-3 + padding.size()] + padding[-4 + padding.size()]), -padding[-3 + padding.size()]), input}, /*dim=*/3);
   }
 
   if (padding.size() > 4) {
-    input = torch::cat({input, input.narrow(4, 0, padding[-5])}, /*dim=*/4);
-    input = torch::cat({input.narrow(4, -(padding[-5] + padding[-6]), -padding[-5]), input}, /*dim=*/4);
+    input = torch::cat({input, input.narrow(4, 0, padding[-5 + padding.size()])}, /*dim=*/4);
+    input = torch::cat({input.narrow(4, -(padding[-5 + padding.size()] + padding[-6 + padding.size()]), -padding[-5 + padding.size()]), input}, /*dim=*/4);
   }
 
   return input;
