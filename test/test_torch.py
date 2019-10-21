@@ -3262,10 +3262,10 @@ class _TestTorchMixin(object):
         self.assertFalse(t1.is_same_size(t3))
         self.assertTrue(t1.is_same_size(t4))
 
-    def test_is_set_to(self):
-        t1 = torch.Tensor(3, 4, 9, 10)
-        t2 = torch.Tensor(3, 4, 9, 10)
-        t3 = torch.Tensor().set_(t1)
+    def test_is_set_to(self, device):
+        t1 = torch.empty(3, 4, 9, 10)
+        t2 = torch.empty(3, 4, 9, 10)
+        t3 = torch.tensor([]).set_(t1)
         t4 = t3.clone().resize_(12, 90)
         self.assertFalse(t1.is_set_to(t2))
         self.assertTrue(t1.is_set_to(t3))
@@ -3277,6 +3277,12 @@ class _TestTorchMixin(object):
 
         t1 = torch.tensor([True, True], dtype=torch.bool)
         t2 = torch.tensor([0], dtype=torch.bool).set_(t1)
+        self.assertTrue(t1.is_set_to(t2))
+
+        # test that legacy empty size behavior used to be respected (i.e. all
+        # empty tensors were logically collapsed to size [0]).
+        t1 = torch.empty([0, 2, 5, 0])
+        t2 = t1.view([0])
         self.assertTrue(t1.is_set_to(t2))
 
     def test_tensor_set(self):
