@@ -9744,7 +9744,18 @@ class TestTorchDeviceType(TestCase):
         m2 = torch.tensor([3., 4.], dtype=torch.bfloat16)
         self.assertEqual(m1 + m2, torch.tensor([4., 6.], dtype=torch.bfloat16))
 
-    def test_bool_sub(self, device):
+        # mismatched alpha
+        m1 = torch.tensor([1], dtype=torch.int8, device=device)
+        m2 = torch.tensor([2], dtype=torch.int8, device=device)
+        self.assertRaisesRegex(RuntimeError,
+                               r"Boolean alpha only supported for Boolean results\.",
+                               lambda: torch.add(m1, m2, alpha=True))
+        self.assertRaisesRegex(RuntimeError,
+                               r"For integral input tensors, argument alpha must not be a floating point number\.",
+                               lambda: torch.add(m1, m2, alpha=1.0))
+
+
+    def test_sub_typing(self, device):
         m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
         m2 = torch.tensor([True, True, False, False, False, True], dtype=torch.bool, device=device)
         self.assertRaisesRegex(RuntimeError,
@@ -9759,6 +9770,16 @@ class TestTorchDeviceType(TestCase):
                                r"Subtraction, the `\-` operator, with a bool tensor is not supported. "
                                r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
                                lambda: m2 - 1)
+
+        # mismatched alpha
+        m1 = torch.tensor([1], dtype=torch.int8, device=device)
+        m2 = torch.tensor([2], dtype=torch.int8, device=device)
+        self.assertRaisesRegex(RuntimeError,
+                               r"Boolean alpha only supported for Boolean results\.",
+                               lambda: torch.sub(m1, m2, alpha=True))
+        self.assertRaisesRegex(RuntimeError,
+                               r"For integral input tensors, argument alpha must not be a floating point number\.",
+                               lambda: torch.sub(m1, m2, alpha=1.0))
 
     def test_mul(self, device):
         m1 = torch.randn(10, 10, device=device)

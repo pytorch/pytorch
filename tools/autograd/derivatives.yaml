@@ -443,6 +443,7 @@
 - name: lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor
   self: grad * (1 - weight)
   end: grad * weight
+  weight: grad * (end - self)
 
 - name: lgamma(Tensor self) -> Tensor
   self: grad * digamma(self)
