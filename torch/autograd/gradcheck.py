@@ -120,9 +120,9 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
                 x_tensor[x_idx] = orig - eps
-                outa = fn(input).clone()
+                outa = fn(input).clone(memory_format=torch.contiguous_format)
                 x_tensor[x_idx] = orig + eps
-                outb = fn(input).clone()
+                outb = fn(input).clone(memory_format=torch.contiguous_format)
                 x_tensor[x_idx] = orig
                 r = (outb - outa) / (2 * eps)
                 d_tensor[d_idx] = r.detach().reshape(-1)
