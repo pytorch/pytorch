@@ -124,11 +124,12 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(true);
+  iter.dont_compute_common_dtype();
   iter.add_output(self);
   iter.add_input(src);
   iter.dont_resize_outputs();
-  iter.dont_compute_common_dtype();
   iter.build();
+  iter.set_common_dtype(iter.dtype());
 
   if (iter.numel() == 0) {
     return self;

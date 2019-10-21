@@ -318,6 +318,10 @@ struct CAFFE2_API TensorIterator {
     resize_outputs_ = false;
   }
 
+  void set_common_dtype(ScalarType dtype) {
+    common_dtype_ = dtype;
+  }
+
   void build();
 
 protected:
