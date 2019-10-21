@@ -60,6 +60,11 @@ class VonMises(Distribution):
     can be any real number (to facilitate unconstrained optimization), but are
     interpreted as angles modulo 2 pi.
 
+    Example::
+        >>> m = dist.VonMises(torch.tensor([1.0]), torch.tensor([1.0]))
+        >>> m.sample() # von Mises distributed with loc=1 and concentration=1
+        tensor([1.9777])
+
     :param torch.Tensor loc: an angle in radians.
     :param torch.Tensor concentration: concentration parameter
     """

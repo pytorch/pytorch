@@ -36,7 +36,7 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf
-from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
+from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests, skipIfRocm
 from common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
