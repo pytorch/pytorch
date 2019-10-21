@@ -272,7 +272,7 @@ Tensor& upsample_nearest2d_out_cuda(
   return output;
 }
 
-Tensor upsample_nearest2d_cuda(const Tensor& input, IntArrayRef output_size, double scales_1, double scales_2,) {
+Tensor upsample_nearest2d_cuda(const Tensor& input, IntArrayRef output_size, double scales_1, double scales_2) {
   Tensor output = at::empty_like(input);
   upsample_nearest2d_out_cuda_template(output, input, output_size, scales_1, scales_2);
   return output;
