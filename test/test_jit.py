@@ -167,13 +167,12 @@ def prof_callable(callable, *args, **kwargs):
 def prof_callable(callable, *args, **kwargs):
     
     #print ("running prof_callable")
-    if 'profile' in kwargs:    
-        if kwargs['profile'] == ProfilingMode.FULL:
-            with enable_profiling_mode(ProfilingMode.FULL):
-                #print ("removing profile")
-                del kwargs['profile']
-                callable(*args, **kwargs)
-                return callable(*args, **kwargs)
+    if profile_and_replay in kwargs:
+        with enable_profiling_mode(ProfilingMode.FULL):
+            #print ("removing profile")
+            del kwargs['profile']
+            callable(*args, **kwargs)
+            return callable(*args, **kwargs)
 
     return callable(*args, **kwargs)
 
@@ -637,7 +636,7 @@ class TestJit(JitTestCase):
         def test_input(func, input, result):
             # if result == 2 we will trigger a bailout and 
             # the unprofiled graph should return the correct result
-            self.assertEqual(func(input, profile = ProfilingMode.FULL), result)
+            self.assertEqual(func(input, profile_and_replay = True), result)
             gre = func.graph_for(input)
 
             
@@ -3136,7 +3135,7 @@ class TestScript(JitTestCase):
         b = torch.randn(5, 5, requires_grad=True, device='cuda')
 
         #jit = torch.jit.script(fusable)
-        fusable(a, b, profile = ProfilingMode.FULL)
+        fusable(a, b, profile_and_replay = True)
         #b_script.backward()
         
 
@@ -4871,7 +4870,7 @@ a")
         # and the output of the node conservatively setting grad to true
 
         inps = (torch.tensor(1.0, requires_grad=True), torch.tensor(1), 10)
-        test(*inps, profile = ProfilingMode.FULL)
+        test(*inps, profile_and_replay = True)
 
         graph = test.graph_for(*inps)
         loop = graph.findNode("prim::Loop")
@@ -6227,7 +6226,7 @@ a")
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
             return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
 
-        g = test_dtype.graph_for(5, profile = ProfilingMode.FULL)
+        g = test_dtype.graph_for(5, profile_and_replay = True)
         # both should have completed shapes
         FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut").check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
 
@@ -6236,7 +6235,7 @@ a")
             a = torch.as_tensor(input, dtype=input.dtype)
             return a, torch.as_tensor(input, dtype=torch.float)
 
-        g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile = ProfilingMode.FULL)
+        g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile_and_replay = True)
         FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
 
 
@@ -6334,7 +6333,7 @@ a")
             code = template.format(to_str=to_str, device=device, non_blocking=non_blocking, cuda=cuda)
             scope = {}
             cu = torch.jit.CompilationUnit(code)
-            return cu.func(t, profile = ProfilingMode.FULL)
+            return cu.func(t, profile_and_replay = True)
 
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, s(t, 't.to(t, non_blocking=non_blocking)', non_blocking))
@@ -10028,7 +10027,7 @@ a")
         def randint():
             return torch.randint(0, 5, [1, 2])
         
-        out = randint(profile = ProfilingMode.FULL)
+        out = randint(profile_and_replay = True)
         self.assertEqual(out.dtype, torch.double)
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
