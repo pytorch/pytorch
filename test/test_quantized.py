@@ -527,7 +527,7 @@ class TestQuantizedOps(TestCase):
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch_type)
         X = qX.dequantize()
-        # Run reference on int_repr + round to avoid double rounding error.
+        # Run reference on float tensor and then quantize the result for comparison
         X_ref = torch.nn.functional.avg_pool2d(
             X, kernel_size=kernel, stride=stride, padding=padding,
             ceil_mode=ceil_mode, count_include_pad=count_include_pad, divisor_override=divisor_override)
