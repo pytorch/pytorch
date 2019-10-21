@@ -711,6 +711,21 @@ class DistAutogradTest(object):
                 # Exit all other nodes.
                 pass
 
+    @dist_init
+    def test_context_cleanup_timeout(sefl):
+        global known_context_ids
+        with dist_autograd.context() as context_id:
+            t1 = torch.rand((3, 3), requires_grad=True)
+            t2 = torch.rand((3, 3), requires_grad=True)
+
+            res = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
+                               args=(t1, t2))
+            time.sleep(600);
+            with self.assertRaises(RuntimeError):
+                dist_autograd._retrieve_context(context_id)
+            success = _all_contexts_cleaned_up(num_contexts=len(dst_ranks))
+            self.assertTrue(success)
+
     @dist_init(setup_model_parallel=True)
     def test_backward_without_context(self):
         t1 = torch.rand((3, 3), requires_grad=True)
