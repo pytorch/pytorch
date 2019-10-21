@@ -212,41 +212,41 @@ Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, const Tensor& other)
 
 Tensor bitwise_xor(const Tensor& self, const Tensor& other) {
   Tensor result = at::empty({0}, self.options());
-  native::bitwise_xor_out(result, self, other);
+  at::bitwise_xor_out(result, self, other);
   return result;
 }
 
 Tensor& bitwise_xor_(Tensor& self, const Tensor& other) {
-  return native::bitwise_xor_out(self, self, other);
+  return at::bitwise_xor_out(self, self, other);
 }
 
 Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, Scalar other) {
-  return native::bitwise_xor_out(result, self, wrapped_scalar_tensor(other));
+  return at::bitwise_xor_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_xor(const Tensor& self, Scalar other) {
-  return native::bitwise_xor(self, wrapped_scalar_tensor(other));
+  return at::bitwise_xor(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& bitwise_xor_(Tensor& self, Scalar other) {
-  return native::bitwise_xor_(self, wrapped_scalar_tensor(other));
+  return self.bitwise_xor_(wrapped_scalar_tensor(other));
 }
 
 // Legacy xor interfaces. They are aliased to bitwise_xor* functions
 Tensor __xor__(const Tensor& self, const Tensor& other) {
-  return native::bitwise_xor(self, other);
+  return at::bitwise_xor(self, other);
 }
 
 Tensor __xor__(const Tensor& self, Scalar other) {
-  return native::bitwise_xor(self, other);
+  return at::bitwise_xor(self, other);
 }
 
 Tensor& __ixor__(Tensor& self, const Tensor& other) {
-  return native::bitwise_xor_(self, other);
+  return self.bitwise_xor_(other);
 }
 
 Tensor& __ixor__(Tensor& self, Scalar other) {
-  return native::bitwise_xor_(self, other);
+  return self.bitwise_xor_(other);
 }
 
 template <typename Stub>
