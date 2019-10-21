@@ -2740,9 +2740,9 @@ class TestNN(NNTestCase):
     def test_adaptive_pooling_avg_nhwc_non_contiguous(self):
         input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last)
-        input = input[:,::2,:,:].requires_grad_()
+        input = input[:, ::2, :, :].requires_grad_()
         grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32, device="cuda")
-        grad = grad[:,::2,:,:]
+        grad = grad[:, ::2, :, :]
         pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
 
         ref_input = input.detach().clone().contiguous().requires_grad_(True)
