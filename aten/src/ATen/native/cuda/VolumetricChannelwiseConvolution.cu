@@ -604,7 +604,7 @@ Tensor& conv_depthwise3d_cuda(
 }
 
 // // Don't need OOP calls?
-// Tensor conv3d_channelwise3d_forward_cuda(
+// Tensor conv3d_depthwise3d_forward_cuda(
 //   at::Tensor const& input,
 //   IntList kernel_size,
 //   IntList stride_size,
@@ -613,13 +613,13 @@ Tensor& conv_depthwise3d_cuda(
 // )
 // {
 //   auto output = at::empty({0}, input.options());
-//   conv3d_channelwise3d_forward_out_cuda_template(
+//   conv3d_depthwise3d_forward_out_cuda_template(
 //     output, input, kernel_size, stride_size, pad_size, dilation_size
 //   );
 //   return output;
 // }
 
-Tensor& conv3d_channelwise3d_backward_input_cuda(
+Tensor& conv3d_depthwise3d_backward_input_cuda(
   Tensor& gradInput,
   const Tensor& gradOutput,
   const Tensor& input,
@@ -638,7 +638,7 @@ Tensor& conv3d_channelwise3d_backward_input_cuda(
 }
 
 
-Tensor& conv3d_channelwise3d_backward_weight_cuda(
+Tensor& conv3d_depthwise3d_backward_weight_cuda(
   Tensor& gradWeight,
   const Tensor& gradOutput,
   const Tensor& input,
