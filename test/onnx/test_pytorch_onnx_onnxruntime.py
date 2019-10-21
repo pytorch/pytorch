@@ -426,7 +426,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DynamicSliceExportMod(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_arange(self):
+    def test_arange_dynamic(self):
         class ArangeModel(torch.nn.Module):
             def forward(self, input):
                 return torch.arange(input.shape[0]), \
@@ -440,6 +440,26 @@ class TestONNXRuntime(unittest.TestCase):
                       output_names=['output_1', 'output_2', 'output_3'],
                       dynamic_axes={'input_1': [0],
                                     'output_1': [0]})
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_arange(self):
+        class ArangeModel(torch.nn.Module):
+            def forward(self, start, end):
+                return torch.arange(start.size(0), end, 1.5, dtype=torch.int64)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.tensor(8.5, dtype=torch.float)
+        self.run_test(ArangeModel(), (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_arange_no_type(self):
+        class ArangeModel(torch.nn.Module):
+            def forward(self, end):
+                return torch.arange(end), \
+                    torch.arange(0, end)
+
+        x = torch.tensor(6.2, dtype=torch.float)
+        self.run_test(ArangeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_size(self):
@@ -907,6 +927,23 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(ArangeModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_arange_end_notype(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(a.size(0))
+
+        x = torch.randn(3, 4, requires_grad=True)
+        outputs = ArangeScript()(x)
+        self.run_test(ArangeScript(), x)
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(a.size(0))
+
+        self.run_test(ArangeModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_start_end(self):
         class ArangeScript(torch.jit.ScriptModule):
@@ -915,12 +952,27 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
 
         x = torch.randn(3, 4, requires_grad=True)
-        outputs = ArangeScript()(x)
         self.run_test(ArangeScript(), x)
 
         class ArangeModel(torch.nn.Module):
             def forward(self, a):
                 return torch.arange(2, a.size(0) + 2, dtype=torch.float).view(-1, 1) + a
+
+        self.run_test(ArangeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_arange_start_end_notype(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2.7, a.size(0) + 2).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        self.run_test(ArangeScript(), x)
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2.7, a.size(0) + 2).view(-1, 1) + a
 
         self.run_test(ArangeModel(), x)
 
@@ -932,12 +984,27 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
 
         x = torch.randn(3, 4, requires_grad=True)
-        outputs = ArangeScript()(x)
         self.run_test(ArangeScript(), x)
 
         class ArangeModel(torch.nn.Module):
             def forward(self, a):
                 return torch.arange(2, a.size(0) * a.size(1) + 2, a.size(1), dtype=torch.float).view(-1, 1) + a
+
+        self.run_test(ArangeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_arange_start_end_step_notype(self):
+        class ArangeScript(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, a):
+                return torch.arange(2.7, a.size(0) * a.size(1) + 2, a.size(1)).view(-1, 1) + a
+
+        x = torch.randn(3, 4, requires_grad=True)
+        self.run_test(ArangeScript(), x)
+
+        class ArangeModel(torch.nn.Module):
+            def forward(self, a):
+                return torch.arange(2.7, a.size(0) * a.size(1) + 2, a.size(1)).view(-1, 1) + a
 
         self.run_test(ArangeModel(), x)
 
