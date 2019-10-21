@@ -851,6 +851,18 @@ TEST_F(FunctionalTest, Normalize) {
   }
 }
 
+TEST_F(FunctionalTest, GeLU) {
+  const auto size = 3;
+  auto x = torch::linspace(-10.0, 10.0, size * size * size);
+  x.resize_({size, size, size});
+  auto y_exp = torch::gelu(x);
+  auto y = F::gelu(x);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(FunctionalTest, ReLU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
