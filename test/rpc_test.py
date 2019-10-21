@@ -1,9 +1,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import concurrent.futures
+from datetime import timedelta
 import sys
 import unittest
 from collections import namedtuple
+import time
 from unittest import mock
 
 import torch
@@ -107,7 +109,6 @@ def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
 
 def timeout_function(timeout):
-    import time
     time.sleep(timeout)
 
 
@@ -345,16 +346,17 @@ class RpcTest(object):
 
     @dist_init
     def test_future_timer(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
         fut = rpc.rpc_async(
-            "worker{}".format(dst_rank),
+            "worker{}".format((self.rank + 1) % self.world_size),
             timeout_function,
-            args=(5,)
+            args=(3,)
         )
-        from datetime import timedelta
-        print(fut.check_time_elapsed(timedelta(seconds=0)))
+        time.sleep(1)
+        self.assertTrue(fut.check_time_elapsed(timedelta(seconds=0)))
+        self.assertFalse(fut.check_time_elapsed(timedelta(seconds=100)))
+        # after waiting, check_time_elapsed should never return True, since the future has completed.
         fut.wait()
+        self.assertFalse(fut.check_time_elapsed(timedelta(seconds=0)))
 
 
     @dist_init
@@ -589,7 +591,6 @@ class RpcTest(object):
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
     def _stress_test_rpc(self, f, repeat=1000, args=()):
-        import time
 
         n = self.rank + 1
         dst_rank = n % self.world_size

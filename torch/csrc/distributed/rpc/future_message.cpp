@@ -67,6 +67,7 @@ void FutureMessage::startTimer() {
 bool FutureMessage::checkTimeElapsed(
     const std::chrono::seconds& timeoutSeconds) {
   std::unique_lock<std::mutex> lock(mutex_);
+
   if (completed_) {
     return false;
   }

@@ -85,7 +85,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "check_time_elapsed",
               [&](FutureMessage& fut, const std::chrono::seconds& timeout)
-                  -> bool { return fut.checkTimeElapsed(timeout); });
+                  -> bool { return fut.checkTimeElapsed(timeout); },
+              py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
