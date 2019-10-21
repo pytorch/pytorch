@@ -5,7 +5,7 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, lazy_property
 
 
 def _eval_poly(y, coef):
