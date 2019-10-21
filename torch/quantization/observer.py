@@ -42,7 +42,7 @@ def _with_args(cls_or_self, **kwargs):
 ABC = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
 
 
-class Observer(ABC, nn.Module):
+class ObserverBase(ABC, nn.Module):
     r"""Base observer Module.
     Any observer implementation should derive from this class.
 
@@ -55,7 +55,7 @@ class Observer(ABC, nn.Module):
         dtype: Quantized data type
     """
     def __init__(self, dtype):
-        super(Observer, self).__init__()
+        super(ObserverBase, self).__init__()
         self.dtype = dtype
 
     @abstractmethod
@@ -69,18 +69,31 @@ class Observer(ABC, nn.Module):
     with_args = classmethod(_with_args)
 
 
-class _ObserverBase(Observer):
+class _ObserverBase(ObserverBase):
     r"""Internal common base for all qint/quint8 observers.
 
     This base is for commonly used paramters used internally.
-    Users should use `~torch.quantization.observer.Observer` as a base class for
-    custom observers.
+    Users should use `~torch.quantization.observer.ObserverBase` as a base class
+    for custom observers.
 
     Args:
-        dtype: Quantized data type
-        qscheme: Quantization scheme to be used
+        dtype: Quantized data type.
+        qscheme: Quantization scheme to be used.
         reduce_range: Reduces the range of the quantized data type by 1 bit.
                       This is sometimes required to avoid instruction overflow.
+
+    .. warning::
+
+        :attr:`dtype` can only take ``torch.qint8`` or ``torch.quint8``.
+
+    .. warning::
+
+        :attr:`qscheme` can only take one of the following options:
+
+        - ``torch.per_tensor_affine``
+        - ``torch.per_tensor_symmetric``
+        - ``torch.per_channel_affine``
+        - ``torch.per_channel_symmetric``
     """
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
@@ -250,7 +263,9 @@ class MinMaxObserver(_ObserverBase):
     where :math:`Q_\text{min}` and :math:`Q_\text{max}` are the minimum and
     maximum of the quantized data type.
 
-    .. note:: Only works with ``torch.per_tensor_symmetric`` quantization scheme
+    .. warning:: Only works with ``torch.per_tensor_symmetric`` quantization scheme
+
+    .. warning:: :attr:`dtype` can only take ``torch.qint8`` or ``torch.quint8``.
 
     .. note:: If the running minimum equals to the running maximum, the scale
               and zero_point are set to 1.0 and 0.
@@ -530,10 +545,7 @@ class HistogramObserver(_ObserverBase):
         with every new tensor observed.
     2. Search the distribution in the histogram for optimal min/max values.
         The search for the min/max values ensures the minimization of the
-        quantization error.
-        During the search the bins that were formed due to outliers are ignored.
-        This is achieved by computing the quantization error assuming the min or
-        max are within specific bins in the histogram.
+        quantization error with respect to the floating point model.
     3. Compute the scale and zero point the same way as in the
         :class:`~torch.quantization.MinMaxObserver`
     """
@@ -834,7 +846,7 @@ class RecordingObserver(_ObserverBase):
         return self.tensor_val
 
 
-class NoopObserver(Observer):
+class NoopObserver(ObserverBase):
     r"""
     Observer that doesn't do anything and just passes its configuration to the
     quantized module's ``.from_float()``.
