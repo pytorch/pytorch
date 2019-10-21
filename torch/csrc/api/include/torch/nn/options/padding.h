@@ -12,10 +12,10 @@ namespace nn {
 
 /// Options for a pad functional.
 struct TORCH_API PadOptions {
-  PadOptions(IntArrayRef pad) : pad_(pad) {}
+  PadOptions(std::vector<int64_t> pad) : pad_(std::move(pad)) {}
 
   /// m-elements tuple, where m/2 <= input dimensions and m is even.
-  TORCH_ARG(IntArrayRef, pad);
+  TORCH_ARG(std::vector<int64_t>, pad);
 
   /// "constant", "reflect", "replicate" or "circular". Default: "constant"
   typedef c10::variant<
