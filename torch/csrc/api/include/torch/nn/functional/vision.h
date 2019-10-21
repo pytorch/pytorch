@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/nn/options/vision.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -44,6 +45,21 @@ inline Tensor affine_grid(
   }
 
   return torch::affine_grid_generator(theta, size, align_corners);
+}
+
+inline Tensor grid_sample(
+    const Tensor& input,
+    const Tensor& grid,
+    GridSampleOptions options = {}) {
+  
+  if (!options.align_corners().has_value()) {
+    TORCH_WARN("Default grid_sample and affine_grid behavior will be changed ",
+                "to align_corners=False from 1.4.0. ",
+                "See the documentation of grid_sample for details.");
+    options.align_corners(true);
+  }
+  
+  return torch::grid_sampler(input, grid, static_cast<int64_t>(options.mode()), static_cast<int64_t>(options.padding_mode()), options.align_corners().value());
 }
 
 } // namespace functional

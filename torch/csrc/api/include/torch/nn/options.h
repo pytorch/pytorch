@@ -8,4 +8,5 @@
 #include <torch/nn/options/loss.h>
 #include <torch/nn/options/normalization.h>
 #include <torch/nn/options/pooling.h>
+#include <torch/nn/options/vision.h>
 #include <torch/nn/options/rnn.h>
