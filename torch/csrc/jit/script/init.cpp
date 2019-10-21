@@ -748,7 +748,6 @@ void initJitScriptBindings(PyObject* module) {
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
           })
       .def_property_readonly("graph", &Method::graph)
-      .def("_lowered_graph", &Method::_lowered_graph)
       .def_property_readonly(
           "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
