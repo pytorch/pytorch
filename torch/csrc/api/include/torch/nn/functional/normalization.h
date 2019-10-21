@@ -22,8 +22,8 @@ inline Tensor normalize(
 
 inline Tensor layer_norm(const Tensor& input,
     const LayerNormOptions& options,
-    const Tensor& weight,
-    const Tensor& bias) {
+    const Tensor& weight = Tensor(),
+    const Tensor& bias = Tensor()) {
 
     return torch::layer_norm(input, options.normalized_shape(), weight, bias, options.eps());
 }
