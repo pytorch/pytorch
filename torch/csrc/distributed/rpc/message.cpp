@@ -52,6 +52,10 @@ const std::vector<char>& Message::payload() const {
   return payload_;
 }
 
+std::vector<torch::Tensor>&& Message::moveTensors() && {
+  return std::move(tensors_);
+}
+
 std::vector<torch::Tensor>& Message::tensors() {
   return tensors_;
 }
@@ -60,7 +64,7 @@ const std::vector<torch::Tensor>& Message::tensors() const {
   return tensors_;
 }
 
-const MessageType& Message::type() const {
+MessageType Message::type() const {
   return type_;
 }
 
@@ -77,7 +81,9 @@ bool Message::isRequest() const {
       MessageType::RREF_FORK_REQUEST == type_ ||
       // Autograd message
       MessageType::BACKWARD_AUTOGRAD_REQ == type_ ||
-      MessageType::FORWARD_AUTOGRAD_REQ == type_;
+      MessageType::FORWARD_AUTOGRAD_REQ == type_ ||
+      // Cleanup Autograd context request
+      MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ == type_;
 }
 
 bool Message::isResponse() const {
@@ -89,7 +95,9 @@ bool Message::isResponse() const {
       MessageType::RREF_ACK == type_ || // ret of other types
       // Autograd response
       MessageType::BACKWARD_AUTOGRAD_RESP == type_ ||
-      MessageType::FORWARD_AUTOGRAD_RESP == type_;
+      MessageType::FORWARD_AUTOGRAD_RESP == type_ ||
+      // Cleanup autograd context response
+      MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP == type_;
 }
 
 bool Message::isShutdown() const {
