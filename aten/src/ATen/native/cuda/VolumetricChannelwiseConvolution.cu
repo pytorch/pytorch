@@ -33,8 +33,9 @@ static int getGradParamsNumThreads(int batchSize){
    return std::min(batchSize * WARP_SIZE, MAX_BLOCK_SIZE);
 }
 
+// Your regular forward pass hopefully
 template <typename T, typename accT, typename IndexType, int kSize>
-__global__ void volumetricChannelwiseConvolutionUpdateOutput(
+__global__ void depthwiseConv3DOutput(
     const Tensor& input,
     Tensor& output,
     const Tensor& weight,
@@ -124,7 +125,7 @@ __global__ void volumetricChannelwiseConvolutionUpdateOutput(
 }
 
 template <typename T, typename accT, typename IndexType, int kSize, int stride>
-__global__ void volumetricChannelwiseConvolutionUpdateGradInput(
+__global__ void depthwiseConv3dUpdateGradInput(
     const Tensor& gradOutput,
     Tensor& gradInput,
     const Tensor& weight,
@@ -210,7 +211,7 @@ __global__ void volumetricChannelwiseConvolutionUpdateGradInput(
 
 
 template <typename T, typename accT, typename IndexType>
-__global__ void volumetricChannelwiseConvolutionAccGradParameters(
+__global__ void depthwiseConv3dUpdateGradWeight(
     const Tensor& gradOutput,
     const Tensor& input,
     Tensor& gradWeight,
@@ -295,48 +296,350 @@ __global__ void volumetricChannelwiseConvolutionAccGradParameters(
   }
 }
 
-// these two should be in the namespace
-// I need to fill that one out 
-Tensor& conv3d_channelwise3d_forward_out_cuda_template()
-Tensor& conv3d_channelwise3d_backward_out_cuda_template()
+
+// 5D tensor B x D x T x H x w
+static void conv_depthwise3d_cuda_template(
+  Tensor& output,
+  const Tensor& input_,
+  Tensor& weight,
+  Tensor? bias,
+  IntArrayRef kernel_size,
+  IntArrayRef stride_size,
+  IntArrayRef pad_size,
+  IntArrayRef dilation_size) {
+  
+    TensorArg input_arg{input_, "input_", 1}, output_arg{output, "output", 2};
+    checkAllSameGPU(
+      "conv_depthwise3d_cuda_template", {input_arg, output_arg});
+
+    for (int64_t i = 0; i < input_.ndimension(); i++) {
+      TORCH_CHECK(
+          input_.size(i) > 0,
+          "conv_depthwise3d_cuda(): expected input to have non-empty spatial dimensions, "
+          "but input has sizes ", input_.sizes(),
+          " with dimension ", i, " being empty");
+    }
+    
+    TORCH_CHECK(
+        (input_.ndimension() == 5),
+        "non-empty 4D tensor expected for input");
+
+    int64_t osizeD = output.size(1);  // num out channels
+    int64_t osizeT = output.size(1);  // output time size
+    int64_t osizeH = output.size(2);  // output height
+    int64_t osizeW = output.size(3);  // output width
+
+    int64_t sizeD, isizeT, isizeH, isizeW;
+    int64_t istrideD, istrideT, istrideH, istrideW;
+    int64_t totalZ;
+  
+    const Tensor& input = input_.ndimension() == 4 ? input_ : input_.contiguous();
+  
+    if (input.ndimension() == 4) {
+      sizeD = input.size(0);   // in channels
+      isizeT = input.size(1);  // in time
+      isizeH = input.size(2);  // in height
+      isizeW = input.size(3);  // in width
+
+  
+      output.resize_({sizeD, osizeT, osizeH, osizeW});
+      // total num elements
+      totalZ = sizeD * osizeT;
+    } else {
+      int64_t sizeB = input.size(0);
+      sizeD = input.size(1);
+      isizeT = input.size(2);
+      isizeH = input.size(3);
+      isizeW = input.size(4);
+  
+      output.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
+      // total num elements
+      totalZ = sizeB * sizeD * osizeT;
+    }
+
+    // define kernel/stride/pad/dilation
+    int64_t kernelSizeW = kernel_size[0];
+    int64_t kernelSizeH = kernel_size[1];
+    int64_t kernelSizeT = kernel_size[2];
+
+    int64_t strideSizeW = stride_size[0];
+    int64_t strideSizeH = stride_size[1];
+    int64_t strideSizeT = stride_size[2];
+
+    int64_t padSizeW = pad_size[0];
+    int64_t padSizeH = pad_size[1];
+    int64_t padSizeT = pad_size[2];
+
+    int64_t dilSizeW = dilation_size[0];
+    int64_t dilSizeH = dilation_size[1];
+    int64_t dilSizeT = dilation_size[2];
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      input.scalar_type(), "conv_depthwise3d_cuda", [&] {
+        scalar_t* input_data = input.data_ptr<scalar_t>();
+        scalar_t* output_data = output.data_ptr<scalar_t>();
+
+        depthwiseConv3DOutput(
+          input_data, output_data,
+          weight,
+          bias,
+          // biasenabled (if bias is not null)
+          totalZ, // totalElements
+          osizeD, // ouptut_channels
+          isizeW, isizeH, isizeT, // input
+          osizeW, osizeH, osizeT, // output
+          kernelSizeW, kernelSizeH, kernelSizeT,
+          strideSizeW, strideSizeH, strideSizeT,
+          padSizeW, padSizeH, padSizeT,
+          dilSizeW, dilSizeH, dilSizeT});
+}
+
+void conv_depthwise3d_backward_input_cuda_template(
+  Tensor& gradInput,
+  const Tensor& gradOutput_,
+  const Tensor& input,
+  const Tensor& weight,
+  IntArrayRef kernel_size,
+  IntArrayRef stride_size,
+  IntArrayRef pad_size,
+  IntArrayRef dilation_size
+) {
+
+  TensorArg grad_input_arg{gradInput, "gradInput", 1};
+  TensorArg grad_output_arg{gradOutput_, "gradOutput_", 2};
+  TensorArg input_arg{input, "input", 3};
+
+  checkAllSameGPU(
+      "conv_depthwise3d_backward_input_cuda_template",
+      {grad_input_arg, grad_output_arg, input_arg});
+  
+  const Tensor gradOutput = gradOutput_.contiguous();
+
+  gradInput.resize_as_(input);
+  gradInput.zero_();
+
+  int64_t sizeB, sizeD, isizeT, isizeH, isizeW;
+  int64_t osizeD, osizeT, osizeH, osizeW;
+  int64_t totalZ;
+
+  if (input.ndimension() == 4) {
+    sizeD = input.size(0);  
+    isizeT = input.size(1);
+    isizeH = input.size(2);
+    isizeW = input.size(3);
+
+    osizeD = gradOutput.size(0);
+    osizeT = gradOutput.size(1);
+    osizeH = gradOutput.size(2);
+    osizeW = gradOutput.size(3);
+
+    // TODO: not sure about these
+    totalZ = sizeD * isizeT;
+
+  } else {
+    sizeB = input.size(0);
+    sizeD = input.size(1);
+    isizeT = input.size(2);
+    isizeH = input.size(3);
+    isizeW = input.size(4);
+
+    osizeD = gradOutput.size(1);
+    osizeT = gradOutput.size(2);
+    osizeH = gradOutput.size(3);
+    osizeW = gradOutput.size(4);
+    
+    // TODO: not sure about these
+    totalZ = sizeB * sizeD * isizeT;
+  }
+
+  // define kernel/stride/pad/dilation
+  int64_t kernelSizeW = kernel_size[0];
+  int64_t kernelSizeH = kernel_size[1];
+  int64_t kernelSizeT = kernel_size[2];
+
+  int64_t strideSizeW = stride_size[0];
+  int64_t strideSizeH = stride_size[1];
+  int64_t strideSizeT = stride_size[2];
+
+  int64_t padSizeW = pad_size[0];
+  int64_t padSizeH = pad_size[1];
+  int64_t padSizeT = pad_size[2];
+
+  int64_t dilSizeW = dilation_size[0];
+  int64_t dilSizeH = dilation_size[1];
+  int64_t dilSizeT = dilation_size[2];
+
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    input.scalar_type(), "conv_depthwise3d_backward_input_cuda", [&] {
+      scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+      scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
+
+      depthwiseConv3dUpdateGradInput(
+          gradOutput_data, gradInput_data,
+          weight,
+          totalZ, //total elements
+          sizeD,  // input channels
+          osizeD, // ouptut channels 
+          isizeW, isizeH, isizeT, // input
+          osizeW, osizeH, osizeT, // output
+          kernelSizeW, kernelSizeH, kernelSizeT,
+          strideSizeW, strideSizeH, strideSizeT,
+          padSizeW, padSizeH, padSizeT,
+          dilSizeW, dilSizeH, dilSizeT});
+    });
+
+} // conv_depthwise3d_backward_input_cuda_template
+
+void conv_depthwise3d_backward_weight_cuda_template(
+  Tensor& gradWeight,
+  const Tensor& gradOutput_,
+  const Tensor& input,
+  IntArrayRef kernel_size,
+  IntArrayRef stride_size,
+  IntArrayRef pad_size,
+  IntArrayRef dilation_size
+) {
+
+  TensorArg grad_weight_arg{gradInput, "gradWeight", 1};
+  TensorArg grad_output_arg{gradOutput_, "gradOutput_", 2};
+  TensorArg input_arg{input, "input", 3};
+
+  checkAllSameGPU(
+      "conv_depthwise3d_backward_weight_cuda_template",
+      {grad_weight_arg, grad_output_arg, input_arg});
+  
+  const Tensor gradOutput = gradOutput_.contiguous();
+
+  int64_t sizeB, sizeD, isizeT, isizeH, isizeW;
+  int64_t osizeD, osizeT, osizeH, osizeW;
+  int64_t totalZ;
+
+  if (input.ndimension() == 4) {
+    sizeD = input.size(0);  
+    isizeT = input.size(1);
+    isizeH = input.size(2);
+    isizeW = input.size(3);
+
+    osizeD = gradOutput.size(0);
+    osizeT = gradOutput.size(1);
+    osizeH = gradOutput.size(2);
+    osizeW = gradOutput.size(3);
+
+    // TODO: not sure about these
+    totalZ = sizeD * isizeT;
+
+  } else {
+    sizeB = input.size(0);
+    sizeD = input.size(1);
+    isizeT = input.size(2);
+    isizeH = input.size(3);
+    isizeW = input.size(4);
+
+    osizeD = gradOutput.size(1);
+    osizeT = gradOutput.size(2);
+    osizeH = gradOutput.size(3);
+    osizeW = gradOutput.size(4);
+    
+    // TODO: not sure about these
+    totalZ = sizeB * sizeD * isizeT;
+  }
+
+    // define kernel/stride/pad/dilation
+    int64_t kernelSizeW = kernel_size[0];
+    int64_t kernelSizeH = kernel_size[1];
+    int64_t kernelSizeT = kernel_size[2];
+  
+    int64_t strideSizeW = stride_size[0];
+    int64_t strideSizeH = stride_size[1];
+    int64_t strideSizeT = stride_size[2];
+  
+    int64_t padSizeW = pad_size[0];
+    int64_t padSizeH = pad_size[1];
+    int64_t padSizeT = pad_size[2];
+  
+    int64_t dilSizeW = dilation_size[0];
+    int64_t dilSizeH = dilation_size[1];
+    int64_t dilSizeT = dilation_size[2];
+  
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      input.scalar_type(), "conv_depthwise3d_backward_weight_cuda", [&] {
+        scalar_t* gradWeight_data = gradWeight.data_ptr<scalar_t>();
+        scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
+  
+        depthwiseConv3dUpdateGradWeight(
+            gradOutput_data, input, gradWeight_data,
+            sizeB,  // batch size
+            sizeD,  // input channels
+            osizeD, // ouptut channels (should be kernelchannels? where is that)
+            isizeW, isizeH, isizeT, // input
+            osizeW, osizeH, osizeT, // output
+            kernelSizeW, kernelSizeH, kernelSizeT,
+            strideSizeW, strideSizeH, strideSizeT,
+            padSizeW, padSizeH, padSizeT,
+            dilSizeW, dilSizeH, dilSizeT});
+      });
+
+} //conv_depthwise3d_backward_weight_cuda_template
 
 } // namespace
 
 
-// these are very much out
-Tensor& conv3d_channelwise3d_forward_out_cuda(
+Tensor& conv_depthwise3d_cuda(
   Tensor& output,
   const Tensor& input,
+  const Tensor& weight,
+  Tensor? bias,
   IntList kernel_size,
   IntList stride_size,
   IntList pad_size,
   IntList dilation_size
 )
 {
-  conv3d_channelwise3d_forward_out_cuda_template(
-    output, input, kernel_size, stride_size, pad_size, dilation_size
-  );
+  conv_depthwise3d_cuda_template(
+    output, input, 
+    weight, bias, 
+    kernel_size, stride_size, pad_size, dilation_size);
   return output;
 
 }
 
-Tensor conv3d_channelwise3d_forward_cuda(
-  at::Tensor const& input,
-  IntList kernel_size,
-  IntList stride_size,
-  IntList pad_size,
-  IntList dilation_size
-)
-{
-  auto output = at::empty({0}, input.options());
-  conv3d_channelwise3d_forward_out_cuda_template(
-    output, input, kernel_size, stride_size, pad_size, dilation_size
-  );
-  return output;
-}
+// // Don't need OOP calls?
+// Tensor conv3d_channelwise3d_forward_cuda(
+//   at::Tensor const& input,
+//   IntList kernel_size,
+//   IntList stride_size,
+//   IntList pad_size,
+//   IntList dilation_size
+// )
+// {
+//   auto output = at::empty({0}, input.options());
+//   conv3d_channelwise3d_forward_out_cuda_template(
+//     output, input, kernel_size, stride_size, pad_size, dilation_size
+//   );
+//   return output;
+// }
 
-Tensor& conv3d_channelwise3d_backward_out_cuda(
+Tensor& conv3d_channelwise3d_backward_input_cuda(
   Tensor& gradInput,
+  const Tensor& gradOutput,
+  const Tensor& input,
+  const Tensor& weight,
+  IntList kernel_size,
+  IntList stride_size,
+  IntList pad_size,
+  IntList dilation_size
+)
+{
+  conv_depthwise3d_backward_input_cuda_template(
+    gradInput, gradOutput, weight,
+    kernel_size, stride_size, pad_size, dilation_size
+  )
+  return gradInput;
+}
+
+
+Tensor& conv3d_channelwise3d_backward_weight_cuda(
+  Tensor& gradWeight,
   const Tensor& gradOutput,
   const Tensor& input,
   IntList kernel_size,
@@ -345,27 +648,13 @@ Tensor& conv3d_channelwise3d_backward_out_cuda(
   IntList dilation_size
 )
 {
-  conv3d_channelwise3d_backward_out_cuda_template(
-    gradInput, gradOutput, kernel_size, stride_size, pad_size, dilation_size
+  conv_depthwise3d_backward_weight_cuda_template(
+    gradWeight, gradOutput, input,
+    kernel_size, stride_size, pad_size, dilation_size
   )
-  return gradOutput;
+  return gradInput;
 }
 
-Tensor& conv3d_channelwise3d_backward_cuda
-const Tensor& gradOutput,
-const Tensor& input,
-IntList kernel_size,
-IntList stride_size,
-IntList pad_size,
-IntList dilation_size
-)
-{
-  auto gradInput = at::zeros_like(input);
-  conv3d_channelwise3d_backward_out_cuda_template(
-    gradInput, gradOutput, kernel_size, stride_size, pad_size, dilation_size
-  )
-  return gradOutput;
-}
 
 } // namespace at
 } // namespace native
