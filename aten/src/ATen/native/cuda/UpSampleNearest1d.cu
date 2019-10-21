@@ -185,8 +185,8 @@ static void upsample_nearest1d_backward_out_cuda_template(
 Tensor& upsample_nearest1d_out_cuda(
     Tensor& output,
     const Tensor& input,
-    double scales_1,
-    IntArrayRef output_size) {
+    IntArrayRef output_size,
+    double scales_1) {
   upsample_nearest1d_out_cuda_template(output, input, output_size, scales_1);
   return output;
 }
