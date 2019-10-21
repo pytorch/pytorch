@@ -289,6 +289,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: index_copy
    .. automethod:: index_fill_
    .. automethod:: index_fill
+   .. automethod:: index_max_
+   .. automethod:: index_max
    .. automethod:: index_put_
    .. automethod:: index_put
    .. automethod:: index_select

@@ -372,6 +372,12 @@ Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Te
 Tensor& index_fill_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   return self.index_fill_(dimname_to_position(self, dim), index, source);
 }
+Tensor index_max(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("index_max");
+}
+Tensor& index_max_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
+  reportNYIDimnameOverload("index_max");
+}
 Tensor index_copy(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source) {
   reportNYIDimnameOverload("index_copy");
 }

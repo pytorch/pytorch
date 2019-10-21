@@ -110,6 +110,9 @@ TH_API void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension);
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 TH_API void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
+#if defined(TH_REAL_IS_FLOAT)
+TH_API void THTensor_(indexMax)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
+#endif
 
 TH_API accreal THTensor_(dot)(THTensor *t, THTensor *src);
 

@@ -1353,6 +1353,13 @@ Args:
     accumulate (bool): whether to accumulate into self
 """)
 
+add_docstr_all('index_max_',
+               r"""
+index_max_(dim, index, tensor) -> Tensor
+
+@nocommit
+""")
+
 add_docstr_all('index_put',
                r"""
 index_put(indices, value, accumulate=False) -> Tensor
@@ -3339,6 +3346,13 @@ add_docstr_all('index_fill',
 index_fill(dim, index, value) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_fill_`
+""")
+
+add_docstr_all('index_max',
+               r"""
+index_max(dim, index, tensor) -> Tensor
+
+Out-of-place version of :meth:`torch.Tensor.index_max_`
 """)
 
 add_docstr_all('scatter',

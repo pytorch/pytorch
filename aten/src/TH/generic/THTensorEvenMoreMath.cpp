@@ -764,6 +764,53 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
   THLongTensor_free(index);
 }
 
+#if defined(TH_REAL_IS_FLOAT)
+static inline scalar_t max_scalar_t(scalar_t a, scalar_t b) {
+  return (b > a) ? b : a;
+}
+
+void THTensor_(indexMax)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
+{
+  ptrdiff_t i, numel;
+  THTensor *tSlice, *sSlice;
+  int64_t *index_data;
+
+  numel = THLongTensor_nElement(index);
+  THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(src), 4,"Indexing dim %d is out of bounds of tensor", dim);
+  THArgCheck(numel == THTensor_sizeLegacyNoScalars(src, dim),4,"Number of indices should be equal to source:size(dim)");
+
+  index = THLongTensor_newContiguous(index);
+  index_data = THLongTensor_data(index);
+
+  if (tensor->dim() > 1)
+  {
+    tSlice = THTensor_(new)();
+    sSlice = THTensor_(new)();
+
+    for (i=0; i<numel; i++)
+    {
+      THTensor_(select)(tSlice, tensor, dim, index_data[i]);
+      THTensor_(select)(sSlice, src, dim, i);
+      THTensor_(cmax)(tSlice, tSlice, sSlice);
+    }
+
+    c10::raw::intrusive_ptr::decref(tSlice);
+    c10::raw::intrusive_ptr::decref(sSlice);
+  }
+  else
+  {
+    for (i=0; i<numel; i++)
+    {
+      THTensor_(set1d)(tensor,
+              index_data[i],
+              max_scalar_t(THTensor_(get1d)(tensor,index_data[i]), THTensor_(get1d)(src,i)));
+    }
+  }
+  THLongTensor_free(index);
+}
+#endif
+
 accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 {
 #ifdef BUILD_NAMEDTENSOR

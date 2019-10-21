@@ -204,6 +204,97 @@ __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
 // of indices is a small number.
 // This kernel in fact works for all choices of problem size, but if
 // the number of indices chosen is large, then the
+// indexMaxLargeIndex kernel is a better choice to increase
+// parallelism.
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim>
+__global__ void indexMaxSmallIndex(TensorInfo<T, IndexType> dst,
+                                   TensorInfo<T, IndexType> src,
+                                   TensorInfo<int64_t, IndexType> indices,
+                                   int dstMaxDim,
+                                   int srcMaxDim,
+                                   IndexType innerSize,
+                                   int64_t dstMaxDimSize) {
+  // In order to avoid reloading the index that we are copying, load
+  // it once to handle all of the points that are being selected, so
+  // it can be reused as much as possible. This kernel is chosen when
+  // this is a good choice (small number of chosen indices), since
+  // re-accessing indices in addition to src elements can be slow.
+  for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
+    // Lua indices begin at 1
+    IndexType dstIndex =
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
+    assert(dstIndex < dstMaxDimSize);
+
+    // We stride over the output ignoring the indexed dimension
+    // (innerSize), whose offset calculation is handled differently
+    for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+         linearIndex < innerSize;
+         linearIndex += gridDim.x * blockDim.x) {
+      IndexType dstOffset =
+        IndexToOffset<T, IndexType, DstDim>::get(linearIndex, dst);
+      dstOffset += dstIndex * dst.strides[dstMaxDim];
+
+      IndexType srcOffset =
+        IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
+      srcOffset += srcIndex * src.strides[srcMaxDim];
+
+      atomicMax(&dst.data[dstOffset], src.data[srcOffset]);
+    }
+  }
+}
+
+// We prefer this kernel to balance parallelism across index points,
+// if there are a large number of indices.
+// This kernel in fact works for all choices of problem size, but if
+// the number of indices chosen is small, then the
+// indexMaxSmallIndex kernel is a better choice to reduce memory
+// accesses.
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          bool IndexIsMajor>
+__global__ void indexMaxLargeIndex(TensorInfo<T, IndexType> dst,
+                                   TensorInfo<T, IndexType> src,
+                                   TensorInfo<int64_t, IndexType> indices,
+                                   int dstMaxDim,
+                                   int srcMaxDim,
+                                   IndexType totalSize,
+                                   IndexType innerSize,
+                                   int64_t dstMaxDimSize) {
+  // We stride over the output including the indexed dimension
+  // (totalSize), and calculate the destination index point based on that
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalSize;
+       linearIndex += gridDim.x * blockDim.x) {
+    IndexType srcIndex, elementInSlice;
+    if (IndexIsMajor) {
+      srcIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      srcIndex = linearIndex % innerSize;
+    }
+
+    // Lua indices begin at 1
+    IndexType dstIndex =
+      indices.data[IndexToOffset<int64_t, IndexType, IdxDim>::get(srcIndex, indices)];
+    assert(dstIndex < dstMaxDimSize);
+
+    IndexType dstOffset =
+      IndexToOffset<T, IndexType, DstDim>::get(elementInSlice, dst);
+    dstOffset += dstIndex * dst.strides[dstMaxDim];
+
+    IndexType srcOffset =
+      IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
+    srcOffset += srcIndex * src.strides[srcMaxDim];
+
+    atomicMax(&dst.data[dstOffset], src.data[srcOffset]);
+  }
+}
+
+// We prefer this kernel to avoid reloading index points if the number
+// of indices is a small number.
+// This kernel in fact works for all choices of problem size, but if
+// the number of indices chosen is large, then the
 // indexFillLargeIndex kernel is a better choice to increase
 // parallelism.
 template <typename T, typename IndexType, int DstDim, int IdxDim>

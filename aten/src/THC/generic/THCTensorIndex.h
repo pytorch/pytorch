@@ -12,4 +12,8 @@ THC_API void THCTensor_(put)(THCState *state, THCTensor *res_, THCudaLongTensor 
 THC_API void THCTensor_(indexAdd)(THCState *state, THCTensor *res_, int dim, THCudaLongTensor *indices, THCTensor *src);
 #endif
 
+#if defined(THC_REAL_IS_FLOAT)
+THC_API void THCTensor_(indexMax)(THCState *state, THCTensor *res_, int dim, THCudaLongTensor *indices, THCTensor *src);
+#endif
+
 #endif
