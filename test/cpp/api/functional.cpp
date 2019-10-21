@@ -1192,7 +1192,7 @@ TEST_F(FunctionalTest, Pad) {
   }
   {
     auto input = torch::ones({1, 1, 1, 1}, torch::kDouble);
-    auto output = F::pad(input, {1, 1});
+    auto output = F::pad(input, PadOptions({1, 1}));
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 1, 3}));
     auto expected = torch::tensor({{{{0., 1., 0.}}}}, torch::kDouble);
   }
