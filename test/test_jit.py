@@ -28,7 +28,7 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
-from torch.quantization._quantize_script import fold_prepack, ConvPackedParams, LinearPackedParams
+from torch.quantization._quantize_script import ConvPackedParams, LinearPackedParams
 
 # Testing utils
 import jit_utils
