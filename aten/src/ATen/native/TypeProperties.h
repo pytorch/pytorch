@@ -2,6 +2,6 @@
 
 namespace at { namespace native {
 
-ScalarType result_type(const TensorList& tensors);
+ScalarType result_type(TensorList tensors);
 
 }}
