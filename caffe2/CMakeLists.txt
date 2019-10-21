@@ -488,6 +488,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/autograd_metadata.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
@@ -563,6 +565,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/fold.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/loss.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pixelshuffle.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
