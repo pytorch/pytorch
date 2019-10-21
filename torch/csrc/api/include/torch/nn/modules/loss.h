@@ -418,15 +418,16 @@ TORCH_MODULE(MarginRankingLoss);
 
 // ============================================================================
 
-/// Creates a criterion that combines :func:`nn.LogSoftmax` and
-/// :func:`nn.NLLLoss` in one single class. It is useful when training a 
-/// classification problem with `C` classes. If provided, the optional argument
-/// :attr:`weight` should be a 1D `Tensor` assigning weight to each of the classes.
+/// The negative log likelihood loss. It is useful to train a classification
+/// problem with `C` classes. The `input` given through a forward call is expected
+/// to contain log-probabilities of each class. `input` has to be a Tensor of size
+/// either :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)`
+/// with :math:`K \geq 1` for the `K`-dimensional case (described later).
 struct TORCH_API NLLLossImpl : public Cloneable<NLLLossImpl> {
   explicit NLLLossImpl(
       const NLLLossOptions& options_ = {});
 
-  /// Pretty prints the `CrossEntropyLoss` module into the given `stream`.
+  /// Pretty prints the `NLLLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
   
   void reset() override;
@@ -442,8 +443,8 @@ struct TORCH_API NLLLossImpl : public Cloneable<NLLLossImpl> {
   Tensor weight;
 };
 
-/// A `ModuleHolder` subclass for `CrossEntropyLoss`.
-/// See the documentation for `CrossEntropyLossImpl` class to learn what
+/// A `ModuleHolder` subclass for `NLLLoss`.
+/// See the documentation for `NLLLossImpl` class to learn what
 /// methods it provides, or the documentation for `ModuleHolder` to learn about
 /// PyTorch's module storage semantics.
 TORCH_MODULE(NLLLoss);

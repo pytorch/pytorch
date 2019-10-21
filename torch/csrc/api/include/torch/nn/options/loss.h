@@ -237,7 +237,7 @@ struct TORCH_API MarginRankingLossOptions {
 
 // ============================================================================
 
-/// Options for a cross-entropy-Loss functional and module.
+/// Options for a nll-loss functional and module.
 struct TORCH_API NLLLossOptions {
   /// A manual rescaling weight given to each class. If given, has to be a Tensor
   /// of size C
