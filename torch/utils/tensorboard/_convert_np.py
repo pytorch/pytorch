@@ -9,8 +9,6 @@ import numpy as np
 import torch
 import six
 
-from caffe2.python import workspace
-
 
 def make_np(x):
     """
@@ -40,5 +38,6 @@ def _prepare_pytorch(x):
 
 
 def _prepare_caffe2(x):
+    from caffe2.python import workspace
     x = workspace.FetchBlob(x)
     return x

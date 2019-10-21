@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/variadic.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
@@ -34,33 +35,33 @@ using saved_variable_list = std::vector<SavedVariable>;
 using IndexRange = std::pair<size_t, size_t>;
 
 // Custom deleter to prevent stack overflows.
-TORCH_API void deleteFunction(Function* function);
+TORCH_API void deleteNode(Node* function);
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-///                               Function
+///                               Node
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// A `Function` is an abstract class that represents an operation taking zero
+/// A `Node` is an abstract class that represents an operation taking zero
 /// or more input `Variable`s and producing zero or more output `Variable`s. All
 /// functions in PyTorch's autograd machinery derive from this class and
 /// override its `apply` method. Instances of such subclasses will then be
 /// invokeable via the call operator.
 ///
-///                    Functions in the Autograd Graph
+///                    Nodes in the Autograd Graph
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// When viewing the autograd system as a graph, `Function`s are the vertices or
+/// When viewing the autograd system as a graph, `Node`s are the vertices or
 /// nodes, connected to each other via (directed) `Edge`s, which themselves are
-/// represented via (`Function`, input_nr) pairs. `Variable`s are the outputs to
-/// and inputs of `Function`s, and travel between these edges during execution
+/// represented via (`Node`, input_nr) pairs. `Variable`s are the outputs to
+/// and inputs of `Node`s, and travel between these edges during execution
 /// of the graph. When two or more `Edge`s (from different sources) point at the
-/// same input to a `Function`, the values produced along all of these edges are
-/// implicitly summed prior to being forwarded to the target `Function`.
+/// same input to a `Node`, the values produced along all of these edges are
+/// implicitly summed prior to being forwarded to the target `Node`.
 ///
 ///                              Hierarchy
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /// Subclasses usually represent differentiable functions as well as their
 /// gradient operators. Note, however, that due to the very general definition
-/// of a `Function` taking *zero* or more inputs and producing *zero* or more
-/// outputs, uses of `Function`s are flexible and extend beyond purely
+/// of a `Node` taking *zero* or more inputs and producing *zero* or more
+/// outputs, uses of `Node`s are flexible and extend beyond purely
 /// mathematical operations. For example, the `AccumulateGrad` function is a
 /// *sink*: it takes one input, but produces no outputs, instead accumulating
 /// the input as a side effect. At the other extreme, the `GraphRoot` function
@@ -68,28 +69,28 @@ TORCH_API void deleteFunction(Function* function);
 ///
 ///                              Interface
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// The most important method on `Function` is the call operator, which takes in
+/// The most important method on `Node` is the call operator, which takes in
 /// a list of variables and produces a list of variables. The precise size of
 /// these lists can be determined with `num_inputs()` and `num_outputs()`.
-/// `Function`s are stitched together via their `next_edge` interface, which let
-/// you manipulate the set of outgoing edges of a `Function`. You can add an
+/// `Node`s are stitched together via their `next_edge` interface, which let
+/// you manipulate the set of outgoing edges of a `Node`. You can add an
 /// edge with `add_next_edge()`, retrieve an edge with `next_edge(index)` and
 /// iterate over them via the `next_edges()` method. Other methods exist for
-/// integration with the JIT and other parts of PyTorch. Every `Function` has a
-/// *sequence number* that increases monotonically in the order of `Function`
+/// integration with the JIT and other parts of PyTorch. Every `Node` has a
+/// *sequence number* that increases monotonically in the order of `Node`
 /// construction. It can be retrieved via the `sequence_nr()` method. Note that
-/// this sequence number is *thread local*. This means that when `Function`s
+/// this sequence number is *thread local*. This means that when `Node`s
 /// `A`, `B` and `C` are created consecutively in the same thread, their
 /// sequence numbers will be ordered `A` < `B` < `C`. If, however, `A` and `B`
 /// are created in one thread and `C` is created in a new thread, there are *no
 /// guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-struct TORCH_API Function : std::enable_shared_from_this<Function> {
+struct TORCH_API Node : std::enable_shared_from_this<Node> {
  public:
-  /// Construct a new `Function` with the given `next_edges`. `sequence_nr` is
+  /// Construct a new `Node` with the given `next_edges`. `sequence_nr` is
   /// a (currently THE) hint to prioritization in the backward() pass, with
   /// higher sequence numbers prioritized before lower sequence numbers.
-  explicit Function(
+  explicit Node(
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
       : sequence_nr_(sequence_nr),
@@ -99,15 +100,15 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     }
   }
 
-  explicit Function(edge_list&& next_edges = edge_list())
-      : Function(get_next_sequence_nr()++, std::move(next_edges)) {}
+  explicit Node(edge_list&& next_edges = edge_list())
+      : Node(get_next_sequence_nr()++, std::move(next_edges)) {}
 
-  /// Functions are neither copyable nor moveable.
-  Function(const Function& other) = delete;
-  Function(Function&& other) = delete;
-  Function& operator=(const Function& other) = delete;
-  Function& operator=(Function&& other) = delete;
-  virtual ~Function() = default;
+  /// Nodes are neither copyable nor moveable.
+  Node(const Node& other) = delete;
+  Node(Node&& other) = delete;
+  Node& operator=(const Node& other) = delete;
+  Node& operator=(Node&& other) = delete;
+  virtual ~Node() = default;
 
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
@@ -115,6 +116,12 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     RECORD_FUNCTION(
         this, std::vector<c10::IValue>(inputs.begin(), inputs.end()));
 
+#ifdef BUILD_NAMEDTENSOR
+    // In the first iteration of named tensors, autograd ignores names and
+    // operates on unnamed tensors. In the long term, autograd should
+    // probably operate with names.
+    at::NoNamesGuard no_names_guard;
+#endif
     return apply(std::move(inputs));
   }
 
@@ -159,6 +166,23 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     return input_metadata_[index];
   }
 
+  /**
+   * Note: Function Streams
+   * A function's stream (for a given device type) is the stream of the first
+   * element of its input buffer on a device of that type.
+   *
+   * If all elements are on the same device they MUST share a stream. If
+   * elements are on different devices (across multiple GPUs, for example)
+   * they may have different streams.
+   */
+  c10::optional<c10::Stream> stream(const c10::DeviceType device_type) {
+    for (const auto& metadata : input_metadata_) {
+      if (metadata.device().type() == device_type) return metadata.stream();
+    }
+
+    return c10::nullopt;
+  }
+
   void clear_input_metadata() {
     input_metadata_.clear();
   }
@@ -196,16 +220,9 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   // Miscellaneous Methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  /// The sequence number of this `Function`.
+  /// The sequence number of this `Node`.
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
-  }
-
-  /// Returns a shared pointer to `this`. `PyFunction`s are not managed by
-  /// `shared_ptr`s by default, but are bound to the lifetime of their Python
-  /// object instead.
-  virtual std::shared_ptr<Function> get_shared_ptr() {
-    return shared_from_this();
   }
 
   /// Returns the name of the dynamic type of the function, for debugging.
@@ -229,18 +246,18 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     });
   }
 
-  /// Returns the `PyObject` stored for this `Function` (for Python
+  /// Returns the `PyObject` stored for this `Node` (for Python
   /// interaction).
   PyObject* pyobj() const noexcept {
     return pyobj_;
   }
 
-  /// Sets the `PyObject` stored for this `Function` (for Python interaction).
+  /// Sets the `PyObject` stored for this `Node` (for Python interaction).
   void set_pyobj(PyObject* pyobj) noexcept {
     pyobj_ = pyobj;
   }
 
-  /// Returns the anomaly metadata stored for this `Function`.
+  /// Returns the anomaly metadata stored for this `Node`.
   /// If none exist, creates a new empty one.
   AnomalyMetadata* metadata() noexcept;
 
@@ -305,7 +322,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
     return false;
   }
 
-  /// A `Function` is said to pass state transparently to backward, if the
+  /// A `Node` is said to pass state transparently to backward, if the
   /// state consists only of (Saved)Variables and only non-variable objects
   /// that parameterize the operation in some way that defines the graph
   /// structure AND the backward function is traceable. In particular,
@@ -323,13 +340,13 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
  protected:
   static uint64_t& get_next_sequence_nr();
 
-  /// Performs the `Function`'s actual operation.
+  /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;
 
   /// Calls `apply()`, but instruments it with tracing machinery.
   variable_list traced_apply(variable_list inputs);
 
-  // Since `Function`s are neither copyable nor moveable, we can have const
+  // Since `Node`s are neither copyable nor moveable, we can have const
   // fields.
   const uint64_t sequence_nr_;
 
@@ -341,16 +358,16 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   at::SmallVector<InputMetadata, 2> input_metadata_;
 };
 
-/// See Function::is_traceable() for definition.
-struct TraceableFunction : public Function {
-  using Function::Function;
+/// See Node::is_traceable() for definition.
+struct TraceableFunction : public Node {
+  using Node::Node;
   bool is_traceable() final {
     return true;
   }
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//                       Associated Free Functions
+//                       Associated Free Nodes
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace detail {
@@ -374,14 +391,14 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
 /// This sets the `grad_fn` property of the `variable`. This function assumes
 /// that the `Variable` is a new input to the gradient function and its
 /// `input_nr` thus equal to `function->num_inputs()`. Additionally, it
-/// increments the `Function`'s number of inputs by one. Approximately
+/// increments the `Node`'s number of inputs by one. Approximately
 /// equivalent to `variable.set_gradient_edge(function,
 /// function->add_input_metadata(variable.dispatch_type(), variable.sizes()))`.
-/// If you don't want the `Function`'s `num_inputs` to be incremented, use
+/// If you don't want the `Node`'s `num_inputs` to be incremented, use
 /// `set_gradient_edge` directly.
 inline void create_gradient_edge(
     Variable& variable,
-    std::shared_ptr<Function> function) {
+    std::shared_ptr<Node> function) {
   // Copy before move.
   const auto input_nr = function->add_input_metadata(variable);
   variable.set_gradient_edge({std::move(function), input_nr});

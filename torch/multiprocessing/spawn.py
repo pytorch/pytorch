@@ -26,8 +26,12 @@ def _wrap(fn, i, args, error_queue):
         sys.exit(1)
 
 
+# Multiprocessing contexts are introduced at Python 3.4
+_supports_context = sys.version_info >= (3, 4)
+
+
 def _python_version_check():
-    if sys.version_info < (3, 4):
+    if not _supports_context:
         raise RuntimeError("Requires python 3.4 or higher to use "
                            "torch.multiprocessing.spawn and "
                            "torch.multiprocessing.SpawnContext helper "

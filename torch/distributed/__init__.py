@@ -1,11 +1,14 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 
 
 def is_available():
-    return hasattr(torch._C, "_c10d_init")
+    return (hasattr(torch._C, "_c10d_init") and hasattr(torch._C, "_rpc_init")
+            and hasattr(torch._C, "_dist_autograd_init"))
 
 
-if is_available() and not torch._C._c10d_init():
+if is_available() and not (torch._C._c10d_init() and torch._C._rpc_init() and torch._C._dist_autograd_init()):
     raise RuntimeError("Failed to initialize PyTorch distributed support")
 
 

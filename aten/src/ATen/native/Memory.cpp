@@ -9,9 +9,16 @@
 namespace at {
 namespace native {
 
+bool is_pinned(const Tensor& self) {
+  return detail::getCUDAHooks().isPinnedPtr(self.storage().data());
+}
+
 Tensor pin_memory(const Tensor& self) {
   if (self.type().backend() != Backend::CPU) {
     AT_ERROR("cannot pin '", self.type().toString(), "' only dense CPU tensors can be pinned");
+  }
+  if (self.is_pinned()) {
+    return self;
   }
   auto* allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
   auto storage = Storage(

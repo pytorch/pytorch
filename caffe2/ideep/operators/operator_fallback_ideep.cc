@@ -50,7 +50,7 @@
 #include "caffe2/operators/bbox_transform_op.h"
 #include "caffe2/operators/box_with_nms_limit_op.h"
 
-#ifdef CAFFE2_USE_GLOO
+#if __linux__ && defined(CAFFE2_USE_GLOO)
 #include <caffe2/contrib/gloo/common_world_ops.h>
 #include <caffe2/contrib/gloo/broadcast_ops.h>
 #include <caffe2/contrib/gloo/allreduce_ops.h>
@@ -284,7 +284,7 @@ REGISTER_IDEEP_OPERATOR(
     BatchMatMul,
     IDEEPFallbackOp<BatchMatMulOp<CPUContext>>);
 
-#ifdef CAFFE2_USE_GLOO
+#if __linux__ && defined(CAFFE2_USE_GLOO)
 namespace gloo {
 // gloo operators
 REGISTER_IDEEP_OPERATOR(

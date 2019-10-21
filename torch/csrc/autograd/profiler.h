@@ -21,7 +21,7 @@ typedef struct CUevent_st* CUDAEventStub;
 
 namespace torch { namespace autograd {
 
-struct Function;
+struct Node;
 
 namespace profiler {
 

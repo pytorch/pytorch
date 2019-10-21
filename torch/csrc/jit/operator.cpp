@@ -114,6 +114,17 @@ struct OperatorRegistry {
     }
     return ret;
   }
+
+  const std::vector<std::shared_ptr<Operator>> getAllOperators() {
+    std::lock_guard<std::mutex> guard(lock);
+    registerPendingOperators();
+    std::vector<std::shared_ptr<Operator>> values;
+    values.clear();
+    for (auto & kv : operators) {
+      values.insert(values.end(), kv.second.begin(), kv.second.end());
+    }
+    return values;
+  }
 };
 
 OperatorRegistry& getRegistry() {
@@ -132,16 +143,27 @@ void registerOperator(Operator&& op) {
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
-    if (op.isC10Op() && !aliasAnalysisHasSpecialCaseFor(s) &&
-        op.aliasAnalysisKind() == AliasAnalysisKind::DEFAULT) {
+    if (!aliasAnalysisHasSpecialCaseFor(s) &&
+        op.aliasAnalysisKind() == AliasAnalysisKind::CONSERVATIVE) {
       AT_ERROR(
           "Missing special case in alias analysis for non-schematized"
           " operator ",
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
+    if (aliasAnalysisHasSpecialCaseFor(s) &&
+        op.aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA) {
+      AT_ERROR(
+          "The operator ",
+          op.schema().name(),
+          " is special cased and cannot use explicit alias analysis.");
+    }
   }
   getRegistry().registerOperator(std::move(op));
+}
+
+const std::vector<std::shared_ptr<Operator>> getAllOperators() {
+  return getRegistry().getAllOperators();
 }
 
 const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
@@ -203,12 +225,20 @@ bool Operator::matches(const Node* node) const {
 
   TypeEnv type_env;
   for (size_t i = 0; i < formals.size(); ++i) {
-    const MatchTypeReturn matched_type =
-        matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
-    if (!matched_type.type) {
+    auto formal = formals[i].type();
+    const MatchTypeReturn matched_type = matchTypeVariables(
+        formal, actuals[i]->type(), type_env);
+    if (!matched_type.success()) {
       return false;
     }
-    TypePtr formal = *matched_type.type;
+    TypePtr resolved = tryEvalTypeVariables(formal, type_env);
+    if (resolved) {
+      formal = resolved;
+    }
+    // note: it is possible at this point that type variable matching has
+    // not resolved all type variables, e.g. if None was matched to Optional[T]
+    // we will not succeed at matching T. However None <: Optional[T] so this
+    // check can still succeed.
     if (!actuals[i]->type()->isSubtypeOf(formal)) {
       return false;
     }

@@ -17,7 +17,7 @@ namespace torch { namespace autograd {
 // AccumulateGrad sets sequence_nr to the max value so it's always called
 // ASAP during backwards.
 AccumulateGrad::AccumulateGrad(Variable variable_)
-    : Function(/*sequence_nr=*/UINT64_MAX)
+    : Node(/*sequence_nr=*/UINT64_MAX)
     , variable(std::move(variable_)) {
   add_input_metadata(variable);
 }

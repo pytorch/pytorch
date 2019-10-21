@@ -67,7 +67,7 @@ struct dst_idx_to_src_functor : public thrust::unary_function<int64_t, scalar_t>
 
   dst_idx_to_src_functor(const Tensor& batched_complex_signal)
     : signal_ndim(batched_complex_signal.dim() - 1),
-      data(batched_complex_signal.data<scalar_t>()) {
+      data(batched_complex_signal.data_ptr<scalar_t>()) {
     for (int64_t i = 0; i < signal_ndim; i++) {
       sizes[i] = batched_complex_signal.size(i);
       strides[i] = batched_complex_signal.stride(i);
@@ -125,7 +125,7 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 
     dst_idx_iterator dst_idxs(counter(0), cnt_to_dst_idx_functor(size_last_dim, last_dim_start_slice));
 
-    auto data = device_ptr(input.data<scalar_t>());
+    auto data = device_ptr(input.data_ptr<scalar_t>());
     dst_iterator dsts(data, dst_idxs);
     src_iterator srcs(dst_idxs, dst_idx_to_src_functor<scalar_t>(input));
     thrust::copy_n(policy, srcs, n, dsts);

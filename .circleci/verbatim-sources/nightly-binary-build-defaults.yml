@@ -48,21 +48,3 @@ binary_run_in_docker: &binary_run_in_docker
   # This step only runs on circleci linux machine executors that themselves
   # need to start docker images
   command: ~/workspace/.circleci/scripts/binary_run_in_docker.sh
-
-# This is copied almost verbatim from the macos_brew_update job
-# In version 2.1 and above we could make this a command and pass a parameter to
-# it, but in this version there is no way to pass a parameter to a step
-binary_macos_brew_update: &binary_macos_brew_update
-  name: Brew update and install moreutils and expect
-  no_output_timeout: "1h"
-  command: |
-    set -eux -o pipefail
-    # moreutils installs a `parallel` executable by default, which conflicts
-    # with the executable from the GNU `parallel`, so we must unlink GNU
-    # `parallel` first, and relink it afterwards
-    brew update
-    brew unlink parallel
-    brew install moreutils
-    brew link parallel --overwrite
-    brew install expect
-

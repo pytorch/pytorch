@@ -119,7 +119,7 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
     ops = list(net.Proto().op)
     op_indices = [index for index, op in enumerate(net.Proto().op)]
 
-    # Sanity check: check that all external inputs are properlyh accounted
+    # Sanity check: check that all external inputs are properly accounted
     # and that no gradient ops are included in 'net'
     for op in ops:
         for b in op.input:

@@ -23,6 +23,15 @@ SCRIPT_DIR="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
+# Figure out which Python to use for ROCm
+if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]] && [[ "${BUILD_ENVIRONMENT}" =~ py((2|3)\.?[0-9]?\.?[0-9]?) ]]; then
+  PYTHON=$(which "python${BASH_REMATCH[1]}")
+  # non-interactive bashs do not expand aliases by default
+  shopt -s expand_aliases
+  export PYTORCH_TEST_WITH_ROCM=1
+  alias python="$PYTHON"
+fi
+
 # This token is used by a parser on Jenkins logs for determining
 # if a failure is a legitimate problem, or a problem with the build
 # system; to find out more, grep for this string in ossci-job-dsl.
@@ -149,7 +158,14 @@ fi
 
 function pip_install() {
   # retry 3 times
-  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@"
+  # old versions of pip don't have the "--progress-bar" flag
+  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
+  pip install "$@" || pip install "$@" || pip install "$@"
+}
+
+function pip_uninstall() {
+  # uninstall 2 times
+  pip uninstall -y "$@" || pip uninstall -y "$@"
 }
 
 function get_exit_code() {

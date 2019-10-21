@@ -1,6 +1,7 @@
 def while_test(a: Tensor,
     i: Tensor) -> Tensor:
-  a0, i0 = a, i
+  a0 = a
+  i0 = i
   _0 = bool(torch.lt(i, 3))
   while _0:
     a1 = torch.mul_(a0, a0)

@@ -773,13 +773,12 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [var, nz, indices, grad, alpha],
                                    ftrl)
 
-    # TODO: (bddppq) test_unique keeps running into segfault on rocm 1.8.2
     @given(input=hu.tensor(max_value=20,
                            max_dim=1,
                            dtype=np.int32,
                            elements=st.integers(min_value=0, max_value=10)),
            with_remapping=st.booleans(),
-           **hu.gcs_no_hip)
+           **hu.gcs)
     def test_unique(self, input, with_remapping, gc, dc):
         op = core.CreateOperator(
             "Unique",
@@ -1593,9 +1592,7 @@ class TestOperators(hu.HypothesisTestCase):
             self.assertAlmostEqual(np.sum(np.square(output)), 91.81752,
                                    delta=1e-2)
 
-    @given(input=hu.tensor(min_dim=2, max_dim=6, dtype=np.int32,
-                           elements=st.integers(min_value=0,
-                                                max_value=2**32 - 1)),
+    @given(input=hu.tensor(min_dim=2, max_dim=6),
            slice_dim=st.integers(),
            a=st.integers(),
            b=st.integers(),
@@ -1626,6 +1623,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(gc, op, [input, start_vec, end_vec],
                                    slice_ref)
+        self.assertGradientChecks(gc, op, [input, start_vec, end_vec], 0, [0])
 
     @given(data=hu.tensor(), **hu.gcs_cpu_only)
     def test_shape(self, data, gc, dc):

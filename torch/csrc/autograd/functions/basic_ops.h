@@ -10,9 +10,9 @@
 
 namespace torch { namespace autograd {
 
-struct TORCH_API Error : public Function {
+struct TORCH_API Error : public Node {
   Error(std::string msg, edge_list&& next_edges)
-    : Function(std::move(next_edges))
+    : Node(std::move(next_edges))
     , msg(std::move(msg)) {}
 
   Error(std::string msg)
@@ -36,11 +36,11 @@ struct TORCH_API NotImplemented : public Error {
 };
 
 // Identity in forward, Error in backward. Used to implement @once_differentiable
-struct TORCH_API DelayedError : public Function {
+struct TORCH_API DelayedError : public Node {
   DelayedError(std::string msg, int num_inputs)
     : msg(std::move(msg)) {
       for (int i = 0; i < num_inputs; i++)
-        add_input_metadata(Function::undefined_input());
+        add_input_metadata(Node::undefined_input());
     }
 
   variable_list apply(variable_list&& inputs) override;
@@ -48,9 +48,9 @@ struct TORCH_API DelayedError : public Function {
   std::string msg;
 };
 
-struct TORCH_API GraphRoot : public Function {
+struct TORCH_API GraphRoot : public Node {
   GraphRoot(edge_list functions, variable_list inputs)
-      : Function(std::move(functions)),
+      : Node(std::move(functions)),
         outputs(std::move(inputs)) {}
 
   variable_list apply(variable_list&& inputs) override {

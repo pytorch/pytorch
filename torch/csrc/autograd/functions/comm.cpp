@@ -34,7 +34,7 @@ variable_list Scatter::apply(variable_list&& inputs) {
   AT_ASSERT(inputs.size() == 1);
   auto& input = inputs.front();
 
-  std::shared_ptr<Function> grad_fn;
+  std::shared_ptr<Node> grad_fn;
   if (compute_requires_grad(input)) {
     grad_fn =
         std::make_shared<Gather>(/*destination_device=*/input.device(), dim_);
@@ -101,7 +101,7 @@ variable_list Gather::apply(variable_list&& inputs) {
     }
   }
 
-  std::shared_ptr<Function> grad_fn;
+  std::shared_ptr<Node> grad_fn;
   if (compute_requires_grad(inputs)) {
     std::vector<at::Device> source_devices;
     std::vector<int64_t> input_sizes;
