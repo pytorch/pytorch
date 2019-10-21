@@ -34,7 +34,6 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", GeneratorType::get()},
       {"Dimname", StringType::get()},
-      {"DimnameList", ListType::create(StringType::get())}, // TODO Remove this type from the schema parser and write these as Dimname[] instead
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
