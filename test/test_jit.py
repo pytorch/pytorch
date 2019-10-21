@@ -167,7 +167,7 @@ def prof_callable(callable, *args, **kwargs):
 def prof_callable(callable, *args, **kwargs):
     
     #print ("running prof_callable")
-    if profile_and_replay in kwargs:
+    if 'profile_and_replay' in kwargs:
         with enable_profiling_mode(ProfilingMode.FULL):
             #print ("removing profile")
             del kwargs['profile']
