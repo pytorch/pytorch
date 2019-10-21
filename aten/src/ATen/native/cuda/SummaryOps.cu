@@ -2,6 +2,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
+#include <THC/THCNumerics.cuh>
+
 namespace at {
 namespace cuda {
 #define THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM 100
