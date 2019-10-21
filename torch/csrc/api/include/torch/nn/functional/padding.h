@@ -17,7 +17,7 @@ inline Tensor _pad_circular(Tensor input, IntArrayRef padding) {
 
   if (padding.size() > 4) {
     input = torch::cat({input, input.narrow(4, 0, padding[-5])}, /*dim=*/4);
-    input = torch::cat({input.index_select(4, -(padding[-5] + padding[-6]), -padding[-5]), input}, /*dim=*/4);
+    input = torch::cat({input.narrow(4, -(padding[-5] + padding[-6]), -padding[-5]), input}, /*dim=*/4);
   }
 
   return input;
