@@ -105,6 +105,10 @@ Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
 Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
 
+Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
+Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
+Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
+
 Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
 Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
 Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
@@ -290,7 +294,6 @@ IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(sigmoid)
 IMPLEMENT_UNARY_OP_VEC(sin)
 IMPLEMENT_UNARY_OP_VEC(sinh)
-IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
