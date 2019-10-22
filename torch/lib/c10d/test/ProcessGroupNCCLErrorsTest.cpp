@@ -87,9 +87,11 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   }
 
   void SetUp() override {
-    auto skipInfo = skipTest();
-    if (skipInfo.first) {
-      GTEST_SKIP() << skipInfo.second;
+    bool skip;
+    std::string skipReason;
+    std::tie(skip, skipReason) = skipTest();
+    if (skip) {
+      GTEST_SKIP() << skipReason;
     }
 
     size_t numDevices = cudaNumDevices();
