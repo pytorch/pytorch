@@ -8,6 +8,7 @@ future.
 from .adadelta import Adadelta  # noqa: F401
 from .adagrad import Adagrad  # noqa: F401
 from .adam import Adam  # noqa: F401
+from .radam import RAdam
 from .adamw import AdamW  # noqa: F401
 from .sparse_adam import SparseAdam  # noqa: F401
 from .adamax import Adamax  # noqa: F401
@@ -22,6 +23,7 @@ from . import lr_scheduler  # noqa: F401
 del adadelta
 del adagrad
 del adam
+del radam
 del adamw
 del sparse_adam
 del adamax
