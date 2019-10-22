@@ -82,7 +82,7 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
   return result.copy_(self);
 }
 
-bool is_set_to(const Tensor &self, const Tensor& src) {
+bool is_set_to(const Tensor& self, const Tensor& src) {
   if (self.storage().unsafeGetStorageImpl() == src.storage().unsafeGetStorageImpl() &&
       self.storage_offset() == src.storage_offset() &&
       self.dim() == src.dim()) {

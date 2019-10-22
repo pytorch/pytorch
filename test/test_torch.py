@@ -6372,7 +6372,7 @@ class TestTorchDeviceType(TestCase):
 
         # test that sizes must match
         t1 = torch.empty([2, 3, 4], device=device)
-        t2  = t1.view(4, 3, 2)
+        t2 = t1.view(4, 3, 2)
         self.assertFalse(t1.is_set_to(t2))
         self.assertFalse(t2.is_set_to(t1))
 
