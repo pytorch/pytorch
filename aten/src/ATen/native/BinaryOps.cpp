@@ -230,7 +230,7 @@ Tensor bitwise_xor(const Tensor& self, Scalar other) {
 }
 
 Tensor& bitwise_xor_(Tensor& self, Scalar other) {
-  return self.bitwise_xor_(wrapped_scalar_tensor(other));
+  return at::bitwise_xor_out(self, self, other);
 }
 
 // Legacy xor interfaces. They are aliased to bitwise_xor* functions
