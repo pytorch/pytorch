@@ -220,8 +220,9 @@ bool Operator::matches(const Node* node) const {
   const auto& formals = schema().arguments();
 
   // not enough inputs
-  if (actuals.size() < formals.size())
+  if (actuals.size() < formals.size()) {
     return false;
+  }
 
   TypeEnv type_env;
   for (size_t i = 0; i < formals.size(); ++i) {
@@ -231,6 +232,20 @@ bool Operator::matches(const Node* node) const {
     if (!matched_type.success()) {
       return false;
     }
+
+    TypePtr formal = *matched_type.type;
+    if (!actuals[i]->type()->isSubtypeOf(formal) &&
+        !(formal->cast<OptionalType>() &&
+          actuals[i]->type()->cast<NoneType>()) &&
+        !(formal->kind() == TensorType::Kind && actuals[i]->type()->kind() == TensorType::Kind) &&
+        !(formal->kind() == ListType::Kind && actuals[i]->type()->kind() == ListType::Kind &&
+          formal->expect<ListType>()->getElementType()->kind() == TensorType::Kind &&
+          actuals[i]->type()->expect<ListType>()->getElementType()->kind() == TensorType::Kind
+        )  
+          ) {
+      return false;
+    }
+
     TypePtr resolved = tryEvalTypeVariables(formal, type_env);
     if (resolved) {
       formal = resolved;
@@ -253,6 +268,7 @@ bool Operator::matches(const Node* node) const {
 }
 
 std::shared_ptr<Operator> findOperatorFor(const Node* node) {
+
   const auto& candidates = getAllOperatorsFor(node->kind());
   for (const auto& candidate : candidates) {
     if (candidate->matches(node)) {
