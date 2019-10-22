@@ -38,7 +38,7 @@ struct ClearAutogradContextGuard {
 } // anonymous namespace
 
 Message RequestCallback::operator()(Message& request) const {
-  // For a rev thread, current context id should be invalid outside
+  // For a recv thread, current context id should be invalid outside
   // processMessage().
   ClearAutogradContextGuard guard;
   try {

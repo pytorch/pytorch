@@ -64,6 +64,20 @@ TEST_F(FunctionalTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+TEST_F(FunctionalTest, LPPool1d) {
+  int norm_type = 2;
+  int stride = 2;
+  int kernel_size = 3;
+
+  auto x = torch::ones({1, 1, 5});
+  auto y = F::lp_pool1d(x, LPPool1dOptions(norm_type, kernel_size).stride(stride));
+  auto expected = (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) * kernel_size).pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
 TEST_F(FunctionalTest, CosineSimilarity) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
@@ -978,6 +992,24 @@ TEST_F(FunctionalTest, CELUDefaultOptions) {
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({size, size, size}));
   ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, PixelShuffle) {
+  auto x = torch::tensor(
+    {{{{-17, 19}, {-1, 2}},
+      {{7, 14}, {-3, 1}},
+      {{0, -2}, {-12, 14}},
+      {{-15, 0}, {-3, 9}}}}, torch::kFloat);
+  auto y_exp = torch::tensor(
+    {{{{-17, 7, 19, 14},
+       {0, -15, -2, 0},
+       {-1, -3, 2, 1},
+       {-12, -3, 14, 9}}}}, torch::kFloat);
+  auto y = F::pixel_shuffle(x, 2);
+
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4}));
+  ASSERT_TRUE(y.allclose(y_exp));
 }
 
 TEST_F(FunctionalTest, Softplus) {
