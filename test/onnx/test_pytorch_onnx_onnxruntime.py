@@ -503,14 +503,14 @@ class TestONNXRuntime(unittest.TestCase):
     def test_random(self):
         class RandN(torch.nn.Module):
             def forward(self, x):
-                return torch.arange(torch.randn(2, 3, 4).size(0))
+                return torch.arange((torch.randn(2, 3, 4) + x).size(0))
 
         x = torch.randn(2, 3, 4)
         self.run_test(RandN(), x)
 
         class Rand(torch.nn.Module):
             def forward(self, x):
-                return torch.arange(torch.rand(2, 3, 4).size(0))
+                return torch.arange((torch.rand(2, 3, 4) + x).size(0))
 
         x = torch.randn(2, 3, 4)
         self.run_test(Rand(), x)
