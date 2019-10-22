@@ -33,12 +33,60 @@ const char* operator()(const enumtype::k##name& v) const { \
   return #name; \
 }
 
-#define TORCH_CTOR_REDUCTION_ARG3(OPTIONS_NAME, ARG_NAME, TYPE1, TYPE2, TYPE3) \
+// NOTE: Backstory on why we need the following two macros:
+//
+// Consider the following options class:
+//
+// ```
+// struct TORCH_API SomeOptions {
+//   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+//   SomeOptions(reduction_t reduction = torch::kMean) : reduction_(reduction) {}
+//
+//   TORCH_ARG(reduction_t, reduction);
+// };
+// ```
+//
+// and the functional that uses it:
+//
+// ```
+// Tensor some_functional(
+//     const Tensor& input,
+//     const SomeOptions& options = {}) {
+//   ...
+// }
+// ```
+//
+// Normally, we would expect this to work:
+//
+// `F::some_functional(input, torch::kNone)`
+//
+// However, it throws the following error instead:
+//
+// ```
+// error: invalid initialization of reference of type ‘const SomeOptions&’
+// from expression of type ‘const torch::enumtype::kNone’
+// ```
+//
+// To get around this problem, we explicitly provide the following constructors for `SomeOptions`:
+//
+// ```
+// SomeOptions(torch::enumtype::kNone reduction) : reduction_(torch::kNone) {}
+// SomeOptions(torch::enumtype::kMean reduction) : reduction_(torch::kMean) {}
+// SomeOptions(torch::enumtype::kSum reduction) : reduction_(torch::kSum) {}
+// ```
+//
+// so that the conversion from `torch::kNone` to `SomeOptions` would work.
+//
+// Note that we also provide the default constructor `SomeOptions() {}`, so that
+// `const SomeOptions& options = {}` can work.
+#define TORCH_OPTIONS_CTOR_VARIANT_ARG3(OPTIONS_NAME, ARG_NAME, TYPE1, TYPE2, TYPE3) \
+OPTIONS_NAME() {} \
 OPTIONS_NAME(torch::enumtype::TYPE1 ARG_NAME) : ARG_NAME##_(torch::TYPE1) {} \
 OPTIONS_NAME(torch::enumtype::TYPE2 ARG_NAME) : ARG_NAME##_(torch::TYPE2) {} \
 OPTIONS_NAME(torch::enumtype::TYPE3 ARG_NAME) : ARG_NAME##_(torch::TYPE3) {}
 
-#define TORCH_CTOR_REDUCTION_ARG4(OPTIONS_NAME, ARG_NAME, TYPE1, TYPE2, TYPE3, TYPE4) \
+#define TORCH_OPTIONS_CTOR_VARIANT_ARG4(OPTIONS_NAME, ARG_NAME, TYPE1, TYPE2, TYPE3, TYPE4) \
+OPTIONS_NAME() {} \
 OPTIONS_NAME(torch::enumtype::TYPE1 ARG_NAME) : ARG_NAME##_(torch::TYPE1) {} \
 OPTIONS_NAME(torch::enumtype::TYPE2 ARG_NAME) : ARG_NAME##_(torch::TYPE2) {} \
 OPTIONS_NAME(torch::enumtype::TYPE3 ARG_NAME) : ARG_NAME##_(torch::TYPE3) {} \

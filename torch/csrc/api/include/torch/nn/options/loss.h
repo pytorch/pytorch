@@ -10,7 +10,7 @@ namespace nn {
 
 /// Options for a L1 loss module.
 struct TORCH_API L1LossOptions {
-  TORCH_CTOR_REDUCTION_ARG3(L1LossOptions, reduction, kNone, kMean, kSum)
+  TORCH_OPTIONS_CTOR_VARIANT_ARG3(L1LossOptions, reduction, kNone, kMean, kSum)
 
   /// Specifies the reduction to apply to the output.
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
@@ -21,7 +21,7 @@ struct TORCH_API L1LossOptions {
 
 /// Options for a KLDiv loss module.
 struct TORCH_API KLDivLossOptions {
-  TORCH_CTOR_REDUCTION_ARG4(KLDivLossOptions, reduction, kNone, kBatchMean, kSum, kMean)
+  TORCH_OPTIONS_CTOR_VARIANT_ARG4(KLDivLossOptions, reduction, kNone, kBatchMean, kSum, kMean)
 
   /// Specifies the reduction to apply to the output.
   /// ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``. Default: ``'mean'``
@@ -33,7 +33,7 @@ struct TORCH_API KLDivLossOptions {
 
 /// Options for a MSE loss module.
 struct TORCH_API MSELossOptions {
-  TORCH_CTOR_REDUCTION_ARG3(MSELossOptions, reduction, kNone, kMean, kSum)
+  TORCH_OPTIONS_CTOR_VARIANT_ARG3(MSELossOptions, reduction, kNone, kMean, kSum)
 
   /// Specifies the reduction to apply to the output.
   /// ``'none'`` | ``'mean'`` | ``'sum'``. Default: ``'mean'``
@@ -103,7 +103,7 @@ struct TORCH_API CosineEmbeddingLossOptions {
 
 /// Options for a multi-label margin loss functional and module.
 struct TORCH_API MultiLabelMarginLossOptions {
-  TORCH_CTOR_REDUCTION_ARG3(MultiLabelMarginLossOptions, reduction, kNone, kMean, kSum)
+  TORCH_OPTIONS_CTOR_VARIANT_ARG3(MultiLabelMarginLossOptions, reduction, kNone, kMean, kSum)
 
   /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
@@ -117,7 +117,7 @@ struct TORCH_API MultiLabelMarginLossOptions {
 
 /// Options for a soft margin loss functional and module.
 struct TORCH_API SoftMarginLossOptions {
-  TORCH_CTOR_REDUCTION_ARG3(SoftMarginLossOptions, reduction, kNone, kMean, kSum)
+  TORCH_OPTIONS_CTOR_VARIANT_ARG3(SoftMarginLossOptions, reduction, kNone, kMean, kSum)
 
   /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
   /// 'none': no reduction will be applied, 'mean': the sum of the output will
