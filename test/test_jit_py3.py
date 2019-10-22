@@ -354,6 +354,60 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
             as_module_interface(scripted_wrong_mod)
 
+    def test_module_interface_swap(self):
+        @torch.jit.interface
+        class ModuleInterface(nn.Module):
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                pass
+
+        class OrigModule(nn.Module):
+            def __init__(self):
+                super(OrigModule, self).__init__()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return input + 5
+
+        class NewModule(nn.Module):
+            def __init__(self):
+                super(NewModule, self).__init__()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return input + 1
+
+        class NewModuleWrong(nn.Module):
+            def __init__(self):
+                super(NewModuleWrong, self).__init__()
+
+            def forward(self, input):
+                # type: (int) -> int
+                return input + 1
+
+        class TestModule(nn.Module):
+            proxy_mod : ModuleInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigModule()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return self.proxy_mod.forward(input)
+
+
+        scripted_mod = torch.jit.script(TestModule())
+        input = torch.randn(3, 4)
+        self.assertEqual(scripted_mod(input), input + 5)
+
+        # module swap with the same interface
+        scripted_mod.proxy_mod = torch.jit.script(NewModule())
+        self.assertEqual(scripted_mod(input), input + 1)
+
+        # module swap with in-compatible interface
+        with self.assertRaisesRegex(RuntimeError, "does not compatible with the type"):
+            scripted_mod.proxy_mod = torch.jit.script(NewModuleWrong())
 
 
 if __name__ == '__main__':

@@ -73,6 +73,8 @@ def infer_raw_concrete_type(nn_module):
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.jit._ConstModuleList)):
         concrete_type.set_module_list()
 
+    class_annotations = getattr(nn_module, '__annotations__', {})
+
     added_names = set()
     for name, item in nn_module._parameters.items():
         if item is None:
@@ -88,6 +90,17 @@ def infer_raw_concrete_type(nn_module):
         added_names.add(name)
 
     for name, item in nn_module._modules.items():
+        if name in class_annotations:
+            attr_type = torch.jit.annotations.ann_to_type(class_annotations[name])
+            # check if it's an module iterface type otherwise error out
+            if isinstance(attr_type, torch._C.InterfaceType) and attr_type.isModule():
+                concrete_type.add_attribute(name, attr_type, False)
+            else:
+                raise RuntimeError("Trying to assign the submodule {} to an attribute "
+                                   "that is not an module interface type.".format(name))
+
+            continue
+
         sub_concrete_type = concrete_type_store.get_or_create_concrete_type(item)
         concrete_type.add_module(name, sub_concrete_type)
         added_names.add(name)
@@ -109,7 +122,7 @@ def infer_raw_concrete_type(nn_module):
     constants_set = getattr(nn_module, "__constants__", set())
 
     # Constants annotated via `Final[T]` rather than being added to `__constants__`
-    for name, ann in getattr(nn_module, '__annotations__', {}).items():
+    for name, ann in class_annotations.items():
         if torch._jit_internal.is_final(ann):
             constants_set.add(name)
 
@@ -136,8 +149,6 @@ def infer_raw_concrete_type(nn_module):
     overloads.update(get_overload_name_mapping(get_overload_annotations(nn_module)))
     for name, overloaded_names in overloads.items():
         concrete_type.add_overload(name, overloaded_names)
-
-    class_annotations = getattr(nn_module, '__annotations__', {})
 
     # TODO: [switch to __dict__]
     # we should use __dict__ here because we only want to pick up attributes on
@@ -329,6 +340,10 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
                 cpp_module._register_parameter(name, orig_value, False)
             elif isinstance(orig_value, torch.jit.Attribute):
                 cpp_module._register_attribute(name, attr_type, orig_value.value)
+            elif isinstance(orig_value, Module):
+                scripted = recursive_script(orig_value)
+                cpp_module._register_module(name, scripted._c)
+                script_module._modules[name] = scripted
             else:
                 cpp_module._register_attribute(name, attr_type, orig_value)
 

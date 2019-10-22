@@ -515,6 +515,16 @@ def _verify_equal(xs, ys):
             raise RuntimeError("JIT and real computation mismatch")
 
 
+def _is_module_interface(cpp_module, attr):
+    attr_type = cpp_module._type().getAttribute(attr)
+
+    if attr_type is not None:
+        if isinstance(attr_type, torch._C.InterfaceType) and attr_type.isModule():
+            return True
+
+    return False
+
+
 def indent(s):
     return '\n'.join(['\t' + line for line in s.splitlines()])
 
@@ -1373,8 +1383,14 @@ class OrderedModuleDict(OrderedDictWrapper):
         return k in self._python_modules
 
     def __setitem__(self, k, v):
-        raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                           "tried to replace existing module '{}': {}".format(k, v))
+        # allow swap submodules defined as module interface type with the existing
+        # module dict and update the python module dict to keep sync.
+        if _is_module_interface(self.module, k) and isinstance(v, ScriptModule):
+            self.module._register_module(k, v._c)
+            self._python_modules[k] = v
+        else:
+            raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
+                               "tried to replace existing module '{}': {}".format(k, v))
 
     def __getitem__(self, k):
         return self._python_modules[k]
@@ -1716,8 +1732,18 @@ if _enabled:
                 # XXX: buffers are implemented as attributes in the JIT
                 self._c._set_attribute(attr, value)
             elif self._c._has_module(attr):
-                raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                                   "tried to replace existing module '{}': {}".format(attr, value))
+                # If the attr is an module interface type, it's guranteed that the module is
+                # not inlined in the graph and acting like the attribute way, in this case we
+                # allow swapping a new scripted module in.
+                if _is_module_interface(self._c, attr):
+                    if isinstance(value, ScriptModule):
+                        self._modules[attr] = value
+                    else:
+                        raise RuntimeError("Cannot re-assign a non-ScriptModule to an module interface"
+                                           "tried to replace existing module '{}': {}".format(attr, value))
+                else:
+                    raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
+                                        "tried to replace existing module '{}': {}".format(attr, value))
             elif self._c._has_parameter(attr):
                 self._c._set_parameter(attr, value)
             elif hasattr(self, "_concrete_type") and attr in self._concrete_type.get_constants().keys():

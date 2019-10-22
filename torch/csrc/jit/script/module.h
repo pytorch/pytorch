@@ -357,6 +357,11 @@ struct TORCH_API Module {
         return EntityType::MODULE;
       }
     }
+    if (auto cls = t->cast<at::InterfaceType>()) {
+      if (cls->is_module()) {
+        return EntityType::MODULE;
+      }
+    }
     return EntityType::ATTRIBUTE;
   }
 

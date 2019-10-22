@@ -723,13 +723,17 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
-      }));
+      }))
+      .def("getAttribute",
+           (TypePtr (ClassType::*)(const std::string &) const) &ClassType::getAttribute,
+           "Get the class attribute type");
   py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
       m, "InterfaceType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_interface(
             c10::QualifiedName(qualified_name));
-      }));
+      }))
+      .def("isModule", &InterfaceType::is_module);
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)

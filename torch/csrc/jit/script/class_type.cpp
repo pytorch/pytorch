@@ -139,8 +139,8 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
                    << rhs->python_str() << "' (2)\n"
                    << "  (1) " << self_method->getSchema() << "\n"
                    << "  (2) " << schema << "\n";
-          return false;
         }
+        return false;
       }
     }
     return true;
