@@ -19,11 +19,11 @@ from debug_embed_params import run_embed_params
 import io
 
 # Import various models for testing
-# from torchvision.models.alexnet import alexnet
-# from torchvision.models.inception import inception_v3
-# from torchvision.models.densenet import densenet121
-# from torchvision.models.resnet import resnet50
-# from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
+from torchvision.models.alexnet import alexnet
+from torchvision.models.inception import inception_v3
+from torchvision.models.densenet import densenet121
+from torchvision.models.resnet import resnet50
+from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 
 from model_defs.squeezenet import SqueezeNet
 from model_defs.super_resolution import SuperResolutionNet
