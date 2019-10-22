@@ -19,7 +19,16 @@ void nll_loss_forward_out_cpu_template(
     int64_t ignore_index) {
   TORCH_CHECK(
       input.dim() > 0 && input.dim() <= 2, "input tensor should be 1D or 2D");
-  TORCH_CHECK(target.dim() == 1, "multi-target not supported");
+  TORCH_CHECK(
+      target.dim() == 1,
+      "1D target tensor expected, multi-target not supported");
+  TORCH_CHECK(
+      input.size(0) == target.size(0),
+      "size mismatch (got input: ",
+      input.sizes(),
+      ", target: ",
+      target.sizes(),
+      ")")
 
   const auto n_dims = input.dim();
   const auto n_classes = input.size(-1);
@@ -142,8 +151,22 @@ void nll_loss_backward_out_cpu_template(
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
-  TORCH_CHECK(target.dim() == 1, "multi-target not supported");
-  TORCH_CHECK(input.dim() <= 2, "input tensor should be 1D or 2D");
+  TORCH_CHECK(
+      input.dim() > 0 && input.dim() <= 2, "input tensor should be 1D or 2D");
+  TORCH_CHECK(
+      target.dim() == 1,
+      "1D target tensor expected, multi-target not supported");
+  TORCH_CHECK(
+      input.size(0) == target.size(0),
+      "size mismatch (got input: ",
+      input.sizes(),
+      ", target: ",
+      target.sizes(),
+      ")")
+  TORCH_CHECK(
+      total_weight.dim() == 1 && total_weight.numel() == 1,
+      "expected total_weight to be a 1D single element tensor, got: ",
+      total_weight.sizes());
 
   grad_input.resize_as_(input);
   grad_input.zero_();
@@ -168,11 +191,10 @@ void nll_loss_backward_out_cpu_template(
             weight.defined() ? weight_contiguous.data_ptr<scalar_t>() : nullptr;
 
         if (reduction == Reduction::None && n_dims == 2) {
-          auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
-          auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
-
           const auto batch_size = input.size(0);
           check_dim_size(grad_output, 1, 0, batch_size);
+          auto grad_input_acc = grad_input.accessor<scalar_t, 2>();
+          auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
           at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
             for (auto i = start; i < end; i++) {
               auto cur_target = target_acc[i];
