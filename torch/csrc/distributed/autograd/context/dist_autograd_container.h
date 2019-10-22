@@ -120,13 +120,15 @@ class TORCH_API DistAutogradContainer {
 
   // Lock to protect next_context_id_ and autograd_context map. initialized_
   // and worker_id_ are immutable.
-  mutable std::recursive_mutex autograd_context_lock_;
+  mutable std::mutex autograd_context_lock_;
 
   // Autograd message id to identify unique send/recv autograd function pairs.
   std::atomic<int64_t> next_autograd_message_id_;
 
   // Maximum allowed value for autograd_context_id or autograd_message_id.
   int64_t max_id_;
+
+  std::chrono::time_point<std::chrono::system_clock> creation_time;
 };
 
 } // namespace autograd
