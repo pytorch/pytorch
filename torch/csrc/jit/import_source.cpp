@@ -390,11 +390,7 @@ struct SourceImporterImpl : public Resolver,
       field_types.emplace_back(std::move(type));
     }
 
-    auto tt = TupleType::create(
-        field_types,
-        qualified_name,
-        TupleType::namedTupleSchemaFromNamesAndTypes(
-            qualified_name, field_names, field_types));
+    auto tt = TupleType::createNamed(qualified_name, field_names, field_types);
     cu_->register_type(tt);
   }
 
