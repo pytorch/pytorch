@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
