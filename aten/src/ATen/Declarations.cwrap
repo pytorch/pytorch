@@ -299,6 +299,7 @@
   cname: unfold
   variants:
     - function
+  scalar_check: false
   cpu_half: True
   cpu_bool: True
   cuda_bool: True
