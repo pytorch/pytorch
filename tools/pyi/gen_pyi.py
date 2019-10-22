@@ -48,6 +48,7 @@ blacklist = [
     '__init_subclass__',
     '__new__',
     '__subclasshook__',
+    'cdist',
     'clamp',
     'clamp_',
     'device',
@@ -64,7 +65,6 @@ blacklist = [
     'kl_div',
     'margin_ranking_loss',
     'triplet_margin_loss',
-    'soft_margin_loss',
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
     'align_tensors',  # BUILD_NAMEDTENSOR only

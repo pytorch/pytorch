@@ -513,8 +513,9 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self, const std::string& name, py::object value) {
             auto attr = self.find_attribute(name);
             TORCH_CHECK(attr, "Could not find attribute '", name, "'");
-            auto ivalue = toIValue(value, attr->type());
-            attr->setValue(ivalue);
+            auto ivalue =
+                toIValue(std::move(value), self.type()->getAttribute(name));
+            self.set_attribute(name, ivalue);
           })
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
@@ -525,8 +526,8 @@ void initJitScriptBindings(PyObject* module) {
           "_get_modules",
           [](Module& self) {
             std::vector<std::pair<std::string, Module>> modules;
-            for (Slot s : self.get_module_slots()) {
-              modules.emplace_back(s.name(), s.to_module());
+            for (const NameModule& s : self.get_modules()) {
+              modules.emplace_back(std::make_pair(s.name, s.module));
             }
             return modules;
           })
@@ -536,10 +537,10 @@ void initJitScriptBindings(PyObject* module) {
             auto parameters = self.get_parameters();
             py::tuple result(parameters.size());
             auto i = 0;
-            for (Slot p : parameters) {
+            for (const NameValue& p : parameters) {
               py::tuple r(2);
               result[i++] = std::make_tuple(
-                  p.name(), autograd::as_variable_ref(p.value().toTensor()));
+                  p.name, autograd::as_variable_ref(p.value.toTensor()));
             }
             return result;
           })
@@ -549,11 +550,11 @@ void initJitScriptBindings(PyObject* module) {
             auto attributes = self.get_attributes();
             py::tuple result(attributes.size());
             size_t i = 0;
-            for (Slot buffer : attributes) {
+            for (const NameValue& attr : attributes) {
               py::tuple r(3);
-              IValue v = buffer.value();
+              IValue v = attr.value;
               result[i++] = std::make_tuple(
-                  buffer.name(), buffer.type(), toPyObject(std::move(v)));
+                  attr.name, attr.value.type(), toPyObject(std::move(v)));
             }
             return result;
           })
@@ -599,7 +600,7 @@ void initJitScriptBindings(PyObject* module) {
              bool force_outplace) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
-            auto typed_inputs = toTypedStack(input_tuple);
+            auto typed_inputs = toTraceableStack(input_tuple);
             auto graph = tracer::createGraphByTracing(
                 func, typed_inputs, var_lookup_fn, force_outplace, &self);
             const auto method_name = QualifiedName(self.name(), name);
@@ -620,14 +621,11 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "code",
           [](Module& self) {
-            std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
-            SourceRangeRecords source_ranges;
-            PythonPrint pp(ss, source_ranges, tensors, deps, false);
+            PythonPrint pp(tensors, deps, false);
             pp.printNamedType(self.type());
-            pp.finish();
-            return ss.str();
+            return pp.str();
           })
       .def("apply", &Module::apply)
       .def("_clone", &Module::clone)
@@ -721,14 +719,11 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "code",
           [](const StrongFunctionPtr& self) {
-            std::ostringstream ss;
             std::vector<at::Tensor> tensors;
             std::vector<c10::NamedTypePtr> deps;
-            SourceRangeRecords source_ranges;
-            PythonPrint pp(ss, source_ranges, tensors, deps, false);
+            PythonPrint pp(tensors, deps, false);
             pp.printFunction(*self.function_);
-            pp.finish();
-            return ss.str();
+            return pp.str();
           })
       .def(
           "get_debug_state",
@@ -753,19 +748,15 @@ void initJitScriptBindings(PyObject* module) {
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
           })
       .def_property_readonly("graph", &Method::graph)
-      .def("_lowered_graph", &Method::_lowered_graph)
       .def_property_readonly(
           "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
       .def_property_readonly("code", [](Method& self) {
-        std::ostringstream ss;
         std::vector<at::Tensor> tensors;
         std::vector<c10::NamedTypePtr> deps;
-        SourceRangeRecords source_ranges;
-        PythonPrint pp(ss, source_ranges, tensors, deps, false);
+        PythonPrint pp(tensors, deps, false);
         pp.printMethod(self.function());
-        pp.finish();
-        return ss.str();
+        return pp.str();
       });
   m.def(
       "_jit_script_compile",
@@ -805,7 +796,7 @@ void initJitScriptBindings(PyObject* module) {
          py::tuple input_tuple,
          py::function var_lookup_fn,
          bool force_outplace) {
-        auto typed_inputs = toTypedStack(input_tuple);
+        auto typed_inputs = toTraceableStack(input_tuple);
         auto graph = tracer::createGraphByTracing(
             func, typed_inputs, var_lookup_fn, force_outplace);
         auto cu = get_python_cu();

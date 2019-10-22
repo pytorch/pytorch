@@ -337,6 +337,7 @@ Tensor linspace(
     Scalar end,
     int64_t steps,
     const TensorOptions& options) {
+  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
   Tensor result = at::empty({steps}, options);
   return at::linspace_out(result, start, end, steps);
 }
