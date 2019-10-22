@@ -3,12 +3,12 @@ from collections import defaultdict
 from torch._six import container_abcs
 
 
-class _PerDeviceHelper(object):
+class _MultiDeviceReplicator(object):
     """
-    Helper class to serve copies of a master tensor that may be needed on multiple devices.
-    Intended to be used as a temporary.
+    Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.
     """
     def __init__(self, master_tensor):
+        assert master_tensor.is_cuda
         self.master = master_tensor
         self._per_device_tensors = {}
 
@@ -22,28 +22,29 @@ class _PerDeviceHelper(object):
 
 class AmpScaler(object):
     """
-    ``torch.float16`` has a limited dynamic range.  Late in training, when gradient magnitudes become small,
-    gradient values may underflow in ``float16`` regions of the backward pass.
-
-    :class:`AmpScaler` performs dynamic gradient scaling to mitigate underflow.
+    :class:`AmpScaler` performs dynamic gradient scaling.
 
     Here's how that looks in a simple example::
 
-        scaler = AmpScaler()
+    # Create an AmpScaler instance.
+    scaler = AmpScaler()
+    ...
+    for input, target in data:
+        optimizer.zero_grad()
+        output = model(input)
+        loss = loss_fn(output, target)
 
-        for input, target in data:
-            optimizer.zero_grad()
-            output = model(input)
-            loss = loss_fn(output, target)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+        # Scale the loss, and call backward() on the scaled loss to create scaled gradients.
+        scaler.scale(loss).backward()
+
+        # Carry out a scaling-safe step.  scaler.step() unscales the optimizer's gradients
+        # and skips optimizer.step() if the gradients contain infs or NaNs.
+        scaler.step(optimizer)
+
+        # Update the scale for next iteration.
+        scaler.update()
 
     See the :ref:`Gradient Scaling Examples<gradient-scaling-examples>` for usage in more complex cases.
-
-    By default, ``scaler.step`` internally unscales ``optimizer``'s gradients before applying them, so the
-    learning rate and other hyperparameters don't need to change.  You may also unscale gradients manually
-    prior to :meth:`step` using :meth:`unscale`.
 
     ``scaler`` maintains the scale factor internally.  To leverage ``float16``'s full dynamic range,
     ``scaler`` attempts to use the largest scale factor it can without incurring overflow.
@@ -100,7 +101,7 @@ class AmpScaler(object):
             return outputs * self._scale.to(outputs.device)
 
         # Invoke the more complex machinery only if we're treating multiple outputs.
-        per_device_scale = _PerDeviceHelper(self._scale)
+        per_device_scale = _MultiDeviceReplicator(self._scale)
 
         def apply_scale(val):
             if isinstance(val, torch.Tensor):
@@ -114,8 +115,8 @@ class AmpScaler(object):
         return apply_scale(outputs)
 
     def _unscale_grads(self, optimizer, rscale, found_inf, allow_fp16=False):
-        per_device_rscale = _PerDeviceHelper(rscale)
-        per_device_found_inf = _PerDeviceHelper(found_inf)
+        per_device_rscale = _MultiDeviceReplicator(rscale)
+        per_device_found_inf = _MultiDeviceReplicator(found_inf)
 
         for group in optimizer.param_groups:
             for param in group["params"]:
@@ -250,7 +251,7 @@ class AmpScaler(object):
                 reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor with requires_grad=False."
                 assert isinstance(new_scale, torch.cuda.FloatTensor), reason
                 assert new_scale.numel() == 1, reason
-                assert new_scale.requires_grad == False, reason
+                assert new_scale.requires_grad is False, reason
                 self._scale = new_scale
         else:
             # Consume shared inf/nan data collected from optimizers to update the scale.
