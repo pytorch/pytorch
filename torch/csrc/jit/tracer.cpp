@@ -1,20 +1,21 @@
 #include <torch/csrc/jit/tracer.h>
 
-#include <torch/csrc/utils/variadic.h>
-#include <torch/csrc/jit/constants.h>
-#include <ATen/core/functional.h>
 #include <ATen/Backtrace.h>
+#include <ATen/core/Dict.h>
+#include <ATen/core/EnableNamedTensor.h>
+#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
-#include <ATen/core/Dict.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <torch/csrc/utils/variadic.h>
 
 #include <memory>
 #include <sstream>
@@ -368,6 +369,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     if (script::getInlineEverythingMode()) {
       Inline(*graph);
     }
+    FixupTraceScopeBlocks(graph, self);
     LowerSimpleTuples(graph);
     EliminateDeadCode(graph);
 

@@ -77,17 +77,6 @@ else:
         return value
 
 @contextlib.contextmanager
-def scope(scope_name):
-    tracing_state = torch._C._get_tracing_state()
-    if tracing_state:
-        tracing_state.push_scope(scope_name)
-    try:
-        yield
-    finally:
-        if tracing_state:
-            tracing_state.pop_scope()
-
-@contextlib.contextmanager
 def optimized_execution(should_optimize):
     """
     A context manager that controls whether the JIT's executor will run
