@@ -20,12 +20,17 @@ executors:
       image: windows-server-2019-nvidia:201908-28
       shell: bash.exe
 
+  windows-cuda:
+    machine:
+      resource_class: l1.large
+      image: windows-server-2019-nvidia:edge
+      shell: bash.exe
 ##############################################################################
 # Job specs
 ##############################################################################
 jobs:
   pytorch_windows_build:
-    executor: windows-gpu-prototype
+    executor: windows-cuda
     environment:
       BUILD_ENVIRONMENT: "pytorch-win-ws2016-cuda9-cudnn7-py3"
       SCCACHE_BUCKET: "ossci-compiler-cache"
@@ -44,7 +49,7 @@ jobs:
             set -x
             choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
             choco install -y 7zip curl awscli
-            choco upgrade -y visualstudio2019community
+            # choco upgrade -y visualstudio2019community
             pushd ..
             curl -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
             7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
