@@ -5,6 +5,7 @@
 #include <torch/nn/functional/fold.h>
 #include <torch/nn/functional/loss.h>
 #include <torch/nn/functional/normalization.h>
+#include <torch/nn/functional/padding.h>
 #include <torch/nn/functional/pixelshuffle.h>
 #include <torch/nn/functional/pooling.h>
 #include <torch/nn/functional/vision.h>
