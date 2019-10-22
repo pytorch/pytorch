@@ -366,18 +366,13 @@ class RNN(RNNBase):
     """
 
     def __init__(self, *args, **kwargs):
-        if 'nonlinearity' in kwargs:
-            if kwargs['nonlinearity'] == 'tanh':
-                mode = 'RNN_TANH'
-            elif kwargs['nonlinearity'] == 'relu':
-                mode = 'RNN_RELU'
-            else:
-                raise ValueError("Unknown nonlinearity '{}'".format(
-                    kwargs['nonlinearity']))
-            del kwargs['nonlinearity']
-        else:
+        self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
+        if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
-
+        elif self.nonlinearity == 'relu':
+            mode = 'RNN_RELU'
+        else:
+            raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
         super(RNN, self).__init__(mode, *args, **kwargs)
 
 
