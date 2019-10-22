@@ -93,6 +93,10 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # On ROCm, RCCL (distributed) development isn't complete.
   # https://github.com/ROCmSoftwarePlatform/rccl
   rocm_ignore_test+=("--ignore $caffe2_pypath/python/data_parallel_model_test.py")
+
+  # This test has been flaky in ROCm CI (but note the tests are
+  # cpu-only so should be unrelated to ROCm)
+  rocm_ignore_test+=("--ignore $caffe2_pypath/python/operator_test/blobs_queue_db_test.py")
 fi
 
 # NB: Warnings are disabled because they make it harder to see what
@@ -131,7 +135,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
     # default pip version is too old(9.0.2), unable to support tag `manylinux2010`.
     # Fix the pip error: Couldn't find a version that satisfies the requirement
     sudo pip install --upgrade pip
-    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==0.5.0.dev1009
+    pip install -q --user -i https://test.pypi.org/simple/ ort-nightly==0.5.0.dev1012
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

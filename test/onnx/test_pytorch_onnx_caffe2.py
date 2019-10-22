@@ -19,11 +19,11 @@ from debug_embed_params import run_embed_params
 import io
 
 # Import various models for testing
-from torchvision.models.alexnet import alexnet
-from torchvision.models.inception import inception_v3
-from torchvision.models.densenet import densenet121
-from torchvision.models.resnet import resnet50
-from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
+# from torchvision.models.alexnet import alexnet
+# from torchvision.models.inception import inception_v3
+# from torchvision.models.densenet import densenet121
+# from torchvision.models.resnet import resnet50
+# from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 
 from model_defs.squeezenet import SqueezeNet
 from model_defs.super_resolution import SuperResolutionNet
@@ -1316,6 +1316,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dynamic_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1327,6 +1328,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dynamic_slice_script(self):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
