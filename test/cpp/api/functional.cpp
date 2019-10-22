@@ -225,19 +225,24 @@ TEST_F(FunctionalTest, GridSample) {
 
   // bilinear, zeros, true
   auto options = GridSampleOptions()
-                  .mode(torch::GridSamplerInterpolation::Bilinear)
-                  .padding_mode(torch::GridSamplerPadding::Zeros)
-                  .align_corners(true);
+                    .mode("bilinear")
+                    .padding_mode("zeros")
+                    .align_corners(true);
   auto output = F::grid_sample(input, grid, options);
   auto expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+  
+  // default options (bilinear, zeros, true) same result as above
+  output = F::grid_sample(input, grid);
 
   ASSERT_TRUE(output.allclose(expected));
 
   // bilinear, zeros, false
   options = GridSampleOptions()
-                  .mode(torch::GridSamplerInterpolation::Bilinear)
-                  .padding_mode(torch::GridSamplerPadding::Zeros)
-                  .align_corners(false);
+                .mode("bilinear")
+                .padding_mode("zeros")
+                .align_corners(false);
   output = F::grid_sample(input, grid, options);
   expected = torch::tensor({{{{0., 0., 0.5}, {1.5, 4., 2.5}, {3.5, 2., 0.}}}}, torch::kFloat);
 
@@ -245,9 +250,9 @@ TEST_F(FunctionalTest, GridSample) {
 
   // nearest, zeros, true
   options = GridSampleOptions()
-                  .mode(torch::GridSamplerInterpolation::Nearest)
-                  .padding_mode(torch::GridSamplerPadding::Zeros)
-                  .align_corners(true);
+                .mode("nearest")
+                .padding_mode("zeros")
+                .align_corners(true);
   output = F::grid_sample(input, grid, options);
   expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
 
@@ -255,9 +260,9 @@ TEST_F(FunctionalTest, GridSample) {
 
   // bilinear, border, true
   options = GridSampleOptions()
-                  .mode(torch::GridSamplerInterpolation::Bilinear)
-                  .padding_mode(torch::GridSamplerPadding::Border)
-                  .align_corners(true);
+                .mode("bilinear")
+                .padding_mode("border")
+                .align_corners(true);
   output = F::grid_sample(input, grid, options);
   expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 8.}}}}, torch::kFloat);
 
@@ -265,9 +270,9 @@ TEST_F(FunctionalTest, GridSample) {
 
   // bilinear, reflection, true
   options = GridSampleOptions()
-                  .mode(torch::GridSamplerInterpolation::Bilinear)
-                  .padding_mode(torch::GridSamplerPadding::Reflection)
-                  .align_corners(true);
+                .mode("bilinear")
+                .padding_mode("reflection")
+                .align_corners(true);
   output = F::grid_sample(input, grid, options);
   expected = torch::tensor({{{{1., 0., 1.}, {3., 4., 5.}, {7., 8., 7.}}}}, torch::kFloat);
 
