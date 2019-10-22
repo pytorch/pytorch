@@ -26,7 +26,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
         minObservation_(
             this->template GetSingleArgument<int>("min_observation", 10000)),
         maxEmptyRatio_(
-            this->template GetSingleArgument<float>("max_empty_ratio", 0.1)),
+            this->template GetSingleArgument<float>("max_empty_ratio", 0.3)),
         maxMismatchedRatio_(this->template GetSingleArgument<float>(
             "max_mismatched_ratio",
             0.01)) {
@@ -155,20 +155,6 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     if (totalRanges_ >= minObservation_) {
       for (int j = 0; j < OutputSize(); ++j) {
         CAFFE_ENFORCE_GT(
-            totalRanges_ * maxEmptyRatio_,
-            emptyRanges_[j],
-            "Ratio of empty range for feature at index ",
-            j,
-            " is ",
-            (static_cast<double>(emptyRanges_[j]) /
-             static_cast<double>(totalRanges_)),
-            " (",
-            emptyRanges_[j],
-            "/",
-            totalRanges_,
-            ") which exceeds ",
-            maxEmptyRatio_);
-        CAFFE_ENFORCE_GT(
             totalRanges_ * maxMismatchedRatio_,
             mismatchedRanges_[j],
             "Ratio of range length mismatch for feature at index ",
@@ -182,6 +168,14 @@ class GatherRangesToDenseOp final : public Operator<Context> {
             totalRanges_,
             ") which exceeds ",
             maxMismatchedRatio_);
+        if (totalRanges_ * maxEmptyRatio_ <= emptyRanges_[j]) {
+          LOG(ERROR) << "Ratio of empty range for feature at index " << j
+                     << " is "
+                     << (static_cast<double>(emptyRanges_[j]) /
+                         static_cast<double>(totalRanges_))
+                     << " (" << emptyRanges_[j] << "/" << totalRanges_
+                     << ") which exceeds " << maxEmptyRatio_;
+        }
       }
     }
 
