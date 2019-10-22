@@ -1495,6 +1495,153 @@ TEST_F(ModulesTest, Threshold) {
   }
 }
 
+TEST_F(ModulesTest, Upsampling1D) {
+  {
+    Upsample model(UpsampleOptions()
+                       .size(std::vector<int64_t>{4})
+                       .mode(torch::Interpolation::Nearest));
+    auto input = torch::ones({1, 1, 2}, torch::requires_grad());
+    auto output = model->forward(input);
+    auto expected = torch::ones({1, 1, 4});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(UpsampleOptions()
+                           .scale_factor(std::vector<double>{scale_factor})
+                           .mode(torch::Interpolation::Linear)
+                           .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+  {
+    // linear (1D) upsampling spatial invariance
+    Upsample model(UpsampleOptions()
+                       .scale_factor(std::vector<double>{3})
+                       .mode(torch::Interpolation::Linear)
+                       .align_corners(false));
+    auto input = torch::zeros({1, 1, 9});
+    input.narrow(2, 0, 4).normal_();
+    auto output = model->forward(input);
+    auto expected = model->forward(input.narrow(2, 0, 5));
+
+    ASSERT_TRUE(torch::allclose(output.narrow(2, 0, 15), expected));
+  }
+}
+
+TEST_F(ModulesTest, Upsampling2D) {
+  {
+    Upsample model(UpsampleOptions()
+                       .size(std::vector<int64_t>{4, 4})
+                       .mode(torch::Interpolation::Nearest));
+    auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
+    auto output = model->forward(input);
+    auto expected = torch::ones({1, 1, 4, 4});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(UpsampleOptions()
+                           .scale_factor({{scale_factor, scale_factor}})
+                           .mode(torch::Interpolation::Bilinear)
+                           .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(UpsampleOptions()
+                           .scale_factor({{scale_factor, scale_factor}})
+                           .mode(torch::Interpolation::Bicubic)
+                           .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+}
+
+TEST_F(ModulesTest, Upsampling3D) {
+  {
+    Upsample model(UpsampleOptions()
+                       .size(std::vector<int64_t>{4, 4, 4})
+                       .mode(torch::Interpolation::Nearest));
+    auto input = torch::ones({1, 1, 2, 2, 2}, torch::requires_grad());
+    auto output = model->forward(input);
+    auto expected = torch::ones({1, 1, 4, 4, 4});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(
+            UpsampleOptions()
+                .scale_factor({{scale_factor, scale_factor, scale_factor}})
+                .mode(torch::Interpolation::Trilinear)
+                .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2, 2, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected =
+            torch::ones({1, 1, expected_size, expected_size, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1520,6 +1667,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintUpsample) {
+  ASSERT_EQ(
+      c10::str(Upsample(UpsampleOptions().size(std::vector<int64_t>{2, 4, 4}))),
+      "torch::nn::Upsample(size=[2, 4, 4])");
+  ASSERT_EQ(
+      c10::str(Upsample(UpsampleOptions().scale_factor({{0.5, 1.5}}))),
+      "torch::nn::Upsample(scale_factor=[0.5, 1.5])");
 }
 
 TEST_F(ModulesTest, PrettyPrintUnfold) {

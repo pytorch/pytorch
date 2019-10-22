@@ -18,4 +18,5 @@
 #include <torch/nn/modules/loss.h>
 #include <torch/nn/modules/pooling.h>
 #include <torch/nn/modules/rnn.h>
+#include <torch/nn/modules/upsampling.h>
 #include <torch/nn/modules/activation.h>
