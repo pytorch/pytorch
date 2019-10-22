@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/tracer.h>
-#include <ATen/core/ATenDispatch.h>
 #include <unordered_set>
 
 namespace torch {

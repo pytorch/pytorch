@@ -11,7 +11,6 @@
 #include <torch/csrc/jit/script/function_schema_parser.h>
 #endif
 #include <ATen/core/OpsAlreadyMovedToC10.h>
-#include <ATen/core/ATenDispatch.h>
 
 namespace c10 {
 
