@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 
-import operator_benchmark as op_bench 
+import operator_benchmark as op_bench
 import torch
 import torch.nn as nn
 
@@ -13,8 +13,8 @@ import torch.nn as nn
 
 configs = op_bench.config_list(
     attrs=[
-        [4, 256, 100],
-        [16, 1024, 256],
+        [32, 1024, 256],
+        [64, 256, 100],
     ],
     attr_names=["N", "IN", "OUT"],
     tags=["short"]
@@ -24,7 +24,7 @@ configs = op_bench.config_list(
 class LinearBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, N, IN, OUT):
         self.input_one = torch.rand(N, IN)
-        self.linear = nn.Linear(IN, OUT) 
+        self.linear = nn.Linear(IN, OUT)
         self.set_module_name("linear")
 
     def forward(self):
