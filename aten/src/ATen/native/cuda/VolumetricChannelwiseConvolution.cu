@@ -324,38 +324,27 @@ static void conv_depthwise3d_cuda_template(
         (input_.ndimension() == 5),
         "non-empty 5D tensor expected for input");
 
+    // 0th dimension is batchsize
     int64_t osizeD = output.size(1);  // num out channels
-    int64_t osizeT = output.size(1);  // output time size
-    int64_t osizeH = output.size(2);  // output height
-    int64_t osizeW = output.size(3);  // output width
+    int64_t osizeT = output.size(2);  // output time size
+    int64_t osizeH = output.size(3);  // output height
+    int64_t osizeW = output.size(4);  // output width
 
-    int64_t sizeD, isizeT, isizeH, isizeW;
+    int64_t sizeB, sizeD, isizeT, isizeH, isizeW;
     int64_t istrideD, istrideT, istrideH, istrideW;
     int64_t totalZ;
   
     const Tensor& input = input_.ndimension() == 5 ? input_ : input_.contiguous();
   
-    if (input.ndimension() == 4) {
-      sizeD = input.size(0);   // in channels
-      isizeT = input.size(1);  // in time
-      isizeH = input.size(2);  // in height
-      isizeW = input.size(3);  // in width
+    sizeB  = input.size(0);
+    sizeD = input.size(1);
+    isizeT = input.size(2);
+    isizeH = input.size(3);
+    isizeW = input.size(4);
 
-  
-      output.resize_({sizeD, osizeT, osizeH, osizeW});
-      // total num elements
-      totalZ = sizeD * osizeT;
-    } else {
-      int64_t sizeB = input.size(0);
-      sizeD = input.size(1);
-      isizeT = input.size(2);
-      isizeH = input.size(3);
-      isizeW = input.size(4);
-  
-      output.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
-      // total num elements
-      totalZ = sizeB * sizeD * osizeT;
-    }
+    output.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
+    // total num elements
+    totalZ = sizeB * sizeD * osizeT;
 
     // define kernel/stride/pad/dilation
     int64_t kernelSizeW = kernel_size[0];
@@ -374,6 +363,8 @@ static void conv_depthwise3d_cuda_template(
     int64_t dilSizeH = dilation_size[1];
     int64_t dilSizeT = dilation_size[2];
 
+    bool bias_flag = (bias != NULL);
+
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "conv_depthwise3d_cuda", [&] {
         scalar_t* input_data = input.data_ptr<scalar_t>();
@@ -383,7 +374,7 @@ static void conv_depthwise3d_cuda_template(
           input_data, output_data,
           weight,
           bias,
-          // biasenabled (if bias is not null)
+          bias_flag, // if true, bias is not null
           totalZ, // totalElements
           osizeD, // ouptut_channels
           isizeW, isizeH, isizeT, // input
@@ -422,35 +413,20 @@ void conv_depthwise3d_backward_input_cuda_template(
   int64_t osizeD, osizeT, osizeH, osizeW;
   int64_t totalZ;
 
-  if (input.ndimension() == 4) {
-    sizeD = input.size(0);  
-    isizeT = input.size(1);
-    isizeH = input.size(2);
-    isizeW = input.size(3);
+  sizeB = input.size(0);
+  sizeD = input.size(1);
+  isizeT = input.size(2);
+  isizeH = input.size(3);
+  isizeW = input.size(4);
 
-    osizeD = gradOutput.size(0);
-    osizeT = gradOutput.size(1);
-    osizeH = gradOutput.size(2);
-    osizeW = gradOutput.size(3);
-
-    // TODO: not sure about these
-    totalZ = sizeD * isizeT;
-
-  } else {
-    sizeB = input.size(0);
-    sizeD = input.size(1);
-    isizeT = input.size(2);
-    isizeH = input.size(3);
-    isizeW = input.size(4);
-
-    osizeD = gradOutput.size(1);
-    osizeT = gradOutput.size(2);
-    osizeH = gradOutput.size(3);
-    osizeW = gradOutput.size(4);
-    
-    // TODO: not sure about these
-    totalZ = sizeB * sizeD * isizeT;
-  }
+  osizeD = gradOutput.size(1);
+  osizeT = gradOutput.size(2);
+  osizeH = gradOutput.size(3);
+  osizeW = gradOutput.size(4);
+  
+  // TODO: not sure about these
+  totalZ = sizeB * sizeD * isizeT;
+  
 
   // define kernel/stride/pad/dilation
   int64_t kernelSizeW = kernel_size[0];
@@ -500,7 +476,7 @@ void conv_depthwise3d_backward_weight_cuda_template(
   IntArrayRef dilation_size
 ) {
 
-  TensorArg grad_weight_arg{gradInput, "gradWeight", 1};
+  TensorArg grad_weight_arg{gradWeight, "gradWeight", 1};
   TensorArg grad_output_arg{gradOutput_, "gradOutput_", 2};
   TensorArg input_arg{input, "input", 3};
 
@@ -514,35 +490,19 @@ void conv_depthwise3d_backward_weight_cuda_template(
   int64_t osizeD, osizeT, osizeH, osizeW;
   int64_t totalZ;
 
-  if (input.ndimension() == 4) {
-    sizeD = input.size(0);  
-    isizeT = input.size(1);
-    isizeH = input.size(2);
-    isizeW = input.size(3);
+  sizeB = input.size(0);
+  sizeD = input.size(1);
+  isizeT = input.size(2);
+  isizeH = input.size(3);
+  isizeW = input.size(4);
 
-    osizeD = gradOutput.size(0);
-    osizeT = gradOutput.size(1);
-    osizeH = gradOutput.size(2);
-    osizeW = gradOutput.size(3);
-
-    // TODO: not sure about these
-    totalZ = sizeD * isizeT;
-
-  } else {
-    sizeB = input.size(0);
-    sizeD = input.size(1);
-    isizeT = input.size(2);
-    isizeH = input.size(3);
-    isizeW = input.size(4);
-
-    osizeD = gradOutput.size(1);
-    osizeT = gradOutput.size(2);
-    osizeH = gradOutput.size(3);
-    osizeW = gradOutput.size(4);
-    
-    // TODO: not sure about these
-    totalZ = sizeB * sizeD * isizeT;
-  }
+  osizeD = gradOutput.size(1);
+  osizeT = gradOutput.size(2);
+  osizeH = gradOutput.size(3);
+  osizeW = gradOutput.size(4);
+  
+  // TODO: not sure about these
+  totalZ = sizeB * sizeD * isizeT;
 
     // define kernel/stride/pad/dilation
     int64_t kernelSizeW = kernel_size[0];
