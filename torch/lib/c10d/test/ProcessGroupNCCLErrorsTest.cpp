@@ -85,6 +85,9 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   }
 
   void SetUp() override {
+    if (skipTest()) {
+      GTEST_SKIP() << "skipping test since CUDA is not available";
+    }
     size_t numDevices = cudaNumDevices();
     TemporaryFile file;
     store_ = std::make_shared<::c10d::FileStore>(file.path, 1);
@@ -106,10 +109,6 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
 };
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
-  if (skipTest()) {
-    return;
-  }
-
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1);
 
@@ -141,10 +140,6 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
-  if (skipTest()) {
-    return;
-  }
-
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1);
 
   auto work = pg.allreduce(tensors_);

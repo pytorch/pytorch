@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <gtest/gtest.h>
 
 using namespace c10d::test;
 
@@ -414,7 +415,7 @@ void testReduceScatter(const std::string& path, int rank, int size) {
 }
 
 int main(int argc, char** argv) {
-  if (!(c10::cuda::device_count() > 0)) {
+  if (!at::cuda::is_available()) {
     // skip the test
     std::cout << "CUDA not available, skipping test" << std::endl;
     return EXIT_SUCCESS;
