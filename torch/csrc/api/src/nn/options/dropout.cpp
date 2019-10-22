@@ -3,7 +3,7 @@
 namespace torch {
 namespace nn {
 
-DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
+DropoutOptions::DropoutOptions(double p, bool inplace) : p_(p), inplace_(inplace) {}
 
 } // namespace nn
 } // namespace torch

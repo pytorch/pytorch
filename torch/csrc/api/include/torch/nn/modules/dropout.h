@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
+#include <torch/nn/functional/dropout.h>
 #include <torch/nn/options/dropout.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
@@ -12,6 +13,8 @@
 
 namespace torch {
 namespace nn {
+
+using AlphaDropoutOptions = DropoutOptions;
 
 namespace detail {
 template <typename Derived>
@@ -64,6 +67,19 @@ class TORCH_API FeatureDropoutImpl
   void pretty_print(std::ostream& stream) const override;
 };
 
+class TORCH_API AlphaDropoutImpl
+    : public detail::DropoutImplBase<AlphaDropoutImpl> {
+ public:
+  explicit AlphaDropoutImpl(const AlphaDropoutOptions& options_ = AlphaDropoutOptions());
+
+  /// During training, applies a noise mask to the input tensor.
+  /// During evaluation, applies an identity function.
+  Tensor forward(const Tensor& input);
+
+  /// Pretty prints the `FeatureDropout` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
 /// A `ModuleHolder` subclass for `DropoutImpl`.
 /// See the documentation for `DropoutImpl` class to learn what methods it
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
@@ -75,5 +91,6 @@ TORCH_MODULE(Dropout);
 /// it provides, or the documentation for `ModuleHolder` to learn about
 /// PyTorch's module storage semantics.
 TORCH_MODULE(FeatureDropout);
+TORCH_MODULE(AlphaDropout);
 } // namespace nn
 } // namespace torch

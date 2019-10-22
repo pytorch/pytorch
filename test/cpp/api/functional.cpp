@@ -1647,6 +1647,7 @@ TEST_F(FunctionalTest, Pad) {
   }
 }
 
+<<<<<<< 4926a51010b0ea8c190165d88157cf2f66a4a25b
 TEST_F(FunctionalTest, CTCLoss) {
   { // test CTCLoss typechecks
     const auto target_lengths = torch::tensor({30, 25, 20});
@@ -1764,4 +1765,19 @@ TEST_F(FunctionalTest, MarginRankingLoss) {
       (-target * (input1 - input2) + margin).clamp(0).mean()
     ));
   }
+}
+
+TEST_F(FunctionalTest, AlphaDropout) {
+  auto input = torch::randn(5000);
+  auto input_mean = input.mean();
+  auto input_std = input.std();
+
+  for (const auto rate : {0.2, 0.5, 0.8}) {
+    auto output = F::alpha_dropout(input, rate, false);
+    ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+    ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
+  }
+  auto output = F::alpha_dropout(input);
+  ASSERT_TRUE(torch::allclose(input_mean, output.mean(), 0.1));
+  ASSERT_TRUE(torch::allclose(input_std, output.std(), 0.1));
 }
