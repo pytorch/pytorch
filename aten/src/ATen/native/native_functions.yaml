@@ -1615,16 +1615,16 @@
   supports_named_tensor: True
   variants: function, method
   dispatch:
-    CPU: _log1p__cpu
-    CUDA: _log1p__cuda
+    CPU: log1p_
+    CUDA: log1p_
     SparseCPU: log1p_sparse_
     SparseCUDA: log1p_sparse_
 
 - func: log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log1p_out_cpu
-    CUDA: _log1p_out_cuda
+    CPU: log1p_out
+    CUDA: log1p_out
     SparseCPU: log1p_out_sparse
     SparseCUDA: log1p_out_sparse
 
