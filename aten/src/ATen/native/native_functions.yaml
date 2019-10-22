@@ -1,4 +1,3 @@
-- func: align_to.ellipsis_idx(Tensor(a) self, Dimname[] order, int ellipsis_idx) -> Tensor(a)
 # See README.md in this directory for more guidance
 
 
