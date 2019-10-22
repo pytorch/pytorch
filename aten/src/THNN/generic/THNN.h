@@ -199,26 +199,6 @@ TH_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
           THTensor *isTarget,
           int64_t reduction);
 
-TH_API void THNN_(MultiMarginCriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *output,
-          int64_t reduction,
-          int p,
-          THTensor* weights,      // [OPTIONAL]
-          accreal margin);
-TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t reduction,
-          int p,
-          THTensor *weights,      // [OPTIONAL]
-          accreal margin);
-
 TH_API void THNN_(RReLU_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -290,58 +270,6 @@ TH_API void THNN_(SoftShrink_updateGradInput)(
           THTensor *gradInput,
           accreal lambda);
 
-
-TH_API void THNN_(IndexLinear_updateOutput)(
-          THNNState *state,
-          THIndexTensor *keys,
-          int64_t keysOffset,
-          THTensor *values,
-          THIndexTensor *sizes,
-          THIndexTensor *cumSumSizes,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,
-          THTensor *normalizedValues,
-          int train);
-TH_API void THNN_(IndexLinear_accGradParameters)(
-          THNNState *state,
-          THIndexTensor *keys,
-          int64_t keysOffset,
-          THTensor *values,
-          THIndexTensor *sizes,
-          THIndexTensor *cumSumSizes,
-          THTensor *gradOutput,
-          THTensor *gradWeight,
-          THTensor *gradBias,
-          THTensor *weight,
-          THTensor *bias,
-          THTensor* valuesBuffer,
-          accreal weightDecay,
-          accreal scale);
-TH_API void THNN_(IndexLinear_accUpdateGradParameters)(
-          THNNState *state,
-          THIndexTensor *keys,
-          int64_t keysOffset,
-          THTensor *values,
-          THIndexTensor *sizes,
-          THIndexTensor *cumSumSizes,
-          THTensor *gradOutput,
-          THTensor *weight,
-          THTensor *bias,
-          accreal weightDecay,
-          accreal scale);
-TH_API void THNN_(IndexLinear_updateParameters)(
-          THNNState *state,
-          THTensor *gradWeight,
-          THTensor *gradBias,
-          THTensor *weight,
-          THTensor *bias,
-          THIndexTensor *runningKeys,
-          THIndexTensor *cumSumSizes,
-          int64_t keysOffset,
-          accreal weightDecay,
-          accreal learningRate);
-
 TH_API void THNN_(SpatialConvolutionMM_updateGradInput)(
           THNNState *state,
           THTensor *input,
@@ -384,26 +312,6 @@ TH_API void THNN_(unfolded_copy)(
           int nInputPlane,
           int inputWidth, int inputHeight,
           int outputWidth, int outputHeight);
-
-TH_API void THNN_(FeatureLPPooling_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          accreal power,
-          int width,
-          int stride,
-          bool batchMode);
-
-TH_API void THNN_(FeatureLPPooling_updateGradInput)(
-          THNNState *state,
-          THTensor* gradOutput,
-          THTensor* input,
-          THTensor* output,
-          THTensor* gradInput,
-          accreal power,
-          int width,
-          int stride,
-          bool batchMode);
 
 TH_API void THNN_(Tanh_updateOutput)(
           THNNState *state,
