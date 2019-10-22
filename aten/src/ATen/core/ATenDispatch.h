@@ -14,6 +14,7 @@
 #include <mutex>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/jit/script/function_schema_parser.h>
 
 // TODO: Rewrite this comment
 //
@@ -74,7 +75,7 @@ namespace detail {
   }
 }
 
-using FallbackBoxedFunction = void(const char* schema, torch::jit::Stack*);
+using FallbackBoxedFunction = void(const c10::FunctionSchema& schema, torch::jit::Stack*);
 
 // Assume T is decayed
 template <typename T>
@@ -129,9 +130,19 @@ class CAFFE2_API ATenOpTable {
 
   C10_NORETURN void reportError(TensorTypeId tid) const;
 
+  const FunctionSchema& function_schema() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!parsed_schema_.has_value()) {
+      parsed_schema_ = torch::jit::parseSchema(schema_);
+    }
+    return *parsed_schema_;
+  }
+
   friend class ATenDispatch;
 
   std::string schema_;
+  mutable c10::optional<c10::FunctionSchema> parsed_schema_;
+  mutable std::mutex mutex_;
   void* function_table_[static_cast<int64_t>(TensorTypeId::NumTensorIds)] = {nullptr};
 };
 
@@ -141,9 +152,9 @@ class CAFFE2_API ATenDispatch {
   ATenDispatch& registerOp(TensorTypeId id, const char* schema, FuncType* fn) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (op_tables_.find(schema) == op_tables_.end()) {
-      op_tables_.insert(std::make_pair(schema, ATenOpTable(schema)));
+      op_tables_.insert(std::make_pair(schema, c10::guts::make_unique<ATenOpTable>(schema)));
     }
-    op_tables_.at(schema).registerOp(id, reinterpret_cast<void*>(fn));
+    op_tables_.at(schema)->registerOp(id, reinterpret_cast<void*>(fn));
     return *this;
   }
 
@@ -157,7 +168,7 @@ class CAFFE2_API ATenDispatch {
     auto iter = op_tables_.find(schema);
     TORCH_CHECK(iter != op_tables_.end(),
         "No functions are registered for schema ", schema);
-    return &iter->second;
+    return iter->second.get();
   }
 
   FallbackBoxedFunction* getFallbackBoxedOp(TensorTypeId tid) const {
@@ -165,7 +176,7 @@ class CAFFE2_API ATenDispatch {
   }
 
  private:
-  std::unordered_map<std::string, ATenOpTable> op_tables_;
+  std::unordered_map<std::string, std::unique_ptr<ATenOpTable>> op_tables_;
   FallbackBoxedFunction* boxed_fallback_table_[static_cast<int64_t>(TensorTypeId::NumTensorIds)] = {nullptr};
   std::mutex mutex_;
 };
@@ -173,7 +184,7 @@ class CAFFE2_API ATenDispatch {
 CAFFE2_API ATenDispatch& globalATenDispatch();
 
 template<class Result, class... Args>
-Result callBoxedFallback(const char* schema, FallbackBoxedFunction* boxed_fallback_fn, Args&&... args,
+Result callBoxedFallback(const c10::FunctionSchema& schema, FallbackBoxedFunction* boxed_fallback_fn, Args&&... args,
   // NB: enable_if must occur in function parameter, because MSVC
   // doesn't like it when it's a template argument next to
   // a parameter pack
@@ -189,7 +200,7 @@ Result callBoxedFallback(const char* schema, FallbackBoxedFunction* boxed_fallba
 
 template<
   class Result, class... Args>
-Result callBoxedFallback(const char* schema, FallbackBoxedFunction* boxed_fallback_fn, Args&&... args,
+Result callBoxedFallback(const c10::FunctionSchema& schema, FallbackBoxedFunction* boxed_fallback_fn, Args&&... args,
   typename c10::guts::enable_if_t<
     supports_boxed_fallback<Result, Args...>::value,
     std::nullptr_t
@@ -232,7 +243,7 @@ Result ATenOpTable::callUnboxed(Args... args) const {
   auto* boxed_fallback_fn = globalATenDispatch().getFallbackBoxedOp(tid);
   if (C10_UNLIKELY(boxed_fallback_fn)) {
     if (supports_boxed_fallback<Result, Args...>::value) {
-      return callBoxedFallback<Result, Args...>(schema_.c_str(), boxed_fallback_fn, std::forward<Args>(args)...);
+      return callBoxedFallback<Result, Args...>(function_schema(), boxed_fallback_fn, std::forward<Args>(args)...);
     } else {
       TORCH_INTERNAL_ASSERT(0, schema_, " does not support boxed fallback, but boxed fallback for ", tid, " was available");
     }
