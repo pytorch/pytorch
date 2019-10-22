@@ -13,12 +13,6 @@ use ``torch.float16`` (``half``). Some operations, like linear layers and convol
 are much faster in ``float16``. Other operations, like reductions, often require the dynamic
 range of ``float32``. Networks running in mixed precision try to match each operation to its appropriate datatype.
 
-By default, you don't need to call ``.half()`` on your model(s) or data to use the routines below.
-In fact, you shouldn't.  Model weights should remain ``float32``.
-
-Mixed precision should not require retuning any hyperparameters, as long as the conventions shown in the
-:ref:`Automatic Mixed Precision Examples<amp-examples>` are obeyed.
-
 .. contents:: :local:
 
 Gradient Scaling

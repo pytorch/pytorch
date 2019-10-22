@@ -11,25 +11,25 @@
 namespace at {
 namespace native {
 
-// Multiplies scaled_grad in-place by rscale.  If an element of scaled_grad was inf or NaN sets found_inf to 1.
+// Multiplies scaled_grad in-place by inv_scale.  If an element of scaled_grad was inf or NaN sets found_inf to 1.
 //
 // Args:
 // scaled_grad:  A (scaled) gradient tensor.  May contain infs or NaNs.
-// rscale:  The inverse of the scale factor by which scaled_grad is currently multiplied.
+// inv_scale:  The inverse of the scale factor by which scaled_grad is currently multiplied.
 // found_inf:  A single-element float tensor to which 1.0 will be written if any gradients contain infs/nans.
 //             Pre-zeroing found_inf, if appropriate, is the responsibility of the caller.
 // Returns:
 // A reference to the grad, which was unscaled in place.
 Tensor& _amp_unscale_inf_check_cuda(Tensor& scaled_grad,
-                                     const Tensor& rscale,
+                                     const Tensor& inv_scale,
                                      const Tensor& found_inf)
 {
   TORCH_CHECK(scaled_grad.is_cuda(), "scaled_grad must be a CUDA tensor.");
-  TORCH_CHECK(rscale.is_cuda(), "rscale must be a CUDA tensor.");
+  TORCH_CHECK(inv_scale.is_cuda(), "inv_scale must be a CUDA tensor.");
   TORCH_CHECK(found_inf.is_cuda(), "found_inf must be a CUDA tensor.");
-  TORCH_CHECK(rscale.numel() == 1, "rscale must be a 1-element tensor.");
+  TORCH_CHECK(inv_scale.numel() == 1, "inv_scale must be a 1-element tensor.");
   TORCH_CHECK(found_inf.numel() == 1, "found_inf must be a 1-element tensor.");
-  TORCH_CHECK(rscale.scalar_type() == at::ScalarType::Float, "rscale must be a float tensor.");
+  TORCH_CHECK(inv_scale.scalar_type() == at::ScalarType::Float, "inv_scale must be a float tensor.");
   TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
 
   // Act on scaled_grad in place.
@@ -40,14 +40,15 @@ Tensor& _amp_unscale_inf_check_cuda(Tensor& scaled_grad,
     "_amp_unscale_inf_check_kernel",
     [&] {
       auto* found_inf_ptr = found_inf.data_ptr<float>();
-      auto* rscale_ptr = rscale.data_ptr<float>();
+      auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      gpu_kernel(iter, [found_inf_ptr, rscale_ptr] GPU_LAMBDA(scalar_t val) -> scalar_t {
+      gpu_kernel(iter, [found_inf_ptr, inv_scale_ptr] GPU_LAMBDA(scalar_t val) -> scalar_t {
           auto fval = static_cast<float>(val);
-          if(!std::isfinite(fval))
+          if (!std::isfinite(fval)) {
             *found_inf_ptr = 1.f;
-          auto rscale = *rscale_ptr; // Every thread accesses rscale, but it will hit in cache.
-          return static_cast<scalar_t>(rscale == 1.f ? fval : fval*(*rscale_ptr));
+          }
+          const auto inv_scale = *inv_scale_ptr; // Every thread accesses inv_scale, but it will hit in cache.
+          return static_cast<scalar_t>(inv_scale == 1.f ? fval : fval*inv_scale);
         });
     });
 
@@ -91,11 +92,12 @@ Tensor _amp_update_scale_cuda(const Tensor& current_scale,
 
   auto new_scale = at::empty_like(current_scale);
 
-  amp_update_scale_kernel<<<1,1>>>(current_scale.data_ptr<float>(),
-                                   found_inf.data_ptr<float>(),
-                                   new_scale.data_ptr<float>(),
-                                   scale_growth_factor,
-                                   scale_backoff_factor);
+  amp_update_scale_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+    current_scale.data_ptr<float>(),
+    found_inf.data_ptr<float>(),
+    new_scale.data_ptr<float>(),
+    scale_growth_factor,
+    scale_backoff_factor);
 
   return new_scale;
 }

@@ -26,23 +26,23 @@ class AmpScaler(object):
 
     Here's how that looks in a simple example::
 
-    # Create an AmpScaler instance.
-    scaler = AmpScaler()
-    ...
-    for input, target in data:
-        optimizer.zero_grad()
-        output = model(input)
-        loss = loss_fn(output, target)
+        # Create an AmpScaler instance.
+        scaler = AmpScaler()
+        ...
+        for input, target in data:
+            optimizer.zero_grad()
+            output = model(input)
+            loss = loss_fn(output, target)
 
-        # Scale the loss, and call backward() on the scaled loss to create scaled gradients.
-        scaler.scale(loss).backward()
+            # Scale the loss, and call backward() on the scaled loss to create scaled gradients.
+            scaler.scale(loss).backward()
 
-        # Carry out a scaling-safe step.  scaler.step() unscales the optimizer's gradients
-        # and skips optimizer.step() if the gradients contain infs or NaNs.
-        scaler.step(optimizer)
+            # Carry out a scaling-safe step.  scaler.step() unscales the optimizer's gradients
+            # and skips optimizer.step() if the gradients contain infs or NaNs.
+            scaler.step(optimizer)
 
-        # Update the scale for next iteration.
-        scaler.update()
+            # Update the scale for next iteration.
+            scaler.update()
 
     See the :ref:`Gradient Scaling Examples<gradient-scaling-examples>` for usage in more complex cases.
 
@@ -114,8 +114,8 @@ class AmpScaler(object):
 
         return apply_scale(outputs)
 
-    def _unscale_grads(self, optimizer, rscale, found_inf, allow_fp16=False):
-        per_device_rscale = _MultiDeviceReplicator(rscale)
+    def _unscale_grads(self, optimizer, inv_scale, found_inf, allow_fp16=False):
+        per_device_inv_scale = _MultiDeviceReplicator(inv_scale)
         per_device_found_inf = _MultiDeviceReplicator(found_inf)
 
         for group in optimizer.param_groups:
@@ -126,7 +126,7 @@ class AmpScaler(object):
                                          "infs/nans without unscaling, use optimizer.check_infs() instead.")
                     else:
                         torch._amp_unscale_inf_check_(param.grad,
-                                                      per_device_rscale.get(param.grad.device),
+                                                      per_device_inv_scale.get(param.grad.device),
                                                       per_device_found_inf.get(param.grad.device))
 
         return per_device_found_inf._per_device_tensors
@@ -172,10 +172,10 @@ class AmpScaler(object):
             raise RuntimeError("unscale() has already been called on this optimizer this iteration.")
 
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
-        rscale = self._scale.double().reciprocal().float()
+        inv_scale = self._scale.double().reciprocal().float()
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
 
-        optimizer_state["found_inf_per_device"] = self._unscale_grads(optimizer, rscale, found_inf, allow_fp16=False)
+        optimizer_state["found_inf_per_device"] = self._unscale_grads(optimizer, inv_scale, found_inf)
         optimizer_state["unscaled"] = True
 
     def step(self, optimizer, *args, **kwargs):
@@ -321,11 +321,11 @@ class AmpScaler(object):
         return self._enabled
 
     def _check_inf_per_device(self, optimizer):
-        dummy_rscale = torch.full((1,), 1.0, dtype=torch.float32, device="cuda")
+        dummy_inv_scale = torch.full((1,), 1.0, dtype=torch.float32, device="cuda")
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
 
         self._per_optimizer_states[id(optimizer)]["found_inf_per_device"] = \
-            self._unscale_grads(optimizer, dummy_rscale, found_inf, allow_fp16=True)
+            self._unscale_grads(optimizer, dummy_inv_scale, found_inf, allow_fp16=True)
 
         return self._per_optimizer_states[id(optimizer)]["found_inf_per_device"]
 
