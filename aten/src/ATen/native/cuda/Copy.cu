@@ -8,19 +8,11 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <THC/THC.h>
-#include <c10/util/TypeCast.h>
 
 namespace at {
 namespace native {
 
 using namespace at::cuda;
-
-template <typename dst_t, typename src_t>
-void copy_kernel_impl(TensorIterator& iter) {
-  gpu_kernel(iter, []GPU_LAMBDA(src_t x) -> dst_t {
-    return c10::static_cast_with_inter_type<dst_t>(x);
-  });
-}
 
 // device-to-device copy, does type conversion
 static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
@@ -67,10 +59,7 @@ static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         copy_stream));
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(0), "copy_", [&] {
-      using dst_t = scalar_t;
-      AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(1), "copy_", [&] {
-        copy_kernel_impl<dst_t, scalar_t>(iter);
-      });
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t x) { return x; });
     });
   }
 
