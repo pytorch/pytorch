@@ -34,28 +34,34 @@ void LayerNormKernelImplInternal(
   const T c = T(1) / static_cast<T>(N);
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
-  for (int64_t i = 0; i < M; ++i) {
-    const T* X_ptr = X_data + i * N;
-    T* Y_ptr = Y_data + i * N;
-    T mean_val = T(0);
-    T rstd_val = T(0);
-    for (int64_t j = 0; j < N; ++j) {
-      mean_val += X_ptr[j];
-      rstd_val += X_ptr[j] * X_ptr[j];
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t start, int64_t end) {
+    int64_t M_per_thread = std::ceil(static_cast<float>(M) / num_tasks);
+    int64_t M_start = std::min(start * M_per_thread, M);
+    int64_t M_end = std::min(end * M_per_thread, M);
+    for (int64_t i = M_start; i < M_end; ++i) {
+      const T* X_ptr = X_data + i * N;
+      T* Y_ptr = Y_data + i * N;
+      T mean_val = T(0);
+      T rstd_val = T(0);
+      for (int64_t j = 0; j < N; ++j) {
+        mean_val += X_ptr[j];
+        rstd_val += X_ptr[j] * X_ptr[j];
+      }
+      mean_val *= c;
+      rstd_val = std::max(rstd_val * c - mean_val * mean_val, T(0));
+      rstd_val = T(1) / std::sqrt(rstd_val + eps);
+      const T scale = rstd_val;
+      const T bias = -rstd_val * mean_val;
+      for (int64_t j = 0; j < N; ++j) {
+        const T gamma_v = gamma_null ? T(1) : gamma_data[j];
+        const T beta_v = beta_null ? T(0) : beta_data[j];
+        Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
+      }
+      mean_data[i] = mean_val;
+      rstd_data[i] = rstd_val;
     }
-    mean_val *= c;
-    rstd_val = std::max(rstd_val * c - mean_val * mean_val, T(0));
-    rstd_val = T(1) / std::sqrt(rstd_val + eps);
-    const T scale = rstd_val;
-    const T bias = -rstd_val * mean_val;
-    for (int64_t j = 0; j < N; ++j) {
-      const T gamma_v = gamma_null ? T(1) : gamma_data[j];
-      const T beta_v = beta_null ? T(0) : beta_data[j];
-      Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
-    }
-    mean_data[i] = mean_val;
-    rstd_data[i] = rstd_val;
-  }
+  });
 }
 
 void LayerNormKernelImpl(
