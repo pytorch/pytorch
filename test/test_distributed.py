@@ -56,7 +56,7 @@ class Net(nn.Module):
         self.fc2 = _FC2()
         self.fc3 = nn.Linear(50, 4, bias=False)
         self.relu = nn.ReLU()
-        self.no_grad_param = nn.Parameter(torch.Tensor([2, 2]).long(),
+        self.no_grad_param = nn.Parameter(torch.tensor([2, 2]).long(),
                                           requires_grad=False)
 
     def forward(self, x):
