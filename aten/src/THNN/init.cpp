@@ -94,9 +94,6 @@
 #include <THNN/generic/SoftMarginCriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/MultiLabelMarginCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/RReLU.c>
 #include <TH/THGenerateFloatTypes.h>
 
