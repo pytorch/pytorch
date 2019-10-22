@@ -1622,13 +1622,13 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
 
 def randn(g, *shapes):
     shapes_list = list(shapes)
-    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    shape = sym_help._get_const(shapes_list[0], "is", "Rand")
     return g.op('RandomNormal', shape_i=shape)
 
 
 def rand(g, *shapes):
     shapes_list = list(shapes)
-    shape = sym_help._maybe_get_const(shapes_list[0], "is")
+    shape = sym_help._get_const(shapes_list[0], "is", "Rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
@@ -1973,12 +1973,14 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
 
+
 def baddbmm(g, self, batch1, batch2, beta, alpha):
     dtype = self.type().scalarType()
     batch_mul = matmul(g, batch1, batch2)
     mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     mul_b = mul(g, self, g.op("Cast", beta, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     return add(g, mul_a, mul_b)
+
 
 def remainder(g, input, other):
     div = g.op("Div", input, other)
