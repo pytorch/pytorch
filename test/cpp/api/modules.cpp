@@ -254,6 +254,21 @@ TEST_F(ModulesTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+TEST_F(ModulesTest, LPPool1d) {
+  int norm_type = 2;
+  int stride = 2;
+  int kernel_size = 3;
+
+  LPPool1d model(LPPool1dOptions(norm_type, kernel_size).stride(stride));
+  auto x = torch::ones({1, 1, 5});
+  auto y = model(x);
+  auto expected = (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) * kernel_size).pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
 TEST_F(ModulesTest, Identity) {
   Identity identity;
   auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::requires_grad());
@@ -1515,6 +1530,25 @@ TEST_F(ModulesTest, Sigmoid) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(ModulesTest, PixelShuffle) {
+  PixelShuffle module(/*upscale_factor=*/2);
+  auto x = torch::tensor(
+    {{{{-17, 19}, {-1, 2}},
+      {{7, 14}, {-3, 1}},
+      {{0, -2}, {-12, 14}},
+      {{-15, 0}, {-3, 9}}}}, torch::kFloat);
+  auto y_exp = torch::tensor(
+    {{{{-17, 7, 19, 14},
+       {0, -15, -2, 0},
+       {-1, -3, 2, 1},
+       {-12, -3, 14, 9}}}}, torch::kFloat);
+  auto y = module(x);
+
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4}));
+  ASSERT_TRUE(y.allclose(y_exp));
+}
+
 TEST_F(ModulesTest, Softplus) {
   const auto size = 3;
   for (const auto beta : {0.5, 1.0, 2.0}) {
@@ -1688,6 +1722,15 @@ TEST_F(ModulesTest, PrettyPrintAvgPool) {
   ASSERT_EQ(
       c10::str(AvgPool2d(options)),
       "torch::nn::AvgPool2d(kernel_size=[5, 6], stride=[1, 2], padding=[0, 0])");
+}
+
+TEST_F(ModulesTest, PrettyPrintLPPool) {
+  ASSERT_EQ(
+      c10::str(LPPool1d(2, 5)),
+      "torch::nn::LPPool1d(norm_type=2, kernel_size=5, stride=5, ceil_mode=false)");
+  ASSERT_EQ(
+      c10::str(LPPool1d(LPPool1dOptions(1, 2).stride(5).ceil_mode(true))),
+      "torch::nn::LPPool1d(norm_type=1, kernel_size=2, stride=5, ceil_mode=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
@@ -1996,6 +2039,11 @@ TEST_F(ModulesTest, PrettyPrintCELU) {
 
 TEST_F(ModulesTest, PrettyPrintSigmoid) {
   ASSERT_EQ(c10::str(Sigmoid()), "torch::nn::Sigmoid()");
+}
+
+TEST_F(ModulesTest, PrettyPrintPixelShuffle) {
+  ASSERT_EQ(c10::str(PixelShuffle(PixelShuffleOptions(5))),
+            "torch::nn::PixelShuffle(upscale_factor=5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintSoftplus) {
