@@ -15,7 +15,7 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion, skipIfNoLapack
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -699,9 +699,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 5, 10, 10)
         self.run_test(model, x)
 
-    # enable test for opset 11 when ScatterElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_scatter(self):
         class ScatterModel(torch.nn.Module):
             def forward(self, input, indices, values):
@@ -728,9 +726,7 @@ class TestONNXRuntime(unittest.TestCase):
         values = torch.arange(3 * 2 * 2, dtype=torch.float32).view(3, 2, 2)
         self.run_test(ScatterModel(), (input, indices, values))
 
-    # enable test for opset 11 when ScatterElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_scatter_add(self):
         class ScatterModel(torch.nn.Module):
             def forward(self, input, indices, values):
@@ -741,9 +737,7 @@ class TestONNXRuntime(unittest.TestCase):
         values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
         self.run_test(ScatterModel(), input=(input, indices, values))
 
-    # enable test for opset 11 when GatherElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_gather(self):
         class GatherModel(torch.nn.Module):
             def forward(self, input, indices):
@@ -1447,6 +1441,16 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.ReplicationPad2d((3, 0, 2, 1))
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
+
+    @skipIfNoLapack
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_det(self):
+        class Det(torch.nn.Module):
+            def forward(self, x):
+                return torch.det(x)
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(Det(), x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
