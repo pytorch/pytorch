@@ -7,6 +7,7 @@
 #include <torch/nn/options/linear.h>
 #include <torch/nn/options/loss.h>
 #include <torch/nn/options/normalization.h>
+#include <torch/nn/options/padding.h>
 #include <torch/nn/options/pooling.h>
 #include <torch/nn/options/rnn.h>
 #include <torch/nn/options/pixelshuffle.h>
