@@ -100,9 +100,17 @@ struct CAFFE2_API DispatchStub<rT (*)(Args...), T> {
     return DEFAULT;
   }
 
+// Fixing dispatch error in Windows debug builds.
+// See https://github.com/pytorch/pytorch/issues/22681 for more details.
+#if defined(_MSC_VER) && defined(_DEBUG)
+  FnPtr cpu_dispatch_ptr;
+  FnPtr cuda_dispatch_ptr;
+  FnPtr hip_dispatch_ptr;
+#else
   FnPtr cpu_dispatch_ptr = nullptr;
   FnPtr cuda_dispatch_ptr = nullptr;
   FnPtr hip_dispatch_ptr = nullptr;
+#endif
   static FnPtr DEFAULT;
 #ifdef HAVE_AVX_CPU_DEFINITION
   static FnPtr AVX;
