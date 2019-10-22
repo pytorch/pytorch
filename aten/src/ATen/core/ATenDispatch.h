@@ -141,7 +141,7 @@ class CAFFE2_API ATenOpTable {
   friend class ATenDispatch;
 
   std::string schema_;
-  mutable c10::optional<c10::FunctionSchema> parsed_schema_;
+  mutable c10::optional<c10::FunctionSchema> parsed_schema_ = c10::nullopt;
   mutable std::mutex mutex_;
   void* function_table_[static_cast<int64_t>(TensorTypeId::NumTensorIds)] = {nullptr};
 };
