@@ -11010,7 +11010,7 @@ class TestTorchDeviceType(TestCase):
             ("log10", positives, True, True, 'cpu'),
             ("log10", positives, True, True, 'cuda'),
             ("log1p", positives, True, True, 'cpu'),
-            ("log1p", positives, False, True, 'cuda'),
+            ("log1p", positives, True, True, 'cuda'),
             ("log2", positives, True, True, 'cpu'),
             ("log2", positives, True, True, 'cuda'),
             ("neg", doubles, True, True, 'cpu'),

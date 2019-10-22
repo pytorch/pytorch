@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from test_pytorch_common import TestCase, run_tests, flatten
+from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack
 
 import torch
 import torch.onnx
@@ -813,6 +813,11 @@ class TestOperators(TestCase):
     def test_round(self):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
+
+    @skipIfNoLapack
+    def test_det(self):
+        x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
+        self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
 
 
 if __name__ == '__main__':

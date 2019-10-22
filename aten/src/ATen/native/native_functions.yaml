@@ -1615,16 +1615,16 @@
   supports_named_tensor: True
   variants: function, method
   dispatch:
-    CPU: _log1p__cpu
-    CUDA: _log1p__cuda
+    CPU: log1p_
+    CUDA: log1p_
     SparseCPU: log1p_sparse_
     SparseCUDA: log1p_sparse_
 
 - func: log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log1p_out_cpu
-    CUDA: _log1p_out_cuda
+    CPU: log1p_out
+    CUDA: log1p_out
     SparseCPU: log1p_out_sparse
     SparseCUDA: log1p_out_sparse
 
@@ -2681,15 +2681,9 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _sqrt__cpu
-    CUDA: _sqrt__cuda
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _sqrt_out_cpu
-    CUDA: _sqrt_out_cuda
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full
@@ -5616,27 +5610,27 @@
 - func: multilabel_margin_loss_forward.output(Tensor self, Tensor target, int reduction, *, Tensor(a!) output, Tensor(b!) is_target) -> (Tensor(a!), Tensor(b!))
   python_module: nn
   dispatch:
-    CPU: multilabel_margin_loss_forward_out_cpu
+    CPU: legacy::cpu::_thnn_multilabel_margin_loss_forward_out
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_forward_out
 
 - func: multilabel_margin_loss_forward(Tensor self, Tensor target, int reduction) -> (Tensor output, Tensor is_target)
   use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
-    CPU: multilabel_margin_loss_forward_cpu
+    CPU: legacy::cpu::_thnn_multilabel_margin_loss_forward
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_forward
 
 - func: multilabel_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: multilabel_margin_loss_backward_cpu_out
+    CPU: legacy::cpu::_thnn_multilabel_margin_loss_backward_out
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_backward_out
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
-    CPU: multilabel_margin_loss_backward_cpu
+    CPU: legacy::cpu::_thnn_multilabel_margin_loss_backward
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_backward
 
 - func: nll_loss.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)

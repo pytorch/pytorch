@@ -89,7 +89,6 @@ int main(int argc, char** argv) {
   torch::autograd::AutoGradMode guard(false);
   auto module = torch::jit::load(FLAGS_model);
 
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
   module.eval();
   if (FLAGS_print_output) {
     std::cout << module.forward(inputs) << std::endl;
