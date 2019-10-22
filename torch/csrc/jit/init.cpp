@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
@@ -263,6 +264,11 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
       .def("_jit_pass_inline", Inline)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
+      .def(
+          "_jit_pass_lower_graph",
+          [](std::shared_ptr<Graph>& graph, const script::Module& self) {
+            return LowerGraph(*graph, self.module_object());
+          })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
           "_jit_pass_constant_propagation",

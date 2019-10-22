@@ -2703,7 +2703,7 @@ class TestAutograd(TestCase):
         def construct_inputs(*shapes):
             start = cast(torch.randn(shapes[0])).requires_grad_()
             end = cast(torch.randn(shapes[1])).requires_grad_()
-            weight = cast(torch.randn(shapes[2]))
+            weight = cast(torch.randn(shapes[2])).requires_grad_()
             return [start, end, weight]
 
         all_test_shapes = [((3, 3, 3), (3, 3, 3), (3, 3, 3)),  # no broadcasting
