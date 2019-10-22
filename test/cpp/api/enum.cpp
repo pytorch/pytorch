@@ -31,7 +31,7 @@ TEST(EnumTest, AllEnums) {
     torch::enumtype::kConstant,
     torch::enumtype::kReflect,
     torch::enumtype::kReplicate,
-    torch::enumtype::kCircular
+    torch::enumtype::kCircular,
     torch::enumtype::kSum,
     torch::enumtype::kMean,
     torch::enumtype::kMax
