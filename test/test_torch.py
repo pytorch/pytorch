@@ -6207,7 +6207,7 @@ class TestTorchDeviceType(TestCase):
             a1.bitwise_xor_(b)
             self.assertEqual(a1, expected_res)
             a.bitwise_xor_(b_scalar)
-            self.assertEqual(a1, expected_res_scalar)
+            self.assertEqual(a, expected_res_scalar)
 
         self.assertEqual(torch.tensor([True, False, False], device=device),
                          torch.bitwise_xor(torch.tensor([True, True, False], device=device),
