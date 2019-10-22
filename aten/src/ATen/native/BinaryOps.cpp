@@ -225,7 +225,8 @@ Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, Scalar other) {
 }
 
 Tensor bitwise_xor(const Tensor& self, Scalar other) {
-  return at::bitwise_xor(self, wrapped_scalar_tensor(other));
+  Tensor result = at::empty({0}, self.options());
+  return at::bitwise_xor_out(result, self, other);
 }
 
 Tensor& bitwise_xor_(Tensor& self, Scalar other) {
