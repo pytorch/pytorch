@@ -501,7 +501,6 @@ class RpcTest(object):
 
     @dist_init
     def test_py_no_return_result(self):
-        print('ahwoufhoruh')
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync("worker{}".format(dst_rank), no_result)
