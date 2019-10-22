@@ -73,14 +73,14 @@ void bitwise_xor_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     // Boolean type does not work with ^ (bitwise XOR) in C++. bitwise_xor wraps this operation for both Boolean and
     // integral types.
-    gpu_kernel(
+    gpu_kernel_with_scalars(
           iter,
           []GPU_LAMBDA(bool a, bool b) {
             return a != b;
           });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_xor_cuda", [&]() {
-      gpu_kernel(
+      gpu_kernel_with_scalars(
           iter,
           []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
             return a ^ b;
