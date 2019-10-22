@@ -1,3 +1,7 @@
+"""
+Source code from the authors original implementation at :
+https://github.com/LiyuanLucasLiu/RAdam
+"""
 import math
 import torch
 from .optimizer import Optimizer
