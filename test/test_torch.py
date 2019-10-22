@@ -5716,6 +5716,20 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             }
             return x.cos();
         }
+
+        // Convoluted example that force concurency (nesting in this case)
+        // of warning handling.
+        at::Tensor bar(at::Tensor x) {
+            std::ostringstream err_stream;
+            err_stream << "Error with "  << x.type();
+            TORCH_WARN(err_stream.str());
+
+            // Call a function that will also handle warnings
+            auto torch = py::module::import("torch");
+            auto cos_fn = torch.attr("cos");
+            auto py_result = cos_fn(x);
+            return py_result.cast<at::Tensor>();
+        }
         '''
 
         # Ensure double type for hard-coded c name below
@@ -5750,7 +5764,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
         warn_mod = cpp_extension.load_inline(name='warn_mod',
                                              cpp_sources=[source],
-                                             functions=['foo'],
+                                             functions=['foo', 'bar'],
                                              with_pytorch_error_handling=True)
 
 
@@ -5788,6 +5802,12 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
             self.assertEqual(len(w), 0)
+
+        # Ensure nested detection works
+        with warnings.catch_warnings(record=True) as w:
+            # Both the original and the additional warning should be catched
+            warn_mod.bar(t)
+            self.assertEqual(len(w), 2)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
