@@ -28,7 +28,7 @@ from torch.nn.parallel import DistributedDataParallel
 from common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, skip_for_known_issues, get_timeout, skip_if_rocm
-from common_utils import TestCase, load_tests, run_tests, retry_on_address_already_in_use_error
+from common_utils import TestCase, load_tests, run_tests, retry_on_address_already_in_use_error, TEST_WITH_TSAN
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -559,6 +559,7 @@ class TimeoutTest(TestCase):
 
 
 @requires_gloo()
+@unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def setUp(self):
         super(ProcessGroupGlooTest, self).setUp()
@@ -953,20 +954,19 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             opts.rootRank = self.rank
             pg.scatter([t1], [[t1] * self.world_size, [t1] * self.world_size], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
+        desired_list_size = self.world_size
+        incorrect_list_size = self.world_size - 1
+        err_str = "Incorrect input list size {}. Input list size should be {}"
+        with self.assertRaisesRegex(ValueError, err_str.format(incorrect_list_size, desired_list_size)):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
-            pg.scatter([t1], [[t1] * (self.world_size - 1)], opts)
+            pg.scatter([t1], [[t1] * incorrect_list_size], opts)
 
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
+        incorrect_list_size = self.world_size + 1
+        with self.assertRaisesRegex(ValueError, err_str.format(incorrect_list_size, desired_list_size)):
             opts = c10d.ScatterOptions()
             opts.rootRank = self.rank
-            pg.scatter([t1], [[t1] * (self.world_size + 1)], opts)
-
-        with self.assertRaisesRegex(ValueError, "requires a single-element input list"):
-            opts = c10d.ScatterOptions()
-            opts.rootRank = self.rank
-            pg.scatter([t1], [[t1] * (self.world_size + 1)], opts)
+            pg.scatter([t1], [[t1] * incorrect_list_size], opts)
 
         with self.assertRaisesRegex(ValueError, "invalid tensor type"):
             opts = c10d.ScatterOptions()
@@ -1799,6 +1799,7 @@ class QuadraGpuNet(nn.Module):
         return F.softmax(x, dim=1).to(dev0)
 
 
+@unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
@@ -2115,6 +2116,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_sync_params_with_buffers(self, dtype=torch.double):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
@@ -2978,6 +2980,7 @@ class ComputeBucketAssignmentTest(TestCase):
         result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
 
+@unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class NcclErrorHandlingTest(MultiProcessTestCase):
     def setUp(self):
         super(NcclErrorHandlingTest, self).setUp()
@@ -3130,6 +3133,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             time.sleep(2 * timeout)
 
 
+@unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class CommTest(MultiProcessTestCase):
     def setUp(self):
         super(CommTest, self).setUp()

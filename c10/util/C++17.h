@@ -11,6 +11,15 @@
 #include <functional>
 #include <c10/macros/Macros.h>
 
+#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
+  __GNUC__ < 5
+#error "You're trying to build PyTorch with a too old version of GCC. We need GCC 5 or later."
+#endif
+
+#if (defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201402L)) || (!defined(_MSC_VER) && __cplusplus < 201402L)
+#error You need C++14 to compile PyTorch
+#endif
+
 /*
  * This header adds some polyfills with C++14 and C++17 functionality
  */
@@ -288,6 +297,15 @@ template<class T> inline std::string to_string(T value) {
     return detail::to_string_<T>::call(value);
 }
 
+template <class T>
+constexpr const T& min(const T& a, const T& b) {
+  return (b < a) ? b : a;
+}
+
+template <class T>
+constexpr const T& max(const T& a, const T& b) {
+  return (a < b) ? b : a;
+}
 }}
 
 #endif // C10_UTIL_CPP17_H_
