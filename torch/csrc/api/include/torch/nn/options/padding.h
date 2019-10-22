@@ -12,7 +12,7 @@ namespace nn {
 
 /// Options for a pad functional.
 struct TORCH_API PadOptions {
-  PadOptions(std::vector<int64_t> pad) : pad_(std::move(pad)) {}
+  PadOptions(std::vector<int64_t> pad);
 
   /// m-elements tuple, where m/2 <= input dimensions and m is even.
   TORCH_ARG(std::vector<int64_t>, pad);
