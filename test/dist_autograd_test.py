@@ -725,15 +725,14 @@ class DistAutogradTest(object):
             #                        args=(t1, t2))
             #     rpc.rpc_sync("worker{}".format(dst_rank), _store_context_id,
             #         args=(context_id,))
-            time.sleep(20);
+            time.sleep(5);
             # if self.rank == 0:
             #     sys.exit(0)
 
             print(context_id)
             with self.assertRaises(RuntimeError):
                 dist_autograd._retrieve_context(context_id)
-            # success = _all_contexts_cleaned_up(num_contexts=len(dst_ranks))
-            # self.assertTrue(success)
+            print("worked")
 
     @dist_init(setup_model_parallel=True)
     def test_backward_without_context(self):
