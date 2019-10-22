@@ -322,7 +322,7 @@ static void conv_depthwise3d_cuda_template(
     
     TORCH_CHECK(
         (input_.ndimension() == 5),
-        "non-empty 4D tensor expected for input");
+        "non-empty 5D tensor expected for input");
 
     int64_t osizeD = output.size(1);  // num out channels
     int64_t osizeT = output.size(1);  // output time size
@@ -333,7 +333,7 @@ static void conv_depthwise3d_cuda_template(
     int64_t istrideD, istrideT, istrideH, istrideW;
     int64_t totalZ;
   
-    const Tensor& input = input_.ndimension() == 4 ? input_ : input_.contiguous();
+    const Tensor& input = input_.ndimension() == 5 ? input_ : input_.contiguous();
   
     if (input.ndimension() == 4) {
       sizeD = input.size(0);   // in channels
@@ -652,7 +652,7 @@ Tensor& conv3d_depthwise3d_backward_weight_cuda(
     gradWeight, gradOutput, input,
     kernel_size, stride_size, pad_size, dilation_size
   )
-  return gradInput;
+  return gradWeight;
 }
 
 
