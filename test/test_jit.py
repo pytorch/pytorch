@@ -13,7 +13,6 @@ from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
 from jit.test_list_dict import TestList, TestDict  # noqa: F401
-from jit.test_property import TestProperty  # noqa: F401
 
 # Torch
 from torch import Tensor

@@ -64,7 +64,6 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       std::vector<std::string> overloadedMethodNames);
   void addFailedAttribute(std::string name, std::string failureReason);
   void setIterableModuleKind(IterableModuleKind kind);
-  void addProperty(std::string propertyName);
   void setPoisoned();
 
   /**
@@ -97,7 +96,6 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, std::pair<TypePtr, bool>> getAttributesPy()
       const;
   std::vector<std::string> getModuleNamesPy() const;
-  bool isProperty(const std::string& name) const;
 
   // This determines whether two modules can share a type. The container structs
   // used by ConcreteModuleType have been defined such that operator==
@@ -117,8 +115,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       lhs.constants_ == rhs.constants_ &&
       lhs.attributes_ == rhs.attributes_ &&
       lhs.overloads_ == rhs.overloads_ &&
-      lhs.functionAttributes_ == rhs.functionAttributes_ &&
-      lhs.properties_ == rhs.properties_;
+      lhs.functionAttributes_ == rhs.functionAttributes_;
     // clang-format on
     if (!equal) {
       return false;
@@ -202,8 +199,6 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, FunctionTypePtr> functionAttributes_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
-  // Which methods are properties
-  std::unordered_set<std::string> properties_;
 
   // If something is a ModuleDict/ModuleList, it means:
   //   1. The order of the submodules matters for comparing the type

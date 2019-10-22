@@ -154,16 +154,6 @@ void ConcreteModuleType::addFailedAttribute(
   failedAttributes_.emplace(std::move(name), std::move(failureReason));
 }
 
-void ConcreteModuleType::addProperty(std::string name) {
-  TORCH_INTERNAL_ASSERT(!jitType_);
-  properties_.emplace(std::move(name));
-}
-
-bool ConcreteModuleType::isProperty(const std::string& name) const {
-  TORCH_INTERNAL_ASSERT(jitType_);
-  return properties_.count(name);
-}
-
 c10::optional<py::object> ConcreteModuleType::findConstant(
     const std::string& name) const {
   auto it = constants_.find(name);

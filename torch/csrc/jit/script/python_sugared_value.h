@@ -252,51 +252,6 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
   py::object py_type_;
 };
 
-// PropertyValue represents a Python @property method. It's basically a method
-// that masquerades as a value.
-struct VISIBILITY_HIDDEN PropertyValue : SugaredValue {
- public:
-  explicit PropertyValue(std::shared_ptr<SugaredValue> method)
-      : method_(std::move(method)) {}
-
-  std::string kind() const override {
-    return "property method";
-  }
-
-  Value* asValue(const SourceRange& range, Function& m) override;
-
-  std::shared_ptr<SugaredValue> attr(
-      const SourceRange& loc,
-      Function& m,
-      const std::string& field) override;
-
-  void setAttr(
-      const SourceRange& loc,
-      Function& m,
-      const std::string& field,
-      Value* newValue) override;
-
-  std::vector<std::shared_ptr<SugaredValue>> asTuple(
-      const SourceRange& loc,
-      Function& m,
-      const c10::optional<size_t>& size_hint = {}) override;
-
-  std::shared_ptr<SugaredValue> call(
-      const SourceRange& loc,
-      Function& m,
-      at::ArrayRef<NamedValue> inputs_,
-      at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override;
-
-  Value* len(const SourceRange& loc, Function& m) override;
-  Value* getitem(const SourceRange& loc, Function& m, Value* idx) override;
-
- private:
-  std::shared_ptr<SugaredValue> callMethod(const SourceRange& loc, Function& m);
-
-  std::shared_ptr<SugaredValue> method_;
-};
-
 } // namespace script
 } // namespace jit
 } // namespace torch

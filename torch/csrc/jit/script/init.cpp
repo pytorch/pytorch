@@ -988,7 +988,6 @@ void initJitScriptBindings(PyObject* module) {
       .def("add_pyclass", &ConcreteModuleType::addPyClass)
       .def("add_overload", &ConcreteModuleType::addOverload)
       .def("add_jit_type", &ConcreteModuleType::addJitType)
-      .def("add_property", &ConcreteModuleType::addProperty)
       .def("set_poisoned", &ConcreteModuleType::setPoisoned)
       .def(
           "set_module_dict",

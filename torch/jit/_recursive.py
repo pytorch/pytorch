@@ -140,10 +140,6 @@ def infer_raw_concrete_type(nn_module):
     class_annotations = getattr(nn_module, '__annotations__', {})
 
     # populate which methods are properties
-    for name, value in type(nn_module).__dict__.items():
-        if isinstance(value, property):
-            concrete_type.add_property(name)
-
     for name, value in nn_module.__dict__.items():
         if name in blacklist or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
