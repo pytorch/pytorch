@@ -145,17 +145,14 @@ inline interleave2<double>(const Vec256<double>& a, const Vec256<double>& b) {
   // swap lanes:
   //   a_swapped = {a0, a1, b0, b1}
   //   b_swapped = {a2, a3, b2, b3}
-  constexpr uint8_t swap_ctrl_a = 0 | (2 << 4);  // 0, 2.   4 bits apart
-  constexpr uint8_t swap_ctrl_b = 1 | (3 << 4);  // 1, 3.   4 bits apart
-  auto a_swapped = _mm256_permute2f128_pd(a, b, swap_ctrl_a);
-  auto b_swapped = _mm256_permute2f128_pd(a, b, swap_ctrl_b);
+  auto a_swapped = _mm256_permute2f128_pd(a, b, 0 | (2 << 4));  // 0, 2.   4 bits apart
+  auto b_swapped = _mm256_permute2f128_pd(a, b, 1 | (3 << 4));  // 1, 3.   4 bits apart
 
   // group cols crossing lanes:
   //   return {a0, b0, a1, b1}
   //          {a2, b2, a3, b3}
-  constexpr uint8_t group_ctrl = 0 | (2 << 2) | (1 << 4) | (3 << 6);  // 0, 2, 1, 3
-  return std::make_pair(_mm256_permute4x64_pd(a_swapped, group_ctrl),
-                        _mm256_permute4x64_pd(b_swapped, group_ctrl));
+  return std::make_pair(_mm256_permute4x64_pd(a_swapped, 0 | (2 << 2) | (1 << 4) | (3 << 6)),  // 0, 2, 1, 3
+                        _mm256_permute4x64_pd(b_swapped, 0 | (2 << 2) | (1 << 4) | (3 << 6))); // 0, 2, 1, 3
 }
 
 template <>
@@ -169,10 +166,8 @@ inline interleave2<float>(const Vec256<float>& a, const Vec256<float>& b) {
   //   a_swapped = {a0, a1, a2, a3, b0, b1, b2, b3}
   //   b_swapped = {a4, a5, a6, a7, b4, b5, b6, b7}
   // TODO: can we support caching this?
-  constexpr uint8_t swap_ctrl_a = 0 | (2 << 4);  // 0, 2.   4 bits apart
-  constexpr uint8_t swap_ctrl_b = 1 | (3 << 4);  // 1, 3.   4 bits apart
-  auto a_swapped = _mm256_permute2f128_ps(a, b, swap_ctrl_a);
-  auto b_swapped = _mm256_permute2f128_ps(a, b, swap_ctrl_b);
+  auto a_swapped = _mm256_permute2f128_ps(a, b, 0 | (2 << 4));  // 0, 2.   4 bits apart
+  auto b_swapped = _mm256_permute2f128_ps(a, b, 1 | (3 << 4));  // 1, 3.   4 bits apart
 
   // group cols crossing lanes:
   //   return {a0, b0, a1, b1, a2, b2, a3, b3}
@@ -194,17 +189,14 @@ inline deinterleave2<double>(const Vec256<double>& a, const Vec256<double>& b) {
   // group cols crossing lanes:
   //   a_grouped = {a0, a1, b0, b1}
   //   b_grouped = {a2, a3, b2, b3}
-  constexpr uint8_t group_ctrl = 0 | (2 << 2) | (1 << 4) | (3 << 6);  // 0, 2, 1, 3
-  auto a_grouped = _mm256_permute4x64_pd(a, group_ctrl);
-  auto b_grouped = _mm256_permute4x64_pd(b, group_ctrl);
+  auto a_grouped = _mm256_permute4x64_pd(a, 0 | (2 << 2) | (1 << 4) | (3 << 6));  // 0, 2, 1, 3
+  auto b_grouped = _mm256_permute4x64_pd(b, 0 | (2 << 2) | (1 << 4) | (3 << 6));  // 0, 2, 1, 3
 
   // swap lanes:
   //   return {a0, a1, a2, a3}
   //          {b0, b1, b2, b3}
-  constexpr uint8_t swap_ctrl_a = 0 | (2 << 4);  // 0, 2.   4 bits apart
-  constexpr uint8_t swap_ctrl_b = 1 | (3 << 4);  // 1, 3.   4 bits apart
-  return std::make_pair(_mm256_permute2f128_pd(a_grouped, b_grouped, swap_ctrl_a),
-                        _mm256_permute2f128_pd(a_grouped, b_grouped, swap_ctrl_b));
+  return std::make_pair(_mm256_permute2f128_pd(a_grouped, b_grouped, 0 | (2 << 4)),  // 0, 2.   4 bits apart
+                        _mm256_permute2f128_pd(a_grouped, b_grouped, 1 | (3 << 4))); // 1, 3.   4 bits apart
 }
 
 template <>
@@ -225,10 +217,8 @@ inline deinterleave2<float>(const Vec256<float>& a, const Vec256<float>& b) {
   // swap lanes:
   //   return {a0, a1, a2, a3, a4, a5, a6, a7}
   //          {b0, b1, b2, b3, b4, b5, b6, b7}
-  constexpr uint8_t swap_ctrl_a = 0 | (2 << 4);  // 0, 2.   4 bits apart
-  constexpr uint8_t swap_ctrl_b = 1 | (3 << 4);  // 1, 3.   4 bits apart
-  return std::make_pair(_mm256_permute2f128_ps(a_grouped, b_grouped, swap_ctrl_a),
-                        _mm256_permute2f128_ps(a_grouped, b_grouped, swap_ctrl_b));
+  return std::make_pair(_mm256_permute2f128_ps(a_grouped, b_grouped, 0 | (2 << 4)),  // 0, 2.   4 bits apart
+                        _mm256_permute2f128_ps(a_grouped, b_grouped, 1 | (3 << 4))); // 1, 3.   4 bits apart
 }
 
 #endif  // defined(__AVX2__)
