@@ -449,23 +449,6 @@ int THCTensor_(isContiguous)(THCState *state, const THCTensor *self)
   return self->is_contiguous();
 }
 
-int THCTensor_(isSetTo)(THCState *state, const THCTensor *self, const THCTensor *src)
-{
-  if (THTensor_getStoragePtr(self) == THTensor_getStoragePtr(src) &&
-      self->storage_offset() == src->storage_offset() &&
-      self->dim() == src->dim())
-  {
-    int d;
-    for (d = 0; d < self->dim(); ++d)
-    {
-      if (self->size(d) != src->size(d) || self->stride(d) != src->stride(d))
-        return 0;
-    }
-    return 1;
-  }
-  return 0;
-}
-
 int THCTensor_(isSameSizeAs)(THCState *state, const THCTensor *self, const THCTensor* src)
 {
   int d;
