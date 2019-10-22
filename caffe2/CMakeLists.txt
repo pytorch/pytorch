@@ -681,7 +681,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       )
   else()
     target_compile_options(torch PUBLIC
-      #    -std=c++11
+      #    -std=c++14
       -Wall
       -Wextra
       -Wno-unused-parameter
@@ -776,7 +776,7 @@ ENDIF()
     ${TORCH_ROOT}/third_party/miniz-2.0.8)
 
 
-  set_property(TARGET torch PROPERTY CXX_STANDARD 11)
+  set_property(TARGET torch PROPERTY CXX_STANDARD 14)
 
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
