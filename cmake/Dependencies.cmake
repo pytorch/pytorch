@@ -898,28 +898,17 @@ if(USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cufft caffe2::curand)
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+      caffe2::cufft caffe2::curand caffe2::cublas)
     if(CAFFE2_USE_NVRTC)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
     else()
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      IF(CUDNN_STATIC)
-        LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-          caffe2::cudnn "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" "dl")
-      ELSE()
-        list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
-      ENDIF()
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn)
     else()
       caffe2_update_option(USE_CUDNN OFF)
-    endif()
-    if(CAFFE2_STATIC_LINK_CUDA)
-      # When statically linking, this must be the order of the libraries
-      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" caffe2::cublas)
-    else()
-      LIST(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cublas)
     endif()
     if(CAFFE2_USE_TENSORRT)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
