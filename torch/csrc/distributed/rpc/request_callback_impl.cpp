@@ -3,6 +3,8 @@
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
@@ -184,6 +186,17 @@ Message RequestCallbackImpl::processRpc(
           autogradContext, sendFunction);
 
       return std::move(PropagateGradientsResp()).toMessage();
+    }
+    case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
+      auto& cleanupContextReq = static_cast<CleanupAutogradContextReq&>(rpc);
+      auto cleanupContextId = cleanupContextReq.getContextId();
+      // release the context if it still exists on this thread. We need to check
+      // if it exists since it may have been deleted by an in-flight RPC.
+      // This can create nested RPCs if there are other nodes that get notified
+      // to clean up their context.
+      DistAutogradContainer::getInstance().releaseContextIfPresent(
+          cleanupContextId);
+      return std::move(CleanupAutogradContextResp()).toMessage();
     }
     default: {
       TORCH_INTERNAL_ASSERT(

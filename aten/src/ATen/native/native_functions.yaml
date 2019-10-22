@@ -2489,6 +2489,9 @@
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
+  dispatch:
+    CPU: sin_out
+    CUDA: sin_out
 
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
