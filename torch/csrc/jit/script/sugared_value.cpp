@@ -476,7 +476,7 @@ SugaredValuePtr IterableTree::getitem(
 
 void IterableTree::addChild(
     const SourceRange& range,
-    IterableValuePtr iter_value) {
+    const IterableValuePtr& iter_value) {
   auto child_len = iter_value->getLen();
   auto child_unrolled = iter_value->emitUnrolled();
   if (children_.size() == 0) {

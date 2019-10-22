@@ -1629,10 +1629,10 @@ struct to_ir {
   }
 
   void emitFor(const For& stmt) {
-    auto targets = stmt.targets();
-    auto itrs = stmt.itrs();
-    auto body = stmt.body();
-    auto loc = stmt.range();
+    const auto& targets = stmt.targets();
+    const auto& itrs = stmt.itrs();
+    const auto& body = stmt.body();
+    const auto& loc = stmt.range();
     if (stmt.itrs().size() != 1) {
       throw ErrorReport(stmt) << "List of iterables is not supported currently";
     }
