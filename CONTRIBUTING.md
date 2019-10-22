@@ -643,7 +643,7 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
   we have AliasAnalysisKind::PURE_FUNCTION and not AliasAnalysisKind::PURE.
   The same is likely true for other identifiers that we just didn't try to use yet.
 
-### Running Clang-Tidy
+## Running Clang-Tidy
 
 [Clang-Tidy](https://clang.llvm.org/extra/clang-tidy/index.html) is a C++
 linter and static analysis tool based on the clang compiler. We run clang-tidy
@@ -674,7 +674,7 @@ root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
 to change the clang-tidy this script uses. Make sure you have PyYaml installed,
 which is in PyTorch's `requirements.txt`.
 
-### Pre-commit Tidy/Linting Hook
+## Pre-commit Tidy/Linting Hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
 flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
@@ -689,7 +689,7 @@ You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
 
-### Building PyTorch with ASAN
+## Building PyTorch with ASAN
 
 [ASAN](https://github.com/google/sanitizers/wiki/AddressSanitizer) is very
 useful for debugging memory errors in C++. We run it in CI, but here's how to
@@ -737,7 +737,7 @@ suo-devfair ~/pytorch ❯ build_with_asan
 suo-devfair ~/pytorch ❯ run_with_asan python test/test_jit.py
 ```
 
-#### Getting `ccache` to work
+### Getting `ccache` to work
 
 The scripts above specify the `clang` and `clang++` binaries directly, which
 bypasses `ccache`. Here's how to get `ccache` to work:
@@ -748,7 +748,7 @@ bypasses `ccache`. Here's how to get `ccache` to work:
 3. Change the `CC` and `CXX` variables in `build_with_asan()` to point
    directly to `clang` and `clang++`.
 
-#### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
+### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
 
 The “standard” workflow for ASAN assumes you have a standalone binary:
 
@@ -769,7 +769,7 @@ workaround for cases like this:
 More information can be found
 [here](https://github.com/google/sanitizers/wiki/AddressSanitizerAsDso).
 
-#### Why LD_PRELOAD in the build function?
+### Why LD_PRELOAD in the build function?
 
 We need `LD_PRELOAD` because there is a cmake check that ensures that a
 simple program builds and runs. If we are building with ASAN as a shared
@@ -778,7 +778,7 @@ dynamic linker errors and the check will fail.
 
 We don’t actually need either of these if we fix the cmake checks.
 
-#### Why no Leak detection?
+### Why no Leak detection?
 
 Python leaks a lot of memory. Possibly we could configure a suppression file,
 but we haven’t gotten around to it.
