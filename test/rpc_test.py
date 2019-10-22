@@ -295,26 +295,55 @@ class RpcTest(object):
                 worker_name_to_id=self.worker_name_to_id,
             )
 
+    @dist_init(setup_model_parallel=False)
     def test_invalid_names(self):
         dist.init_process_group(
             backend=dist.Backend.GLOO,
-            init_method=self.init_method
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
         )
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            rpc.init_model_parallel(self_name="abc*")
+            rpc.init_model_parallel(
+                self_name="abc*",
+                backend=TEST_CONFIG.rpc_backend,
+                init_method=self.init_method,
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
+                num_send_recv_threads=16,
+            )
 
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            rpc.init_model_parallel(self_name=" ")
+            rpc.init_model_parallel(
+                self_name=" ",
+                backend=TEST_CONFIG.rpc_backend,
+                init_method=self.init_method,
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
+                num_send_recv_threads=16,
+            )
 
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            rpc.init_model_parallel(self_name="")
+            rpc.init_model_parallel(
+                self_name="",
+                backend=TEST_CONFIG.rpc_backend,
+                init_method=self.init_method,
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
+                num_send_recv_threads=16,
+            )
 
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             rpc.init_model_parallel(
                 self_name="".join(["a" for _ in range(500)]),
+                backend=TEST_CONFIG.rpc_backend,
+                init_method=self.init_method,
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
+                num_send_recv_threads=16,
             )
 
         from torch.distributed.rpc.api import _agent
