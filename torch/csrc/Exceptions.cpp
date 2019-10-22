@@ -144,8 +144,19 @@ void PyWarningHandler::process(
   warning_buffer_.push_back({source_location, msg});
 };
 
-PyWarningHandler::PyWarningHandler() noexcept(true): prev_handler_(c10::Warning::get_warning_handler()) {
+PyWarningHandler::PyWarningHandler() noexcept(true):
+      prev_handler_(c10::Warning::get_warning_handler()),
+      overlapping_(false) {
   c10::Warning::set_warning_handler(this);
+  auto prev_pyhandler = dynamic_cast<PyWarningHandler*>(prev_handler_);
+  if(prev_pyhandler != nullptr) {
+    this->mark_overlapping();
+    prev_pyhandler->mark_overlapping();
+  }
+}
+
+void PyWarningHandler::mark_overlapping() {
+  overlapping_ = true;
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
@@ -184,8 +195,16 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       // destructor normally
       PyErr_Restore(ptype, pvalue, ptraceback);
     } else {
-      auto result = -1;
+      auto result = 0;
+      if(overlapping_) {
+        // This python thread might not be the one that caused the issue
+        // Warn the user about this.
+        result = PyErr_WarnEx(PyExc_RuntimeWarning, PYWARNING_MAYBE_INVALID_PYTHON_STACKTRACE, 1);
+      }
       for(const auto& warning: warning_buffer_) {
+        if (result < 0) {
+          break;
+        }
         auto source_location = warning.first;
         const auto& msg = processErrorMsg(warning.second);
         if (source_location.file == nullptr) {
@@ -198,9 +217,6 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
               /*lineno=*/source_location.line,
               /*module=*/nullptr,
               /*registry=*/nullptr);
-        }
-        if (result < 0) {
-          break;
         }
       }
       warning_buffer_.clear();

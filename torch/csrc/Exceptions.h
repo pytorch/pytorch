@@ -206,6 +206,8 @@ public:
   void process(const at::SourceLocation &source_location,
                const std::string &msg) override;
 
+void mark_overlapping();
+
 private:
   using warning_buffer_t =
     std::vector<std::pair<c10::SourceLocation, std::string>>;
@@ -215,6 +217,14 @@ private:
   // The GIL needs to be acquired first.
   std::mutex warning_buffer_mutex_;
   at::WarningHandler* prev_handler_;
+
+  // Since our warning handler is global, we want to notify the user if
+  // there is a risk of the warning being raised by another python thread
+  // than the one that caused the warning.
+  bool overlapping_;
+  static constexpr char* PYWARNING_MAYBE_INVALID_PYTHON_STACKTRACE =
+    "The following warnings happened in a multithreaded or nested setting and so \
+the python stack traces below might be incorrect.";
 };
 
 } // namespace torch
