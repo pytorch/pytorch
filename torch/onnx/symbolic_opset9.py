@@ -1622,13 +1622,13 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
 
 def randn(g, *shapes):
     shapes_list = list(shapes)
-    shape = sym_help._get_const(shapes_list[0], "is", "Rand")
+    shape = sym_help._get_const(shapes_list[0], "is", "randn")
     return g.op('RandomNormal', shape_i=shape)
 
 
 def rand(g, *shapes):
     shapes_list = list(shapes)
-    shape = sym_help._get_const(shapes_list[0], "is", "Rand")
+    shape = sym_help._get_const(shapes_list[0], "is", "rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
