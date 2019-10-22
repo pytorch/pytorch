@@ -842,9 +842,10 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_interface_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
-         ResolutionCallback rcb) {
+         ResolutionCallback rcb,
+         bool is_module) {
         get_python_cu()->define_interface(
-            c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb));
+            c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb), is_module);
       });
 
   m.def("_parse_source_def", [](const std::string& src) {

@@ -1569,9 +1569,16 @@ using ::torch::jit::Function;
 
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.
+// Subtype relations for Interface/ClassType
+// Case lhs.is_module() xor rhs.is_module() = False:
+//  1. InterfaceType T <: InterfaceType R iff T's methods meets R's methods
+//  2. ClassType T <: InterfaceType R iff T's methods meets R's methods
+// Case lhs.is_module() xor rhs.is_module() = True:
+//  1. Module InterfaceType T <: InterfaceType R iff T's methods meets R's methods
+//  2. Module ClassType T <: InterfaceType R if T's methods meets R's methods
 struct CAFFE2_API InterfaceType : public NamedType {
   static InterfaceTypePtr create(
-      QualifiedName qualifiedName);
+      QualifiedName qualifiedName, bool is_module=false);
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<InterfaceType>()) {
@@ -1597,14 +1604,20 @@ struct CAFFE2_API InterfaceType : public NamedType {
   const std::vector<FunctionSchema>& methods() {
     return *methods_;
   }
+
+  bool is_module() const {
+    return is_module_;
+  }
   static const TypeKind Kind = TypeKind::InterfaceType;
   ~InterfaceType() override;
  private:
-  InterfaceType(QualifiedName name);
+  InterfaceType(QualifiedName name, bool is_module);
 
   // shared_ptr so that this header does not have to depend on
   // FunctionSchema.h
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
+  // flag to distinguish if it's an interface type from a module or not
+  bool is_module_;
 };
 
 } // namespace c10
