@@ -1524,16 +1524,16 @@
   supports_named_tensor: True
   variants: function, method
   dispatch:
-    CPU: _log1p__cpu
-    CUDA: _log1p__cuda
+    CPU: log1p_
+    CUDA: log1p_
     SparseCPU: log1p_sparse_
     SparseCUDA: log1p_sparse_
 
 - func: log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log1p_out_cpu
-    CUDA: _log1p_out_cuda
+    CPU: log1p_out
+    CUDA: log1p_out
     SparseCPU: log1p_out_sparse
     SparseCUDA: log1p_out_sparse
 
@@ -2525,15 +2525,9 @@
 - func: sqrt_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _sqrt__cpu
-    CUDA: _sqrt__cuda
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _sqrt_out_cpu
-    CUDA: _sqrt_out_cuda
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full
