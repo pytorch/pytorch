@@ -295,27 +295,6 @@
         - THTensor* value
 ]]
 [[
-  name: _th_unfold
-  cname: unfold
-  variants:
-    - function
-  scalar_check: false
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  device_guard: False
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - arg: long dimension
-      wrap_dim: self
-    - long size
-    - long step
-]]
-[[
   name: _th_scatter_
   return: argument 0
   cpu_bool: True

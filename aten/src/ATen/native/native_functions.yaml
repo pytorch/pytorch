@@ -5309,8 +5309,8 @@
   use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_unfold
-    CUDA: legacy::cuda::_th_unfold
+    CPU: unfold
+    CUDA: unfold
 
 - func: equal(Tensor self, Tensor other) -> bool
   use_c10_dispatcher: full
