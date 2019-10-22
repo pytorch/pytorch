@@ -157,7 +157,7 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
     list_.emplace_back(x);
   }
   template <typename T>
-  void operator()(T&& x) {
+  void operator()(const T& x) {
     is_var_.push_back(false);
   }
 };
