@@ -37,10 +37,11 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void
+- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()
   variants: method
 
-- func: set_data(Tensor(a!) self, Tensor new_data) -> void
+- func: set_data(Tensor(a!) self, Tensor new_data) -> ()
+  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: data(Tensor self) -> Tensor
@@ -1403,9 +1404,11 @@
 - func: _cufft_get_plan_cache_max_size(int device_index) -> int
   use_c10_dispatcher: full
 
-- func: _cufft_set_plan_cache_max_size(int device_index, int max_size) -> void
+- func: _cufft_set_plan_cache_max_size(int device_index, int max_size) -> ()
+  use_c10_dispatcher: unboxed_only
 
-- func: _cufft_clear_plan_cache(int device_index) -> void
+- func: _cufft_clear_plan_cache(int device_index) -> ()
+  use_c10_dispatcher: unboxed_only
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   variants: function, method
@@ -1459,7 +1462,7 @@
   variants: function
   device_guard: False
   supports_named_tensor: True
-  
+
 - func: is_distributed(Tensor self) -> bool
   use_c10_dispatcher: full
   variants: function, method
@@ -1615,16 +1618,16 @@
   supports_named_tensor: True
   variants: function, method
   dispatch:
-    CPU: _log1p__cpu
-    CUDA: _log1p__cuda
+    CPU: log1p_
+    CUDA: log1p_
     SparseCPU: log1p_sparse_
     SparseCUDA: log1p_sparse_
 
 - func: log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log1p_out_cpu
-    CUDA: _log1p_out_cuda
+    CPU: log1p_out
+    CUDA: log1p_out
     SparseCPU: log1p_out_sparse
     SparseCUDA: log1p_out_sparse
 
@@ -2681,15 +2684,9 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _sqrt__cpu
-    CUDA: _sqrt__cuda
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _sqrt_out_cpu
-    CUDA: _sqrt_out_cuda
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full
