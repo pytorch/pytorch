@@ -38,6 +38,10 @@ enum MessageType {
   BACKWARD_AUTOGRAD_REQ = 16,
   BACKWARD_AUTOGRAD_RESP = 17,
 
+  // Messages to tell workers to clean up their autograd context.
+  CLEANUP_AUTOGRAD_CONTEXT_REQ = 18,
+  CLEANUP_AUTOGRAD_CONTEXT_RESP = 19,
+
   // Other internal message types
   SHUTDOWN = 50,
   EXCEPTION = 55,
