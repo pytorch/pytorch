@@ -724,9 +724,9 @@ class FunctionalModuleTest(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
-            self.assertEquals(type(model.myadd), torch.nn.quantized.QFunctional)
-            self.assertEquals(type(model.mycat), torch.nn.quantized.QFunctional)
-            self.assertEquals(type(model.myadd_relu), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
 
         checkQuantized(model)
         self.checkScriptable(model, [(xq, xq)], check_save_load=True)
@@ -993,7 +993,8 @@ class ObserverTest(QuantizationTestCase):
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
-           ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
+           ch_axis=st.sampled_from((0, 1, 2, 3)),
+           reduce_range=st.booleans())
     def test_per_channel_observers(self, qdtype, qscheme, ch_axis, reduce_range):
         # reduce_range cannot be true for symmetric quantization with uint8
         if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
