@@ -64,6 +64,20 @@ TEST_F(FunctionalTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+TEST_F(FunctionalTest, LPPool1d) {
+  int norm_type = 2;
+  int stride = 2;
+  int kernel_size = 3;
+
+  auto x = torch::ones({1, 1, 5});
+  auto y = F::lp_pool1d(x, LPPool1dOptions(norm_type, kernel_size).stride(stride));
+  auto expected = (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) * kernel_size).pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
 TEST_F(FunctionalTest, CosineSimilarity) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
@@ -1110,5 +1124,146 @@ TEST_F(FunctionalTest, Threshold) {
         }
       }
     }
+  }
+}
+
+TEST_F(FunctionalTest, Pad) {
+  {
+    auto input = torch::arange(6, torch::kDouble).reshape({1, 2, 3});
+    auto output = F::pad(input, PadOptions({1, 2}).mode(torch::kCircular));
+    auto expected = torch::tensor({{{2., 0., 1., 2., 0., 1.},
+                                    {5., 3., 4., 5., 3., 4.}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 2, 6}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(9, torch::kDouble).reshape({1, 1, 3, 3});
+    auto output = F::pad(input, PadOptions({3, 3, 3, 1}).mode(torch::kCircular));
+    auto expected = torch::tensor(
+       {{{{0., 1., 2., 0., 1., 2., 0., 1., 2.},
+          {3., 4., 5., 3., 4., 5., 3., 4., 5.},
+          {6., 7., 8., 6., 7., 8., 6., 7., 8.},
+          {0., 1., 2., 0., 1., 2., 0., 1., 2.},
+          {3., 4., 5., 3., 4., 5., 3., 4., 5.},
+          {6., 7., 8., 6., 7., 8., 6., 7., 8.},
+          {0., 1., 2., 0., 1., 2., 0., 1., 2.}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 7, 9}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(12, torch::kDouble).reshape({1, 1, 2, 2, 3});
+    auto output = F::pad(input, PadOptions({3, 3, 2, 1, 2, 2}).mode(torch::kCircular));
+    auto expected = torch::tensor(
+       {{{{{ 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.}},
+
+          {{ 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.}},
+
+          {{ 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.}},
+
+          {{ 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.}},
+
+          {{ 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.}},
+
+          {{ 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.}}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 6, 5, 9}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(16, torch::kDouble).reshape({2, 2, 2, 2});
+    auto output = F::pad(input, PadOptions({1, 1, 1, 1}).mode(torch::kReflect));
+    auto expected = torch::tensor(
+       {{{{ 3.,  2.,  3.,  2.},
+          { 1.,  0.,  1.,  0.},
+          { 3.,  2.,  3.,  2.},
+          { 1.,  0.,  1.,  0.}},
+
+         {{ 7.,  6.,  7.,  6.},
+          { 5.,  4.,  5.,  4.},
+          { 7.,  6.,  7.,  6.},
+          { 5.,  4.,  5.,  4.}}},
+
+        {{{11., 10., 11., 10.},
+          { 9.,  8.,  9.,  8.},
+          {11., 10., 11., 10.},
+          { 9.,  8.,  9.,  8.}},
+
+         {{15., 14., 15., 14.},
+          {13., 12., 13., 12.},
+          {15., 14., 15., 14.},
+          {13., 12., 13., 12.}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({2, 2, 4, 4}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(12, torch::kDouble).reshape({1, 1, 2, 2, 3});
+    auto output = F::pad(input, PadOptions({1, 2, 2, 1, 1, 2}).mode(torch::kReplicate));
+    auto expected = torch::tensor(
+       {{{{{ 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 3.,  3.,  4.,  5.,  5.,  5.},
+           { 3.,  3.,  4.,  5.,  5.,  5.}},
+
+          {{ 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 3.,  3.,  4.,  5.,  5.,  5.},
+           { 3.,  3.,  4.,  5.,  5.,  5.}},
+
+          {{ 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 9.,  9., 10., 11., 11., 11.},
+           { 9.,  9., 10., 11., 11., 11.}},
+
+          {{ 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 9.,  9., 10., 11., 11., 11.},
+           { 9.,  9., 10., 11., 11., 11.}},
+
+          {{ 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 9.,  9., 10., 11., 11., 11.},
+           { 9.,  9., 10., 11., 11., 11.}}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 5, 5, 6}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::ones({1, 1, 1, 1}, torch::kDouble);
+    auto output = F::pad(input, PadOptions({1, 1}).mode(torch::kConstant).value(0));
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 1, 3}));
+    auto expected = torch::tensor({{{{0., 1., 0.}}}}, torch::kDouble);
+  }
+  {
+    auto input = torch::ones({1, 1, 1, 1}, torch::kDouble);
+    auto output = F::pad(input, PadOptions({1, 1}));
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 1, 3}));
+    auto expected = torch::tensor({{{{0., 1., 0.}}}}, torch::kDouble);
   }
 }
