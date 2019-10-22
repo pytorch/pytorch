@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 from .quantize import *
 from .observer import *
-from .QConfig import *
+from .qconfig import *
 from .fake_quantize import *
 from .fuse_modules import fuse_modules
 from .stubs import *
@@ -24,7 +24,7 @@ _all__ = [
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
     'default_eval_fn', 'get_observer_dict',
     # Observers
-    'Observer', 'WeightObserver', 'observer', 'default_observer',
+    'ObserverBase', 'WeightObserver', 'observer', 'default_observer',
     'default_weight_observer',
     # QConfig
     'QConfig', 'default_qconfig', 'default_dynamic_qconfig', 'float16_dynamic_qconfig',
