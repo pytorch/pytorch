@@ -208,59 +208,6 @@ void DistAutogradContainer::cleanupContextWatchdog() {
   }
 }
 
-void DistAutogradContainer::testercleanupContextWatchdog() {
-  std::lock_guard<std::mutex> guard(autograd_context_lock_);
-  LOG(ERROR) << getWorkerId() << "- scheduled again!\n";
-  /* while (true) { */
-  std::this_thread::sleep_for(kContextTimeout);
-  while (!autograd_context_.empty()) {
-    LOG(ERROR) << getWorkerId() << "- entered the loop!\n";
-    LOG(ERROR) << getWorkerId() << "- queue size is " << autograd_context_.size() << "\n";
-    /* std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now(); */
-    /* auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - std::get<0>(context_queue_.front())); */
-    /* auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - creation_time); */
-    /* LOG(ERROR) << getWorkerId() << "- time since context creation: " << diff.count() << "\n"; */
-    /* LOG(ERROR) << kContextTimeout.count() << "\n"; */
-    /* while (std::chrono::system_clock::now() - std::get<0>(context_queue_.front()) >= kContextTimeout) { */
-    /* while (std::chrono::system_clock::now() - creation_time >= kContextTimeout) { */
-      LOG(ERROR) << getWorkerId() << "- cleared timeout!\n";
-      /* if (autograd_context_.find(std::get<1>(context_queue_.front())) == autograd_context_.end()) { */
-      /*   LOG(ERROR) << "messed up. " << std::get<1>(context_queue_.front()) << " not in map.\n"; */
-      /* } else { */
-      /*   LOG(ERROR) << "hello\n"; */
-      /* } */
-      /* for (auto& pair : autograd_context_) { */
-      /*   LOG(ERROR) << pair.first << "\n"; */
-      /* } */
-      for (auto& pair : autograd_context_) {
-        /* releaseContext(pair.second.contextId()); */
-        LOG(ERROR) << "just in case " << pair.first << "\n";
-        /* TORCH_CHECK( */
-        /*     autograd_context_.find(context_id) != autograd_context_.end(), */
-        /*     "Could not find autograd context with id: ", */
-        /*     context_id); */
-
-        if (autograd_context_.find(pair.first) != autograd_context_.end()) {
-          sendReleaseContextRpc(pair.first);
-          eraseContextIdAndReset(pair.first);
-        } else {
-          LOG(ERROR) << getWorkerId() << "- couldn't find context id: " << pair.first << "\n";
-        }
-        LOG(ERROR) << getWorkerId() << "- queue size post-deletion is " << autograd_context_.size() << "\n";
-        if (autograd_context_.size() == 0) {
-          LOG(ERROR) << getWorkerId() << " is exiting!!\n";
-          return;
-        }
-      }
-      /* releaseContext(std::get<1>(context_queue_.front())); */
-      /* context_queue_.pop(); */
-      /* if (context_queue_.empty()) { */
-      /*   return; */
-      /* } */
-    /* } */
-  }
-}
-
 DistAutogradContext& DistAutogradContainer::retrieveContext(
     int64_t context_id) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);

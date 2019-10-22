@@ -122,8 +122,6 @@ class TORCH_API DistAutogradContainer {
   // and worker_id_ are immutable.
   mutable std::mutex autograd_context_lock_;
 
-  void testercleanupContextWatchdog(); 
-
   // Atomic var to control when the watchdog thread is killed.
   std::atomic<bool> terminateWatchdog_;
 
