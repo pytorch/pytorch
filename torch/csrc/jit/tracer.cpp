@@ -9,6 +9,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
 #include <ATen/core/Dict.h>
@@ -341,6 +343,39 @@ void exit(const Stack& outputs) {
     i++;
   }
   setTracingState(nullptr);
+}
+
+std::pair<std::shared_ptr<TracingState>, Stack> trace(
+  Stack inputs,
+  std::function<Stack(Stack)> traced_fn,
+  std::function<std::string(const Variable&)> var_name_lookup_fn,
+  bool force_outplace,
+  script::Module* self
+) {
+  try {
+    std::shared_ptr<TracingState> state;
+    Stack trace_state_inputs;
+    std::tie(state, trace_state_inputs) = tracer::enter(std::move(inputs), self);
+    auto graph = state->graph;
+
+    getTracingState()->lookup_var_name_fn = var_name_lookup_fn;
+    getTracingState()->force_outplace = force_outplace;
+
+    auto out_stack = traced_fn(trace_state_inputs);
+
+    tracer::exit(out_stack);
+
+    if (script::getInlineEverythingMode()) {
+      Inline(*graph);
+    }
+    LowerSimpleTuples(graph);
+    EliminateDeadCode(graph);
+
+    return {state, out_stack};
+  } catch (...) {
+    tracer::abandon();
+    throw;
+  }
 }
 
 // Abort tracing. Used to reset the state in case of errors.

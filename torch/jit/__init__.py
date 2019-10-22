@@ -280,7 +280,7 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    return ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -322,9 +322,9 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
     return _get_interpreter_name_for_var
 
 
-class LegacyTracedModule(Module):
+class ONNXTracedModule(Module):
     def __init__(self, inner, force_outplace=False, return_inputs=False, return_inputs_states=False):
-        super(LegacyTracedModule, self).__init__()
+        super(ONNXTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
@@ -338,39 +338,37 @@ class LegacyTracedModule(Module):
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
-        try:
-            trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
-        except Exception as e:
-            torch._C._tracer_abandon()
-            raise e
-        ret_inputs = tuple(x.clone() for x in all_trace_inputs)
-        torch._C._tracer_set_force_outplace(self._force_outplace)
-        torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
-        try:
-            trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
-            # inputs_states is a tuple of len == 2 that keeps track of
-            # the inputs before (inputs_states[0]) and after (inputs_states[1])
-            # the trace to verify if they were modified during the trace
+
+        state = {}
+
+        def wrapper(*args):
+            trace_inputs = _unflatten(args[:len(in_vars)], in_desc)
+
+            state['ret_inputs'] = tuple(x.clone() for x in args)
             if self._return_inputs_states:
-                # executing a deepcopy on trace_inputs will fail
-                # for tensors not explicitly created by the user.
-                # generating trace_inputs again by calling _unflatten
-                # for now.
-                inputs_states = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
-            out = self.inner(*trace_inputs)
+                state['inputs_states'] = _unflatten(args[:len(in_vars)], in_desc)
+            outs = state['outs'] = self.inner(*trace_inputs)
             if self._return_inputs_states:
-                inputs_states = (inputs_states, trace_inputs)
-            out_vars, _ = _flatten(out)
-            torch._C._tracer_exit(tuple(out_vars))
-        except Exception:
-            torch._C._tracer_abandon()
-            raise
+                state['inputs_states'] = (state['inputs_states'], args)
+            out_vars, _ = _flatten(outs)
+            if len(out_vars) == 1:
+                return out_vars[0]
+            else:
+                return tuple(out_vars)
+
+        trace, out = torch._C._create_graph_by_tracing(
+            wrapper,
+            in_vars + module_state,
+            _create_interpreter_name_lookup_fn(),
+            self._force_outplace,
+        )
+
         if self._return_inputs:
-            return trace, out, ret_inputs
+            return trace, state['outs'], state['ret_inputs']
         if self._return_inputs_states:
-            return trace, out, inputs_states
+            return trace, state['outs'], state['inputs_states']
         else:
-            return trace, out
+            return trace, state['outs']
 
 
 def _clone_inputs(args):
