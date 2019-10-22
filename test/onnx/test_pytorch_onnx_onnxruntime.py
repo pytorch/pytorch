@@ -500,6 +500,35 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(np.arange(6.0).reshape(2, 3))
         self.run_test(MyModule(), x)
 
+    def test_random(self):
+        # class RandNLike(torch.nn.Module):
+        #     def forward(self, x):
+        #         return torch.randn_like(x).to(torch.float32)
+        #
+        # x = torch.randn(2, 3, 4)
+        # self.run_test(RandNLike(), x)
+
+        # class RandLike(torch.nn.Module):
+        #     def forward(self, x):
+        #         return torch.rand_like(x).to(torch.float32)
+        #
+        # x = torch.randn(2, 3, 4)
+        # self.run_test(RandLike(), x)
+        #
+        class RandN(torch.nn.Module):
+            def forward(self, x):
+                return torch.randn(x.size()).to(torch.float32)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandN(), x)
+        #
+        # class Rand(torch.nn.Module):
+        #     def forward(self, x):
+        #         return torch.rand(x.size()).to(torch.float32)
+        #
+        # x = torch.randn(2, 3, 4)
+        # self.run_test(Rand(), x)
+
     def _interpolate(self, x, mode, use_size, is_upsample):
         class MyModel(torch.nn.Module):
             def forward(self, x):
