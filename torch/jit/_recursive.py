@@ -139,13 +139,12 @@ def infer_raw_concrete_type(nn_module):
 
     class_annotations = getattr(nn_module, '__annotations__', {})
 
-    # TODO: [switch to __dict__]
-    # we should use __dict__ here because we only want to pick up attributes on
-    # this module instance, not the class itself. We can't do it right now
-    # because there is code that relies on properties being turned into attributes.
-    # This is wrong (the property function is only evaluated once then "saved"
-    # as an attribute), so we should fix that and then switch this to using __dict__
-    for name in dir(nn_module):
+    # populate which methods are properties
+    for name, value in type(nn_module).__dict__.items():
+        if isinstance(value, property):
+            concrete_type.add_property(name)
+
+    for name, value in nn_module.__dict__.items():
         if name in blacklist or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
@@ -155,26 +154,10 @@ def infer_raw_concrete_type(nn_module):
             # Don't re-add anything we already added
             continue
 
-        if not hasattr(nn_module, name):
-            # TODO: delete this when [switch to __dict__]
-            continue
-
-        item = getattr(nn_module, name)
-        if name not in nn_module.__dict__ and not isinstance(getattr(type(nn_module), name, None), property):
-            # Skip class attributes that aren't properties
-            # TODO: delete this when [switch to __dict__]
-            continue
-
-        if inspect.isfunction(item) and not inspect.ismethod(item):
-            cls_attr = getattr(type(nn_module), name, None)
-            if inspect.isfunction(cls_attr):
-                # Skip function attributes that exist on the nn_module class.
-                # TODO: delete this when [switch to __dict__]
-                continue
-
+        if inspect.isfunction(value) and not inspect.ismethod(value):
             # This is a Python function attribute. Try to script it.
             try:
-                item = torch.jit.script(item)
+                value = torch.jit.script(value)
             except Exception as e:
                 # If we fail to script the function, it isn't a hard error.
                 # Instead, we will add it to the list of attributes we failed
@@ -187,10 +170,10 @@ def infer_raw_concrete_type(nn_module):
 
         if name in class_annotations:
             attr_type = torch.jit.annotations.ann_to_type(class_annotations[name])
-        elif isinstance(item, torch.jit.Attribute):
-            attr_type = torch.jit.annotations.ann_to_type(item.type)
+        elif isinstance(value, torch.jit.Attribute):
+            attr_type = torch.jit.annotations.ann_to_type(value.type)
         else:
-            attr_type = torch._C._jit_try_infer_type(item)
+            attr_type = torch._C._jit_try_infer_type(value)
 
         if attr_type is not None:
             concrete_type.add_attribute(name, attr_type, False)
@@ -199,7 +182,7 @@ def infer_raw_concrete_type(nn_module):
             # when the pytype is `list` or `NoneType`
             hint = ("(This attribute exists on the Python module, "
                     "but we failed to convert Python type: '{}' "
-                    "to a TorchScript type.)").format(type(item).__name__)
+                    "to a TorchScript type.)").format(type(value).__name__)
             concrete_type.add_failed_attribute(name, hint)
 
     return concrete_type
@@ -392,6 +375,8 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
 def get_overload_annotations(mod):
     # original function => [(mangled overload name, overload function)]
     overloads = {}
+
+    # TODO: should this be dir(type(mod))?
     for name in dir(mod):
         item = getattr(mod, name, None)
         if not callable(item):
@@ -558,6 +543,14 @@ def wrap_cpp_module(cpp_module):
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 
 def compile_unbound_method(concrete_type, fn):
+    if isinstance(fn, property):
+        if fn.fset is not None or fn.fdel is not None:
+            err_name = fn.fset.__name__ if fn.fset is not None else fn.fdel.__name__
+            raise RuntimeError(
+                "Found a setter or deleter on `@property` method '{}', "
+                "these are not supported.".format(err_name))
+        fn = fn.fget
+
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = make_stub(fn)
@@ -566,6 +559,9 @@ def compile_unbound_method(concrete_type, fn):
         # this function is not yet complete
         create_methods_from_stubs(concrete_type, (stub,))
     return stub
+
+def is_property(attr):
+    return isinstance(attr, property)
 
 def lazy_bind(concrete_type, unbound_method):
     """

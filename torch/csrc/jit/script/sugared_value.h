@@ -509,6 +509,7 @@ struct SimpleSelf : public Self {
  private:
   ClassTypePtr classType_;
 };
+
 } // namespace script
 } // namespace jit
 } // namespace torch
