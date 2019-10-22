@@ -90,7 +90,7 @@
   variants: method
   supports_named_tensor: True
 
-- func: unflatten(Tensor self, int dim, int[] sizes, DimnameList names) -> Tensor
+- func: unflatten(Tensor self, int dim, int[] sizes, Dimname[] names) -> Tensor
   variants: method
   supports_named_tensor: True
 
