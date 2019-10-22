@@ -79,7 +79,7 @@ class TORCH_API DistAutogradContainer {
 
  private:
   DistAutogradContainer();
-  ~DistAutogradContainer() = default;
+  virtual ~DistAutogradContainer();
 
   DistAutogradContainer(const DistAutogradContainer&) = delete;
   DistAutogradContainer& operator=(const DistAutogradContainer&) = delete;
@@ -110,14 +110,17 @@ class TORCH_API DistAutogradContainer {
   std::unordered_map<int64_t, DistAutogradContext> autograd_context_;
 
   // Queue to store DistAutogradContext pointers and their creation time.
-  std::queue<std::tuple<std::chrono::system_clock::time_point, int64_t>> context_queue_;
+  std::queue<std::tuple<std::chrono::time_point<std::chrono::system_clock>, int64_t>> context_queue_;
+
+  // Thread running the cleanupContextWatchdog
+  std::thread cleanupWatchdogThread_;
 
   // Whether or not the container has been initialized appropriately.
   bool initialized_;
 
   // Lock to protect next_context_id_ and autograd_context map. initialized_
   // and worker_id_ are immutable.
-  mutable std::mutex autograd_context_lock_;
+  mutable std::recursive_mutex autograd_context_lock_;
 
   // Autograd message id to identify unique send/recv autograd function pairs.
   std::atomic<int64_t> next_autograd_message_id_;
