@@ -32,7 +32,7 @@ jobs:
   pytorch_windows_build:
     executor: windows-cuda
     environment:
-      BUILD_ENVIRONMENT: "pytorch-win-ws2016-cuda9-cudnn7-py3"
+      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
       SCCACHE_BUCKET: "ossci-compiler-cache"
       CUDA_VERSION: "10"
       USE_CUDA: "1"
@@ -59,7 +59,7 @@ jobs:
   pytorch_windows_test:
     executor: windows-gpu-prototype
     environment:
-      BUILD_ENVIRONMENT: "pytorch-win-ws2016-cuda9-cudnn7-py3"
+      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
       SCCACHE_BUCKET: "ossci-compiler-cache"
       CUDA_VERSION: "10"
       # USE_CUDA: "1"
