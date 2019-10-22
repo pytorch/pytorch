@@ -180,6 +180,10 @@ def round(g, self):
     return g.op("Round", self)
 
 
+def det(g, self):
+    return g.op("Det", self)
+
+
 def arange(g, *args):
     def _get_arange_dtype(dtype):
         dtype = sym_help._maybe_get_const(dtype, 'i')
@@ -206,6 +210,7 @@ def arange(g, *args):
     else:
         raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
     return arange_tensor
+
 
 @parse_args('v', 'i')
 def _dim_arange(g, like, dim):
