@@ -10,6 +10,7 @@ from .internal import _internal_rpc_pickler, PythonUDF
 import functools
 import sys
 import torch
+from datetime import timedelta
 from enum import Enum
 
 
@@ -67,7 +68,7 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
               self_name=None,
               self_rank=-1,
               init_method=None,
-              num_send_recv_threads=4):
+              num_send_recv_threads=4, rpc_timeout=100):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
 
@@ -84,7 +85,7 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
             raise RuntimeError("self_rank argument {} doesn't match pg rank {}".format(
                                self_rank, group.rank()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
-        _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
+        _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads, timedelta(seconds=rpc_timeout))
     elif is_backend_registered(backend):
         _agent = init_backend(
             backend,
@@ -116,6 +117,10 @@ def get_worker_info(worker_name=None):
         return _agent.get_worker_info(worker_name)
     else:
         return _agent.get_worker_info()
+
+@_require_initialized
+def get_rpc_timeout():
+    return _agent._get_rpc_timeout()
 
 
 def _to_worker_info(name_or_info):

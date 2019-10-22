@@ -501,6 +501,7 @@ class RpcTest(object):
 
     @dist_init
     def test_py_no_return_result(self):
+        print('ahwoufhoruh')
         n = self.rank + 1
         dst_rank = n % self.world_size
         ret = rpc.rpc_sync("worker{}".format(dst_rank), no_result)
@@ -854,6 +855,12 @@ class RpcTest(object):
 
         ret = ret_rref
         self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
+
+    @dist_init
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_timeout_set(self):
+        rpc_timeout_seconds = rpc.get_rpc_timeout().seconds
+        self.assertEqual(rpc_timeout_seconds, 100)
 
     @dist_init
     def test_remote_same_worker(self):
