@@ -552,6 +552,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
     //          left in that may inhibit optimization
     Inline(*opt_graph);
+    LowerGradOf(*g);
     specializeAutogradZero(*opt_graph);
     LowerSimpleTuples(opt_graph);
     ConstantPooling(opt_graph);
@@ -621,7 +622,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
     : pImpl(
-          getProfilingMode() ? dynamic_cast<GraphExecutorImplBase*>(
+          getExecutorMode() ? dynamic_cast<GraphExecutorImplBase*>(
                                    new ProfilingGraphExecutorImpl(graph))
                              : dynamic_cast<GraphExecutorImplBase*>(
                                    new GraphExecutorImpl(graph))) {}
@@ -631,6 +632,7 @@ void GraphExecutor::run(Stack& inputs) {
 }
 
 ExecutionPlan GraphExecutor::getPlanFor(Stack& inputs) {
+  TORCH_INTERNAL_ASSERT(false);
   return pImpl->getPlanFor(inputs);
 }
 
@@ -643,7 +645,6 @@ GraphExecutorState GraphExecutor::getDebugState() {
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
-  LowerGradOf(*g);
   // implicit inserted expand nodes are not necessarily always valid
   // when used inside script methods that might have unstable shapes
   // we remove the implicitly created ones, and have shape analysis
@@ -681,14 +682,35 @@ static bool mayIntroduceGradient(const Block* b) {
 }
 
 bool needsGradient(const std::shared_ptr<const Graph>& graph) {
-  if (!autograd::GradMode::is_enabled())
+
+  if (!autograd::GradMode::is_enabled()) {
     return false;
-  if (mayIntroduceGradient(graph->block()))
-    return true;
-  for (const Value* input : graph->inputs()) {
-    if (input->type()->requires_grad())
-      return true;
   }
+
+  if (mayIntroduceGradient(graph->block())) {
+    return true;
+  }
+
+  if (getProfilingMode()) {
+    std::cout << "getProfilingMode is true \n";
+    for (const Value *input : graph->inputs()) {
+      for (const auto &use : input->uses()) {
+        if (use.user->kind() == prim::BailOut) {
+          auto ptt = use.user->output()->type()->expect<TensorType>();
+          if (ptt->requiresGrad() && *ptt->requiresGrad()) {
+            return true;
+          }
+        }
+      }
+    }
+  } else {
+    for (const Value *input : graph->inputs()) {
+      if (input->type()->requires_grad()) {
+        return true;
+      }
+    }
+  }
+
   return false;
 }
 

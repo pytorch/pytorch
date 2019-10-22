@@ -794,6 +794,25 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   grad_desc.df->block()->cloneFrom(reverse_block, [&](Value* v) {
     return grad_desc.df->inputs()[capture_to_formal_index.at(v)];
   });
+
+  // if we actually profile we can rely on profiling information
+  // so we don't have to mark every gradient as possibly undefined
+  if (!getProfilingMode()) {
+      for (size_t i = 0; i < grad_desc.df_input_vjps.size(); i++) {
+        auto tt = grad_desc.df->block()->inputs().at(i);
+        if (auto ttt = tt->type()->cast<TensorType>()) {
+          tt->setType(ttt->withPossiblyUndefined());
+        }
+        else if (auto lt = tt->type()->cast<ListType>()) {
+          auto undef_type = lt->getElementType()->expect<TensorType>()->withPossiblyUndefined();
+          tt->setType(ListType::create(undef_type));
+        } else {
+          // unexpected type
+          TORCH_INTERNAL_ASSERT(false);
+        }
+     }
+  }
+
   // reverse_node was just to hold onto reverse_block in a debuggable way
   // we can remove it now.
   reverse_block->owningNode()->destroy();

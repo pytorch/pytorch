@@ -931,28 +931,41 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::AutogradAnyNonZero,
-         [](const Node* node) -> Operation {
+         "prim::AutogradAnyNonZero(...) -> int",
+         [](const Node* node) {
            size_t num_inputs = node->inputs().size();
            return [=](Stack& stack) {
              bool result = false;
-             for (const IValue& t : last(stack, num_inputs)) {
-               if (t.toTensor().defined()) {
-                 result = true;
-                 break;
+             for (const IValue& v : last(stack, num_inputs)) {
+               if (v.isTensor()) {
+                if (v.toTensor().defined()) {
+                  result = true;
+                  break;
+                }
+               } else if (v.isTensorList()) {
+                 for (const at::Tensor& t : v.toTensorListRef()) {
+                   result = true;
+                 }
+                 
+                 if (result) {
+                   break;
+                 }
+               } else {
+                 TORCH_INTERNAL_ASSERT(false);
                }
+
              }
              drop(stack, num_inputs);
              stack.emplace_back(result);
              return 0;
            };
-         },
-         aliasAnalysisSpecialCase()),
+         }, aliasAnalysisFromSchema()),
      Operator(
          prim::AutogradAdd,
          [](Stack& stack) {
            at::Tensor a, b;
            pop(stack, a, b);
+           TORCH_INTERNAL_ASSERT(a.defined() || b.defined());
            if (!a.defined())
              stack.emplace_back(b);
            else if (!b.defined())

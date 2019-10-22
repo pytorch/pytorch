@@ -20,6 +20,19 @@ namespace jit {
 
 namespace {
 
+static bool hasMaybeUndefinedInputs(Node* node) {
+
+  auto maybe_undefined = [](Value* v) { 
+    auto tt = v->type()->cast<TensorType>();
+    if (!tt) {
+      return false;
+    }
+    return !tt->undefined().has_value() || *tt->undefined();
+  };
+
+  return std::any_of(node->inputs().begin(), node->inputs().end(), maybe_undefined);
+}
+
 // What is a simple mappable operator?  It:
 //    - Has a single tensor output
 //    - Output and all tensor inputs have the same shape
@@ -170,7 +183,7 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    return callback_(node);
+    return callback_(node) && !hasMaybeUndefinedInputs(node);
   }
 
   bool isFusableDevice(Value *v) {
@@ -189,7 +202,7 @@ struct GraphFuser {
     throw std::runtime_error("Unknown device");
   }
 
-
+  //@#$
   // Default fusability check - used when the user doesn't pass in
   // a callback.
   bool isFusableDefault(Node* node) {
@@ -221,6 +234,11 @@ struct GraphFuser {
         subgraph_arg_limit_) {
       return false;
     }
+
+    if (hasMaybeUndefinedInputs(tensors_node)) {
+      return false;
+    }
+
     if (tensors_node->kind() != prim::ListConstruct)
       return false;
     // NB: Note that technically other uses of the list aren't a big problem for
@@ -341,11 +359,11 @@ struct GraphFuser {
           inputs_map[input] = in_group;
           group->insertInput(tensor_insert_idx, input);
           tensor_insert_idx++;
-        } else if (
-            (input->type()->isSubtypeOf(FloatType::get()) &&
-             input->node()->kind() != prim::Constant) ||
-            (n->kind() == aten::_grad_sum_to_size &&
-             input->type()->isSubtypeOf(ListType::ofInts()))) {
+        } else if ((input->type()->isSubtypeOf(FloatType::get()) &&
+                    input->node()->kind() != prim::Constant) ||
+                   (n->kind() == aten::_grad_sum_to_size &&
+                    input->type()->isSubtypeOf(
+                        OptionalType::create(ListType::ofInts())))) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;
@@ -355,6 +373,11 @@ struct GraphFuser {
           // so we generally don't allow fusing tensor-scalar operations unless
           // the scalar is constant. In those cases we inline the constants
           // directly in the body of the fused group.
+
+          if (input->node()->kind() != prim::Constant) {
+            std::cout << " node = " << *input->node() << std::endl;
+          }
+          
           AT_ASSERT(input->node()->kind() == prim::Constant);
           Node* in_const =
               subgraph.createClone(input->node(), [](Value*) -> Value* {
