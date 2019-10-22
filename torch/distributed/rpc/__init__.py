@@ -16,7 +16,7 @@ if sys.version_info >= (3, 0):
         backend=RpcBackend.PROCESS_GROUP,
         init_method=None,
         self_rank=-1,
-        world_size=-1,
+        worker_name_to_id=None,
         num_send_recv_threads=4,
     ):
         r"""
@@ -44,15 +44,16 @@ if sys.version_info >= (3, 0):
             num_send_recv_threads(int): Number of threads for send/recv work.
         """
         # Rendezvous.
+        world_size = len(worker_name_to_id)
         rendezvous_iterator = torch.distributed.rendezvous(init_method, self_rank, world_size)
         store, self_rank, world_size = next(rendezvous_iterator)
         # Initialize RPC.
         _init_rpc(
             backend,
+            store,
             self_name,
             self_rank,
-            world_size,
-            store,
+            worker_name_to_id,
             num_send_recv_threads,
         )
         # Initialize Autograd.

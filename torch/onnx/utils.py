@@ -232,7 +232,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
-            method_graph, params = model.forward._lowered_graph()
+            method_graph, params = torch._C._jit_pass_lower_graph(model.forward.graph, model._c)
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), False, propagate)

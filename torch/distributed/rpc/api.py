@@ -65,10 +65,10 @@ class RpcBackend(Enum):
 # TODO: add a context manager to wrap _init_rpc and join_rpc
 def _init_rpc(
     backend=RpcBackend.PROCESS_GROUP,
+    store=None,
     self_name=None,
     self_rank=-1,
-    world_size=-1,
-    store=None,
+    worker_name_to_id=None,
     num_send_recv_threads=4,
 ):
     if sys.version_info < (3, 0):
@@ -86,18 +86,18 @@ def _init_rpc(
         if (self_rank != -1) and (self_rank != group.rank()):
             raise RuntimeError("self_rank argument {} doesn't match pg rank {}".format(
                                self_rank, group.rank()))
-        if (world_size != -1) and (world_size != group.size()):
-            raise RuntimeError("world_size argument {} doesn't match pg rank {}".format(
-                               world_size, group.size()))
+        if (worker_name_to_id is not None) and (len(worker_name_to_id) != group.size()):
+            raise RuntimeError("worker_name_to_id argument {} doesn't match pg size {}".format(
+                               worker_name_to_id, group.size()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
     elif is_backend_registered(backend):
         _agent = init_backend(
             backend,
+            store=store,
             self_name=self_name,
             self_rank=self_rank,
-            world_size=world_size,
-            store=store,
+            worker_name_to_id=worker_name_to_id,
         )
     else:
         raise RuntimeError("Unrecognized RPC backend ", backend)
