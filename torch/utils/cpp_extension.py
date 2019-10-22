@@ -803,7 +803,6 @@ def load_inline(name,
         module_def.append('}')
         cpp_sources += module_def
 
-    print('\n'.join(cpp_sources))
     cpp_source_path = os.path.join(build_directory, 'main.cpp')
     with open(cpp_source_path, 'w') as cpp_source_file:
         cpp_source_file.write('\n'.join(cpp_sources))

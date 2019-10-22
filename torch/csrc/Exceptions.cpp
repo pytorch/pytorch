@@ -137,41 +137,35 @@ ValueError::ValueError(const char *format, ...) {
   va_end(fmt_args);
 }
 
-// ATen warning handler for Python
-using warning_buffer_t =
-  std::vector<std::pair<c10::SourceLocation, std::string>>;
-
-static warning_buffer_t warning_buffer;
-// To avoid deadlocks, if both the GIL and this lock is needed,
-// The GIL needs to be acquired first.
-static std::mutex warning_buffer_mutex;
-
-static void py_warning_handler(
+void PyWarningHandler::process(
     const c10::SourceLocation& source_location,
     const std::string& msg) {
-  std::unique_lock<std::mutex> lock(warning_buffer_mutex);
-  warning_buffer.push_back({source_location, msg});
+  std::unique_lock<std::mutex> lock(warning_buffer_mutex_);
+  warning_buffer_.push_back({source_location, msg});
 };
 
-EnforceWarningBuffer::EnforceWarningBuffer() noexcept(true): prev_handler(c10::Warning::get_warning_handler()) {
-  c10::Warning::set_warning_handler(&py_warning_handler);
+PyWarningHandler::PyWarningHandler() noexcept(true): prev_handler_(c10::Warning::get_warning_handler()) {
+  c10::Warning::set_warning_handler(this);
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
 /// NOLINTNEXTLINE(bugprone-exception-escape)
-EnforceWarningBuffer::~EnforceWarningBuffer() noexcept(false) {
-  c10::Warning::set_warning_handler(prev_handler);
+PyWarningHandler::~PyWarningHandler() noexcept(false) {
+  c10::Warning::set_warning_handler(prev_handler_);
 
+  // The double lock is to keep the overall logic simple and avoid
+  // the need to thread local warnings.
+  // The has_warnings is still valid because the warning handler is
+  // changed on entering this function.
   bool has_warnings;
   {
-    std::unique_lock<std::mutex> lock(warning_buffer_mutex);
-    has_warnings = warning_buffer.size() > 0;
+    std::unique_lock<std::mutex> lock(warning_buffer_mutex_);
+    has_warnings = warning_buffer_.size() > 0;
   }
-
 
   if(has_warnings) {
     AutoGIL gil;
-    std::unique_lock<std::mutex> lock(warning_buffer_mutex);
+    std::unique_lock<std::mutex> lock(warning_buffer_mutex_);
 
     PyObject *ptype, *pvalue, *ptraceback;
     PyErr_Fetch(&ptype, &pvalue, &ptraceback);
@@ -179,19 +173,19 @@ EnforceWarningBuffer::~EnforceWarningBuffer() noexcept(false) {
     if(ptype) {
       // A python error happened after the warning
       // Simply handle with the cpp handler
-      for(const auto& warning: warning_buffer) {
+      for(const auto& warning: warning_buffer_) {
         auto source_location = warning.first;
         const auto& msg = processErrorMsg(warning.second);
         c10::Warning::warn(source_location, msg);
       }
-      warning_buffer.clear();
+      warning_buffer_.clear();
       // The parent function already returns an error
       // We only restore the error and exit the
       // destructor normally
       PyErr_Restore(ptype, pvalue, ptraceback);
     } else {
       auto result = -1;
-      for(const auto& warning: warning_buffer) {
+      for(const auto& warning: warning_buffer_) {
         auto source_location = warning.first;
         const auto& msg = processErrorMsg(warning.second);
         if (source_location.file == nullptr) {
@@ -209,7 +203,7 @@ EnforceWarningBuffer::~EnforceWarningBuffer() noexcept(false) {
           break;
         }
       }
-      warning_buffer.clear();
+      warning_buffer_.clear();
       if (result < 0) {
         /// A warning raised an error, we need to force the parent
         /// function to return an error code.

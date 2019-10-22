@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 #include <queue>
+#include <mutex>
 
 #include <torch/csrc/THP_export.h>
 #include <torch/csrc/utils/auto_gil.h>
@@ -18,7 +19,7 @@
 /// python error. To solve this, we buffer the warnings and
 /// process them when we go back to python.
 /// This leads to the following cases:
-/// - The GIL is acquired in the EnforceWarningBuffer destructor
+/// - The GIL is acquired in the PyWarningHandler destructor
 ///   - If there is no Error raised in the inner try/catch, the
 ///     bufferred warnings are processed as python warnings.
 ///     - If they don't raise an error, the function process with the
@@ -34,7 +35,7 @@
 ///     cannot handle two errors at the same time.
 #define HANDLE_TH_ERRORS                                           \
   try {                                                            \
-    torch::EnforceWarningBuffer __enforce_warning_buffer;          \
+    torch::PyWarningHandler __enforce_warning_buffer;          \
     try{
 
 #define CATCH_TH_ERRORS(retstmnt)                                      \
@@ -195,14 +196,25 @@ struct ValueError : public PyTorchError {
   }
 };
 
-struct EnforceWarningBuffer {
+// ATen warning handler for Python
+struct PyWarningHandler: at::WarningHandler {
 public:
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
-  EnforceWarningBuffer() noexcept(true);
-  ~EnforceWarningBuffer() noexcept(false);
+  PyWarningHandler() noexcept(true);
+  ~PyWarningHandler() noexcept(false);
+
+  void process(const at::SourceLocation &source_location,
+               const std::string &msg) override;
 
 private:
-  c10::Warning::handler_t prev_handler;
+  using warning_buffer_t =
+    std::vector<std::pair<c10::SourceLocation, std::string>>;
+
+  warning_buffer_t warning_buffer_;
+  // To avoid deadlocks, if both the GIL and this lock is needed,
+  // The GIL needs to be acquired first.
+  std::mutex warning_buffer_mutex_;
+  at::WarningHandler* prev_handler_;
 };
 
 } // namespace torch

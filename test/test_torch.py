@@ -5775,6 +5775,20 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 warn_mod.foo(t, 3)
             self.assertEqual(len(w), 1)
 
+        # Make sure raising warnings are handled properly
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("error")
+
+            # No error, the warning should raise
+            with self.assertRaisesRegex(UserWarning, t.type()):
+                warn_mod.foo(t, 0)
+            self.assertEqual(len(w), 0)
+
+            # Another error happened, the warning is ignored
+            with self.assertRaisesRegex(TypeError, t.type()):
+                warn_mod.foo(t, 1)
+            self.assertEqual(len(w), 0)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
