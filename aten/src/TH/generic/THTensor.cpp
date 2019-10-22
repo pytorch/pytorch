@@ -395,28 +395,6 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
   self->set_sizes_and_strides(newSize, newStride);
 }
 
-/* we have to handle the case where the result is a number */
-void THTensor_(squeeze)(THTensor *self, THTensor *src)
-{
-  if(!src)
-    src = self;
-
-  THTensor_(set)(self, src);
-
-  std::vector<int64_t> newSize;
-  std::vector<int64_t> newStride;
-  for(int d = 0; d < src->dim(); ++d)
-  {
-    if(src->size(d) != 1)
-    {
-      newSize.push_back(src->size(d));
-      newStride.push_back(src->stride(d));
-    }
-  }
-
-  self->set_sizes_and_strides(newSize, newStride);
-}
-
 void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 {
   int d;
