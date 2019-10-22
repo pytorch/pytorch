@@ -199,26 +199,6 @@ TH_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
           THTensor *isTarget,
           int64_t reduction);
 
-TH_API void THNN_(MultiMarginCriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *output,
-          int64_t reduction,
-          int p,
-          THTensor* weights,      // [OPTIONAL]
-          accreal margin);
-TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t reduction,
-          int p,
-          THTensor *weights,      // [OPTIONAL]
-          accreal margin);
-
 TH_API void THNN_(RReLU_updateOutput)(
           THNNState *state,
           THTensor *input,
