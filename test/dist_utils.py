@@ -66,10 +66,11 @@ def dist_init(setup_model_parallel=True):
             self.worker_name_to_id = {
                 "worker{}".format(rank): rank for rank in range(self.world_size)
             }
-            global _ALL_NODE_NAMES
-            _ALL_NODE_NAMES = self.worker_name_to_id.keys()
 
             if setup_model_parallel:
+                global _ALL_NODE_NAMES
+                _ALL_NODE_NAMES = self.worker_name_to_id.keys()
+
                 dist.init_process_group(
                     backend="gloo",
                     init_method=self.init_method,
