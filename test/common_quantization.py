@@ -91,8 +91,8 @@ class QuantizationTestCase(TestCase):
         """
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential):
-                self.assertTrue(hasattr(module, 'activation_post_process'),
-                                'module: ' + str(type(module)) + ' do not have observer')
+            self.assertTrue(hasattr(module, 'activation_post_process'),
+                            'module: ' + str(type(module)) + ' do not have observer')
         for child in module.children():
             self.checkObservers(child)
 
