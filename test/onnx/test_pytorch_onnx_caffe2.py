@@ -1316,7 +1316,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_model_test(NegSlice(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
-    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dynamic_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -1328,7 +1327,6 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.rand(5, 5, 5)
         self.run_model_test(DynamicSliceExportMod(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
-    @skipIfUnsupportedMinOpsetVersion(11)
     def test_dynamic_slice_script(self):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method

@@ -411,6 +411,7 @@ def select(g, self, dim, index):
     else:
         return g.op("Gather", self, index, axis_i=dim)
 
+
 def squeeze(g, self, dim=None):
     if dim is None:
         dims = []
@@ -1269,6 +1270,11 @@ def slice(g, self, dim, start, end, step):
             raise RuntimeError('Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice '
                                'is a deprecated experimental op. Please use statically allocated '
                                'variables or export to a higher opset version.')
+        else:
+            start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
+            end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
+            dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
+            return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
     else:
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
