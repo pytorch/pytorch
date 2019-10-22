@@ -1,12 +1,9 @@
 import unittest
 import os
 import sys
-from typing import List, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch import Tensor
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -85,7 +82,6 @@ class TestProperty(JitTestCase):
                 return self.x
 
             def forward(self):
-                # type () -> Tensor
                 return self.prop.add(torch.rand(2, 3))
 
         m = M()
@@ -102,7 +98,6 @@ class TestProperty(JitTestCase):
                 return self.x
 
             def forward(self):
-                # type () -> Tensor
                 return self.prop[:]
 
         m = M()

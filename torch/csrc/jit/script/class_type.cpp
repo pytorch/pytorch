@@ -51,7 +51,7 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   return ptr;
 }
 
-void ClassType::addMethod(Function* method) {
+void ClassType::addMethod(Function* method, bool isProperty) {
   TORCH_CHECK(
       getMethod(method->name()) == nullptr,
       "Can't redefine method: ",
@@ -59,6 +59,7 @@ void ClassType::addMethod(Function* method) {
       " on class: ",
       python_str());
   methods_.push_back(method);
+  propertySlots_->push_back(isProperty);
 }
 
 size_t ClassType::addAttribute(

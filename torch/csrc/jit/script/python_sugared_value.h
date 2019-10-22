@@ -256,7 +256,7 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
 // that masquerades as a value.
 struct VISIBILITY_HIDDEN PropertyValue : SugaredValue {
  public:
-  PropertyValue(std::shared_ptr<SugaredValue> method)
+  explicit PropertyValue(std::shared_ptr<SugaredValue> method)
       : method_(std::move(method)) {}
 
   std::string kind() const override {

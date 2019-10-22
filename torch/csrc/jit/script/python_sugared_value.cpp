@@ -299,6 +299,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
   } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
     if (concreteType_->isProperty(field)) {
+      // Property methods need to be handled specially since they behave like
+      // values
       return std::make_shared<PropertyValue>(
           SimpleValue(self_).attr(loc, m, field));
     } else {
@@ -347,9 +349,9 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     return std::make_shared<FunctionValue>(*fnAttr);
   }
 
-  // 6. Check if it's a property of the original Python class that this
-  // ScriptModule was derived from. The only class properties we handle are
-  // methods.
+  // 6. Check if it's an attribute of the original Python class that this
+  // ScriptModule was derived from. The only class attributes we handle are
+  // methods and properties
   py::object unboundMethod = py::getattr(
       concreteType_->getPyClass(),
       field.c_str(),
@@ -357,20 +359,10 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   py::object isPropertyObj = py::module::import("torch.jit._recursive")
                                  .attr("is_property")(unboundMethod);
   bool isProperty = py::cast<bool>(isPropertyObj);
-  if (isProperty) {
-    auto stub =
-        py::module::import("torch.jit._recursive")
-            .attr("compile_unbound_method")(concreteType_, unboundMethod);
-    TORCH_INTERNAL_ASSERT(!stub.is_none());
-      return std::make_shared<PropertyValue>(
-          SimpleValue(self_).attr(loc, m, field));
-  }
-
   if (py::isinstance<py::function>(unboundMethod) || isProperty) {
     // For Python methods that we're trying to call directly, we need to bind
-    // the method to a self. TODO say more about tis
-    //
-    // If the function is @ignored
+    // the method to a self. (see the documentation for lazy_bind in Python for
+    // more info).
     bool isIgnoredFn =
         py::cast<bool>(py::module::import("torch._jit_internal")
                            .attr("is_ignored_fn")(unboundMethod));
@@ -392,7 +384,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         py::module::import("torch.jit._recursive")
             .attr("compile_unbound_method")(concreteType_, unboundMethod);
     TORCH_INTERNAL_ASSERT(!stub.is_none());
-    return SimpleValue(self_).attr(loc, m, field);
+    // Look up the attribute again, it will be available as a compiled method.
+    return attr(loc, m, field);
   }
 
   // We've exhausted all possibilities. Bailout with a hint to the user.
