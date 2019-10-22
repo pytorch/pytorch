@@ -5,17 +5,63 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 
-L1LossImpl::L1LossImpl(const torch::nn::L1LossOptions& options_)
-    : options(options_) {}
+L1LossImpl::L1LossImpl(const L1LossOptions& options_) : options(options_) {}
 
 void L1LossImpl::reset() {}
 
 void L1LossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::L1Loss";
+  stream << "torch::nn::L1Loss()";
 }
 
 Tensor L1LossImpl::forward(const Tensor& input, const Tensor& target) {
-  return torch::l1_loss(input, target, options.reduction());
+  return F::l1_loss(input, target, options);
+}
+
+// ============================================================================
+
+KLDivLossImpl::KLDivLossImpl(const KLDivLossOptions& options_)
+    : options(options_) {}
+
+void KLDivLossImpl::reset() {}
+
+void KLDivLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::KLDivLoss()";
+}
+
+Tensor KLDivLossImpl::forward(const Tensor& input, const Tensor& target) {
+  return F::kl_div(input, target, options);
+}
+
+// ============================================================================
+
+MSELossImpl::MSELossImpl(const MSELossOptions& options_) : options(options_) {}
+
+void MSELossImpl::reset() {}
+
+void MSELossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::MSELoss()";
+}
+
+Tensor MSELossImpl::forward(const Tensor& input, const Tensor& target) {
+  return F::mse_loss(input, target, options);
+}
+
+// ============================================================================
+
+BCELossImpl::BCELossImpl(const BCELossOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
+  reset();
+}
+
+void BCELossImpl::reset() {
+  register_buffer("weight", options.weight());
+}
+
+void BCELossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::BCELoss()";
+}
+
+Tensor BCELossImpl::forward(const Tensor& input, const Tensor& target) {
+  return F::binary_cross_entropy(input, target, options);
 }
 
 // ============================================================================
@@ -41,31 +87,30 @@ Tensor HingeEmbeddingLossImpl::forward(
 MultiMarginLossImpl::MultiMarginLossImpl(
     const MultiMarginLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
-      reset();
+  reset();
 }
 
 void MultiMarginLossImpl::reset() {
-  TORCH_CHECK((options.p() == 1) || (options.p() == 2), "only p == 1 and p == 2 supported");
+  TORCH_CHECK(
+      (options.p() == 1) || (options.p() == 2),
+      "only p == 1 and p == 2 supported");
   TORCH_CHECK(!options.weight().defined() || options.weight().dim() == 1);
 
   register_buffer("weight", options.weight());
 }
 
 void MultiMarginLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::MultiMarginLoss(p=" << options.p() << 
-            ", margin=" << options.margin() <<
-            ", weight=" << options.weight() <<
-            ", reduction=" << options.reduction() << ")";
+  stream << "torch::nn::MultiMarginLoss(p=" << options.p()
+         << ", margin=" << options.margin() << ", weight=" << options.weight()
+         << ", reduction=" << options.reduction() << ")";
 }
 
-Tensor MultiMarginLossImpl::forward(
-    const Tensor& input,
-    const Tensor& target) {
+Tensor MultiMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
   return F::multi_margin_loss(input, target, options);
 }
 
 // ============================================================================
-  
+
 CosineEmbeddingLossImpl::CosineEmbeddingLossImpl(
     const CosineEmbeddingLossOptions& options_)
     : options(options_) {}
@@ -98,10 +143,10 @@ void MultiLabelSoftMarginLossImpl::reset() {
   register_buffer("weight", options.weight());
 }
 
-Tensor MultiLabelSoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
-  return F::multilabel_soft_margin_loss(input,
-    target,
-    options);
+Tensor MultiLabelSoftMarginLossImpl::forward(
+    const Tensor& input,
+    const Tensor& target) {
+  return F::multilabel_soft_margin_loss(input, target, options);
 }
 
 // ============================================================================
@@ -113,10 +158,9 @@ TripletMarginLossImpl::TripletMarginLossImpl(
 void TripletMarginLossImpl::reset() {}
 
 void TripletMarginLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::TripletMarginLoss(margin=" << options.margin() << 
-            ", p=" << options.p() <<
-            ", eps=" << options.eps() << std::boolalpha <<
-            ", swap=" << options.swap() << ")";
+  stream << "torch::nn::TripletMarginLoss(margin=" << options.margin()
+         << ", p=" << options.p() << ", eps=" << options.eps() << std::boolalpha
+         << ", swap=" << options.swap() << ")";
 }
 
 Tensor TripletMarginLossImpl::forward(
