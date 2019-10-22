@@ -172,3 +172,12 @@ TEST(TensorIteratorTest, DoNotComputeCommonDTypeIfOutputIsUndefined) {
   iter.compute_common_dtype_only_for_inputs();
   ASSERT_ANY_THROW(iter.build());
 }
+
+TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
+  Tensor out;
+  auto iter = at::TensorIterator();
+  iter.add_output(out);
+  iter.add_input(at::ones({1,1}, at::dtype(at::kDouble)));
+  iter.add_input(at::ones({1,1}, at::dtype(at::kInt)));
+  ASSERT_ANY_THROW(iter.build());
+}
