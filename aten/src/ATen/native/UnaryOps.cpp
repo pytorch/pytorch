@@ -81,6 +81,10 @@ Tensor& log10_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor log10(const Tensor& self) { return unary_op_impl(self, at::log10_out); }
 Tensor& log10_(Tensor& self) { return unary_op_impl_(self, at::log10_out); }
 
+Tensor& log1p_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log1p_stub); }
+Tensor log1p(const Tensor& self) { return unary_op_impl(self, at::log1p_out); }
+Tensor& log1p_(Tensor& self) { return unary_op_impl_(self, at::log1p_out); }
+
 Tensor& log2_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log2_stub); }
 Tensor log2(const Tensor& self) { return unary_op_impl(self, at::log2_out); }
 Tensor& log2_(Tensor& self) { return unary_op_impl_(self, at::log2_out); }
@@ -282,7 +286,6 @@ IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(frac)
-IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(sigmoid)
 IMPLEMENT_UNARY_OP_VEC(sin)
