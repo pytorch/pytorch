@@ -22,7 +22,7 @@ executors:
 
   windows-cuda:
     machine:
-      resource_class: l1.large
+      # resource_class: l1.large
       image: windows-server-2019-nvidia:edge
       shell: bash.exe
 ##############################################################################
