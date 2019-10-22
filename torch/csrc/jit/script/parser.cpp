@@ -318,12 +318,12 @@ struct ParserImpl {
 
   StringLiteral parseConcatenatedStringLiterals() {
     auto range = L.cur().range;
-    std::stringstream ss;
+    std::string ss;
     while (L.cur().kind == TK_STRINGLITERAL) {
       auto literal_range = L.cur().range;
-      ss << parseStringLiteral(literal_range, L.next().text());
+      ss.append(parseStringLiteral(literal_range, L.next().text()));
     }
-    return StringLiteral::create(range, ss.str());
+    return StringLiteral::create(range, ss);
   }
 
   Expr parseAttributeValue() {
