@@ -14,7 +14,6 @@
 #include <mutex>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/stack.h>
-#include <torch/csrc/jit/script/function_schema_parser.h>
 
 // TODO: Rewrite this comment
 //
@@ -74,37 +73,5 @@ namespace detail {
     return MultiDispatchTensorTypeSet().apply(args...).ts;
   }
 }
-
-// using FallbackBoxedFunction = void(const c10::FunctionSchema& schema, torch::jit::Stack*);
-//
-// // Assume T is decayed
-// template <typename T>
-// using not_ok_to_box =
-//   c10::guts::disjunction<
-//     c10::guts::negation<
-//       c10::guts::disjunction<
-//         std::is_constructible<IValue, T>,
-//         // TensorOptions are not directly constructible into IValue,
-//         // but torch::jit::push knows how to handle them
-//         std::is_same<TensorOptions, T>
-//       >>
-// #ifdef BUILD_NAMEDTENSOR
-//     ,
-//     // some constructors are templated (and therefore pass
-//     // is_constructible), but do not actually work with all
-//     // template arguments, so we must blacklist them explicitly
-//     // TODO: The correct fix is to sfinae based on is_constructible of T
-//     std::is_same<optional<ArrayRef<Dimname>>, T>
-// #endif
-//   >;
-//
-// template <class Result, class... Args>
-// using supports_boxed_fallback =
-//   c10::guts::negation<c10::guts::disjunction<
-//     std::is_lvalue_reference<Result>,
-//     not_ok_to_box<Result>,
-//     std::is_same<IntArrayRef, Result>,
-//     not_ok_to_box<guts::decay_t<Args>>...
-//   >>;
 
 } // namespace at
