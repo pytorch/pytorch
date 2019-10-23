@@ -154,7 +154,6 @@ _wrapped_func_source = textwrap.dedent("""
             implementation, {name}, relevant_args, args, kwargs)
     """)
 
-
 def torch_function_dispatch(dispatcher, module=None, verify=True,
                             docs_from_dispatcher=False):
     """Decorator for adding dispatch with the __torch_function__ protocol.

@@ -310,6 +310,13 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     return torch._C._VariableFunctions.meshgrid(tensors)
 
 
+def _stft_dispatcher(input, n_fft, hop_length=None, win_length=None,
+                     window=None, center=True, pad_mode='reflect',
+                     normalized=False, onesided=True):
+    return (input,)
+
+
+@torch_function_dispatch(_stft_dispatcher)
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
          center=True, pad_mode='reflect', normalized=False, onesided=True):
     # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, str, bool, bool) -> Tensor
@@ -611,7 +618,7 @@ def tensordot(a, b, dims=2):
         dims_b = list(range(dims))
     return torch._C._VariableFunctions.tensordot(a, b, dims_a, dims_b)
 
-
+@torch_function_dispatch(_broadcast_tensors_dispatcher)
 def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
     python's `itertools.product`.
@@ -643,6 +650,11 @@ def cartesian_prod(*tensors):
     return torch._C._VariableFunctions.cartesian_prod(tensors)
 
 
+def _norm_dispatcher(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
+    return (input,)
+
+
+@torch_function_dispatch(_norm_dispatcher)
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
     r"""Returns the matrix norm or vector norm of a given tensor.
 
@@ -740,6 +752,11 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
     return torch._C._VariableFunctions.norm(input, p, dim, keepdim=keepdim, dtype=dtype, out=out)
 
 
+def _chain_matmul_dispatcher(*matrices):
+    return matrices
+
+
+@torch_function_dispatch(_chain_matmul_dispatcher)
 def chain_matmul(*matrices):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
     using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms

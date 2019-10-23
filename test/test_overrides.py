@@ -2,9 +2,10 @@ import torch
 import numpy as np
 import unittest
 import six
+import inspect
+import pprint
 
 from common_utils import TestCase
-
 
 HANDLED_FUNCTIONS = {}
 HANDLED_FUNCTIONS_SUB = {}
@@ -239,6 +240,468 @@ class TestOverrideSubDiagonalTensor(TestCase):
         self.assertEqual(torch.mm(t3, t2), 1)
         self.assertEqual(torch.mm(t2, t3), 1)
 
+IGNORED_TORCH_FUNCTIONS = (
+    'unique_dim',
+    'typename',
+    'is_tensor',
+    'is_storage',
+    'set_default_tensor_type',
+    'set_rng_state',
+    'get_rng_state',
+    'manual_seed',
+    'initial_seed',
+    'seed',
+    'save',
+    'load',
+    'set_printoptions',
+    'fork',
+    'get_default_dtype',
+    'get_num_interop_threads',
+    'get_num_threads',
+    'import_ir_module',
+    'import_ir_module_from_buffer',
+    'is_anomaly_enabled',
+    'is_grad_enabled',
+    'merge_type_from_type_comment',
+    'parse_ir',
+    'parse_schema',
+    'parse_type_comment',
+    'set_anomaly_enabled',
+    'set_flush_denormal',
+    'set_num_interop_threads',
+    'set_num_threads',
+    'wait',
+    'as_tensor',
+    'dsmm',
+    'hsmm',
+    'from_numpy',
+    'get_device',
+    'numel',
+    'saddmm',
+    'spmm',
+    'tensor',
+    'default_generator',
+    'has_cuda',
+    'has_cudnn',
+    'has_lapack',
+    'cpp',
+    'device',
+    'dtype',
+    'finfo',
+    'has_mkl',
+    'has_mkldnn',
+    'has_openmp',
+    'iinfo',
+    'memory_format',
+    'qscheme',
+    'set_grad_enabled',
+    'no_grad',
+    'enable_grad',
+    'layout',
+    'affine_grid_generator',
+    'align_tensors',
+    'all',
+    'angle',
+    'any',
+    'arange',
+    'as_strided',
+    'bartlett_window',
+    'batch_norm',
+    'batch_norm_backward_elemt',
+    'batch_norm_backward_reduce',
+    'batch_norm_elemt',
+    'batch_norm_gather_stats',
+    'batch_norm_gather_stats_with_counts',
+    'batch_norm_stats',
+    'batch_norm_update_stats',
+    'blackman_window',
+    'can_cast',
+    'clone',
+    'constant_pad_nd',
+    'convolution',
+    'cudnn_affine_grid_generator',
+    'cudnn_batch_norm',
+    'cudnn_convolution',
+    'cudnn_convolution_transpose',
+    'cudnn_grid_sampler',
+    'cudnn_is_acceptable',
+    'dequantize',
+    'detach',
+    'empty',
+    'empty_strided',
+    'eye',
+    'fake_quantize_per_channel_affine',
+    'fake_quantize_per_tensor_affine',
+    'fbgemm_linear_fp16_weight',
+    'fbgemm_linear_fp16_weight_fp32_activation',
+    'fbgemm_linear_int8_weight',
+    'fbgemm_linear_int8_weight_fp32_activation',
+    'fbgemm_linear_quantize_weight',
+    'fbgemm_pack_gemm_matrix_fp16',
+    'fbgemm_pack_quantized_matrix',
+    'feature_alpha_dropout',
+    'feature_dropout',
+    'from_file',
+    'full',
+    'grid_sampler',
+    'grid_sampler_2d',
+    'grid_sampler_3d',
+    'gru',
+    'gru_cell',
+    'hamming_window',
+    'hann_window',
+    'linspace',
+    'logspace',
+    'mkldnn_adaptive_avg_pool2d',
+    'mkldnn_convolution',
+    'mkldnn_convolution_backward_weights',
+    'mkldnn_max_pool2d',
+    'ones',
+    'promote_types',
+    'rand',
+    'randn',
+    'randint',
+    'randperm',
+    'range',
+    'zeros',
+)
+
+TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
+    (torch.abs, lambda input, out=None: -1),
+    (torch.adaptive_avg_pool1d, lambda input, output_size: -1),
+    (torch.adaptive_max_pool1d, lambda inputs, output_size: -1),
+    (torch.acos, lambda input, out=None: -1),
+    (torch.add, lambda input, other, out=None: -1),
+    (torch.addbmm, lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1),
+    (torch.addcdiv, lambda input, value, tensor1, tensor2, out=None: -1),
+    (torch.addcmul, lambda input, value, tensor1, tensor2, out=None: -1),
+    (torch.addmm, lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1),
+    (torch.addmv, lambda input, mat, vec, beta=1, alpha=1, out=None: -1),
+    (torch.addr, lambda input, vec1, vec2, beta=1, alpha=1, out=None: -1),
+    (torch.allclose, lambda input, other, trol=1e-05, atol=1e-08, equal_nan=False: -1),
+    (torch.alpha_dropout, lambda input, p, train, inplace=False: -1),
+    (torch.argmax, lambda input: -1),
+    (torch.argmin, lambda input: -1),
+    (torch.argsort, lambda input: -1),
+    (torch.asin, lambda input, out=None: -1),
+    (torch.atan, lambda input, out=None: -1),
+    (torch.atan2, lambda input, other, out=None: -1),
+    (torch.avg_pool1d, lambda input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True: -1),
+    (torch.baddbmm, lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1),
+    (torch.bernoulli, lambda input, *, generator=None, out=None: -1),
+    (torch.bilinear, lambda input1, input2, weight, bias: -1),
+    (torch.binary_cross_entropy_with_logits, lambda input, target, weight=None, size_average=None, reduce=None, reduction='mean',
+     pos_weight=None: -1),
+    (torch.bincount, lambda input, weights=None, minlength=0: -1),
+    (torch.bitwise_not, lambda input, out=None: -1),
+    (torch.bmm, lambda input, mat2, out=None: -1),
+    (torch.broadcast_tensors, lambda *tensors: -1),
+    (torch.cartesian_prod, lambda *tensors: -1),
+    (torch.cat, lambda tensors, dim=0, out=None: -1),
+    (torch.cdist, lambda x1, c2, p=2: -1),
+    (torch.ceil, lambda input, out=None: -1),
+    (torch.celu, lambda input, alhpa=1., inplace=False: -1),
+    (torch.chain_matmul, lambda *matrices: -1),
+    (torch.cholesky, lambda input, upper=False, out=None: -1),
+    (torch.cholesky_inverse, lambda input, upper=False, out=None: -1),
+    (torch.cholesky_solve, lambda input1, input2, upper=False, out=None: -1),
+    (torch.chunk, lambda input, chunks, dim=0: -1),
+    (torch.clamp, lambda input, min, max, out=None: -1),
+    (torch.clamp_min, lambda input, min, out=None: -1),
+    (torch.clamp_max, lambda input, max, out=None: -1),
+    (torch.combinations, lambda input, r=2, with_replacement=False: -1),
+    (torch.conj, lambda input, out=None: -1),
+    (torch.conv1d, lambda input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1: -1),
+    (torch.conv2d, lambda input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1: -1),
+    (torch.conv3d, lambda input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1: -1),
+    (torch.conv_tbc, lambda input, weight, bias, pad=0: -1),
+    (torch.conv_transpose1d, lambda input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1: -1),
+    (torch.conv_transpose2d, lambda input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1: -1),
+    (torch.conv_transpose3d, lambda input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1: -1),
+    (torch.cos, lambda input, out=None: -1),
+    (torch.cosine_embedding_loss, lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean': -1),
+    (torch.cosh, lambda input, out=None: -1),
+    (torch.cosine_similarity, lambda x1, x2, dim=1, eps=1e-8: -1),
+    (torch.cross, lambda input, other, dim=-1, out=None: -1),
+    (torch.ctc_loss, lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction='mean', zero_infinity=False: -1),
+    (torch.cumprod, lambda input, dim, out=None, dtype=None: -1),
+    (torch.cumsum, lambda input, dim, out=None, dtype=None: -1),
+    (torch.det, lambda input: -1),
+    (torch.diag, lambda input, diagonal=0, out=None: -1),
+    (torch.diag_embed, lambda input, diagonal=0, out=None: -1),
+    (torch.diagflat, lambda input, offset=0: -1),
+    (torch.diagonal, lambda input, offset=0, dim1=0, dim2=1: -1),
+    (torch.digamma, lambda input, out=None: -1),
+    (torch.dist, lambda input, other, p=2: -1),
+    (torch.div, lambda input, other, out=None: -1),
+    (torch.dot, lambda mat1, mat2: -1),
+    (torch.dropout, lambda input, p, train, inplace=False: -1),
+    (torch.eig, lambda input, eigenvectors=False, out=None: -1),
+    (torch.einsum, lambda equation, *operands: -1),
+    (torch.einsum, lambda equation, *operands: -1),
+    (torch.embedding, lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0, scale_grad_by_freq=False,
+     sparse=False: -1),
+    (torch.embedding_bag, lambda input, weight, offsets, max_norm=None, norm_type=2, scale_grad_by_freq=False,
+     mode='mean', sparse=False, per_sample_weights=None: -1),
+    (torch.empty_like, lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1),
+    (torch.eq, lambda input, other, out=None: -1),
+    (torch.equal, lambda input, other: -1),
+    (torch.erf, lambda input, out=None: -1),
+    (torch.erfc, lambda input, out=None: -1),
+    (torch.erfinv, lambda input, out=None: -1),
+    (torch.exp, lambda input, out=None: -1),
+    (torch.expm1, lambda input, out=None: -1),
+    (torch.fft, lambda input, signal_ndim, normalized=False: -1),
+    (torch.flatten, lambda input, start_dim=0, end_dim=-1: -1),
+    (torch.flip, lambda input, dims: -1),
+    (torch.frobenius_norm, lambda input, dim=None, keepdim=False, out=None: -1),
+    (torch.floor, lambda input, out=None: -1),
+    (torch.fmod, lambda input, other, out=None: -1),
+    (torch.frac, lambda input, out=None: -1),
+    (torch.full_like, lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1),
+    (torch.gather, lambda input, dim, index, out=None, sparse_grad=False: -1),
+    (torch.ge, lambda input, other, out=None: -1),
+    (torch.geqrf, lambda input, out=None: -1),
+    (torch.ger, lambda input, vec2, out=None: -1),
+    (torch.group_norm, lambda input, num_groups, weight=None, bias=None, eps=1e-05: -1),
+    (torch.gt, lambda input, other, out=None: -1),
+    (torch.hardshrink, lambda input, lambd=0.5: -1),
+    (torch.hinge_embedding_loss, lambda input, target, margin=1.0, size_average=None, reduce=None, reduction='mean': -1),
+    (torch.histc, lambda input, bins=100, min=0, max=0, out=None: -1),
+    (torch.hspmm, lambda mat1, mat2, out=None: -1),
+    (torch.ifft, lambda input, signal_ndim, normalized=False: -1),
+    (torch.imag, lambda input, out=None: -1),
+    (torch.index_add, lambda input, dim, index, source: -1),
+    (torch.index_copy, lambda input, dim, index, source: -1),
+    (torch.index_put, lambda input, indices, values, accumulate=False: -1),
+    (torch.index_select, lambda input, dim, index, out=None: -1),
+    (torch.index_fill, lambda input, dim, index, value: -1),
+    (torch.isfinite, lambda tensor: -1),
+    (torch.isinf, lambda tensor: -1),
+    (torch.instance_norm, lambda input, running_mean, running_var, weight, bias, use_input_stats, momentum, eps, cudnn_enabled: -1),
+    (torch.int_repr, lambda input: -1),
+    (torch.inverse, lambda input, out=None: -1),
+    (torch.irfft, lambda input, signal_ndim, normalized=False, onesided=True, signal_sizes=None: -1),
+    (torch.is_complex, lambda input: -1),
+    (torch.is_distributed, lambda input: -1),
+    (torch.is_floating_point, lambda input: -1),
+    (torch.is_nonzero, lambda input: -1),
+    (torch.is_same_size, lambda input, other: -1),
+    (torch.is_signed, lambda input: -1),
+    (torch.isclose, lambda input, other, rtol=1e-05, atol=1e-08, equal_nan=False: -1),
+    (torch.isnan, lambda input: -1),
+    (torch.kl_div, lambda input, target, size_average=None, reduce=None, reduction='mean': -1),
+    (torch.kthvalue, lambda input, k, dim=None, keepdim=False, out=None: -1),
+    (torch.layer_norm, lambda input, normalized_shape, weight=None, bias=None, esp=1e-05: -1),
+    (torch.le, lambda input, other, out=None: -1),
+    (torch.lerp, lambda input, end, weight, out=None: -1),
+    (torch.lgamma, lambda input, out=None: -1),
+    (torch.log, lambda input, out=None: -1),
+    (torch.log_softmax, lambda input, dim, dtype: -1),
+    (torch.log10, lambda input, out=None: -1),
+    (torch.log1p, lambda input, out=None: -1),
+    (torch.log2, lambda input, out=None: -1),
+    (torch.logdet, lambda input: -1),
+    (torch.logical_not, lambda input, out=None: -1),
+    (torch.logical_xor, lambda input, other, out=None: -1),
+    (torch.logsumexp, lambda input, names, keepdim, out=None: -1),
+    (torch.lstm, lambda data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional: -1),
+    (torch.lstm_cell, lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1),
+    (torch.lstsq, lambda input, A, out=None: -1),
+    (torch.lt, lambda input, other, out=None: -1),
+    (torch.lu, lambda A, pivot=True, get_infos=False, out=None: -1),
+    (torch.lu_solve, lambda input, LU_data, LU_pivots, out=None: -1),
+    (torch.margin_ranking_loss, lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean': -1),
+    (torch.masked_fill, lambda input, mask, value: -1),
+    (torch.masked_scatter, lambda input, mask, source: -1),
+    (torch.masked_select, lambda input, mask, out=None: -1),
+    (torch.matmul, lambda input, other, out=None: -1),
+    (torch.matrix_power, lambda input, n: -1),
+    (torch.matrix_rank, lambda input, tol=None, symmetric=False: -1),
+    (torch.max, lambda input, out=None: -1),
+    (torch.max_pool1d, lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False: -1),
+    (torch.max_pool2d, lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False: -1),
+    (torch.max_pool3d, lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False: -1),
+    (torch.max_pool1d_with_indices, lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False,
+     ceil_mode=False: -1),
+    (torch.mean, lambda input: -1),
+    (torch.median, lambda input: -1),
+    (torch.meshgrid, lambda *tensors, **kwargs: -1),
+    (torch.min, lambda input, out=None: -1),
+    (torch.miopen_batch_norm, lambda input, weight, bias, running_mean, running_var, training, exponential_average_factor,
+     epsilon: -1),
+    (torch.miopen_convolution, lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1),
+    (torch.miopen_convolution_transpose, lambda input, weight, bias, padding, output_padding, stride, dilation, groups, benchmark,
+     deterministic: -1),
+    (torch.miopen_depthwise_convolution, lambda input, weight, bias, padding, stride, dilation, groups, benchmark,
+     deterministic: -1),
+    (torch.miopen_rnn, lambda input, weight, weight_stride0, hx, cx, mode, hidden_size, num_layers, batch_first, dropout, train,
+     bidirectional, batch_sizes, dropout_state: -1),
+    (torch.mm, lambda input, mat2, out=None: -1),
+    (torch.mode, lambda input: -1),
+    (torch.mul, lambda input, other, out=None: -1),
+    (torch.multinomial, lambda input, num_samples, replacement=False, out=None: -1),
+    (torch.mv, lambda input, vec, out=None: -1),
+    (torch.mvlgamma, lambda input, p: -1),
+    (torch.narrow, lambda input, dim, start, length: -1),
+    (torch.native_batch_norm, lambda input, weight, bias, running_mean, running_var, training, momentum, eps: -1),
+    (torch.native_layer_norm, lambda input, weight, bias, M, N, eps: -1),
+    (torch.native_norm, lambda input, p=2: -1),
+    (torch.ne, lambda input, other, out=None: -1),
+    (torch.neg, lambda input, out=None: -1),
+    (torch.nonzero, lambda input, *, out=None, as_tuple=False: -1),
+    (torch.norm, lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1),
+    (torch.norm_except_dim, lambda v, pow=2, dim=0: -1),
+    (torch.normal, lambda mean, std, out=None: -1),
+    (torch.nuclear_norm, lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1),
+    (torch.orgqr, lambda input1, input2: -1),
+    (torch.ormqr, lambda input, input2, input3, left=True, transpose=False: -1),
+    (torch.pairwise_distance, lambda x1, x2, p=2.0, eps=1e-06, keepdim=False: -1),
+    (torch.pdist, lambda input, p=2: -1),
+    (torch.pinverse, lambda input, rcond=1e-15: -1),
+    (torch.pixel_shuffle, lambda input, upscale_factor: -1),
+    (torch.poisson, lambda input, generator=None: -1),
+    (torch.poisson_nll_loss, lambda input, target, log_input, full, eps, reduction: -1),
+    (torch.polygamma, lambda input, n, out=None: -1),
+    (torch.prelu, lambda input, weight: -1),
+    (torch.ones_like, lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1),
+    (torch.pow, lambda input, exponent, out=None: -1),
+    (torch.prod, lambda input: -1),
+    (torch.q_per_channel_axis, lambda input: -1),
+    (torch.q_per_channel_scales, lambda input: -1),
+    (torch.q_per_channel_zero_points, lambda input: -1),
+    (torch.q_scale, lambda input: -1),
+    (torch.q_zero_point, lambda input: -1),
+    (torch.qr, lambda input, some=True, out=None: -1),
+    (torch.quantize_per_channel, lambda input, scales, zero_points, axis, dtype: -1),
+    (torch.quantize_per_tensor, lambda input, scale, zero_point, dtype: -1),
+    (torch.quantized_gru, lambda data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional: -1),
+    (torch.quantized_gru_cell, lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh,
+     scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
+    (torch.quantized_lstm, lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first,
+     dtype=None, use_dynamic=False: -1),
+    (torch.quantized_lstm_cell, lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh,
+     scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
+    (torch.quantized_max_pool2d, lambda input, kernel_size, stride, padding, dilation, ceil_mode=False: -1),
+    (torch.quantized_rnn_relu_cell, lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
+     col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
+    (torch.quantized_rnn_tanh_cell, lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
+     col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
+    (torch.rand_like, lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1),
+    (torch.randint_like, lambda input, low, high, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1),
+    (torch.randn_like, lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1),
+    (torch.real, lambda input, out=None: -1),
+    (torch.reciprocal, lambda input, out=None: -1),
+    (torch.relu, lambda input, inplace=False: -1),
+    (torch.remainder, lambda input, other, out=None: -1),
+    (torch.renorm, lambda input, p, dim, maxnorm, out=None: -1),
+    (torch.repeat_interleave, lambda input, repeats, dim=None: -1),
+    (torch.reshape, lambda input, shape: -1),
+    (torch.result_type, lambda tensor1, tensor2: -1),
+    (torch.rfft, lambda input, signal_ndim, normalized=False, onesided=True: -1),
+    (torch.rnn_relu, lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1),
+    (torch.rnn_relu_cell, lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1),
+    (torch.rnn_tanh, lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1),
+    (torch.rnn_tanh_cell, lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1),
+    (torch.roll, lambda input, shifts, dims=None: -1),
+    (torch.rot90, lambda input, k, dims: -1),
+    (torch.round, lambda input, out=None: -1),
+    (torch.rrelu, lambda input, lower=1. / 8, upper=1. / 3, training=False, inplace=False: -1),
+    (torch.rsqrt, lambda input, out=None: -1),
+    (torch.rsub, lambda input, other, alpha=1: -1),
+    (torch.scalar_tensor, lambda s, dtype=None, layour=None, device=None, pin_memory=None: -1),
+    (torch.scatter, lambda input, dim, index, src: -1),
+    (torch.scatter_add, lambda input, dim, index, src: -1),
+    (torch.select, lambda input, dim, index: -1),
+    (torch.selu, lambda input, inplace=False: -1),
+    (torch.sigmoid, lambda input, out=None: -1),
+    (torch.sign, lambda input, out=None: -1),
+    (torch.sin, lambda input, out=None: -1),
+    (torch.sinh, lambda input, out=None: -1),
+    (torch.slogdet, lambda input: -1),
+    (torch.smm, lambda input, mat2: -1),
+    (torch.softmax, lambda input, dim, dtype=None: -1),
+    (torch.solve, lambda input, A, out=None: -1),
+    (torch.sort, lambda input, dim=-1, descending=False, out=None: -1),
+    (torch.sparse_coo_tensor, lambda indices, values, size=None, dtype=None, device=None, requires_grad=False: -1),
+    (torch.split, lambda tensor, split_size_or_sections, dim=0: -1),
+    (torch.split_with_sizes, lambda tensor, split_size_or_sections, dim=0: -1),
+    (torch.sqrt, lambda input, out=None: -1),
+    (torch.squeeze, lambda input, dim=None, out=None: -1),
+    (torch.sspaddmm, lambda input, mat1, mat2, beta, alpha, out=None: -1),
+    (torch.stack, lambda tensors, dim=0, out=None: -1),
+    (torch.std, lambda input: -1),
+    (torch.std_mean, lambda input: -1),
+    (torch.stft, lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode='reflect',
+     normalized=False, onesided=True: -1),
+    (torch.sub, lambda input, other, out=None: -1),
+    (torch.sum, lambda input: -1),
+    (torch.svd, lambda input, some=True, compute_uv=True, out=None: -1),
+    (torch.symeig, lambda input, eigenvectors=False, upper=True, out=None: -1),
+    (torch.t, lambda input: -1),
+    (torch.take, lambda input, index: -1),
+    (torch.tan, lambda input, out=None: -1),
+    (torch.tanh, lambda input, out=None: -1),
+    (torch.tensordot, lambda a, b, dims=2: -1),
+    (torch.threshold, lambda input, threshold, value, inplace=False: -1),
+    (torch.topk, lambda input, k, dim=-1, descending=False, out=None: -1),
+    (torch.trace, lambda input: -1),
+    (torch.transpose, lambda input, dim0, dim1: -1),
+    (torch.trapz, lambda y, x, *, dim=-1: -1),
+    (torch.triangular_solve, lambda input, A, upper=True, transpose=False, unitriangular=False: -1),
+    (torch.tril, lambda input, diagonal=0, out=None: -1),
+    (torch.tril_indices, lambda row, col, offset=0, dtype=torch.long, device='cpu', layout=torch.strided: -1),
+    (torch.triplet_margin_loss, lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06, swap=False, size_average=None,
+     reduce=None, reduction='mean': -1),
+    (torch.triu, lambda input, diagonal=0, out=None: -1),
+    (torch.triu_indices, lambda row, col, offset=0, dtype=torch.long, device='cpu', layout=torch.strided: -1),
+    (torch.trunc, lambda input, out=None: -1),
+    (torch.unbind, lambda input, dim=0: -1),
+    (torch.unique, lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1),
+    (torch.unique_consecutive, lambda input, return_inverse=False, return_counts=False, dim=None: -1),
+    (torch.unsqueeze, lambda input, dim, out=None: -1),
+    (torch.var, lambda input: -1),
+    (torch.var_mean, lambda input: -1),
+    (torch.where, lambda condition, x, y: -1),
+    (torch.zeros_like, lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1),
+)
+
+TENSOR_LIKE_OVERRIDES = tuple(t[0] for t in TENSOR_LIKE_TORCH_IMPLEMENTATIONS)
+
+# TODO make these functions overridable
+TENSOR_LIKE_SKIP_TESTS = (
+    torch.sparse_coo_tensor,
+)
+
+def generate_tensor_like_torch_implementations():
+    torch_vars = vars(torch)
+    untested_funcs = []
+    for func_name in torch.__all__ + dir(torch._C._VariableFunctions):
+        # these are functions that are public but shouldn't be overriden by __torch_function__
+        if func_name in IGNORED_TORCH_FUNCTIONS:
+            continue
+        # ignore private functions
+        if func_name.startswith('_'):
+            continue
+        # ignore in-place operators
+        if func_name.endswith('_'):
+            continue
+        # only consider objects with lowercase names
+        if not func_name.islower():
+            continue
+        func = torch_vars[func_name]
+        if func not in TENSOR_LIKE_OVERRIDES:
+            untested_funcs.append("torch.{}".format(func.__name__))
+    msg = (
+        "The following functions are not tested for __torch_function__ "
+        "support, please either add an entry in "
+        "TENSOR_LIKE_TORCH_IMPLEMENTATIONS for this function or if a "
+        "__torch_function__ override does not make sense, add an entry to "
+        "IGNORED_TORCH_FUNCTIONS.\n\n{}"
+    )
+    assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
+    return TENSOR_LIKE_TORCH_IMPLEMENTATIONS
+
 @six.add_metaclass(ImplementationMeta)
 class TensorLike(object):
     """A class that emulate the full tensor API
@@ -246,89 +709,7 @@ class TensorLike(object):
     This class is used to explicitly test that the full torch.tensor API
     can be overriden with a class that defines __torch_function__.
     """
-    TORCH_IMPLEMENTATIONS = (
-        (torch.dot, lambda mat1, mat2: 0),
-        (torch.addr, lambda input, vec1, vec2, beta=1, alpha=1, out=None: 0),
-        (torch.addmv, lambda input, mat, vec, beta=1, alpha=1, out=None: 0),
-        (torch.addmm, lambda input, mat1, mat2, beta=1, alpha=1, out=None: 0),
-        (torch.sin, lambda input, out=None: -1),
-        (torch.sinh, lambda input, out=None: -1),
-        (torch.lgamma, lambda input, out=None: -1),
-        (torch.mvlgamma, lambda input, p: -1),
-        (torch.asin, lambda input, out=None: -1),
-        (torch.cos, lambda input, out=None: -1),
-        (torch.cosh, lambda input, out=None: -1),
-        (torch.acos, lambda input, out=None: -1),
-        (torch.tan, lambda input, out=None: -1),
-        (torch.tanh, lambda input, out=None: -1),
-        (torch.atan, lambda input, out=None: -1),
-        (torch.log, lambda input, out=None: -1),
-        (torch.log10, lambda input, out=None: -1),
-        (torch.log1p, lambda input, out=None: -1),
-        (torch.log2, lambda input, out=None: -1),
-        (torch.logical_not, lambda input, out=None: -1),
-        (torch.logical_xor, lambda input, other, out=None: -1),
-        (torch.sqrt, lambda input, out=None: -1),
-        (torch.erf, lambda input, out=None: -1),
-        (torch.erfc, lambda input, out=None: -1),
-        (torch.exp, lambda input, out=None: -1),
-        (torch.expm1, lambda input, out=None: -1),
-        (torch.floor, lambda input, out=None: -1),
-        (torch.ceil, lambda input, out=None: -1),
-        (torch.rsqrt, lambda input, out=None: -1),
-        (torch.sigmoid, lambda input, out=None: -1),
-        (torch.sign, lambda input, out=None: -1),
-        (torch.frac, lambda input, out=None: -1),
-        (torch.lerp, lambda input, end, weight, out=None: -1),
-        (torch.trunc, lambda input, out=None: -1),
-        (torch.round, lambda input, out=None: -1),
-        (torch.max, lambda input, out=None: -1),
-        (torch.min, lambda input, out=None: -1),
-        (torch.logsumexp, lambda input, keepdim=False, out=None: -1),
-        (torch.where, lambda condition, x, y: -1),
-        (torch.sub, lambda input, other, out=None: -1),
-        (torch.reciprocal, lambda input, out=None: -1),
-        (torch.remainder, lambda input, other, out=None: -1),
-        (torch.div, lambda input, other, out=None: -1),
-        (torch.fmod, lambda input, other, out=None: -1),
-        (torch.einsum, lambda equation, *operands: -1),
-        (torch.bmm, lambda input, mat2, out=None: -1),
-        (torch.addbmm, lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1),
-        (torch.baddbmm, lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1),
-        (torch.pow, lambda input, exponent, out=None: -1),
-        (torch.neg, lambda input, out=None: -1),
-        (torch.argmax, lambda input: -1),
-        (torch.argmin, lambda input: -1),
-        (torch.cumprod, lambda input, dim, out=None, dtype=None: -1),
-        (torch.cumsum, lambda input, dim, out=None, dtype=None: -1),
-        (torch.dist, lambda input, other, p=2: -1),
-        (torch.mean, lambda input: -1),
-        (torch.median, lambda input: -1),
-        (torch.mode, lambda input: -1),
-        (torch.norm, lambda input, other, p=2: -1),
-        (torch.prod, lambda input: -1),
-        (torch.std, lambda input: -1),
-        (torch.std_mean, lambda input: -1),
-        (torch.sum, lambda input: -1),
-        (torch.unique, lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1),
-        (torch.unique_consecutive, lambda input, return_inverse=False, return_counts=False, dim=None: -1),
-        (torch.var, lambda input: -1),
-        (torch.var_mean, lambda input: -1),
-        (torch.argsort, lambda input: -1),
-        (torch.sort, lambda input, dim=-1, descending=False, out=None: -1),
-        (torch.topk, lambda input, dim=-1, descending=False, out=None: -1),
-        (torch.chunk, lambda input, chunks, dim=0: -1),
-        (torch.gather, lambda input, dim, index, out=None, sparse_grad=False: -1),
-        (torch.index_select, lambda input, dim, index, out=None: -1),
-        (torch.broadcast_tensors, lambda *tensors: -1),
-        (torch.split, lambda tensor, split_size_or_sections, dim=0: -1),
-        (torch.einsum, lambda equation, *operands: -1),
-        (torch.isfinite, lambda tensor: -1),
-        (torch.isinf, lambda tensor: -1),
-        (torch.meshgrid, lambda *tensors, **kwargs: -1),
-        (torch.tensordot, lambda a, b, dims=2: -1),
-        (torch.lu, lambda A, pivot=True, get_infos=False, out=None: -1),
-    )
+    TORCH_IMPLEMENTATIONS = generate_tensor_like_torch_implementations()
     IMPLEMENTS_DECORATOR = implements_tensor_like
 
     def __torch_function__(self, func, args=(), kwargs=None):
@@ -337,270 +718,35 @@ class TensorLike(object):
 
         if func not in HANDLED_FUNCTIONS_TENSOR_LIKE:
             return NotImplemented
-        # In this case _torch_function_ should override DiagonalTensor objects
+        # In this case _torch_function_ should override TensorLike objects
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
 
 class TestApis(TestCase):
-    def setUp(self):
-        self.t1 = TensorLike()
-        self.t2 = TensorLike()
-        self.t3 = TensorLike()
-
-    def test_dot(self):
-        self.assertEqual(torch.dot(self.t1, self.t2), 0)
-
-    def test_addr(self):
-        self.assertEqual(torch.addr(1, self.t1, 0, self.t2, self.t3), 0)
-
-    def test_addmv(self):
-        self.assertEqual(torch.addmv(1, self.t1, 0, self.t2, self.t3), 0)
-
-    def test_addmm(self):
-        self.assertEqual(torch.addmm(1, self.t1, 0, self.t2, self.t3), 0)
-
-    def test_allclose(self):
-        pass
-
-    def test_linear_algebra_scalar_raises(self):
-        pass
-
-    def test_sin(self):
-        self.assertEqual(torch.sin(self.t1), -1)
-
-    def test_sinh(self):
-        self.assertEqual(torch.sinh(self.t1), -1)
-
-    def test_lgamma(self):
-        self.assertEqual(torch.lgamma(self.t1), -1)
-
-    def test_mvlgamma(self):
-        self.assertEqual(torch.mvlgamma(self.t1, 1), -1)
-
-    def test_asin(self):
-        self.assertEqual(torch.asin(self.t1), -1)
-
-    def test_cos(self):
-        self.assertEqual(torch.cos(self.t1), -1)
-
-    def test_cosh(self):
-        self.assertEqual(torch.cosh(self.t1), -1)
-
-    def test_acos(self):
-        self.assertEqual(torch.acos(self.t1), -1)
-
-    def test_tan(self):
-        self.assertEqual(torch.tan(self.t1), -1)
-
-    def test_tanh(self):
-        self.assertEqual(torch.tanh(self.t1), -1)
-
-    def test_atan(self):
-        self.assertEqual(torch.atan(self.t1), -1)
-
-    def test_log(self):
-        self.assertEqual(torch.log(self.t1), -1)
-
-    def test_log10(self):
-        self.assertEqual(torch.log10(self.t1), -1)
-
-    def test_log1p(self):
-        self.assertEqual(torch.log1p(self.t1), -1)
-
-    def test_log2(self):
-        self.assertEqual(torch.log2(self.t1), -1)
-
-    def test_logical_not(self):
-        self.assertEqual(torch.logical_not(self.t1), -1)
-
-    def test_logical_xor(self):
-        self.assertEqual(torch.logical_xor(self.t1, self.t2), -1)
-
-    def test_sqrt(self):
-        self.assertEqual(torch.sqrt(self.t1), -1)
-
-    def test_erf(self):
-        self.assertEqual(torch.erf(self.t1), -1)
-
-    def test_erfc(self):
-        self.assertEqual(torch.erfc(self.t1), -1)
-
-    def test_exp(self):
-        self.assertEqual(torch.exp(self.t1), -1)
-
-    def test_expm1(self):
-        self.assertEqual(torch.expm1(self.t1), -1)
-
-    def test_floor(self):
-        self.assertEqual(torch.floor(self.t1), -1)
-
-    def test_ceil(self):
-        self.assertEqual(torch.ceil(self.t1), -1)
-
-    def test_rsqrt(self):
-        self.assertEqual(torch.rsqrt(self.t1), -1)
-
-    def test_sigmoid(self):
-        self.assertEqual(torch.sigmoid(self.t1), -1)
-
-    def test_sign(self):
-        self.assertEqual(torch.sign(self.t1), -1)
-
-    def test_frac(self):
-        self.assertEqual(torch.frac(self.t1), -1)
-
-    def test_lerp(self):
-        self.assertEqual(torch.lerp(self.t1, self.t2, 2.0), -1)
-
-    def test_trunc(self):
-        self.assertEqual(torch.trunc(self.t1), -1)
-
-    def test_round(self):
-        self.assertEqual(torch.round(self.t1), -1)
-
-    def test_max(self):
-        self.assertEqual(torch.max(self.t1), -1)
-
-    def test_min(self):
-        self.assertEqual(torch.min(self.t1), -1)
-
-    def test_logsumexp(self):
-        self.assertEqual(torch.logsumexp(self.t1, 0), -1)
-
-    def test_max_elementwise(self):
-        pass
-
-    def test_min_elementwise(self):
-        pass
-
-    def test_where_bool_tensor(self):
-        self.assertEqual(torch.where(self.t1, self.t1, self.t2), -1)
-
-    def test_sub(self):
-        self.assertEqual(torch.sub(self.t1, self.t2), -1)
-
-    def test_reciprocal(self):
-        self.assertEqual(torch.reciprocal(self.t1), -1)
-
-    def test_remainder(self):
-        self.assertEqual(torch.remainder(self.t1, self.t2), -1)
-
-    def test_div(self):
-        self.assertEqual(torch.div(self.t1, self.t2), -1)
-
-    def test_fmod(self):
-        self.assertEqual(torch.fmod(self.t1, self.t2), -1)
-
-    def test_mm(self):
-        pass
-
-    def test_bmm(self):
-        self.assertEqual(torch.bmm(self.t1, self.t2), -1)
-
-    def test_addbmm(self):
-        self.assertEqual(torch.addbmm(self.t1, self.t2, self.t3), -1)
-
-    def test_baddbmm(self):
-        self.assertEqual(torch.baddbmm(self.t1, self.t2, self.t3), -1)
-
-    def test_einsum(self):
-        self.assertEqual(torch.einsum('i,j->ij', self.t1, self.t2), -1)
-
-    def test_neg(self):
-        self.assertEqual(torch.neg(self.t1), -1)
-
-    def test_pow(self):
-        self.assertEqual(torch.pow(self.t1, 2), -1)
-
-    def test_argmax(self):
-        self.assertEqual(torch.argmax(self.t1), -1)
-
-    def test_argmin(self):
-        self.assertEqual(torch.argmin(self.t1), -1)
-
-    def test_cumprod(self):
-        self.assertEqual(torch.cumprod(self.t1, 1), -1)
-
-    def test_cumsum(self):
-        self.assertEqual(torch.cumsum(self.t1, 1), -1)
-
-    def test_dist(self):
-        self.assertEqual(torch.dist(self.t1, self.t2), -1)
-
-    def test_mean(self):
-        self.assertEqual(torch.mean(self.t1), -1)
-
-    def test_median(self):
-        self.assertEqual(torch.median(self.t1), -1)
-
-    def test_mode(self):
-        self.assertEqual(torch.mode(self.t1), -1)
-
-    @unittest.skip("norm is pending")
-    def test_norm(self):
-        self.assertEqual(torch.norm(self.t1, self.t2), -1)
-
-    def test_prod(self):
-        self.assertEqual(torch.prod(self.t1), -1)
-
-    def test_std(self):
-        self.assertEqual(torch.std(self.t1), -1)
-
-    def test_std_mean(self):
-        self.assertEqual(torch.std_mean(self.t1), -1)
-
-    def test_sum(self):
-        self.assertEqual(torch.sum(self.t1), -1)
-
-    def test_unique(self):
-        self.assertEqual(torch.unique(self.t1), -1)
-
-    def test_unique_consecutive(self):
-        self.assertEqual(torch.unique_consecutive(self.t1), -1)
-
-    def test_var(self):
-        self.assertEqual(torch.var(self.t1), -1)
-
-    def test_var_mean(self):
-        self.assertEqual(torch.var(self.t1), -1)
-
-    def test_argsort(self):
-        self.assertEqual(torch.argsort(self.t1), -1)
-
-    def test_sort(self):
-        self.assertEqual(torch.sort(self.t1), -1)
-
-    def test_topk(self):
-        self.assertEqual(torch.topk(self.t1, 1), -1)
-
-    def test_chunk(self):
-        self.assertEqual(torch.chunk(self.t1, 2), -1)
-
-    def test_gather(self):
-        self.assertEqual(torch.gather(self.t1, 0, self.t2), -1)
-
-    def test_index_select(self):
-        self.assertEqual(torch.index_select(self.t1, 0, self.t2), -1)
-
-    def test__broadcast_tensors(self):
-        self.assertEqual(torch.broadcast_tensors(self.t1, self.t2), -1)
-
-    def test_split(self):
-        self.assertEqual(torch.split(self.t1, 2), -1)
-
-    def test_isfinite(self):
-        self.assertEqual(torch.isfinite(self.t1), -1)
-
-    def test_isinf(self):
-        self.assertEqual(torch.isinf(self.t1), -1)
-
-    def test_meshgrid(self):
-        self.assertEqual(torch.meshgrid(self.t1, self.t2), -1)
-
-    def test_tensordot(self):
-        self.assertEqual(torch.tensordot(self.t1, self.t2), -1)
-
-    def test_lu(self):
-        self.assertEqual(torch.lu(self.t1), -1)
+    def run(self, result=None):
+        """ Stop after first error """
+        if not result.errors:
+            super(TestApis, self).run(result)
+
+def test_generator(func, override):
+    args = inspect.getfullargspec(override)
+    nargs = len(args.args)
+    if args.defaults is not None:
+        nargs -= len(args.defaults)
+    func_args = [TensorLike() for _ in range(nargs)]
+    if args.varargs is not None:
+        func_args += [TensorLike(), TensorLike()]
+
+    msg = "torch.{} is not currently overridable".format(func.__name__)
+    @unittest.skipIf(func in TENSOR_LIKE_SKIP_TESTS, msg)
+    def test(self):
+        self.assertEqual(func(*func_args), -1)
+
+    return test
 
 if __name__ == '__main__':
+    for func, override in TENSOR_LIKE_TORCH_IMPLEMENTATIONS:
+        test_method = test_generator(func, override)
+        name = 'test_{}'.format(func.__name__)
+        test_method.__name__ = name
+        setattr(TestApis, name, test_method)
     unittest.main()
