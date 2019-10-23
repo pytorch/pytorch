@@ -65,21 +65,24 @@ def _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, ali
     return g.op("Upsample", input, mode_s=interpolate_mode, scales_f=scales)
 
 def _interpolate1d(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, scales_1, align_corners=None):
+    def symbolic_fn(g, input, output_size, *args):
+        scales_1, align_corners = sym_help.get_interpolate_attributes(interpolate_mode, dim, args)
         scales = sym_help._interpolate_get_scales_if_available(g, [scales_1])
         return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
     return symbolic_fn
 
 
 def _interpolate2d(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, scales_1, scales_2, align_corners=None):
+    def symbolic_fn(g, input, output_size, *args):
+        scales_1, scales_2, align_corners = sym_help.get_interpolate_attributes(interpolate_mode, dim, args)
         scales = sym_help._interpolate_get_scales_if_available(g, [scales_1, scales_2])
         return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
     return symbolic_fn
 
 
 def _interpolate3d(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, scales_1, scales_2, scale_3, align_corners=None):
+    def symbolic_fn(g, input, output_size, *args):
+        scales_1, scales_2, scale_3, align_corners = sym_help.get_interpolate_attributes(interpolate_mode, dim, args)
         scales = sym_help._interpolate_get_scales_if_available(g, [scales_1, scales_2, scale_3])
         return _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners)
     return symbolic_fn
@@ -93,7 +96,7 @@ upsample_bilinear2d = _interpolate2d('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate3d('upsample_trilinear3d', 5, "linear")
 
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners):
+def __interpolate(g, input, size, scale_factor, mode, align_corners):
     align_corners = sym_help._maybe_get_const(align_corners, 'b')
     if not sym_help._is_none(align_corners) and align_corners:
         return _unimplemented("interpolate", "align_corners == True")

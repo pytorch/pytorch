@@ -215,10 +215,10 @@ static void upsample_nearest3d_backward_out_cpu_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
+    IntArrayRef input_size,
     double scales_1,
     double scales_2,
-    double scales_3,
-    IntArrayRef input_size) {
+    double scales_3) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -299,25 +299,25 @@ Tensor& upsample_nearest3d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
+    IntArrayRef input_size,
     double scales_1,
     double scales_2,
-    double scales_3,
-    IntArrayRef input_size) {
+    double scales_3) {
   upsample_nearest3d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, scales_1, scales_2, scales_3, input_size);
+      grad_input, grad_output, output_size, input_size, scales_1, scales_2, scales_3);
   return grad_input;
 }
 
 Tensor upsample_nearest3d_backward_cpu(
     const Tensor& grad_output,
     IntArrayRef output_size,
+    IntArrayRef input_size,
     double scales_1,
     double scales_2,
-    double scales_3,
-    IntArrayRef input_size) {
+    double scales_3) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_nearest3d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, scales_1, scales_2, scales_3, input_size);
+      grad_input, grad_output, output_size, input_size, scales_1, scales_2, scales_3);
   return grad_input;
 }
 

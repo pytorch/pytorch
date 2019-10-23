@@ -91,9 +91,9 @@ static void upsample_bilinear2d_out_frame(
 Tensor quantized_upsample_bilinear2d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
+    bool align_corners,
     double scale_1,
-    double scale_2,
-    bool align_corners) {
+    double scale_2) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",

@@ -139,8 +139,8 @@ static void upsample_nearest1d_backward_out_cpu_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
-    double scales_1,
-    IntArrayRef input_size) {
+    IntArrayRef input_size,
+    double scales_1) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -205,21 +205,21 @@ Tensor& upsample_nearest1d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
-    double scales_1,
-    IntArrayRef input_size) {
+    IntArrayRef input_size,
+    double scales_1) {
   upsample_nearest1d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, scales_1, input_size);
+      grad_input, grad_output, output_size, input_size, scales_1);
   return grad_input;
 }
 
 Tensor upsample_nearest1d_backward_cpu(
     const Tensor& grad_output,
     IntArrayRef output_size,
-    double scales_1,
-    IntArrayRef input_size) {
+    IntArrayRef input_size,
+    double scales_1) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_nearest1d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, scales_1, input_size);
+      grad_input, grad_output, output_size, input_size, scales_1);
   return grad_input;
 }
 

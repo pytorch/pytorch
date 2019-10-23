@@ -158,9 +158,9 @@ static void upsample_bilinear2d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
+    bool align_corners,
     double scales_1,
-    double scales_2,
-    bool align_corners) {
+    double scales_2) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -214,10 +214,10 @@ static void upsample_bilinear2d_backward_out_cpu_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
-    double scales_1,
-    double scales_2,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -274,23 +274,23 @@ Tensor& upsample_bilinear2d_out_cpu(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
+    bool align_corners,
     double scales_1,
-    double scales_2,
-    bool align_corners) {
+    double scales_2) {
   upsample_bilinear2d_out_cpu_template(
-      output, input, output_size, scales_1, scales_2, align_corners);
+      output, input, output_size, align_corners, scales_1, scales_2);
   return output;
 }
 
 Tensor upsample_bilinear2d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
+    bool align_corners,
     double scales_1,
-    double scales_2,
-    bool align_corners) {
+    double scales_2) {
   auto output = at::empty({0}, input.options());
   upsample_bilinear2d_out_cpu_template(
-      output, input, output_size, scales_1, scales_2, align_corners);
+      output, input, output_size, align_corners, scales_1, scales_2);
   return output;
 }
 
@@ -298,25 +298,25 @@ Tensor& upsample_bilinear2d_backward_out_cpu(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
-    double scales_1,
-    double scales_2,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2) {
   upsample_bilinear2d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, scales_1, scales_2, input_size, align_corners);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_1, scales_2);
   return grad_input;
 }
 
 Tensor upsample_bilinear2d_backward_cpu(
     const Tensor& grad_output,
     IntArrayRef output_size,
-    double scales_1,
-    double scales_2,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_bilinear2d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, scales_1, scales_2, input_size, align_corners);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_1, scales_2);
   return grad_input;
 }
 

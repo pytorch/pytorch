@@ -194,10 +194,10 @@ static void upsample_nearest3d_backward_out_cuda_template(
     Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
+    IntArrayRef input_size,
     double scales_1,
     double scales_2,
-    double scales_3,
-    IntArrayRef input_size) {
+    double scales_3) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -294,25 +294,25 @@ Tensor& upsample_nearest3d_backward_out_cuda(
     Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
+    IntArrayRef input_size,
     double scales_1,
     double scales_2,
-    double scales_3,
-    IntArrayRef input_size) {
+    double scales_3) {
   upsample_nearest3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, scales_1, scales_2, scales_3, input_size);
+      grad_input, grad_output, output_size, input_size, scales_1, scales_2, scales_3);
   return grad_input;
 }
 
 Tensor upsample_nearest3d_backward_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
+    IntArrayRef input_size,
     double scales_1,
     double scales_2,
-    double scales_3,
-    IntArrayRef input_size) {
+    double scales_3) {
   Tensor grad_input = at::empty_like(grad_output);
   upsample_nearest3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, scales_1, scales_2, scales_3, input_size);
+      grad_input, grad_output, output_size, input_size, scales_1, scales_2, scales_3);
   return grad_input;
 }
 

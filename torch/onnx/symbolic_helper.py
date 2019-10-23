@@ -162,7 +162,11 @@ def _if_scalar_type_as(g, self, tensor):
 
 
 def _is_none(x):
-    return x.node().mustBeNone()
+    try:
+        return x.node().mustBeNone()
+    except AttributeError:
+        pass
+    return x is None
 
 def _is_value(x):
     return isinstance(x, torch._C.Value)
@@ -312,6 +316,8 @@ def _interpolate_get_scales(g, scale_factor, dim):
 def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_corners):
     from torch.onnx.symbolic_opset9 import unsqueeze
     mode = _maybe_get_const(mode, 's')
+    if 'linear' in mode:
+        mode = 'linear'
     _interpolate_warning(mode)
 
     align_corners = _maybe_get_const(align_corners, 'b')
@@ -333,6 +339,16 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     else:
         _unimplemented("Both size and scales are None in __interpolate")
     return scale_factor, mode
+
+
+def get_interpolate_attributes(mode, dim, args):
+    if mode == 'nearest':
+        align_corners = None
+        scales = args[0:2 + (dim - 1)]
+    else:
+        align_corners = args[0]
+        scales = args[1:1 + (dim - 1)]
+    return (*scales), align_corners
 
 
 def _scatter_helper(g, self, dim, index, src):
