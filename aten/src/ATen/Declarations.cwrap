@@ -763,20 +763,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_log1p
-  cname: log1p
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_exp
   cname: exp
   types:
@@ -933,20 +919,6 @@
 [[
   name: _th_erfc
   cname: erfc
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sqrt
-  cname: sqrt
   types:
     - floating_point
   backends:
