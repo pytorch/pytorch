@@ -304,47 +304,6 @@ static void gatherParametersAndBuffers(
   }
 }
 
-
-// Start tracing, treating 'inputs' as inputs to the trace, which can be
-// varied on subsequent invocations of the trace.  Any other variables
-// will be treated as constants.
-std::pair<std::shared_ptr<TracingState>, Stack> enter(
-    Stack inputs,
-    script::Module* self) {
-  if (isTracing()) {
-    AT_ERROR("Tracing can't be nested");
-  }
-  auto state = std::make_shared<TracingState>();
-  setTracingState(state);
-
-  // if we are a module, then make sure the modules parameters are in the map
-  // and mapped to accesses to the self object
-  if (self) {
-    Value* self_value =
-        state->graph->insertInput(0, "self")->setType(self->module_object()->type());
-    gatherParametersAndBuffers(state, self_value, *self);
-  }
-
-  size_t i = 0;
-  for (IValue& input : inputs) {
-    input = addInput(state, input, input.type(), state->graph->addInput());
-  }
-  return std::make_pair(state, inputs);
-}
-
-// Exit a trace, treating 'outputs' as the outputs of the trace.  These
-// are the variables whose values will be computed upon subsequent
-// invocations of the trace.
-void exit(const Stack& outputs) {
-  auto& state = getTracingState();
-  size_t i = 0;
-  for (auto& output : outputs) {
-    state->graph->registerOutput(state->getOutput(output));
-    i++;
-  }
-  setTracingState(nullptr);
-}
-
 std::pair<std::shared_ptr<TracingState>, Stack> trace(
   Stack inputs,
   std::function<Stack(Stack)> traced_fn,
@@ -353,17 +312,43 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
   script::Module* self
 ) {
   try {
-    std::shared_ptr<TracingState> state;
-    Stack trace_state_inputs;
-    std::tie(state, trace_state_inputs) = tracer::enter(std::move(inputs), self);
+// Start tracing, treating 'inputs' as inputs to the trace, which can be
+// varied on subsequent invocations of the trace.  Any other variables
+// will be treated as constants.
+    if (isTracing()) {
+      AT_ERROR("Tracing can't be nested");
+    }
+    auto state = std::make_shared<TracingState>();
+    setTracingState(state);
+
+    // if we are a module, then make sure the modules parameters are in the map
+    // and mapped to accesses to the self object
+    if (self) {
+      Value* self_value =
+          state->graph->insertInput(0, "self")->setType(self->module_object()->type());
+      gatherParametersAndBuffers(state, self_value, *self);
+    }
+
+    for (IValue& input : inputs) {
+      input = addInput(state, input, input.type(), state->graph->addInput());
+    }
     auto graph = state->graph;
 
     getTracingState()->lookup_var_name_fn = var_name_lookup_fn;
     getTracingState()->force_outplace = force_outplace;
 
-    auto out_stack = traced_fn(trace_state_inputs);
+    // Invoke the traced function
+    auto out_stack = traced_fn(inputs);
 
-    tracer::exit(out_stack);
+    // Exit a trace, treating 'out_stack' as the outputs of the trace.  These
+    // are the variables whose values will be computed upon subsequent
+    // invocations of the trace.
+    size_t i = 0;
+    for (auto& output : out_stack) {
+      state->graph->registerOutput(state->getOutput(output));
+      i++;
+    }
+    setTracingState(nullptr);
 
     if (script::getInlineEverythingMode()) {
       Inline(*graph);

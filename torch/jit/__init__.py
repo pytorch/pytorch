@@ -339,17 +339,19 @@ class ONNXTracedModule(Module):
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
 
-        state = {}
+        ret_inputs = []
+        inputs_states = []
+        outs = []
 
         def wrapper(*args):
             trace_inputs = _unflatten(args[:len(in_vars)], in_desc)
 
-            state['ret_inputs'] = tuple(x.clone() for x in args)
+            ret_inputs.append(tuple(x.clone() for x in args))
             if self._return_inputs_states:
-                state['inputs_states'] = _unflatten(args[:len(in_vars)], in_desc)
-            outs = state['outs'] = self.inner(*trace_inputs)
+                inputs_states.append(_unflatten(args[:len(in_vars)], in_desc))
+            outs.append(self.inner(*trace_inputs))
             if self._return_inputs_states:
-                state['inputs_states'] = (state['inputs_states'], trace_inputs)
+                inputs_states[0] = (inputs_states[0], trace_inputs)
             out_vars, _ = _flatten(outs)
             if len(out_vars) == 1:
                 return out_vars[0]
@@ -364,11 +366,11 @@ class ONNXTracedModule(Module):
         )
 
         if self._return_inputs:
-            return trace, state['outs'], state['ret_inputs']
+            return trace, outs[0], ret_inputs[0]
         if self._return_inputs_states:
-            return trace, state['outs'], state['inputs_states']
+            return trace, outs[0], inputs_states[0]
         else:
-            return trace, state['outs']
+            return trace, outs[0]
 
 
 def _clone_inputs(args):
