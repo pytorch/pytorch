@@ -294,6 +294,15 @@ template<class T> inline std::string to_string(T value) {
     return detail::to_string_<T>::call(value);
 }
 
+template <class T>
+constexpr const T& min(const T& a, const T& b) {
+  return (b < a) ? b : a;
+}
+
+template <class T>
+constexpr const T& max(const T& a, const T& b) {
+  return (a < b) ? b : a;
+}
 }}
 
 #endif // C10_UTIL_CPP17_H_
