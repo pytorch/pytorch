@@ -153,7 +153,7 @@ THC_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
                   THCTensor *input,
                   THCIndexTensor *target,
                   THCTensor *output,
-                  THCTensor *is_target,
+                  THCTensor *istarget,
                   int64_t reduction);
 
 THC_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
@@ -162,7 +162,7 @@ THC_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
                   THCIndexTensor *target,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  THCTensor *is_target,
+                  THCTensor *istarget,
                   int64_t reduction);
 
 THC_API void THNN_(MultiMarginCriterion_updateOutput)(
