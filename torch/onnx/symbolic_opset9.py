@@ -400,13 +400,13 @@ def unbind(g, self, dim=0):
 
 @parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
-    if dim > 1:
-        # TODO: this is a temporary hack because of the implementation details
-        # of Gather in caffe2. We need to change this as soon as possible.
-        # TODO: this breaks if index == -1
-        index_val = _parse_arg(index, 'i')
-        slice_node = sym_help._slice_helper(g, self, axes=[dim],
-                                            starts=[index_val], ends=[index_val + 1])
+    index = sym_help._maybe_get_scalar(index)
+    if (not sym_help._is_value(index)) and (index < 0):
+        if index == -1:
+            end_index = 9223372036854775807
+        else:
+            end_index = index + 1
+        slice_node = sym_help._slice_helper(g, self, axes=[dim], starts=[index], ends=[end_index])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
@@ -1266,10 +1266,15 @@ def slice(g, self, dim, start, end, step):
         _unimplemented("slice", "step!=1 is currently not supported")
     if start.node().kind() != 'onnx::Constant' or \
             end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
-        start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
-        end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
-        dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
-        return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
+        if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+            raise RuntimeError('Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice '
+                               'is a deprecated experimental op. Please use statically allocated '
+                               'variables or export to a higher opset version.')
+        else:
+            start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
+            end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
+            dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
+            return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
     else:
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
