@@ -270,6 +270,10 @@ auto Engine::thread_init(int device) -> void {
 auto Engine::thread_main(
     std::shared_ptr<GraphTask> graph_task,
     bool reentrant_thread) -> void {
+  // Either reentrant_thread should be false or we should pass in a non-null
+  // graph_task.
+  TORCH_INTERNAL_ASSERT(reentrant_thread != (graph_task == nullptr));
+
   auto queue = ready_queues_[worker_device + 1];
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
@@ -282,46 +286,50 @@ auto Engine::thread_main(
       break;
     }
 
-    if (!reentrant_thread && !(graph_task = task.base_.lock())) {
+    // local_graph_task represents the graph_task we retrieve from the queue.
+    // The outer graph_task represents the overall graph_task we need to execute
+    // for reentrant execution.
+    std::shared_ptr<GraphTask> local_graph_task;
+    if (!reentrant_thread && !(local_graph_task = task.base_.lock())) {
       LOG(INFO) << "GraphTask for function " << task.fn_->name()
                 << " is no longer valid, skipping execution";
       continue;
     }
 
-    if (task.fn_ && !graph_task->has_error_.load()) {
-      GradMode::set_enabled(graph_task->grad_mode_);
+    if (task.fn_ && !local_graph_task->has_error_.load()) {
+      GradMode::set_enabled(local_graph_task->grad_mode_);
       try {
-        evaluate_function(graph_task, task.fn_.get(), task.inputs_);
+        evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
       } catch (std::exception& e) {
-        thread_on_exception(graph_task, task.fn_, e);
+        thread_on_exception(local_graph_task, task.fn_, e);
       }
     }
     // Notify downstream about the completion of tasks depending
     // on both where the task was executed, and who owned the overall
     // graph (in case of reentrant execution.)  See Note [Reentrant backwards].
-    auto base_owner = graph_task->owner_;
+    auto base_owner = local_graph_task->owner_;
     // Task from a non-worker thread. Easy case.
     if (base_owner == NO_DEVICE) {
-      if (--graph_task->outstanding_tasks_ == 0) {
+      if (--local_graph_task->outstanding_tasks_ == 0) {
         // Lock mutex to notify the GraphTask waiting on not_done_
-        std::lock_guard<std::mutex> lock(graph_task->mutex_);
-        graph_task->not_done_.notify_all();
+        std::lock_guard<std::mutex> lock(local_graph_task->mutex_);
+        local_graph_task->not_done_.notify_all();
       }
     } else {
       // If it's a task initiated from this thread, decrease the counter, but
       // don't do anything - loop condition will do all checks for us next.
       if (base_owner == worker_device) {
-        --graph_task->outstanding_tasks_;
+        --local_graph_task->outstanding_tasks_;
         // Otherwise send a dummy function task to the owning thread just to
         // ensure that it's not sleeping. If it has work, it might see that
         // graph_task->outstanding_tasks_ == 0 before it gets to the task, but
         // it's a no-op anyway.
       } else if (base_owner != worker_device) {
-        if (--graph_task->outstanding_tasks_ == 0) {
+        if (--local_graph_task->outstanding_tasks_ == 0) {
           // Synchronize outstanding_tasks_ with queue mutex
           std::atomic_thread_fence(std::memory_order_release);
           ready_queue_by_index(base_owner)
-              .push(NodeTask(graph_task, nullptr, InputBuffer(0)));
+              .push(NodeTask(local_graph_task, nullptr, InputBuffer(0)));
         }
       }
     }
@@ -352,6 +360,7 @@ void Engine::reentrant_thread_init() {
     std::shared_ptr<GraphTask> graph_task;
     if (!(graph_task = task.lock())) {
       LOG(INFO) << "GraphTask has expired, skipping reentrant execution";
+      continue;
     }
     set_device(graph_task->owner_);
     total_depth = graph_task->reentrant_depth_;
@@ -360,9 +369,11 @@ void Engine::reentrant_thread_init() {
 }
 
 void Engine::thread_on_exception(
-    std::shared_ptr<GraphTask> graph_task,
+    std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> fn,
     std::exception& e) {
+  // Use std::current_exception() instead of passed in exception to get the
+  // appropriate exception_ptr.
   graph_task->set_exception(std::current_exception(), fn);
 }
 
@@ -459,7 +470,7 @@ void validate_outputs(
 }
 
 static variable_list call_function(
-    std::shared_ptr<GraphTask> graph_task,
+    std::shared_ptr<GraphTask>& graph_task,
     Node* func,
     InputBuffer& inputBuffer) {
   bool prev_checkpoint_valid_state = checkpoint_valid;
@@ -516,7 +527,7 @@ static variable_list call_function(
 }
 
 void Engine::evaluate_function(
-    std::shared_ptr<GraphTask> graph_task,
+    std::shared_ptr<GraphTask>& graph_task,
     Node* func,
     InputBuffer& inputs) {
   // If exec_info_ is not empty, we have to instrument the execution
@@ -531,8 +542,10 @@ void Engine::evaluate_function(
             inputs[capture.input_idx_];
       }
     }
-    if (!fn_info.needed_)
+    if (!fn_info.needed_) {
+      // Skip execution if we don't need to execute the function.
       return;
+    }
   }
 
   // Switches to a function's CUDA stream (if applicable) before calling it

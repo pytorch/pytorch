@@ -194,7 +194,7 @@ struct TORCH_API Engine {
 protected:
   void compute_dependencies(Node* root, GraphTask& task);
   void evaluate_function(
-      std::shared_ptr<GraphTask> graph_task,
+      std::shared_ptr<GraphTask>& graph_task,
       Node* func,
       InputBuffer& inputs);
   ReadyQueue& ready_queue(at::Device device);
@@ -202,7 +202,7 @@ protected:
   void start_threads();
   virtual void thread_init(int device);
   virtual void thread_on_exception(
-      std::shared_ptr<GraphTask> graph_task,
+      std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> fn,
       std::exception& e);
   virtual void thread_main(

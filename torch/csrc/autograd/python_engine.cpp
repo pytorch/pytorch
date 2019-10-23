@@ -42,7 +42,7 @@ void PythonEngine::thread_init(int device) {
 }
 
 void PythonEngine::thread_on_exception(
-    std::shared_ptr<GraphTask> graph_task,
+    std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> fn,
     std::exception& e) {
   auto python_err = dynamic_cast<python_error*>(&e);

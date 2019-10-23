@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from functools import wraps
 import threading
 from os import getenv
 
@@ -61,6 +62,7 @@ def dist_init(clean_shutdown=True):
     """
 
     def decorator(test_method):
+        @wraps(test_method)
         def wrapper(self, *arg, **kwargs):
             self.worker_id = self.rank
             global _ALL_NODE_NAMES
