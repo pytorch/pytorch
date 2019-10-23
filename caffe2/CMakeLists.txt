@@ -1068,7 +1068,6 @@ endif()
 if(USE_CUDA)
 
   target_link_libraries(torch INTERFACE torch::cudart)
-  target_link_libraries(torch PUBLIC c10_cuda)
 
   target_link_libraries(torch PUBLIC ${TORCH_CUDA_LIBRARIES})
 
@@ -1104,7 +1103,6 @@ if(USE_ROCM)
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch PRIVATE ${HIP_CXX_FLAGS})
-  target_link_libraries(torch PUBLIC c10_hip)
 
   if(NOT INTERN_BUILD_MOBILE)
     # TODO: Cut this over to ATEN_HIP_FILES_GEN_LIB.  At the moment, we
