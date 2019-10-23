@@ -5,9 +5,10 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, Future, is_future, _qualified_name
+    is_optional, Future, is_future, _qualified_name, Any
 from torch._C import TensorType, TupleType, FloatType, IntType, \
-    ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, FutureType
+    ListType, StringType, DictType, BoolType, OptionalType, ClassType, \
+    InterfaceType, FutureType, AnyType
 from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
@@ -26,6 +27,7 @@ class Module(object):
             return self.members[name]
         except KeyError:
             raise RuntimeError("Module {} has no member called {}".format(self.name, name))
+
 
 class EvalEnv(object):
     env = {
@@ -92,10 +94,7 @@ def get_num_params(fn, loc):
     elif hasattr(py_def.args, 'kwonlyargs') and len(py_def.args.kwonlyargs) > 0:
         return None
     else:
-        num_params = len(py_def.args.args)
-        if inspect.ismethod(fn):
-            num_params = num_params - 1
-        return num_params
+        return len(py_def.args.args)
 
 
 def parse_type_line(type_line, rcb, loc):
@@ -240,6 +239,8 @@ def ann_to_type(ann, resolver=None):
         return StringType.get()
     elif ann is bool:
         return BoolType.get()
+    elif ann is Any:
+        return AnyType.get()
     elif hasattr(ann, "__torch_script_class__"):
         return ClassType(_qualified_name(ann))
     elif hasattr(ann, "__torch_script_interface__"):
@@ -254,6 +255,7 @@ def ann_to_type(ann, resolver=None):
 
 
 __all__ = [
+    'Any',
     'List',
     'BroadcastingList1',
     'BroadcastingList2',
@@ -270,6 +272,7 @@ __all__ = [
     'ListType',
     'StringType',
     'DictType',
+    'AnyType',
     'Module',
     # TODO: Consider not exporting these during wildcard import (reserve
     # that for the types; for idiomatic typing code.)

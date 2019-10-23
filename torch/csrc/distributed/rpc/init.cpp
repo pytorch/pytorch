@@ -71,6 +71,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
                 return PyRRef::unpickle(t);
               }));
 
+  // future.wait() should not be called after join_rpc(), e.g., pythonRpcHandler
+  // is cleaned up in join_rpc(), after join_rpc(), python objects returned
+  // from rpc python call can not be resolved.
   auto futureMessage =
       shared_ptr_class_<FutureMessage>(module, "FutureMessage")
           .def(
@@ -103,12 +106,17 @@ PyObject* rpc_init(PyObject* /* unused */) {
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("_init_rref_context", [](std::shared_ptr<RpcAgent> agent) {
-    RRefContext::initInstance(std::move(agent));
+  module.def("_start_rpc_agent", [](const std::shared_ptr<RpcAgent>& agent) {
+    RpcAgent::setDefaultRpcAgent(agent);
+    agent->start();
   });
 
   module.def("_destroy_rref_context", []() {
-    RRefContext::getInstance()->destroyInstance();
+    RRefContext::getInstance().destroyInstance();
+  });
+
+  module.def("_cleanup_python_rpc_handler", []() {
+    PythonRpcHandler::getInstance().cleanup();
   });
 
   module.def(

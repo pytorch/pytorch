@@ -158,6 +158,28 @@ class TORCH_API SoftmaxImpl : public torch::nn::Cloneable<SoftmaxImpl> {
 
 TORCH_MODULE(Softmax);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softmin ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the Softmin function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softmin to learn
+/// about the exact behavior of this module.
+class TORCH_API SoftminImpl : public torch::nn::Cloneable<SoftminImpl> {
+ public:
+  explicit SoftminImpl(int64_t dim) : SoftminImpl(SoftminOptions(dim)) {}
+  explicit SoftminImpl(const SoftminOptions& options_);
+  
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+  
+  /// Pretty prints the `Softmin` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  SoftminOptions options;
+};
+
+TORCH_MODULE(Softmin);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LogSoftmax ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the LogSoftmax function element-wise.
@@ -179,6 +201,23 @@ class TORCH_API LogSoftmaxImpl : public torch::nn::Cloneable<LogSoftmaxImpl> {
 };
 
 TORCH_MODULE(LogSoftmax);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softmax2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the Softmax2d function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softmax2d to learn
+/// about the exact behavior of this module.
+class TORCH_API Softmax2dImpl : public torch::nn::Cloneable<Softmax2dImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Softmax2d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(Softmax2d);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PReLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -331,6 +370,103 @@ class TORCH_API SoftplusImpl : public torch::nn::Cloneable<SoftplusImpl> {
 };
 
 TORCH_MODULE(Softplus);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the soft shrinkage function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softshrink to learn
+/// about the exact behavior of this module.
+class TORCH_API SoftshrinkImpl : public torch::nn::Cloneable<SoftshrinkImpl> {
+ public:
+  explicit SoftshrinkImpl(const SoftshrinkOptions& options_ = {});
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Softshrink` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  SoftshrinkOptions options;
+};
+
+TORCH_MODULE(Softshrink);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Softsign ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies Softsign over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Softsign to learn
+/// about the exact behavior of this module.
+class TORCH_API SoftsignImpl : public torch::nn::Cloneable<SoftsignImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Softsign` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(Softsign);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Tanh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies Tanh over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Tanh to learn
+/// about the exact behavior of this module.
+class TORCH_API TanhImpl : public torch::nn::Cloneable<TanhImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Tanh` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(Tanh);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Tanhshrink ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies Tanhshrink over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Tanhshrink to learn
+/// about the exact behavior of this module.
+class TORCH_API TanhshrinkImpl : public torch::nn::Cloneable<TanhshrinkImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Tanhshrink` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(Tanhshrink);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Threshold ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the Threshold function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.Threshold to learn
+/// about the exact behavior of this module.
+class TORCH_API ThresholdImpl : public torch::nn::Cloneable<ThresholdImpl> {
+ public:
+  ThresholdImpl(double threshold, double value)
+    : ThresholdImpl(ThresholdOptions(threshold, value)) {}
+  explicit ThresholdImpl(const ThresholdOptions& options_);
+
+  Tensor forward(Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `Threshold` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ThresholdOptions options;
+};
+
+TORCH_MODULE(Threshold);
 
 } // namespace nn
 } // namespace torch
