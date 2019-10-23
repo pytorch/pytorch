@@ -225,9 +225,9 @@ class TransformerDecoder(Module):
 
         for mod in self.layers:
             output = mod(output, memory, tgt_mask=tgt_mask,
-                                    memory_mask=memory_mask,
-                                    tgt_key_padding_mask=tgt_key_padding_mask,
-                                    memory_key_padding_mask=memory_key_padding_mask)
+                         memory_mask=memory_mask,
+                         tgt_key_padding_mask=tgt_key_padding_mask,
+                         memory_key_padding_mask=memory_key_padding_mask)
 
         if self.norm is not None:
             output = self.norm(output)
