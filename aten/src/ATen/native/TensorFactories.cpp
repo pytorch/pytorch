@@ -877,15 +877,8 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  bool expanded = false;
-  if (!src.is_contiguous()) {
-    auto strides = src.strides().vec();
-    expanded = std::find(strides.begin(), strides.end(), 0) != strides.end();
-  }
   auto memory_format =
-    optional_memory_format.value_or(expanded ? MemoryFormat::Contiguous : MemoryFormat::Preserve);
-  //auto memory_format =
-  //    optional_memory_format.value_or(MemoryFormat::Preserve);
+      optional_memory_format.value_or(MemoryFormat::Preserve);
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
       // Copy all strides
