@@ -27,7 +27,6 @@ DistAutogradContainer::DistAutogradContainer()
       max_id_(0) {
   terminateWatchdog_.store(false);
   cleanupWatchdogThread_ = std::thread(&DistAutogradContainer::cleanupContextWatchdog, this);
-  std::chrono::time_point<std::chrono::system_clock> creation_time = std::chrono::system_clock::now(); 
 }
 
 DistAutogradContainer::~DistAutogradContainer() {
@@ -92,7 +91,6 @@ DistAutogradContext& DistAutogradContainer::getOrCreateContext(
                           std::forward_as_tuple(context_id),
                           std::forward_as_tuple(context_id))
                       .first->second;
-  context_queue_.push(std::make_tuple(std::chrono::system_clock::now(), context_id));
   return context;
 }
 
@@ -115,7 +113,6 @@ const DistAutogradContext& DistAutogradContainer::newContext() {
                           std::forward_as_tuple(next_context_id_),
                           std::forward_as_tuple(next_context_id_))
                       .first->second;
-  context_queue_.push(std::make_tuple(std::chrono::system_clock::now(), next_context_id_));
   current_context_id_ = next_context_id_++;
   return context;
 }
@@ -135,8 +132,7 @@ DistAutogradContext& DistAutogradContainer::currentContext() {
   TORCH_CHECK(
       it != autograd_context_.end(),
       "Couldn't find autograd context "
-      "data for current autograd context id."
-      "Worker Id: ", getWorkerId());
+      "data for current autograd context id.");
   return it->second;
 }
 
