@@ -329,8 +329,8 @@ static void cumsum_kernel(Tensor& result, const Tensor& self, int64_t dim) {
         {self, result},
         dim,
         [&](int64_t i, TensorList tl) {
-          auto self_ptr = tl[0].accessor<scalar_t, 1>();
-          auto result_ptr = tl[1].accessor<scalar_t, 1>();
+          auto self_ptr = tl[0].accessor<scalar_t, 0>();
+          auto result_ptr = tl[1].accessor<scalar_t, 0>();
           scalar_t cumsum = static_cast<scalar_t>(0);
           for (int64_t j = 0; j < self_ptr.size(0); j++) {
             cumsum += self_ptr[j];
