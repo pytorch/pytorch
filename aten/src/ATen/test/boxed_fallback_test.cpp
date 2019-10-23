@@ -19,8 +19,7 @@ using namespace at;
 
 // TODO: This to be rewritten when bwasti sets up direct access to
 // JIT data structures
-std::shared_ptr<torch::jit::Operator> getOperator(const char* schema_str) {
-  auto schema = torch::jit::parseSchema(schema_str);
+std::shared_ptr<torch::jit::Operator> getOperator(const c10::FunctionSchema& schema) {
   auto s = Symbol::fromQualString(schema.name());
   auto operators = torch::jit::getAllOperatorsFor(s);
   // Find the exact match
@@ -42,9 +41,9 @@ static int64_t override_call_count = 0;
 
 // Mode implementation
 
-void generic_mode_fallback(const char* schema_str, torch::jit::Stack* stack) {
+void generic_mode_fallback(const c10::FunctionSchema& schema, torch::jit::Stack* stack) {
   override_call_count++;
-  auto operation = getOperator(schema_str)->getOperation();
+  auto operation = getOperator(schema)->getOperation();
   c10::impl::ExcludeTensorTypeIdGuard guard(TensorTypeId::TESTING_ONLY_GenericModeTensorId);
   auto offset = operation(*stack);
   TORCH_INTERNAL_ASSERT(offset == 0);
@@ -65,12 +64,11 @@ struct GenericWrapperTensorImpl : public c10::TensorImpl {
   at::Tensor rep_;
 };
 
-void generic_wrapper_fallback(const char* schema_str, torch::jit::Stack* stack) {
+void generic_wrapper_fallback(const c10::FunctionSchema& schema, torch::jit::Stack* stack) {
   override_call_count++;
-  auto op = getOperator(schema_str);
+  auto op = getOperator(schema);
   auto operation = op->getOperation();
 
-  const auto& schema = op->schema();
   auto num_arguments = schema.arguments().size();
   auto num_returns = schema.returns().size();
 
