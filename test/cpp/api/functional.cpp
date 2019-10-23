@@ -1131,7 +1131,7 @@ TEST_F(FunctionalTest, Interpolate) {
   {
     // 1D interpolation
     auto input = torch::ones({1, 1, 2});
-    auto options = InterpolationOptions()
+    auto options = InterpolateOptions()
                        .size(std::vector<int64_t>{4})
                        .mode(torch::kNearest);
     auto output = F::interpolate(input, options);
@@ -1181,31 +1181,31 @@ TEST_F(FunctionalTest, Interpolate) {
   {
     auto input = torch::randn({3, 2, 2});
     ASSERT_THROWS_WITH(
-        F::interpolate(input[0], InterpolationOptions().size({{4, 4}})),
+        F::interpolate(input[0], InterpolateOptions().size({{4, 4}})),
         "Input Error: Only 3D, 4D and 5D input Tensors supported (got 2D) "
         "for the modes: nearest | linear | bilinear | bicubic | trilinear (got Nearest)");
     ASSERT_THROWS_WITH(
         F::interpolate(
             torch::reshape(input, {1, 1, 1, 3, 2, 2}),
-            InterpolationOptions().size({{1, 1, 1, 3, 4, 4}})),
+            InterpolateOptions().size({{1, 1, 1, 3, 4, 4}})),
         "Input Error: Only 3D, 4D and 5D input Tensors supported (got 6D) "
         "for the modes: nearest | linear | bilinear | bicubic | trilinear (got Nearest)");
     ASSERT_THROWS_WITH(
-        F::interpolate(input, InterpolationOptions()),
+        F::interpolate(input, InterpolateOptions()),
         "either size or scale_factor should be defined");
     ASSERT_THROWS_WITH(
         F::interpolate(
             input,
-            InterpolationOptions().size({{3, 4, 4}}).scale_factor({{0.5}})),
+            InterpolateOptions().size({{3, 4, 4}}).scale_factor({{0.5}})),
         "only one of size or scale_factor should be defined");
     ASSERT_THROWS_WITH(
-        F::interpolate(input, InterpolationOptions().scale_factor({{3, 2}})),
+        F::interpolate(input, InterpolateOptions().scale_factor({{3, 2}})),
         "scale_factor shape must match input shape. "
         "Input is 1D, scale_factor size is 2");
     ASSERT_THROWS_WITH(
         F::interpolate(
             input,
-            InterpolationOptions()
+            InterpolateOptions()
                 .mode(torch::kNearest)
                 .align_corners(true)),
         "align_corners option can only be set with the "

@@ -13,7 +13,7 @@ namespace torch {
 namespace nn {
 
 /// Options for a `D`-dimensional interpolate functional.
-struct TORCH_API InterpolationOptions {
+struct TORCH_API InterpolateOptions {
   /// output spatial sizes.
   TORCH_ARG(c10::optional<std::vector<int64_t>>, size) = c10::nullopt;
 
@@ -38,7 +38,7 @@ struct TORCH_API InterpolationOptions {
 };
 
 /// Options for a `D`-dimensional Upsample module.
-using UpsampleOptions = InterpolationOptions;
+using UpsampleOptions = InterpolateOptions;
 
 } // namespace nn
 } // namespace torch

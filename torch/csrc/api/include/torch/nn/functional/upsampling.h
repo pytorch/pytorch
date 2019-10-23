@@ -9,7 +9,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
-inline Tensor interpolate(const Tensor& input, InterpolationOptions options) {
+inline Tensor interpolate(const Tensor& input, InterpolateOptions options) {
   auto _check_size_scale_factor = [options](size_t dim) {
     if (options.size() == c10::nullopt &&
         options.scale_factor() == c10::nullopt) {
