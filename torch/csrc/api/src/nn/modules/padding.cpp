@@ -21,11 +21,11 @@ void ReflectionPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 }
 
 Tensor ReflectionPad1dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode(torch::kReflect));
+  return F::pad(input, PadOptions(*options.padding()).mode(torch::kReflect));
 }
 
 Tensor ReflectionPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode(torch::kReflect));
+  return F::pad(input, PadOptions(*options.padding()).mode(torch::kReflect));
 }
 
 template class ReflectionPadImpl<1, ReflectionPad1dImpl>;
@@ -47,15 +47,15 @@ void ReplicationPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 }
 
 Tensor ReplicationPad1dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode(torch::kReplicate));
+  return F::pad(input, PadOptions(*options.padding()).mode(torch::kReplicate));
 }
 
 Tensor ReplicationPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode(torch::kReplicate));
+  return F::pad(input, PadOptions(*options.padding()).mode(torch::kReplicate));
 }
 
 Tensor ReplicationPad3dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode(torch::kReplicate));
+  return F::pad(input, PadOptions(*options.padding()).mode(torch::kReplicate));
 }
 
 template class ReplicationPadImpl<1, ReplicationPad1dImpl>;
