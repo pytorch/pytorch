@@ -170,18 +170,7 @@ IValue Unpickler::parse_ivalue() {
 }
 
 double Unpickler::readFloat() {
-  AT_ASSERT(sizeof(double) == 8);
-  double big_endian = read<double>();
-  double little_endian;
-
-  // Pickle floats are big endian, so reverse the bytes
-  auto big_endian_ptr = reinterpret_cast<const char*>(&big_endian);
-  std::reverse_copy(
-      big_endian_ptr,
-      big_endian_ptr + sizeof(big_endian),
-      reinterpret_cast<char*>(&little_endian));
-
-  return little_endian;
+  return swapDoubleEndian(read<double>());
 }
 
 void Unpickler::run() {

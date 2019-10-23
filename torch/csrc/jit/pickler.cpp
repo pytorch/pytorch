@@ -403,13 +403,8 @@ void Pickler::pushSpecializedList(
 }
 
 void Pickler::pushDouble(double value) {
-  AT_ASSERT(sizeof(double) == 8);
-  char* bytes = reinterpret_cast<char*>(&value);
-
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
-  for (size_t i = 0; i < 8; ++i) {
-    push<uint8_t>(bytes[8 - i - 1]);
-  }
+  push<double>(swapDoubleEndian(value));
 }
 
 void Pickler::pushLong(const std::string& data) {

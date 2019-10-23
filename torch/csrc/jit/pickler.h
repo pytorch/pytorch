@@ -266,5 +266,17 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 // otherwise return false
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
+// Python pickle format is big endian.
+namespace {
+double swapDoubleEndian(double value) {
+  static_assert(sizeof(double) == 8, "double length");
+  double d;
+  const char* const bytes = reinterpret_cast<char*>(&value);
+  char* const out = reinterpret_cast<char*>(&d);
+  std::reverse_copy(bytes, bytes + sizeof(double), out);
+  return *reinterpret_cast<double*>(out);
+}
+}
+
 } // namespace jit
 } // namespace torch
