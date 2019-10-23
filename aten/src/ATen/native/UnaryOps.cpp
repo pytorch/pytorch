@@ -236,14 +236,14 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 }
 
 Tensor& cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dimension) {
-  TORCH_CHECK(dimension >= 0 && dimension < self.dim(), "dimension ", dimension, " out of range");
+  int64_t dim = maybe_wrap_dim(dimension, self.dim());
   auto device1 = self.type().device_type();
   TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cumsum only supports CPU and CUDA devices, self got: ", device1);
   auto device2 = result.type().device_type();
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cumsum only supports CPU and CUDA devices, result got: ", device2);
   TORCH_CHECK(device1 == device2, "self and result must have the same device type. self: ", device1, " result: ", device2);
   TORCH_CHECK(!self.is_cuda() || self.get_device() == result.get_device(), "device of self (", self.get_device(), ") must match device of result (", result.get_device(), ")");
-  cumsum_stub(device1, result, self, dimension);
+  cumsum_stub(device1, result, self, dim);
   return result;
 }
 
