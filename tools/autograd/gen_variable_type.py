@@ -470,7 +470,7 @@ def gen_variable_type(out, aten_declarations, template_path):
     registration_declarations = []
 
     for declaration in aten_declarations:
-        if dispatch_strategy(declaration) == 'use_derived':
+        if dispatch_strategy(declaration) == 'use_derived' or declaration['is_factory_method']:
             registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
 
     env = {
