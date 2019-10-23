@@ -354,8 +354,8 @@ class CosineAnnealingLR(_LRScheduler):
     :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
 
     .. math::
-        \eta_{t+1} = \eta_{min} + (\eta_t - \eta_{min})\frac{1 +
-        \cos(\frac{T_{cur}+1}{T_{max}}\pi)}{1 + \cos(\frac{T_{cur}}{T_{max}}\pi)},
+        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 +
+        \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right)
         T_{cur} \neq (2k+1)T_{max};\\
         \eta_{t+1} = \eta_{t} + (\eta_{max} - \eta_{min})\frac{1 -
         \cos(\frac{1}{T_{max}}\pi)}{2},
@@ -367,8 +367,8 @@ class CosineAnnealingLR(_LRScheduler):
     solely by this scheduler, the learning rate at each step becomes:
 
     .. math::
-        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})(1 +
-        \cos(\frac{T_{cur}}{T_{max}}\pi))
+        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 +
+        \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right)
 
     It has been proposed in
     `SGDR: Stochastic Gradient Descent with Warm Restarts`_. Note that this only
@@ -816,11 +816,11 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
     of epochs between two warm restarts in SGDR:
 
     .. math::
-        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})(1 +
-        \cos(\frac{T_{cur}}{T_{i}}\pi))
+        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 +
+        \cos\left(\frac{T_{cur}}{T_{i}}\pi\right)\right)
 
     When :math:`T_{cur}=T_{i}`, set :math:`\eta_t = \eta_{min}`.
-    When :math:`T_{cur}=0`(after restart), set :math:`\eta_t=\eta_{max}`.
+    When :math:`T_{cur}=0` after restart, set :math:`\eta_t=\eta_{max}`.
 
     It has been proposed in
     `SGDR: Stochastic Gradient Descent with Warm Restarts`_.
