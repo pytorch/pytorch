@@ -155,6 +155,8 @@ should write your code this way:
 
 .. autoclass:: torch.optim.lr_scheduler.LambdaLR
     :members:
+.. autoclass:: torch.optim.lr_scheduler.MultiplicativeLR
+    :members:
 .. autoclass:: torch.optim.lr_scheduler.StepLR
     :members:
 .. autoclass:: torch.optim.lr_scheduler.MultiStepLR
