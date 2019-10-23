@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <memory>
 #include <unordered_set>
 
@@ -141,23 +142,12 @@ struct BailOutGraphBuilderForNode {
     buildBailOutBlockFrom(outer_node->next());
   }
 
-  void mapLoopCounts(Node *n) {
-
-    auto loopCounts = collectLoopCounts(n);
-    for (auto lc : loopCounts) {
-      getOrAddInputForValue(lc);
-    }
-  }
-
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
 
     // add graph inputs for guard's input
     // and loop counts for loops `n` is contained in
     // to make sure we can line bailout grap's inputs up properly
     // with arguments to this BailOut node.
-
-    // getOrAddInputForValue(n->input(0));
-    // mapLoopCounts(n);
     for (auto bi : n->inputs()) {
       getOrAddInputForValue(bi);
     }
@@ -249,7 +239,6 @@ struct BailOutInserter {
       if (it->kind() == prim::Guard) {
         auto bailout_node = b->owningGraph()->create(prim::BailOut);
         bailouts_.push_back(bailout_node);
-        
 
         const auto& live_inputs = liveness_sets_[*it];
 
@@ -257,8 +246,9 @@ struct BailOutInserter {
         // currently, there's always one guaded input
         bailout_node->addInput(it->input());
 
-        // pass loop counts in the same order
-        // a bailout graph expects them
+        // collect loop counts since liveness won't collect them
+        // if they aren't used explicitly, but they are used
+        // by BailOut graphs if we trigger a bailout inside a loop
         auto loopCounts = collectLoopCounts(*it);
         for (auto lc : loopCounts) {
           bailout_node->addInput(lc);
@@ -280,9 +270,7 @@ struct BailOutInserter {
         }
 
         bailout_node->output()->setType(it->output()->type());
-        
         bailout_node->i_(attr::index, bailout_index_++);
-        
         // we can't immediately replace nodes since this action will corrupt
         // the liveness sets of following BailOut nodes if any of their
         // arguments are BailOut nodes themselves
@@ -352,9 +340,8 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
   auto orig_bailout_node =
       locateBailOutNodeInUnoptimizedGraph(orig->block(), bailout_index);
 
-  std::cout << "bailout triggered for " << *orig_bailout_node << std::endl;
-  std::cout << "orig bailout graph:\n";
-  orig->dump();
+  GRAPH_DEBUG("bailout triggered for ", *orig_bailout_node);
+  GRAPH_DUMP("original bailout graph ", orig);
   TORCH_INTERNAL_ASSERT(
       orig_bailout_node->inputs().at(0)->type()->cast<FunctionType>() ==
       nullptr);

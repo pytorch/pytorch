@@ -37,14 +37,6 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
 
-  {
-    const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
-    if (ppg) {
-          std::cout << "getExecutorMode: " << getExecutorMode() << std::endl;
-          std::cout << "getProfilingMode: " << getProfilingMode() << std::endl;
-          std::cout << "graph executor: " << this << std::endl;
-    }
-  }
   if (optimized_plan_) {
     return *optimized_plan_;
   }
@@ -54,31 +46,14 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     if (!pr_) {
       pr_ = ProfilingRecord::instrumentGraph(prepareGraph(graph, stack));
       auto copy = pr_->graph()->copy();
-      
-
-      // std::cout << "after instrumentation:\n";
-      // copy->dump();
       LowerGradOf(*copy);
       specializeAutogradZero(*copy);
       runRequiredPasses(copy);
-      // RemoveExpands(copy);
-      // CanonicalizeOps(copy);
-      // EliminateDeadCode(copy);
-      const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
-      if (ppg) {
-        std::cout << "profiled graph for " << this << std::endl;
-        copy->dump();
-      }
-      
+      GRAPH_DUMP("Profiled Graph: ", copy);      
       profiling_plan_ = ExecutionPlan(copy);
       // fall-through
     }
 
-
-    const char* debussy = getenv("DEBUSSY");
-    if (debussy){
-      std::cout << "DEBUSSY\n";
-    }
     if (!pr_->ready()) {
       return *profiling_plan_;
     }
@@ -94,30 +69,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     return *optimized_plan_;
   }
 
-  // std::cout << "before insert guards:\n";
-  // copy->dump();
-  // insert bailouts
   InsertGuards(copy);
-  // get rid of autograd specific ops
-  // we can probably make guard_elimination.cpp
-  // to handle these ops
-
-  EliminateRedundantGuards(copy);
-  //if (getProfilingMode()) {
-    //specializeAutogradZero(*copy);
-  //}
-  // hoist out GradOf blocks
-  // otherwise we will need to teach
-  // liveness and buildBailOut graphs
-  // about them
-  
-  //LowerGradOf(*copy);
-
-
-  
-  // remove foldable ifs to help EliminateRedundantGuards
-  //ConstantPropagation(copy);
-
   LowerGradOf(*copy);
   // constant fold into ConstantChunk
   // this optimization doesn't use any profiling information
@@ -130,25 +82,14 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   }
 
   specializeAutogradZero(*copy);
-  runRequiredPasses(copy);
-  // if (!getProfilingMode()) {
-  //   // PropagateInputShapes is likely a no-op since we don't specialize
-
-  //   PropagateInputShapes(copy);
-  //   PropagateRequiresGrad(copy);
-  // }
-  
+  runRequiredPasses(copy);  
   ConstantPropagation(copy);
   runOptimization(copy);
 
   // TODO: insert grad propagation
   if (needsGradient(copy)) {
-    // auto diff_nodes = CreateAutodiffSubgraphs(
-    //     copy,
-    //     getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     auto diff_nodes = CreateAutodiffSubgraphs(
     copy,
-    //isFusableDefault,
     getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     for (Node *dnode : diff_nodes) {
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
@@ -165,12 +106,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     runNondiffOptimization(copy);
   }
   EliminateDeadCode(copy);
-
-  const static auto *ppg = std::getenv("PYTORCH_PRINT_GRAPH");
-  if (ppg) {
-    std::cout << "optimized graph for" << this << std::endl;
-    copy->dump();
-  }
+  GRAPH_DUMP("Optimized Graph : ", copy);
   // cache
   optimized_plan_ = ExecutionPlan(copy);
   return *optimized_plan_;
@@ -181,7 +117,6 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   GraphExecutorState state;
   TORCH_INTERNAL_ASSERT(optimized_plan_);
   auto opt_plan = *optimized_plan_;
-  std::cout << "getting DebugState for " << this << std::endl;
   state.execution_plans.emplace(ArgumentSpec{0, 0}, opt_plan);
   return state;
 }

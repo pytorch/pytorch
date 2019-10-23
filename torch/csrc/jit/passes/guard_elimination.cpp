@@ -17,21 +17,11 @@ struct GuardElimination {
 
   void run() {
 
-    // std::cout << "before moveGuardsToDefs\n";
-    // graph_->dump();
     size_t attempts = 5;
     while (attempts-- && moveGuardsToDefs(graph_->block())) {}
-    // std::cout << "after moveGuardsToDefs\n";
-    // graph_->dump();
-    // GRAPH_DUMP("After moveGuardsToDefs", graph_);
+    GRAPH_DUMP("After moveGuardsToDefs", graph_);
     coalesceGuards(graph_->block());
-    // std::cout << "after coalesceGuards\n";
-    // graph_->dump();
     GRAPH_DUMP("After coalesceGuards", graph_);
-    static const auto* pavg = getenv("PGE");
-    if (pavg) {
-        graph_->dump();
-    }
     eliminateRedundantGuards(graph_->block());
     GRAPH_DUMP("After eliminateRedundantGuards", graph_);
   }
@@ -185,15 +175,6 @@ struct GuardElimination {
       } else {
         GRAPH_DEBUG("input ", input->debugName(), " isn't guarded, type ",
                     *input->type());
-
-
-        static const auto* pavg = getenv("PGE");
-        if (pavg) {
-          if (n->kind() == aten::avg_pool2d) {
-            std::cout<< "input " << input->debugName() << " isn't guarded, type " << *input->type();
-          }
-        }
-
         all_inputs_guarded = false;
         break;
       }
