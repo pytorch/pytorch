@@ -1183,13 +1183,13 @@ TEST_F(FunctionalTest, Interpolate) {
     ASSERT_THROWS_WITH(
         F::interpolate(input[0], InterpolationOptions().size({{4, 4}})),
         "Input Error: Only 3D, 4D and 5D input Tensors supported (got 2D) "
-        "for the modes: nearest | linear | bilinear | bicubic | trilinear");
+        "for the modes: nearest | linear | bilinear | bicubic | trilinear (got Nearest)");
     ASSERT_THROWS_WITH(
         F::interpolate(
             torch::reshape(input, {1, 1, 1, 3, 2, 2}),
             InterpolationOptions().size({{1, 1, 1, 3, 4, 4}})),
         "Input Error: Only 3D, 4D and 5D input Tensors supported (got 6D) "
-        "for the modes: nearest | linear | bilinear | bicubic | trilinear");
+        "for the modes: nearest | linear | bilinear | bicubic | trilinear (got Nearest)");
     ASSERT_THROWS_WITH(
         F::interpolate(input, InterpolationOptions()),
         "either size or scale_factor should be defined");
