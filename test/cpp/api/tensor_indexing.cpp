@@ -174,7 +174,7 @@ TEST(TensorIndexingTest, TestByteMask) {
     // yf225 TODO: catch warnings end
   }
   {
-    auto v = torch::tensor({1.});
+    auto v = torch::tensor({1.}, torch::kFloat);
     assert_equal(v(v == 0), torch::randn({0}));
   }
 }
