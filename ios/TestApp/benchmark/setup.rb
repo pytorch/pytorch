@@ -28,12 +28,10 @@ target.build_configurations.each do |config|
 end
 
 puts "Installing the testing model..."
-model_path_src = File.expand_path("./model.pt")
-model_path_dst = File.expand_path("../model.pt")
-if not File.exist?(model_path_src)
+model_path = File.expand_path("./model.pt")
+if not File.exist?(model_path)
    raise "no model can be found!"
 end
-FileUtils.cp(model_path_src, model_path_dst)
 group = project.main_group.find_subpath(File.join('TestApp'),true)
 group.set_source_tree('SOURCE_ROOT')
 group.files.each do |file|
@@ -43,7 +41,7 @@ group.files.each do |file|
         target.resources_build_phase.remove_file_reference(file)
     end
 end
-model_file_ref = group.new_reference(model_path_dst)
+model_file_ref = group.new_reference(model_path)
 target.resources_build_phase.add_file_reference(model_file_ref, true)
 
 puts "Linking static libraries..."
