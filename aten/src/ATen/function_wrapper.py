@@ -239,10 +239,17 @@ static inline ${return_type} ${api_name}(${formals}) {
 
 # In order to rely on the linker to strip unused ops, it requires us to dispatch statically
 # in Functions.h and TensorMethods.h.
+#
+# NB: The default body also needs to apply a variable guard, as in some
+# situations what we think is a default body actually does have an
+# explicit derivative, and thereby would have gotten unwrapped by
+# the time you get to the implementation.
 STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
+at::AutoNonVariableTypeMode _var_guard(true);
 ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
+at::AutoNonVariableTypeMode _var_guard(true);
 switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:
@@ -880,7 +887,9 @@ def create_generic(top_env, declarations):
 
     def format_return_type(return_types):
         # type: (List[ReturnType]) -> str
-        if len(return_types) == 1:
+        if len(return_types) == 0:
+            return "void"
+        elif len(return_types) == 1:
             return return_types[0]['type']
         return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
 
@@ -1109,9 +1118,6 @@ def create_generic(top_env, declarations):
             if isinstance(t_raw, string_type):
                 t = t_raw
                 name = None
-            elif t_raw is None:
-                t = 'void'
-                name = None
             else:
                 t = t_raw['type']
                 name = t_raw['name']
@@ -1142,7 +1148,6 @@ def create_generic(top_env, declarations):
         assert option['python_module'] == '' or option['python_module'] == 'nn', \
             "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
                 option['python_module'], option['name'])
-
         formals = native_get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
