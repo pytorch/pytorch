@@ -25,7 +25,7 @@ file(GLOB_RECURSE C10_HIP_HEADERS *.h)
 
 set(C10_HIP_INCLUDE
     ${CMAKE_CURRENT_SOURCE_DIR}/../..
-    ${CMAKE_BINARY_DIR}))))
+    ${CMAKE_BINARY_DIR})
 
 add_subdirectory(test)
 
