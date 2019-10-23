@@ -263,9 +263,9 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), at::kBool);
-  ASSERT_TRUE(almost_equal(tensor[0], true));
-  ASSERT_TRUE(almost_equal(tensor[1], false));
-  ASSERT_TRUE(almost_equal(tensor[2], true));
+  ASSERT_TRUE(exactly_equal(tensor[0], true));
+  ASSERT_TRUE(exactly_equal(tensor[1], false));
+  ASSERT_TRUE(exactly_equal(tensor[2], true));
 }
 
 TEST(TensorTest, MultidimTensorCtor) {
