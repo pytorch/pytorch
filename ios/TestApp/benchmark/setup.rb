@@ -36,6 +36,13 @@ end
 FileUtils.cp(model_path_src, model_path_dst)
 group = project.main_group.find_subpath(File.join('TestApp'),true)
 group.set_source_tree('SOURCE_ROOT')
+group.files.each do |file|
+    if file.name.to_s.end_with?(".pt")
+        puts "Found old model, remove it"
+        group.remove_reference(file)
+        target.resources_build_phase.remove_file_reference(file)
+    end
+end
 model_file_ref = group.new_reference(model_path_dst)
 target.resources_build_phase.add_file_reference(model_file_ref, true)
 
