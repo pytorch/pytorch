@@ -717,7 +717,7 @@ void conv_depthwise3d_backward_weight_cuda_template(
           padSizeW, padSizeH, padSizeT,
           dilSizeW, dilSizeH, dilSizeT);
     }); // AT Dispatch
-    
+
   AT_CUDA_CHECK(cudaGetLastError());
 
 } //conv_depthwise3d_backward_weight_cuda_template
@@ -725,7 +725,7 @@ void conv_depthwise3d_backward_weight_cuda_template(
 } // namespace
 
 
-Tensor& conv_depthwise3d_cuda(
+Tensor _conv_depthwise3d_forward_cuda(
   Tensor& output,
   const Tensor& input,
   const Tensor& weight,
@@ -760,7 +760,7 @@ Tensor& conv_depthwise3d_cuda(
 //   return output;
 // }
 
-Tensor& conv3d_depthwise3d_backward_input_cuda(
+Tensor _conv3d_depthwise3d_backward_input_cuda(
   Tensor& gradInput,
   const Tensor& gradOutput,
   const Tensor& input,
@@ -779,7 +779,7 @@ Tensor& conv3d_depthwise3d_backward_input_cuda(
 }
 
 
-Tensor& conv3d_depthwise3d_backward_weight_cuda(
+Tensor _conv3d_depthwise3d_backward_weight_cuda(
   Tensor& gradWeight,
   const Tensor& gradOutput,
   const Tensor& input,
@@ -794,6 +794,50 @@ Tensor& conv3d_depthwise3d_backward_weight_cuda(
     kernel_size, stride_size, pad_size, dilation_size
   )
   return gradWeight;
+}
+
+// Publicly exposed functions
+
+Tensor conv_depthwise3d_cuda(
+  const Tensor& input,
+  const Tensor& weight,
+  Tensor? bias,
+  IntList kernel_size,
+  IntList stride_size,
+  IntList pad_size,
+  IntList dilation_size
+) {
+  Tensor output;
+  output = _conv_depthwise3d_forward_cuda(
+    output, input, weight, bias, kernel_size, stride_size, pad_size, dilation_size
+  )
+  return output;
+}
+
+std::tuple<at::Tensor,at::Tensor> conv_depthwise3d_backward_cuda(
+  const Tensor& input,
+  const Tensor& gradOutput,
+  const Tensor& weight,
+  IntList kernel_size,
+  IntList stride_size,
+  IntList pad_size,
+  IntList dilation_size,
+  std::array<bool,2> output_mask) {
+
+    Tensor grad_input, grad_weight;
+    if (output_mask[0]) {
+        grad_input = _conv3d_depthwise3d_backward_input_cuda(
+          grad_input, gradOutput, input, weight, 
+          kernel_size, stride_size, pad_size, dilation_size
+        );
+    }
+    if (output_mask[1]) {
+      grad_weight = _conv3d_depthwise3d_backward_weight_cuda(
+        grad_weight, gradOutput, input, 
+        kernel_size, stride_size, pad_size, dilation_size
+      );
+    }
+    return std::tuple<Tensor, Tensor>(grad_input, grad_weight);
 }
 
 

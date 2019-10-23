@@ -6406,9 +6406,15 @@
   dispatch:
     CPU: legacy::cpu::_thnn_conv3d_backward
 
-- func: conv_depthwise3d(Tensor self, Tensor weight, Tensor? bias=None, int[3] kernel_size,  int[3] stride=1, int[3] padding=0, int[3] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
+- func: conv_depthwise3d(Tensor self, Tensor weight, Tensor? bias=None, int[3] kernel_size,  int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
+    python_module: nn
     dispatch:
       CUDA: conv_depthwise3d_cuda
+
+- func: conv_depthwise3d_backward(Tensor self, Tensor grad_output, Tensor weight, int[3] kernel_size,  int[3] stride=1, int[3] padding=0, int[3] dilation=1, bool[2] output_mask) -> (Tensor, Tensor)
+    python_module: nn
+    dispatch:
+      CUDA: conv_depthwise3d_backward_cuda
 
 - func: slow_conv_dilated2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1) -> Tensor
   python_module: nn
