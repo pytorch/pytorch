@@ -92,6 +92,11 @@ def _init_rpc(
         # TODO: add try-except and destroy _agent in all processes if any fails.
         _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
     elif is_backend_registered(backend):
+        # Rendezvous.
+        world_size = len(worker_name_to_id)
+        rendezvous_iterator = torch.distributed.rendezvous(init_method, self_rank, world_size)
+        store, self_rank, world_size = next(rendezvous_iterator)
+        # Initialize RPC.
         _agent = init_backend(
             backend,
             store=store,

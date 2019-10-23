@@ -43,10 +43,6 @@ if sys.version_info >= (3, 0):
             init_method(str): backend specific init arguments.
             num_send_recv_threads(int): Number of threads for send/recv work.
         """
-        # Rendezvous.
-        world_size = len(worker_name_to_id)
-        rendezvous_iterator = torch.distributed.rendezvous(init_method, self_rank, world_size)
-        store, self_rank, world_size = next(rendezvous_iterator)
         # Initialize RPC.
         _init_rpc(
             backend,
