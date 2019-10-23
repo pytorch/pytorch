@@ -125,3 +125,16 @@ TEST(TorchScriptTest, TestPickle) {
   double eps = 0.0001;
   ASSERT_TRUE(diff < eps && diff > -eps);
 }
+
+TEST(TorchScriptTest, TestPickleIntList) {
+  std::vector<int64_t> orig = { 1, 2, 3, 4, 5};
+  std::vector<at::Tensor> tensor_table;
+  auto data = torch::jit::pickle(torch::IValue(orig), &tensor_table);
+  torch::IValue out = torch::jit::unpickle(data.data(), data.size());
+  EXPECT_TRUE(out.isIntList());
+  auto irr = out.toIntListRef();
+  EXPECT_EQ(irr.size(), orig.size());
+  for (size_t i = 0; i < irr.size(); ++i) {
+    EXPECT_EQ(irr[i], orig[i]);
+  }
+}

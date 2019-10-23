@@ -386,6 +386,17 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::MARK);
 
   push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
+
+  // Finish tuple
+  push<PickleOpCode>(PickleOpCode::TUPLE);
+
+  // Call reduce.
+  // Since it's a specialized list, we want to reduce to the specialized
+  // type prior to adding the values. This way, unpickling can be more
+  // efficient, as it can read directly as int/double/etc. rather than
+  // constructing/destructing IValue for each entry.
+  push<PickleOpCode>(PickleOpCode::REDUCE);
+
   // Mark list
   push<PickleOpCode>(PickleOpCode::MARK);
 
@@ -394,12 +405,6 @@ void Pickler::pushSpecializedList(
 
   // Finish list
   push<PickleOpCode>(PickleOpCode::APPENDS);
-
-  // Finish tuple
-  push<PickleOpCode>(PickleOpCode::TUPLE);
-
-  // Call reduce
-  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushDouble(double value) {
