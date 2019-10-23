@@ -608,10 +608,10 @@ class ShapePropagator {
         // We refresh the tuple type, because the input types could have been
         // refined.
         auto orig_type = node->output()->type()->expect<TupleType>();
-        node->output()->setType(TupleType::create(
-            fmap(node->inputs(), [](Value* v) { return v->type(); }),
-            orig_type->name(),
-            orig_type->schema()));
+        auto new_types =
+            fmap(node->inputs(), [](Value* v) { return v->type(); });
+        node->output()->setType(
+            orig_type->createWithContained(std::move(new_types)));
         return;
       }
       case prim::TupleUnpack: {
