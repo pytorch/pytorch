@@ -145,11 +145,7 @@ struct PythonResolver : public Resolver {
           std::tuple<std::string, decltype(fields), decltype(annotations)>>(
           props);
 
-      auto tt = TupleType::create(
-          annotations,
-          qualifiedName,
-          TupleType::namedTupleSchemaFromNamesAndTypes(
-              qualifiedName, fields, annotations));
+      auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
       if (auto type = get_python_cu()->get_type(qualifiedName)) {
         TORCH_CHECK(
             type->isSubtypeOf(tt),
