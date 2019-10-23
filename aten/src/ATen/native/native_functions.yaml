@@ -4024,8 +4024,8 @@
   use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_index_fill_
-    CUDA: legacy::cuda::_th_index_fill_
+    CPU: index_fill_
+    CUDA: index_fill_
   supports_named_tensor: True
 
 - func: index_fill.int_Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
