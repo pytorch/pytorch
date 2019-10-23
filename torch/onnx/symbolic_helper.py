@@ -341,14 +341,19 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     return scale_factor, mode
 
 
-def get_interpolate_attributes(mode, dim, args):
+def get_interpolate_attributes(mode, args):
     if mode == 'nearest':
         align_corners = None
-        scales = args[0:2 + (dim - 1)]
+        scales = args[0:]
     else:
         align_corners = args[0]
-        scales = args[1:1 + (dim - 1)]
-    return (*scales), align_corners
+        scales = args[1:]
+    if len(scales) == 1:
+        return scales[0], align_corners
+    elif len(scales) == 2:
+        return scales[0], scales[1], align_corners
+    else:
+        return scales[0], scales[1], scales[2], align_corners
 
 
 def _scatter_helper(g, self, dim, index, src):
