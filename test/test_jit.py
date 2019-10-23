@@ -17318,6 +17318,8 @@ def normalize_check_ad(check_ad, name):
     # normalized check_ad is 3-element tuple: (bool, List[str], List[str])
     if len(check_ad) == 0:
         check_ad = [False, ['aten::' + name], []]
+    elif len(check_ad) == 1:
+        check_ad = [check_ad[0], ['aten::' + name], []]
     elif len(check_ad) == 2:
         check_ad = [check_ad[0], check_ad[1], []]
     elif len(check_ad) == 3:
