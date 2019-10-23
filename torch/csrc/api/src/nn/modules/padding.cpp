@@ -15,17 +15,14 @@ template <size_t D, typename Derived>
 void ReflectionPadImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
+Tensor ReflectionPadImpl<D, Derived>::forward(const Tensor& input) {
+  return F::pad(input, PadOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kReflect));
+}
+
+template <size_t D, typename Derived>
 void ReflectionPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ReflectionPad" << D << "d"
          << "(padding=" << options.padding() << ")";
-}
-
-Tensor ReflectionPad1dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(*options.padding()).mode(torch::kReflect));
-}
-
-Tensor ReflectionPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(*options.padding()).mode(torch::kReflect));
 }
 
 template class ReflectionPadImpl<1, ReflectionPad1dImpl>;
@@ -41,21 +38,14 @@ template <size_t D, typename Derived>
 void ReplicationPadImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
+Tensor ReplicationPadImpl<D, Derived>::forward(const Tensor& input) {
+  return F::pad(input, PadOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kReplicate));
+}
+
+template <size_t D, typename Derived>
 void ReplicationPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ReplicationPad" << D << "d"
          << "(padding=" << options.padding() << ")";
-}
-
-Tensor ReplicationPad1dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(*options.padding()).mode(torch::kReplicate));
-}
-
-Tensor ReplicationPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(*options.padding()).mode(torch::kReplicate));
-}
-
-Tensor ReplicationPad3dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(*options.padding()).mode(torch::kReplicate));
 }
 
 template class ReplicationPadImpl<1, ReplicationPad1dImpl>;
@@ -88,22 +78,15 @@ template <size_t D, typename Derived>
 void ConstantPadImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
+Tensor ConstantPadImpl<D, Derived>::forward(const Tensor& input) {
+  return F::pad(input, PadOptions(*options.padding()).mode(torch::kConstant).value(options.value()));
+}
+
+template <size_t D, typename Derived>
 void ConstantPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::ConstantPad" << D << "d"
          << "(padding=" << options.padding()
          << ", value=" << options.value() << ")";
-}
-
-Tensor ConstantPad1dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(*options.padding()).mode(torch::kConstant).value(options.value()));
-}
-
-Tensor ConstantPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(*options.padding()).mode(torch::kConstant).value(options.value()));
-}
-
-Tensor ConstantPad3dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(*options.padding()).mode(torch::kConstant).value(options.value()));
 }
 
 template class ConstantPadImpl<1, ConstantPad1dImpl>;
