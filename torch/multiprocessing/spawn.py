@@ -118,7 +118,7 @@ class SpawnContext:
         raise Exception(msg)
 
 
-def spawn(fn, args=(), nprocs=1, join=True, daemon=False):
+def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
     r"""Spawns ``nprocs`` processes that run ``fn`` with ``args``.
 
     If one of the processes exits with a non-zero exit status, the
@@ -142,6 +142,9 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False):
         join (bool): Perform a blocking join on all processes.
         daemon (bool): The spawned processes' daemon flag. If set to True,
                        daemonic processes will be created.
+        start_method (string): The multiprocessing start method to be used
+            to create new processes. It CUDA is available and used, it must
+            be set to ``spawn``.
 
     Returns:
         None if ``join`` is ``True``,
@@ -149,7 +152,7 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False):
 
     """
     _python_version_check()
-    mp = multiprocessing.get_context('spawn')
+    mp = multiprocessing.get_context(start_method)
     error_queues = []
     processes = []
     for i in range(nprocs):
