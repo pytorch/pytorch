@@ -30,7 +30,7 @@ LinearImpl::LinearImpl(const LinearOptions& options_) : options(options_) {
 }
 
 void LinearImpl::reset() {
-  weight = register_parameter("weight", 
+  weight = register_parameter("weight",
     torch::empty({options.out_features(), options.in_features()}));
   if (options.bias()) {
     bias = register_parameter("bias", torch::empty(options.out_features()));
@@ -38,7 +38,7 @@ void LinearImpl::reset() {
     bias = register_parameter("bias", {}, /*requires_grad=*/false);
   }
 
-  torch::nn::init::kaiming_uniform_(weight, sqrt(5));
+  torch::nn::init::kaiming_uniform_(weight, sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
   if (bias.defined()) {
     int64_t fan_in, fan_out;
     std::tie(fan_in, fan_out) =
@@ -49,9 +49,9 @@ void LinearImpl::reset() {
 }
 
 void LinearImpl::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha 
+  stream << std::boolalpha
          << "torch::nn::Linear(in_features=" << options.in_features()
-         << ", out_features=" << options.out_features() 
+         << ", out_features=" << options.out_features()
          << ", bias=" << options.bias() << ")";
 }
 
