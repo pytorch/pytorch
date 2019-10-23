@@ -3425,7 +3425,7 @@ void CompilationUnit::define_interface(
     const ClassDef& classDef,
     ResolverPtr rcb,
     bool is_module) {
-  ScriptTypeParser typeParser(rcb);
+  ScriptTypeParser typeParser(std::move(rcb));
   InterfaceTypePtr iface =
       InterfaceType::create(c10::QualifiedName(qualifiedName), is_module);
   for (const Stmt& stmt : classDef.body()) {
