@@ -22,44 +22,17 @@ from subprocess import Popen, PIPE
 from multiprocessing.util import register_after_fork as _register_after_fork
 from ._utils import _get_device_index
 
+try:
+    from torch._C import _cudart
+except ImportError:
+    pass
+
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
 _in_bad_fork = False  # this global is also used in torch.manual_seed
 _original_pid = False
-_cudart = None
-
-
-def find_cuda_windows_lib():
-    # Override the default search process
-    # Fixes https://github.com/pytorch/pytorch/issues/20202
-    # The libary selection will be done in these directories one by one
-    # 1. [Package Root]\Lib
-    #    That's where our libraries are in, which should be loaded first.
-    # 2. [Python Root]\Library\bin
-    #    That's where `cudatoolkit` store the cuda libraries.
-    # 3. Default directories
-    #    That is stored in the environment variable `PATH`.
-    test_env = os.environ.copy()
-    old_path = test_env['PATH']
-    py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
-    th_dll_path = os.path.join(os.path.dirname(
-        os.path.dirname(__file__)), 'lib')
-    test_env['PATH'] = ';'.join([th_dll_path, py_dll_path, old_path])
-    proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE,
-                 stderr=PIPE, stdin=PIPE, env=test_env)
-    out, err = proc.communicate()
-    out = out.decode().strip()
-    if len(out) > 0:
-        if out.find('\r\n') != -1:
-            out = out.split('\r\n')[0]
-        cuda_lib_name = os.path.basename(out)
-        cuda_lib = os.path.splitext(cuda_lib_name)[0]
-        cuda_lib = str(cuda_lib)
-        return ctypes.cdll.LoadLibrary(cuda_lib)
-    else:
-        return None
 
 
 def is_available():
@@ -72,22 +45,6 @@ def is_available():
 
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
-
-
-def _load_cudart():
-    # First check the main program for CUDA symbols
-    if platform.system() == 'Windows':
-        lib = find_cuda_windows_lib()
-    else:
-        lib = ctypes.cdll.LoadLibrary(None)
-    if hasattr(lib, 'cudaGetErrorName'):
-        return lib
-
-    raise RuntimeError(
-        "couldn't find libcudart. Make sure CUDA libraries are installed in a "
-        "default location, or that they're in {}."
-        .format('DYLD_LIBRARY_PATH' if platform.system() == 'Darwin' else
-                'LD_LIBRARY_PATH'))
 
 
 def _check_driver():
@@ -196,9 +153,6 @@ def _lazy_init():
                 "Cannot re-initialize CUDA in forked subprocess. " + msg)
         _check_driver()
         torch._C._cuda_init()
-        _cudart = _load_cudart()
-        _cudart.cudaGetErrorName.restype = ctypes.c_char_p
-        _cudart.cudaGetErrorString.restype = ctypes.c_char_p
         _original_pid = os.getpid()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
@@ -240,12 +194,12 @@ class cudaStatus(object):
 
 class CudaError(RuntimeError):
     def __init__(self, code):
-        msg = cudart().cudaGetErrorString(code).decode('utf-8')
+        msg = _cudart.cudaGetErrorString(code).decode('utf-8')
         super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
 
 
 def check_error(res):
-    if res != cudaStatus.SUCCESS:
+    if res != _cudart.cudaError.success:
         raise CudaError(res)
 
 

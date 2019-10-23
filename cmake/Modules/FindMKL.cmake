@@ -89,6 +89,7 @@ SET(mklseq)
 # Paths
 SET(saved_CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH})
 SET(saved_CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH})
+SET(saved_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
 IF(WIN32)
   # Set default MKLRoot for Windows
   IF($ENV{MKLProductDir})
@@ -250,12 +251,18 @@ ELSE(UNIX AND NOT APPLE)
   SET(mkl_dl "")
 ENDIF(UNIX AND NOT APPLE)
 
-# Check for version 10/11
-IF (NOT MKL_LIBRARIES)
-  SET(MKL_VERSION 1011)
-ENDIF (NOT MKL_LIBRARIES)
+SET(MKL_VERSION 1011)
 
-# First: search for parallelized ones with intel thread lib
+FIND_LIBRARY(MKL_LIBRARIES mkl_rt)
+
+# Unfortunately combinations of shared MKL libraries other than only libmkl_rt
+# assume and _require_ loading them into the global symbol namespace, which
+# generally causes a lot of pollution with common symbols like pthreads, etc.
+# To avoid this we only allow either linking to libmkl_rt.so, or require all
+# libraries to get statically linked.
+# Relevant link: https://software.intel.com/en-us/forums/intel-math-kernel-library/topic/296094
+SET(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+# Search for parallelized ones with intel thread lib
 IF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
   FOREACH(mklrtl ${mklrtls} "")
     FOREACH(mkliface ${mklifaces})
@@ -271,7 +278,19 @@ IF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
   ENDFOREACH(mklrtl)
 ENDIF (NOT "${MKL_THREADING}" STREQUAL "SEQ")
 
-# Second: search for sequential ones
+# Search for parallelized ones with native pthread lib
+FOREACH(mklrtl ${mklrtls} "")
+  FOREACH(mkliface ${mklifaces})
+    FOREACH(mkl64 ${mkl64s} "")
+      IF (NOT MKL_LIBRARIES)
+        CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
+          "mkl_${mkliface}${mkl64};${mklthread};mkl_core;${mklrtl};pthread;${mkl_m};${mkl_dl}" "")
+      ENDIF (NOT MKL_LIBRARIES)
+    ENDFOREACH(mkl64)
+  ENDFOREACH(mkliface)
+ENDFOREACH(mklrtl)
+
+# Search for sequential ones
 FOREACH(mkliface ${mklifaces})
   FOREACH(mkl64 ${mkl64s} "")
     IF (NOT MKL_LIBRARIES)
@@ -283,18 +302,6 @@ FOREACH(mkliface ${mklifaces})
     ENDIF (NOT MKL_LIBRARIES)
   ENDFOREACH(mkl64)
 ENDFOREACH(mkliface)
-
-# First: search for parallelized ones with native pthread lib
-FOREACH(mklrtl ${mklrtls} "")
-  FOREACH(mkliface ${mklifaces})
-    FOREACH(mkl64 ${mkl64s} "")
-      IF (NOT MKL_LIBRARIES)
-        CHECK_ALL_LIBRARIES(MKL_LIBRARIES MKL_OPENMP_TYPE MKL_OPENMP_LIBRARY cblas_sgemm
-          "mkl_${mkliface}${mkl64};${mklthread};mkl_core;${mklrtl};pthread;${mkl_m};${mkl_dl}" "")
-      ENDIF (NOT MKL_LIBRARIES)
-    ENDFOREACH(mkl64)
-  ENDFOREACH(mkliface)
-ENDFOREACH(mklrtl)
 
 # Check for older versions
 IF (NOT MKL_LIBRARIES)
@@ -333,23 +340,10 @@ IF (MKL_LIBRARIES)
   ENDFOREACH(mkl64)
 ENDIF (MKL_LIBRARIES)
 
-# LibIRC: intel compiler always links this;
-# gcc does not; but mkl kernels sometimes need it.
-IF (MKL_LIBRARIES)
-  IF (CMAKE_COMPILER_IS_GNUCC)
-    FIND_LIBRARY(MKL_KERNEL_libirc "irc")
-  ELSEIF (CMAKE_C_COMPILER_ID AND NOT CMAKE_C_COMPILER_ID STREQUAL "Intel")
-    FIND_LIBRARY(MKL_KERNEL_libirc "irc")
-  ENDIF (CMAKE_COMPILER_IS_GNUCC)
-  MARK_AS_ADVANCED(MKL_KERNEL_libirc)
-  IF (MKL_KERNEL_libirc)
-    SET(MKL_LIBRARIES ${MKL_LIBRARIES} ${MKL_KERNEL_libirc})
-  ENDIF (MKL_KERNEL_libirc)
-ENDIF (MKL_LIBRARIES)
-
 # Final
 SET(CMAKE_LIBRARY_PATH ${saved_CMAKE_LIBRARY_PATH})
 SET(CMAKE_INCLUDE_PATH ${saved_CMAKE_INCLUDE_PATH})
+SET(CMAKE_FIND_LIBRARY_SUFFIXES ${saved_CMAKE_FIND_LIBRARY_SUFFIXES})
 IF (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
   SET(MKL_FOUND TRUE)
 ELSE (MKL_LIBRARIES AND MKL_INCLUDE_DIR)
