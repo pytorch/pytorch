@@ -87,13 +87,6 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   }
 
   void SetUp() override {
-    bool skip;
-    std::string skipReason;
-    std::tie(skip, skipReason) = skipTest();
-    if (skip) {
-      GTEST_SKIP() << skipReason;
-    }
-
     size_t numDevices = cudaNumDevices();
     TemporaryFile file;
     store_ = std::make_shared<::c10d::FileStore>(file.path, 1);
@@ -115,6 +108,14 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
 };
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
+  bool skip;
+  std::string skipReason;
+  std::tie(skip, skipReason) = skipTest();
+  if (skip) {
+    LOG(INFO) << skipReason;
+    return;
+  }
+
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1);
 
@@ -146,6 +147,14 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
+  bool skip;
+  std::string skipReason;
+  std::tie(skip, skipReason) = skipTest();
+  if (skip) {
+    LOG(INFO) << skipReason;
+    return;
+  }
+
   ProcessGroupNCCLSimulateErrors pg(store_, 0, 1);
 
   auto work = pg.allreduce(tensors_);
