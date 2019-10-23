@@ -46,9 +46,9 @@ class Transformer(Module):
         if custom_encoder is not None:
             self.encoder = custom_encoder
         else:
+            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
             encoder_norm = LayerNorm(d_model)
-            encoder_layer_args = (d_model, nhead, dim_feedforward, dropout, activation)
-            self.encoder = TransformerEncoder(encoder_layer_args, num_encoder_layers, encoder_norm)
+            self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
             self.decoder = custom_decoder
@@ -154,11 +154,9 @@ class TransformerEncoder(Module):
     """
     __constants__ = ['norm']
 
-    def __init__(self, encoder_layer_args, num_layers, norm=None):
+    def __init__(self, encoder_layer, num_layers, norm=None):
         super(TransformerEncoder, self).__init__()
-        self.num_layers = num_layers
-        layers = [TransformerEncoderLayer(*encoder_layer_args) for i in range(num_layers)]
-        self.layers = torch.nn.ModuleList(layers)
+        self.layers = _get_clones(encoder_layer, num_layers)
         self.norm = norm
 
     def forward(self, src, mask=None, src_key_padding_mask=None):
@@ -203,7 +201,6 @@ class TransformerDecoder(Module):
     def __init__(self, decoder_layer, num_layers, norm=None):
         super(TransformerDecoder, self).__init__()
         self.layers = _get_clones(decoder_layer, num_layers)
-        self.num_layers = num_layers
         self.norm = norm
 
     def forward(self, tgt, memory, tgt_mask=None,
