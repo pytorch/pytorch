@@ -21,11 +21,11 @@ void ReflectionPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 }
 
 Tensor ReflectionPad1dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode("reflect"));
+  return F::pad(input, PadOptions(options.padding()).mode(torch::kReflect));
 }
 
 Tensor ReflectionPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode("reflect"));
+  return F::pad(input, PadOptions(options.padding()).mode(torch::kReflect));
 }
 
 template class ReflectionPadImpl<1, ReflectionPad1dImpl>;
@@ -47,15 +47,15 @@ void ReplicationPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 }
 
 Tensor ReplicationPad1dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode("replicate"));
+  return F::pad(input, PadOptions(options.padding()).mode(torch::kReplicate));
 }
 
 Tensor ReplicationPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode("replicate"));
+  return F::pad(input, PadOptions(options.padding()).mode(torch::kReplicate));
 }
 
 Tensor ReplicationPad3dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode("replicate"));
+  return F::pad(input, PadOptions(options.padding()).mode(torch::kReplicate));
 }
 
 template class ReplicationPadImpl<1, ReplicationPad1dImpl>;
@@ -75,7 +75,7 @@ void ZeroPad2dImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor ZeroPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode("constant").value(0));
+  return F::pad(input, PadOptions(options.padding()).mode(torch::kConstant).value(0));
 }
 
 // ============================================================================
@@ -95,15 +95,15 @@ void ConstantPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 }
 
 Tensor ConstantPad1dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode("constant").value(options.value()));
+  return F::pad(input, PadOptions(options.padding()).mode(torch::kConstant).value(options.value()));
 }
 
 Tensor ConstantPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode("constant").value(options.value()));
+  return F::pad(input, PadOptions(options.padding()).mode(torch::kConstant).value(options.value()));
 }
 
 Tensor ConstantPad3dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(options.padding()).mode("constant").value(options.value()));
+  return F::pad(input, PadOptions(options.padding()).mode(torch::kConstant).value(options.value()));
 }
 
 template class ConstantPadImpl<1, ConstantPad1dImpl>;
