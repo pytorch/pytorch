@@ -25,7 +25,11 @@ TEST(EnumTest, AllEnums) {
     torch::enumtype::kReLU,
     torch::enumtype::kLeakyReLU,
     torch::enumtype::kFanIn,
-    torch::enumtype::kFanOut
+    torch::enumtype::kFanOut,
+    torch::enumtype::kConstant,
+    torch::enumtype::kReflect,
+    torch::enumtype::kReplicate,
+    torch::enumtype::kCircular
   > v;
 
   TORCH_ENUM_PRETTY_PRINT_TEST(Linear)
@@ -41,4 +45,8 @@ TEST(EnumTest, AllEnums) {
   TORCH_ENUM_PRETTY_PRINT_TEST(LeakyReLU)
   TORCH_ENUM_PRETTY_PRINT_TEST(FanIn)
   TORCH_ENUM_PRETTY_PRINT_TEST(FanOut)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Constant)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Reflect)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Replicate)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Circular)
 }
