@@ -16,7 +16,7 @@ white_list = [
     ('index_fill', datetime.date(2019, 10, 30)),
     ('align_to', datetime.date(2019, 10, 30)),
     ('unflatten', datetime.date(2019, 10, 30)),
-    ('log_softmax', datetime.date(2019, 10, 30)),
+    ('softmax', datetime.date(2019, 10, 30)),
     ('slow_conv_transpose2d_backward', datetime.date(2019, 10, 30)),
     ('slow_conv_transpose3d_backward', datetime.date(2019, 10, 30)),
     ('thnn_conv2d_backward', datetime.date(2019, 10, 30)),
