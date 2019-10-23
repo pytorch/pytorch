@@ -616,15 +616,15 @@ def _avg_pool(name, tuple_fn):
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
-        if divisor_override and divisor_override.node().kind() != 'prim::Constant':
-            return _unimplemented(name, "divisor_override")
-        if not stride:
-            stride = kernel_size
-        padding = tuple(tuple_fn(padding))
+        padding = sym_help._avgpool_helper(kernel_size, stride, divisor_override, name)
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
         if count_include_pad:
-            input, padding = sym_help._avgpool_count_include_pad_helper(g, input, padding)
+            input = g.op("Pad", input,
+                     pads_i=((0,) * 2 + padding) * 2,
+                     mode_s='constant',
+                     value_f=0.)
+            padding = padding = (0,) * len(padding)
         if ceil_mode:
             padding = padding + tuple(numpy.add(padding_ceil, padding))
         else:

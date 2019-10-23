@@ -367,18 +367,13 @@ def _index_fill_reshape_helper(g, self, dim, index):
     return expanded_index_shape, expanded_index
 
 
-def _avgpool_count_include_pad_helper(g, input, padding):
-    if _export_onnx_opset_version <= 10:
-        input = g.op("Pad", input,
-                     pads_i=((0,) * 2 + padding) * 2,
-                     mode_s='constant',
-                     value_f=0.)
-    else:
-        input = g.op("Pad", input,
-                     g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)),
-                     mode_s='constant')
-    padding = (0,) * len(padding)
-    return input, padding
+def _avgpool_helper(kernel_size, stride, divisor_override, name):
+    if divisor_override and divisor_override.node().kind() != 'prim::Constant':
+        return _unimplemented(name, "divisor_override")
+    if not stride:
+        stride = kernel_size
+    padding = tuple(tuple_fn(padding))
+    return padding
 
 # ---------------------------------------------------------------------
 # ONNX operator version
