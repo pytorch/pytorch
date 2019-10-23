@@ -167,8 +167,7 @@ def _avg_pool(name, tuple_fn):
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if count_include_pad:
             input = g.op("Pad", input,
-                     g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)),
-                     mode_s='constant')
+                         g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)), mode_s='constant')
             padding = (0,) * len(padding)
         output = g.op("AveragePool", input,
                       kernel_shape_i=tuple_fn(kernel_size),

@@ -621,10 +621,10 @@ def _avg_pool(name, tuple_fn):
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
         if count_include_pad:
             input = g.op("Pad", input,
-                     pads_i=((0,) * 2 + padding) * 2,
-                     mode_s='constant',
-                     value_f=0.)
-            padding = padding = (0,) * len(padding)
+                         pads_i=((0,) * 2 + padding) * 2,
+                         mode_s='constant',
+                         value_f=0.)
+            padding = (0,) * len(padding)
         if ceil_mode:
             padding = padding + tuple(numpy.add(padding_ceil, padding))
         else:
