@@ -57,18 +57,6 @@ module_tests = [
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t())
     ),
     dict(
-        module_name='Linear',
-        constructor_args=(10, 8),
-        input_size=(0, 10),
-        desc='zero_batch',
-    ),
-    dict(
-        module_name='Linear',
-        constructor_args=(10, 8, False),
-        input_size=(0, 10),
-        desc='zero_batch_no_bias',
-    ),
-    dict(
         module_name='Threshold',
         constructor_args=(2., 1.),
         input_size=(2, 3, 4, 5),
@@ -1407,6 +1395,7 @@ new_module_tests = [
         constructor_args=((3, 3), (2, 2), (1, 1)),
         cpp_constructor_args='(torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1}))',
         input_size=(1, 3, 7, 7),
+        check_with_channels_last=True,
     ),
     dict(
         module_name='AvgPool1d',

@@ -1,5 +1,5 @@
 import unittest
-from common_utils import TestCase, run_tests, TEST_NUMPY, default_floating_dtype
+from common_utils import TestCase, run_tests, TEST_NUMPY
 from common_cuda import TEST_CUDA
 from collections import namedtuple, OrderedDict
 import itertools
@@ -11,23 +11,12 @@ import torch.nn.functional as F
 from multiprocessing.reduction import ForkingPickler
 import pickle
 import io
-import os
 import sys
 import warnings
-
-
-def check_env_flag(name, default=''):
-    return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
-
-TEST_NAMEDTENSOR = check_env_flag('TEST_NAMEDTENSOR')
 
 skipIfNamedTensorDisabled = \
     unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
                     'PyTorch not compiled with namedtensor support')
-
-skipIfNotTestingNamedTensor = \
-    unittest.skipIf(not TEST_NAMEDTENSOR,
-                    'TEST_NAMEDTENSOR=0; set it to 1 to enable named tensor tests')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -275,7 +264,7 @@ class TestNamedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "NYI"):
             ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(named_tensor)
 
-    @default_floating_dtype(torch.double)
+    @unittest.skip("Issue 27753")
     def test_big_tensor_repr(self):
         def check_repr(named_tensor):
             unnamed_tensor = named_tensor.rename(None)
@@ -1366,6 +1355,11 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.names, ['H', 'C', 'W', 'N'])
         self.assertEqual(output.shape, [3, 2, 5, 7])
 
+        # ... = ['N', 'W']
+        output = tensor.align_to('H', 'C', '...')
+        self.assertEqual(output.names, ['H', 'C', 'N', 'W'])
+        self.assertEqual(output.shape, [3, 2, 7, 5])
+
         # ... = ['H', 'C']
         output = tensor.align_to('W', '...', 'N')
         self.assertEqual(output.names, ['W', 'H', 'C', 'N'])
@@ -1377,16 +1371,20 @@ class TestNamedTensor(TestCase):
         self.assertEqual(output.shape, [7, 2, 1, 3, 5])
 
         # Input tensor partially named
-        partiall_named = create('N:7,None:1')
-        with self.assertRaisesRegex(RuntimeError, "All input dims must be named"):
-            partiall_named.align_to('...', 'N')
+        partially_named = create('None:2,None:3,None:5,C:7')
+        output = partially_named.align_to('C', '...')
+        self.assertEqual(output.names, ['C', None, None, None])
+        self.assertEqual(output.shape, [7, 2, 3, 5])
+
+        with self.assertRaisesRegex(RuntimeError, "order of dimensions cannot contain a None"):
+            partially_named.align_to('C', None, '...')
 
         # Input order partially named
-        with self.assertRaisesRegex(RuntimeError, "desired order must not contain None"):
+        with self.assertRaisesRegex(RuntimeError, "cannot contain a None name"):
             tensor.align_to('...', 'N', None)
 
         # Input order duplicate names
-        with self.assertRaisesRegex(RuntimeError, "Duplicate names"):
+        with self.assertRaisesRegex(RuntimeError, "duplicate names"):
             tensor.align_to('...', 'N', 'N')
 
     def test_align_as(self):
@@ -1877,7 +1875,7 @@ class TestNamedTensor(TestCase):
 # Disable all tests if named tensor is not available.
 for attr in dir(TestNamedTensor):
     if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(skipIfNotTestingNamedTensor(getattr(TestNamedTensor, attr)))
+        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
         setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':

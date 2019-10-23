@@ -28,7 +28,6 @@ Checks: '
   ,performance-*
   ,-performance-noexcept-move-constructor
   '
-WarningsAsErrors: '*'
 HeaderFilterRegex: 'torch/csrc/.*'
 AnalyzeTemporaryDtors: false
 CheckOptions:

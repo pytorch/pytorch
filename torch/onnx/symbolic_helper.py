@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 from torch._C import ListType
 import warnings
+from sys import maxsize as maxsize
 
 import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
@@ -54,6 +55,8 @@ def _parse_arg(value, desc):
         return value
     if desc == 'v' or not _is_value(value):
         return value
+    if value.node().mustBeNone():
+        return None
     if value.node().kind() == 'onnx::Constant':
         tval = value.node()['value']
         if desc == 'i':
@@ -62,6 +65,8 @@ def _parse_arg(value, desc):
             return float(tval)
         elif desc == 'b':
             return bool(tval)
+        elif desc == 's':
+            return str(tval)
         elif desc == 't':
             return tval
         elif desc == 'is':
@@ -156,6 +161,9 @@ def _if_scalar_type_as(g, self, tensor):
     return self
 
 
+def _is_none(x):
+    return x.node().mustBeNone()
+
 def _is_value(x):
     return isinstance(x, torch._C.Value)
 
@@ -195,8 +203,10 @@ def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False)
 
 
 def _is_fp(value):
-    type = value.type().scalarType()
-    return (type == 'Float') or (type == 'Double') or (type == 'Half')
+    if value:
+        type = value.type().scalarType()
+        return (type == 'Float') or (type == 'Double') or (type == 'Half')
+    return False
 
 
 def _sort_helper(g, input, dim, decending=True, out=None):
@@ -247,9 +257,9 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, 'is')
     if _is_value(output_size):
         offset = 2
-        offsets = g.op("Constant", value_t=torch.ones(offset))
+        offsets = g.op("Constant", value_t=torch.ones(offset, dtype=torch.float32))
         dividend = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx["Float"])
-        divisor = _slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
+        divisor = _slice_helper(g, g.op("Shape", input), axes=[0], ends=[maxsize], starts=[offset])
         divisor = g.op("Cast", divisor, to_i=cast_pytorch_to_onnx["Float"])
         scale_dims = g.op("Div", dividend, divisor)
         scales = g.op("Concat", offsets, scale_dims, axis_i=0)
@@ -257,8 +267,54 @@ def _interpolate_size_to_scales(g, input, output_size, dim):
         scales_constant = [1. if i < 2 else
                            float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
                            for i in range(0, dim)]
-        scales = g.op("Constant", value_t=torch.tensor(scales_constant))
+        scales = g.op("Constant", value_t=torch.tensor(scales_constant, dtype=torch.float32))
     return scales
+
+
+def _interpolate_get_scales(g, scale_factor, dim):
+    from torch.onnx.symbolic_opset9 import unsqueeze
+
+    offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
+    if _is_packed_list(scale_factor):
+        scale_factor = _unpack_list(scale_factor)
+        scales = []
+        for dim_scale_factor in scale_factor:
+            dim_scale_factor = unsqueeze(g, dim_scale_factor, 0)
+            dim_scale_factor = g.op("Cast", dim_scale_factor, to_i=cast_pytorch_to_onnx["Float"])
+            scales.append(dim_scale_factor)
+    else:
+        scale_factor = unsqueeze(g, scale_factor, 0)
+        scale_factor = g.op("Cast", scale_factor, to_i=cast_pytorch_to_onnx["Float"])
+        scales = [scale_factor for i in range(dim - 2)]
+    scale_factor = g.op("Concat", offsets, *scales, axis_i=0)
+    return scale_factor
+
+
+def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_corners):
+    from torch.onnx.symbolic_opset9 import unsqueeze
+    mode = _maybe_get_const(mode, 's')
+    _interpolate_warning(mode)
+
+    align_corners = _maybe_get_const(align_corners, 'b')
+    if not _is_none(align_corners) and align_corners:
+        return _unimplemented("interpolate", "align_corners == True")
+
+    dim = input.type().dim()
+
+    if not _is_none(scale_factor):
+        scale_factor = _interpolate_get_scales(g, scale_factor, dim)
+    elif not _is_none(size):
+        if not _is_packed_list(size):
+            is_scalar = ((_maybe_get_const(size, 't').dim() == 0))
+            if is_scalar:
+                size = unsqueeze(g, size, 0)
+                size = [size for i in range(dim - 2)]
+                size = g.op("Concat", *size, axis_i=0)
+        scale_factor = _interpolate_size_to_scales(g, input, size, dim)
+    else:
+        _unimplemented("Both size and scales are None in __interpolate")
+    return scale_factor, mode
+
 
 def _scatter_helper(g, self, dim, index, src):
     if _export_onnx_opset_version <= 10:
@@ -266,6 +322,51 @@ def _scatter_helper(g, self, dim, index, src):
     else:
         from torch.onnx.symbolic_opset11 import scatter
     return scatter(g, self, dim, index, src)
+
+
+def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
+    # This logic is based on torch.arange docs. If 'dtype' is provided,
+    # infer input types from dtype. If not, then check if any of start, stop,
+    # or step are floating point, and infer the type from get_default.
+    # Otherwise, the dtype is inferred to be torch.int64.
+    if _is_value(dtype) and _is_none(dtype):
+        type = scalar_type_to_pytorch_type.index(torch.get_default_dtype())
+    else:
+        type = dtype
+
+    start = g.op("Cast", start, to_i=scalar_type_to_onnx[type]) if start else None
+    end = g.op("Cast", end, to_i=scalar_type_to_onnx[type]) if end else None
+    step = g.op("Cast", step, to_i=scalar_type_to_onnx[type]) if step else None
+    return type, end, start, step
+
+
+def _size_helper(g, self, dim):
+    full_shape = g.op("Shape", self)
+    from torch.onnx.symbolic_opset9 import select
+    return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
+
+
+def _index_fill_reshape_helper(g, self, dim, index):
+    # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
+    # 2. expand index => [..., dim, ...], same shape as self except for dim.
+    # 3. expand value as well.
+    # 4. apply onnx::scatter.
+
+    from torch.onnx.symbolic_opset9 import expand
+    if _export_onnx_opset_version <= 10:
+        from torch.onnx.symbolic_opset9 import scatter
+    else:
+        from torch.onnx.symbolic_opset11 import scatter
+
+    if self.type().dim() is None:
+        return _unimplemented("index_fill", "input rank not accesible")
+    self_dim = self.type().dim()
+    dim_value = _parse_arg(dim, 'i')
+    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    expanded_index_shape = scatter(g, g.op("Shape", self), 0,
+                                   g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index))
+    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
+    return expanded_index_shape, expanded_index
 
 # ---------------------------------------------------------------------
 # ONNX operator version

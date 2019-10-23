@@ -9,6 +9,7 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeSet.h>
+#include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/core/CopyBytes.h>
 
 #include <c10/util/Exception.h>
@@ -139,11 +140,6 @@ struct C10_API AutogradMetaInterface {
   virtual unsigned register_hook(std::function<void(at::Tensor)> hook) = 0;
   virtual unsigned register_hook(std::function<at::Tensor(at::Tensor)> hook) = 0;
   virtual ~AutogradMetaInterface();
-};
-
-struct C10_API NonVariableTypeMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
 };
 
 struct C10_API NamedTensorMetaInterface {
@@ -835,14 +831,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const {
-    return autograd_meta_ != nullptr && !at::NonVariableTypeMode::is_enabled();
+    return autograd_meta_ != nullptr && !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
   }
 
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
-  virtual void set_allow_tensor_metadata_change(bool value) {
+  void set_allow_tensor_metadata_change(bool value) {
     allow_tensor_metadata_change_ = value;
   }
 
@@ -850,7 +846,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
-  virtual bool allow_tensor_metadata_change() const {
+  bool allow_tensor_metadata_change() const {
     return allow_tensor_metadata_change_;
   }
 
