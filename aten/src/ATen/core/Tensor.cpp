@@ -199,10 +199,10 @@ void Tensor::rebase_history(torch::autograd::Edge gradient_edge) const {
 }
 
 void Tensor::remove_hook(unsigned pos) const {
-  auto &list = get_autograd_meta()->cpp_hooks_list_;
-  TORCH_CHECK(list && pos < list->hooks_list_.size() , "Invalid index, no hook at position ", pos);
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
-  list->hooks_list_[pos] = nullptr;
+  (*list)[pos] = nullptr;
 }
 
 
