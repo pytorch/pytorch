@@ -189,7 +189,7 @@ void lambdaLiftBlocksAndConvertToGraph(Block* b) {
   }
 }
 
-void createMethodCalls(std::shared_ptr<Graph> g, script::Module* self) {
+void createMethodCalls(const std::shared_ptr<Graph>& g, script::Module* self) {
   // Add `self` as an input on subblocks
   Value* self_val;
   if (g->inputs().size() == 0 || !g->inputs()[0]->type()->cast<ClassType>() ||

@@ -516,8 +516,12 @@ class Module(object):
                 if mod is self:
                     found = True
                     break
-            assert found
-            return name
+            # We can return None here if, for example, someone is
+            # invoking a Module's method via an explicit attr,
+            # rather than via the __call__ path.
+            #
+            # TODO: see if we can capture these cases
+            return name if found else None
 
     def _pop_module(self, tracing_state):
         tracing_state._traced_module_stack.pop()
@@ -527,11 +531,13 @@ class Module(object):
         if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
             return self.forward(*input, **kwargs)
         name = self._push_module(tracing_state)
-        tracing_state.push_scope(name)
+        if name:
+            tracing_state.push_scope(name)
         try:
             result = self.forward(*input, **kwargs)
         finally:
-            tracing_state.pop_scope()
+            if name:
+                tracing_state.pop_scope()
             self._pop_module(tracing_state)
         return result
 
