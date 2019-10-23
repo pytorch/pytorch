@@ -66,7 +66,6 @@ bool isSimpleMap(Node* node) {
       "aten::pow(Tensor self, Tensor exponent) -> Tensor",
       "aten::pow(Tensor self, Scalar exponent) -> Tensor",
       "aten::pow(Scalar self, Tensor exponent) -> Tensor",
-      "aten::rand_like(Tensor self, *, MemoryFormat? memory_format=contiguous_format) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
