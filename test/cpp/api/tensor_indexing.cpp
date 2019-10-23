@@ -64,10 +64,10 @@ TEST(TensorIndexingTest, TestNone) {
 TEST(TensorIndexingTest, TestStep) {
   auto v = torch::arange(10, torch::kInt);
   assert_equal(v({None, None, 1}), v);
-  assert_equal(v({None, None, 2}), torch::tensor({0, 2, 4, 6, 8}));
-  assert_equal(v({None, None, 3}), torch::tensor({0, 3, 6, 9}));
-  assert_equal(v({None, None, 11}), torch::tensor({0}));
-  assert_equal(v({1, 6, 2}), torch::tensor({1, 3, 5}));
+  assert_equal(v({None, None, 2}), torch::tensor({0, 2, 4, 6, 8}, torch::kInt));
+  assert_equal(v({None, None, 3}), torch::tensor({0, 3, 6, 9}, torch::kInt));
+  assert_equal(v({None, None, 11}), torch::tensor({0}, torch::kInt));
+  assert_equal(v({1, 6, 2}), torch::tensor({1, 3, 5}, torch::kInt));
 }
 
 /*
@@ -275,11 +275,11 @@ TEST(TensorIndexingTest, TestIntIndices2d) {
 */
 TEST(TensorIndexingTest, TestIntIndicesBroadcast) {
   // From the NumPy indexing example
-  auto x = torch::arange(0, 12).view({4, 3});
-  auto rows = torch::tensor({0, 3});
-  auto columns = torch::tensor({0, 2});
+  auto x = torch::arange(0, 12, torch::kInt).view({4, 3});
+  auto rows = torch::tensor({0, 3}, torch::kLong);
+  auto columns = torch::tensor({0, 2}, torch::kLong);
   auto result = x(rows({}, None), columns);
-  assert_equal(result, torch::tensor({{0, 2}, {9, 11}}));
+  assert_equal(result, torch::tensor({{0, 2}, {9, 11}}, torch::kInt));
 }
 
 /*
