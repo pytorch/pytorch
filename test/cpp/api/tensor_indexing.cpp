@@ -105,7 +105,7 @@ TEST(TensorIndexingTest, TestBoolIndices) {
     auto v = torch::randn({5, 7, 3});
     auto boolIndices = torch::tensor({true, false, true, true, false}, torch::kBool);
     assert_equal(v(boolIndices).sizes(), {3, 7, 3});
-    assert_equal(v(boolIndices), torch::stack({v(0), v(1), v(2)}));
+    assert_equal(v(boolIndices), torch::stack({v(0), v(2), v(3)}));
   }
   {
     auto v = torch::tensor({true, false, true}, torch::kBool);
