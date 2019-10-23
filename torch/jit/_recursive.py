@@ -336,7 +336,7 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         #    recursively scripting them.
         for name in concrete_type.get_module_names():
             orig_value = getattr(nn_module, name)
-            assert isinstance(orig_value, Module)
+            assert isinstance(orig_value, Module), "Expected Module but got {}".format(type(orig_value))
             scripted = recursive_script(orig_value)
             cpp_module._register_module(name, scripted._c)
 
