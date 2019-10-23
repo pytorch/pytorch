@@ -788,12 +788,19 @@ TEST_F(FunctionalTest, PReLU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, LayerNorm) {
+  const auto input = torch::randn({2, 2});
+  auto y = F::layer_norm(input, LayerNormOptions({2, 2}).eps(2e-5));
+  auto y_exp = torch::layer_norm(input, {2, 2}, torch::Tensor(), torch::Tensor(), 2e-5);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(FunctionalTest, Bilinear) {
   auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
   auto input2 = torch::tensor({{7, 4}, {8 ,9}});
   auto weight = torch::tensor({{{2, 3}, {9, 7}, {8, 6}}});
   auto bias = torch::tensor({1});
- 
+
   auto y_with_bias = F::bilinear(input1, input2, weight, bias);
   ASSERT_EQ(y_with_bias.ndimension(), 2);
   ASSERT_EQ(y_with_bias.sizes(), torch::IntArrayRef({2, 1}));
@@ -811,10 +818,10 @@ TEST_F(FunctionalTest, Normalize) {
   const auto expected = torch::tensor(
     {{{0.00000000, 0.10000000, 0.2000, 0.30000000, 0.40000000},
       {0.14285715, 0.17142858, 0.2000, 0.22857143, 0.25714287}}}, torch::requires_grad().dtype(torch::kFloat));
-  { // Test #1 
+  { // Test #1
     auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat).requires_grad(true));
     auto norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
-    
+
     // reduce to scalar to call .backward()
     torch::Tensor s = norm.sum();
     s.backward();
@@ -834,7 +841,7 @@ TEST_F(FunctionalTest, Normalize) {
 
     ASSERT_TRUE(torch::allclose(output, expected));
   }
-  
+
   { // Test #3 Base case of scalar tensor
     auto input = torch::randn({}, torch::requires_grad());
     torch::Tensor norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
