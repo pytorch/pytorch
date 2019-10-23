@@ -3,6 +3,13 @@ include(../cmake/Codegen.cmake)
 
 # ---[ Declare source file lists
 
+list(APPEND Caffe2_CPU_SRCS ${C10_SRCS})
+list(APPEND Caffe2_GPU_SRCS ${C10_CUDA_SRCS})
+list(APPEND Caffe2_HIP_SRCS ${C10_HIP_SRCS})
+list(APPEND Caffe2_CPU_INCLUDE ${C10_INCLUDE})
+list(APPEND Caffe2_GPU_INCLUDE ${C10_CUDA_INCLUDE})
+list(APPEND Caffe2_HIP_INCLUDE ${C10_HIP_INCLUDE})
+
 # ---[ ATen build
 if (INTERN_BUILD_ATEN_OPS)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
@@ -31,16 +38,16 @@ if (INTERN_BUILD_ATEN_OPS)
   add_dependencies(aten_op_header_gen __aten_op_header_gen)
 
   # Add source, includes, and libs to lists
-  list(APPEND Caffe2_CPU_SRCS ${C10_SRCS} ${ATen_CPU_SRCS})
-  list(APPEND Caffe2_GPU_SRCS ${C10_CUDA_SRCS} ${ATen_CUDA_SRCS})
-  list(APPEND Caffe2_HIP_SRCS ${C10_HIP_SRCS} ${ATen_HIP_SRCS})
+  list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
+  list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
+  list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
   list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
-  list(APPEND Caffe2_CPU_INCLUDE ${C10_INCLUDE} ${ATen_CPU_INCLUDE})
-  list(APPEND Caffe2_GPU_INCLUDE ${C10_CUDA_INCLUDE} ${ATen_CUDA_INCLUDE})
-  list(APPEND Caffe2_HIP_INCLUDE ${C10_HIP_INCLUDE} ${ATen_HIP_INCLUDE})
+  list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
+  list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
+  list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
   # NB: c10 doesn't have any extra dependency settings
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
