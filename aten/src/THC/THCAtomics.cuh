@@ -158,4 +158,21 @@ static inline  __device__  void atomicAdd(double *address, double val) {
 #endif
 #endif
 
+static inline  __device__  void atomicMax(float *address, float val) {
+  uint32_t* address_as_int = (uint32_t*)address;
+  uint32_t old = *address_as_int;
+  uint32_t assumed;
+
+  do {
+    assumed = old;
+    if (!(__int_as_float(assumed) < val)) {
+        return;
+    }
+    old = atomicCAS(address_as_int, assumed,
+                    __float_as_int(val));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+} while (assumed != old);
+}
+
 #endif // THC_ATOMICS_INC

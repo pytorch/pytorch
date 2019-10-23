@@ -625,6 +625,10 @@ def method_tests():
         ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', (), [0]),
         ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', (), [0]),
         ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', (), [0]),
+        # @nocommit requires supporting non-floats
+        # ('index_max', (S, S), (0, index_variable(2, S), (2, S)), 'dim', (), [0]),
+        # ('index_max', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
+        # ('index_max', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
         ('inverse', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', (), NO_ARGS, [skipIfNoLapack]),
         ('inverse', lambda: random_fullrank_matrix_distinct_singular_value(S, 2, 3),
          NO_ARGS, 'batched', (), NO_ARGS, [skipIfNoLapack]),

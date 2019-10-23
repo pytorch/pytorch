@@ -368,6 +368,7 @@ _(aten, index) \
 _(aten, index_add) \
 _(aten, index_copy) \
 _(aten, index_fill) \
+_(aten, index_max) \
 _(aten, index_put) \
 _(aten, index_select) \
 _(aten, indices) \
