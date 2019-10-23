@@ -49,7 +49,7 @@ SourceRange getPythonInterpreterSourceRange() {
   return SourceRange(source, 0, stack_trace_text.size());
 }
 
-std::pair<std::shared_ptr<TracingState>, Stack> createGraphByTracing(
+std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& func,
     Stack trace_inputs,
     const py::function& var_name_lookup_fn,
@@ -82,7 +82,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> createGraphByTracing(
     force_outplace,
     self
   );
-  return outs;
+  return std::make_pair(std::get<0>(outs)->graph, std::get<1>(outs));
 }
 
 Node* preRecordPythonTrace(
