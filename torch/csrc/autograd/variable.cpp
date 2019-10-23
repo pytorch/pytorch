@@ -52,12 +52,12 @@ DifferentiableViewMeta::~DifferentiableViewMeta() {
 
 // In c++ file so we can access Node
 void _create_cpp_hook(const at::Tensor& self) {
-  auto &list = get_autograd_meta()->cpp_hooks_list;
+  auto &list = self.get_autograd_meta()->cpp_hooks_list;
   list.reset(new hooks_list());
   std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, self.output_nr()));
   self.clear_hooks();
   self.add_hook(std::make_shared<CppFunctionPreHook>(list, 0));
-  auto fn = grad_fn();
+  auto fn = self.grad_fn();
   if (fn) {
     fn->add_pre_hook(std::move(hook_ptr));
   }
