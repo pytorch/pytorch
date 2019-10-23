@@ -932,15 +932,16 @@ std::tuple<Tensor, Tensor> _symeig_helper_cpu(const Tensor& self, bool eigenvect
     apply_symeig<scalar_t>(self_working_copy, eigvals, eigenvectors, upper, infos);
   });
 
-  if (!eigenvectors) {
-    self_working_copy.zero_();
-  }
   if (self.dim() > 2) {
     batchCheckErrors(infos, "symeig_cpu");
   } else {
     singleCheckErrors(infos[0], "symeig_cpu");
   }
-  return std::tuple<Tensor, Tensor>(eigvals, self_working_copy);
+  if (eigenvectors) {
+    return std::tuple<Tensor, Tensor>(eigvals, self_working_copy);
+  } else {
+    return std::tuple<Tensor, Tensor>(eigvals, at::empty({0}, self.options()));
+  }
 }
 
 std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool upper) {

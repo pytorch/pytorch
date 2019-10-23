@@ -1279,15 +1279,16 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
     apply_symeig<scalar_t>(self_working_copy, eigvals_working_copy, eigenvectors, upper, infos);
   });
 
-  if (!eigenvectors) {
-    self_working_copy.zero_();
-  }
   if (self.dim() > 2) {
     batchCheckErrors(infos, "symeig_cuda");
   } else {
     singleCheckErrors(infos[0], "symeig_cuda");
   }
-  return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
+  if (eigenvectors) {
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
+  } else {
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), at::empty({0}, self.options()));
+  }
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
