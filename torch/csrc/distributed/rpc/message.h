@@ -39,6 +39,10 @@ enum MessageType {
   BACKWARD_AUTOGRAD_REQ = 17,
   BACKWARD_AUTOGRAD_RESP = 18,
 
+  // Messages to tell workers to clean up their autograd context.
+  CLEANUP_AUTOGRAD_CONTEXT_REQ = 18,
+  CLEANUP_AUTOGRAD_CONTEXT_RESP = 19,
+
   // Other internal message types
   SHUTDOWN = 50,
   EXCEPTION = 55,
@@ -87,11 +91,12 @@ class TORCH_API Message final {
 
   // Destructively retrieves the payload.
   std::vector<char>&& movePayload() &&;
+  std::vector<torch::Tensor>&& moveTensors() &&;
 
   const std::vector<char>& payload() const;
   std::vector<torch::Tensor>& tensors();
   const std::vector<torch::Tensor>& tensors() const;
-  const MessageType& type() const;
+  MessageType type() const;
 
   bool isRequest() const;
   bool isResponse() const;

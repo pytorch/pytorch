@@ -440,10 +440,10 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     return out;
 }
 
-std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(
-    c10::QualifiedName qualName,
-    std::vector<std::string> field_names,
-    std::vector<TypePtr> field_types) {
+TupleTypePtr TupleType::createNamed(
+    const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<std::string>& field_names,
+    const std::vector<TypePtr>& field_types) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
   std::vector<Argument> arguments;
   for (size_t i = 0; i < field_names.size(); ++i) {
@@ -454,11 +454,12 @@ std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(
   }
 
   auto schema = std::make_shared<FunctionSchema>(
-      /*name=*/qualName.name(),
+      /*name=*/qualName.value_or(c10::QualifiedName()).name(),
       /*overload_name=*/std::string(""),
       /*arguments=*/arguments,
       /*returns=*/std::vector<Argument>{});
-  return schema;
+  return std::shared_ptr<TupleType>(new TupleType(
+      field_types, qualName, schema)); // NOLINT(modernize-make-shared)
 }
 
 TupleType::TupleType(
