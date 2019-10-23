@@ -215,6 +215,18 @@ TEST(TensorTest, ContainsCorrectValueForSingleValueVariable) {
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1}));
   ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 123.456));
+
+  tensor = torch::tensor(true);
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
+  ASSERT_EQ(tensor.dtype(), at::kBool);
+  ASSERT_TRUE(almost_equal(tensor, true));
+
+  tensor = torch::tensor({true});
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1}));
+  ASSERT_EQ(tensor.dtype(), at::kBool);
+  ASSERT_TRUE(almost_equal(tensor[0], true));
 }
 
 TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
@@ -253,6 +265,15 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
+
+  tensor = torch::tensor({true, false, true});
+  ASSERT_TRUE(tensor.is_variable());
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
+  ASSERT_EQ(tensor.dtype(), at::kBool);
+  ASSERT_TRUE(almost_equal(tensor[0], true));
+  ASSERT_TRUE(almost_equal(tensor[1], false));
+  ASSERT_TRUE(almost_equal(tensor[2], true));
 }
 
 TEST(TensorTest, MultidimTensorCtor) {
