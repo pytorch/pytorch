@@ -841,10 +841,7 @@ void initJitScriptBindings(PyObject* module) {
          ResolutionCallback rcb,
          bool is_module) {
         get_python_cu()->define_interface(
-            c10::QualifiedName(qualifiedName),
-            classDef,
-            pythonResolver(std::move(rcb)),
-            is_module);
+            c10::QualifiedName(qualifiedName), classDef, pythonResolver(rcb), is_module);
       });
 
   m.def("_parse_source_def", [](const std::string& src) {
