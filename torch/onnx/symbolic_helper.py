@@ -367,7 +367,7 @@ def _index_fill_reshape_helper(g, self, dim, index):
     return expanded_index_shape, expanded_index
 
 
-def _avgpool_helper(kernel_size, stride, divisor_override, name):
+def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name):
     if divisor_override and divisor_override.node().kind() != 'prim::Constant':
         return _unimplemented(name, "divisor_override")
     if not stride:

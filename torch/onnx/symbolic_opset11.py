@@ -6,6 +6,7 @@ import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_helper import _black_list_in_opset
 from torch.onnx.symbolic_opset9 import expand
+from torch.nn.modules.utils import _single, _pair, _triple
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -163,24 +164,17 @@ def _unique2(g, self, sorted, return_inverse, return_counts):
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
-        if ceil_mode and not input.isCompleteTensor():
-            return _unimplemented(name, "input size not accessible")
-        padding = sym_help._avgpool_helper(kernel_size, stride, divisor_override, name)
-        if ceil_mode:
-            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+        padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if count_include_pad:
             input = g.op("Pad", input,
                      g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)),
                      mode_s='constant')
             padding = (0,) * len(padding)
-        if ceil_mode:
-            padding = padding + tuple(numpy.add(padding_ceil, padding))
-        else:
-            padding = padding * 2
         output = g.op("AveragePool", input,
                       kernel_shape_i=tuple_fn(kernel_size),
                       strides_i=tuple_fn(stride),
-                      pads_i=padding)
+                      pads_i=padding * 2,
+                      ceil_mode_i=ceil_mode)
         return output
     return symbolic_fn
 
