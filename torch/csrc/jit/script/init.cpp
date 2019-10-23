@@ -145,11 +145,7 @@ struct PythonResolver : public Resolver {
           std::tuple<std::string, decltype(fields), decltype(annotations)>>(
           props);
 
-      auto tt = TupleType::create(
-          annotations,
-          qualifiedName,
-          TupleType::namedTupleSchemaFromNamesAndTypes(
-              qualifiedName, fields, annotations));
+      auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
       if (auto type = get_python_cu()->get_type(qualifiedName)) {
         TORCH_CHECK(
             type->isSubtypeOf(tt),
@@ -748,7 +744,6 @@ void initJitScriptBindings(PyObject* module) {
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
           })
       .def_property_readonly("graph", &Method::graph)
-      .def("_lowered_graph", &Method::_lowered_graph)
       .def_property_readonly(
           "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)

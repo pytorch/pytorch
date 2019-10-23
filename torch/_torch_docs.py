@@ -912,43 +912,6 @@ Example::
              -0.5790,  0.1497]])
 """.format(**common_args))
 
-add_docstr(torch.cdist,
-           r"""
-cdist(x1, x2, p=2) -> Tensor
-
-Computes the p-norm distance between each pair of the two collections of row vectors.
-
-If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the
-output will have shape :math:`P \times R`.
-
-This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)`
-if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to
-`scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest
-scipy function is `scipy.spatial.distance.cdist(xn, lambda x, y: np.abs(x - y).max())`.
-
-Args:
-    x1 (Tensor): input tensor of shape :math:`P \times M`.
-    x2 (Tensor): input tensor of shape :math:`R \times M`.
-    p: p value for the p-norm distance to calculate between each vector pair
-        :math:`\in [0, \infty]`.
-
-Example::
-
-    >>> a = torch.tensor([[0.9041,  0.0196], [-0.3108, -2.4423], [-0.4821,  1.059]])
-    >>> a
-    tensor([[ 0.9041,  0.0196],
-            [-0.3108, -2.4423],
-            [-0.4821,  1.0590]])
-    >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986,  1.3702]])
-    >>> b
-    tensor([[-2.1763, -0.4713],
-            [-0.6986,  1.3702]])
-    >>> torch.cdist(a, b, p=2)
-    tensor([[3.1193, 2.0959],
-            [2.7138, 3.8322],
-            [2.2830, 0.3791]])
-""".format(**common_args))
-
 add_docstr(torch.ceil,
            r"""
 ceil(input, out=None) -> Tensor
@@ -2975,7 +2938,7 @@ Example::
 
 add_docstr(torch.matrix_rank,
            r"""
-matrix_rank(input, tol=None, bool symmetric=False) -> Tensor
+matrix_rank(input, tol=None, symmetric=False) -> Tensor
 
 Returns the numerical rank of a 2-D tensor. The method to compute the
 matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
@@ -5294,7 +5257,7 @@ Returns:
 
         - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`. The eigenvalues in ascending order.
         - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
-          If ``eigenvectors=False``, it's a tensor filled with zeros.
+          If ``eigenvectors=False``, it's an empty tensor.
           Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
 Examples::

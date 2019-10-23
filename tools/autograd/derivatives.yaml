@@ -402,11 +402,11 @@
   source: grad.index_select(dim, index)
   index: non_differentiable
 
-- name: index_fill_.Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
+- name: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   self: grad.clone().index_fill_(dim, index, 0)
   index: non_differentiable
 
-- name: index_fill_.Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
+- name: index_fill_.int_Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
   self: grad.clone().index_fill_(dim, index, 0)
   value: grad.index_select(dim, index).sum()
   index: non_differentiable
@@ -443,6 +443,7 @@
 - name: lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor
   self: grad * (1 - weight)
   end: grad * weight
+  weight: grad * (end - self)
 
 - name: lgamma(Tensor self) -> Tensor
   self: grad * digamma(self)
@@ -620,7 +621,7 @@
   self: not_implemented("_pdist_backward")
   pdist: not_implemented("_pdist_backward")
 
-- name: cdist(Tensor x1, Tensor x2, float p=2) -> Tensor
+- name: cdist(Tensor x1, Tensor x2, float p=2, int? compute_mode=None) -> Tensor
   x1: _cdist_backward(grad.contiguous(), x1, x2, p, result)
   x2: _cdist_backward(grad.transpose(-1, -2).contiguous(), x2, x1, p, result.transpose(-1, -2).contiguous())
 
