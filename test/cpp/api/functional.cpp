@@ -1145,7 +1145,7 @@ TEST_F(FunctionalTest, Interpolate) {
       // test float scale factor up & down sampling
       for (const auto scale_factor : {0.5, 1.5, 2.0}) {
         auto input = torch::ones({1, 1, 2, 2});
-        auto options = UpsampleOptions()
+        auto options = InterpolateOptions()
                            .scale_factor({scale_factor, scale_factor})
                            .mode(torch::kBilinear)
                            .align_corners(align_corners);
@@ -1164,7 +1164,7 @@ TEST_F(FunctionalTest, Interpolate) {
       for (const auto scale_factor : {0.5, 1.5, 2.0}) {
         auto input = torch::ones({1, 1, 2, 2, 2});
         auto options =
-            UpsampleOptions()
+            InterpolateOptions()
                 .scale_factor({scale_factor, scale_factor, scale_factor})
                 .mode(torch::kTrilinear)
                 .align_corners(align_corners);
