@@ -133,17 +133,13 @@ template <>
 std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
   auto future = std::make_shared<ivalue::Future>(nullptr);
   auto agent = RpcAgent::getDefaultRpcAgent();
-  auto fm = agent->send(
+  auto futureResponse = agent->send(
       agent->getWorkerInfo(ownerId_),
       ScriptRRefFetchCall(rrefId()).toMessage());
 
-  fm->addCallback([future](const Message& message) {
+  futureResponse->addCallback([future](const Message& message) {
     RRefContext::handleException(message);
     auto rfr = ScriptRRefFetchRet::fromMessage(message);
-    TORCH_INTERNAL_ASSERT(
-        rfr->values().size() == 1,
-        "RRef of IValue should contain a single IValue, but got ",
-        rfr->values().size());
     future->markCompleted(rfr->values().front());
   });
   return future;
@@ -153,11 +149,11 @@ template <>
 std::shared_ptr<ivalue::Future> UserRRef<py::object>::toHere() {
   auto future = std::make_shared<ivalue::Future>(nullptr);
   auto agent = RpcAgent::getDefaultRpcAgent();
-  auto fm = agent->send(
+  auto futureResponse = agent->send(
       agent->getWorkerInfo(ownerId_),
       PythonRRefFetchCall(rrefId()).toMessage());
 
-  fm->addCallback([future](const Message& message) {
+  futureResponse->addCallback([future](const Message& message) {
     RRefContext::handleException(message);
     auto rfr = PythonRRefFetchRet::fromMessage(message);
     future->markCompleted(c10::ivalue::Tuple::create(rfr->values()));

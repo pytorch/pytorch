@@ -106,8 +106,12 @@ Message RRefFetchRet::toMessage() && {
 
 std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
     const Message& message) {
-  return c10::guts::make_unique<ScriptRRefFetchRet>(
-      toIValues(message, MessageType::SCRIPT_RREF_FETCH_RET));
+  auto values = toIValues(message, MessageType::SCRIPT_RREF_FETCH_RET);
+  TORCH_INTERNAL_ASSERT(
+      values.size() == 1,
+      "RRef of IValue should contain a single IValue, but got ",
+      values.size());
+  return c10::guts::make_unique<ScriptRRefFetchRet>(std::move(values));
 }
 
 std::unique_ptr<PythonRRefFetchRet> PythonRRefFetchRet::fromMessage(
