@@ -174,7 +174,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
         op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
 #endif
@@ -185,7 +185,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${name}", "${overload_name}"}).value();
+    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
         op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
 #endif
@@ -217,7 +217,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::${name}", "${overload_name}"}).value();
+        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
         op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
@@ -230,7 +230,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     ${static_dispatch_function_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchema({"aten::${name}", "${overload_name}"}).value();
+        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
         op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
@@ -239,10 +239,17 @@ static inline ${return_type} ${api_name}(${formals}) {
 
 # In order to rely on the linker to strip unused ops, it requires us to dispatch statically
 # in Functions.h and TensorMethods.h.
+#
+# NB: The default body also needs to apply a variable guard, as in some
+# situations what we think is a default body actually does have an
+# explicit derivative, and thereby would have gotten unwrapped by
+# the time you get to the implementation.
 STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
+at::AutoNonVariableTypeMode _var_guard(true);
 ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
+at::AutoNonVariableTypeMode _var_guard(true);
 switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:
@@ -269,6 +276,32 @@ static inline ${return_type} ${api_name}(${formals}) {
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static auto table = globalATenDispatch().getOpTable("${schema_string}");
     return table->callUnboxed<${return_type}, ${formals_types}>(${native_actuals});
+#endif
+}
+""")
+C10_UNBOXEDONLY_FACTORY_DEFINITION = CodeTemplate("""\
+static inline ${return_type} ${api_name}(${formals}) {
+#ifdef USE_STATIC_DISPATCH
+    ${static_dispatch_function_body}
+#else
+    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
+    static c10::OperatorHandle op = c10::Dispatcher::singleton()
+        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
+    return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
+        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+#endif
+}
+""")
+C10_FACTORY_DEFINITION = CodeTemplate("""\
+static inline ${return_type} ${api_name}(${formals}) {
+#ifdef USE_STATIC_DISPATCH
+    ${static_dispatch_function_body}
+#else
+    globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
+    static c10::OperatorHandle op = c10::Dispatcher::singleton()
+        .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
+    return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
+        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -880,7 +913,9 @@ def create_generic(top_env, declarations):
 
     def format_return_type(return_types):
         # type: (List[ReturnType]) -> str
-        if len(return_types) == 1:
+        if len(return_types) == 0:
+            return "void"
+        elif len(return_types) == 1:
             return return_types[0]['type']
         return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
 
@@ -1109,9 +1144,6 @@ def create_generic(top_env, declarations):
             if isinstance(t_raw, string_type):
                 t = t_raw
                 name = None
-            elif t_raw is None:
-                t = 'void'
-                name = None
             else:
                 t = t_raw['type']
                 name = t_raw['name']
@@ -1142,7 +1174,6 @@ def create_generic(top_env, declarations):
         assert option['python_module'] == '' or option['python_module'] == 'nn', \
             "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
                 option['python_module'], option['name'])
-
         formals = native_get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
@@ -1263,8 +1294,16 @@ def create_generic(top_env, declarations):
                     option, native_arguments=option['native_actuals'])
 
             if is_factory_method:
-                fn_definition = FACTORY_DEFINITION.substitute(
-                    option, static_dispatch_function_body=static_dispatch_function_body)
+                if option['use_c10_dispatcher'] == 'no':
+                    fn_definition = FACTORY_DEFINITION.substitute(
+                        option, static_dispatch_function_body=static_dispatch_function_body)
+                elif option['use_c10_dispatcher'] == 'unboxed_only':
+                    fn_definition = C10_UNBOXEDONLY_FACTORY_DEFINITION.substitute(
+                        option, static_dispatch_function_body=static_dispatch_function_body)
+                else:
+                    assert option['use_c10_dispatcher'] == 'full'
+                    fn_definition = C10_FACTORY_DEFINITION.substitute(
+                        option, static_dispatch_function_body=static_dispatch_function_body)
             else:
                 if option['use_c10_dispatcher'] == 'no':
                     fn_definition = FUNCTION_DEFINITION.substitute(
