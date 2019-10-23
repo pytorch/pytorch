@@ -721,14 +721,12 @@ class DistAutogradTest(object):
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
 
-            time.sleep(390);
+            time.sleep(300);
             if self.rank == 2:
                 pass
             else:
-                print(context_id)
                 with self.assertRaises(RuntimeError):
                     dist_autograd._retrieve_context(context_id)
-                print("worked")
 
     @dist_init(setup_model_parallel=True)
     def test_backward_without_context(self):
