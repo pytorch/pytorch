@@ -1702,7 +1702,7 @@ TEST_F(ModulesTest, Upsampling2D) {
       // test float scale factor up & down sampling
       for (const auto scale_factor : {0.5, 1.5, 2.0}) {
         Upsample model(UpsampleOptions()
-                           .scale_factor({{scale_factor, scale_factor}})
+                           .scale_factor({scale_factor, scale_factor})
                            .mode(torch::kBilinear)
                            .align_corners(align_corners));
         auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
@@ -1723,7 +1723,7 @@ TEST_F(ModulesTest, Upsampling2D) {
       // test float scale factor up & down sampling
       for (const auto scale_factor : {0.5, 1.5, 2.0}) {
         Upsample model(UpsampleOptions()
-                           .scale_factor({{scale_factor, scale_factor}})
+                           .scale_factor({scale_factor, scale_factor})
                            .mode(torch::kBicubic)
                            .align_corners(align_corners));
         auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
@@ -1761,7 +1761,7 @@ TEST_F(ModulesTest, Upsampling3D) {
       for (const auto scale_factor : {0.5, 1.5, 2.0}) {
         Upsample model(
             UpsampleOptions()
-                .scale_factor({{scale_factor, scale_factor, scale_factor}})
+                .scale_factor({scale_factor, scale_factor, scale_factor})
                 .mode(torch::kTrilinear)
                 .align_corners(align_corners));
         auto input = torch::ones({1, 1, 2, 2, 2}, torch::requires_grad());
@@ -1819,7 +1819,7 @@ TEST_F(ModulesTest, PrettyPrintUpsample) {
       c10::str(Upsample(UpsampleOptions().size(std::vector<int64_t>{2, 4, 4}))),
       "torch::nn::Upsample(size=[2, 4, 4], mode=Nearest)");
   ASSERT_EQ(
-      c10::str(Upsample(UpsampleOptions().scale_factor({{0.5, 1.5}}).mode(torch::kBilinear))),
+      c10::str(Upsample(UpsampleOptions().scale_factor({0.5, 1.5}).mode(torch::kBilinear))),
       "torch::nn::Upsample(scale_factor=[0.5, 1.5], mode=Bilinear)");
 }
 

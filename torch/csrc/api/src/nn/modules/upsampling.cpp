@@ -14,10 +14,10 @@ void UpsampleImpl::reset() {}
 
 void UpsampleImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Upsample(";
-  if (options.scale_factor() != c10::nullopt) {
-    stream << "scale_factor=" << at::ArrayRef<double>(*options.scale_factor());
+  if (!options.scale_factor().empty()) {
+    stream << "scale_factor=" << at::ArrayRef<double>(options.scale_factor());
   } else {
-    stream << "size=" << at::ArrayRef<int64_t>(*options.size());
+    stream << "size=" << at::ArrayRef<int64_t>(options.size());
   }
   stream << ", mode=" << c10::visit(enumtype::enum_name{}, options.mode()) << ")";
 }

@@ -11,30 +11,28 @@ namespace functional {
 
 inline Tensor interpolate(const Tensor& input, InterpolateOptions options) {
   auto _check_size_scale_factor = [options](size_t dim) {
-    if (options.size() == c10::nullopt &&
-        options.scale_factor() == c10::nullopt) {
+    if (options.size().empty() && options.scale_factor().empty()) {
       TORCH_CHECK(false, "either size or scale_factor should be defined");
     }
-    if (options.size() != c10::nullopt &&
-        options.scale_factor() != c10::nullopt) {
+    if (!options.size().empty() && !options.scale_factor().empty()) {
       TORCH_CHECK(false, "only one of size or scale_factor should be defined");
     }
-    if (options.scale_factor() != c10::nullopt &&
-        options.scale_factor()->size() != dim) {
+    if (!options.scale_factor().empty() &&
+        options.scale_factor().size() != dim) {
       TORCH_CHECK(
           false,
           "scale_factor shape must match input shape. "
           "Input is ", dim, "D, scale_factor size is ",
-          options.scale_factor()->size());
+          options.scale_factor().size());
     }
   };
 
   auto _output_size = [input, options, _check_size_scale_factor](size_t dim) {
     _check_size_scale_factor(dim);
-    if (options.size() != c10::nullopt) {
-      return *options.size();
+    if (!options.size().empty()) {
+      return options.size();
     }
-    auto scale_factors = *options.scale_factor();
+    auto scale_factors = options.scale_factor();
 
     std::vector<int64_t> sizes;
     for (size_t i = 0; i < dim; ++i) {

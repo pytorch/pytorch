@@ -15,10 +15,10 @@ namespace nn {
 /// Options for a `D`-dimensional interpolate functional.
 struct TORCH_API InterpolateOptions {
   /// output spatial sizes.
-  TORCH_ARG(c10::optional<std::vector<int64_t>>, size) = c10::nullopt;
+  TORCH_ARG(std::vector<int64_t>, size) = {};
 
   /// multiplier for spatial size.
-  TORCH_ARG(c10::optional<std::vector<double>>, scale_factor) = c10::nullopt;
+  TORCH_ARG(std::vector<double>, scale_factor) = {};
 
   /// algorithm used for upsampling. Default: ``nearest``
   typedef c10::variant<
