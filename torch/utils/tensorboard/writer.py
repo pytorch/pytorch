@@ -264,7 +264,7 @@ class SummaryWriter(object):
         """Returns the directory where event files will be written."""
         return self.log_dir
 
-    def add_hparams(self, hparam_dict=None, metric_dict=None, path_name=str(time.time()), global_step=None):
+    def add_hparams(self, hparam_dict=None, metric_dict=None, path_name=None, global_step=None):
         """Add a set of hyperparameters to be compared in TensorBoard.
         Args:
             hparam_dict (dictionary): Each key-value pair in the dictionary is the
@@ -274,6 +274,8 @@ class SummaryWriter(object):
               here should be unique in the tensorboard record. Otherwise the value
               you added by `add_scalar` will be displayed in hparam plugin. In most
               cases, this is unwanted.
+             path_name (str): Optional custom end of log name
+             global_step (int): Optional current time step 
 
             p.s. The value in the dictionary can be `int`, `float`, `bool`, `str`, or
             0-dim tensor
@@ -291,6 +293,8 @@ class SummaryWriter(object):
             raise TypeError('hparam_dict and metric_dict should be dictionary.')
         exp, ssi, sei = hparams(hparam_dict, metric_dict)
 
+        if not path_name:
+            path_name = str(time.time())
         with SummaryWriter(log_dir=os.path.join(self.file_writer.get_logdir(), path_name)) as w_hp:
             w_hp.file_writer.add_summary(exp)
             w_hp.file_writer.add_summary(ssi)
