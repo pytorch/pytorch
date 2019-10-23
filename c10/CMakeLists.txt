@@ -5,12 +5,6 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Main build file for the C10 library.
-#
-# Note that the C10 library should maintain minimal dependencies - especially,
-# it should not depend on any library that is implementation specific or
-# backend specific. It should in particular NOT be dependent on any generated
-# protobuf header files, because protobuf header files will transitively force
-# one to link against a specific protobuf version.
 
 # ---[ Configure macro file.
 set(C10_USE_GFLAGS ${USE_GFLAGS}) # used in cmake_macros.h.in
@@ -37,46 +31,6 @@ file(GLOB C10_SRCS
         )
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
 file(GLOB_RECURSE C10_HEADERS *.h)
-add_library(c10 ${C10_SRCS} ${C10_HEADERS})
-# If building shared library, set dllimport/dllexport proper.
-target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
-# Enable hidden visibility if compiler supports it.
-if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-  target_compile_options(c10 PRIVATE "-fvisibility=hidden")
-endif()
-
-# ---[ Dependency of c10
-if (${USE_GFLAGS})
-   target_link_libraries(c10 PUBLIC gflags)
-endif()
-
-if (${USE_GLOG})
-    target_link_libraries(c10 PUBLIC glog::glog)
-endif()
-
-if (USE_NUMA)
-  if (NOT CAFFE2_DISABLE_NUMA)
-    message(STATUS "NUMA paths:")
-    message(STATUS ${Numa_INCLUDE_DIR})
-    message(STATUS ${Numa_LIBRARIES})
-    include_directories(SYSTEM ${Numa_INCLUDE_DIR})
-    target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
-  else()
-    message(STATUS "NUMA is disabled")
-  endif()
-else()
-  message(STATUS "don't use NUMA")
-endif()
-
-if (ANDROID)
-    target_link_libraries(c10 PRIVATE log)
-endif()
-
-target_include_directories(
-    c10 PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-    $<INSTALL_INTERFACE:include>)
 
 add_subdirectory(test)
 
@@ -94,13 +48,20 @@ endif()
 # Note: for now, we will put all export path into one single Caffe2Targets group
 # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
 # individual libraries like libc10.so and libcaffe2.so are still self-contained.
-install(TARGETS c10 EXPORT Caffe2Targets DESTINATION lib)
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
 install(FILES ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h
         DESTINATION include/c10/macros)
 
-if (MSVC AND C10_BUILD_SHARED_LIBS)
-  install(FILES $<TARGET_PDB_FILE:c10> DESTINATION lib OPTIONAL)
-endif()
+set(C10_INCLUDE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../
+    ${CMAKE_BINARY_DIR})
+
+# Pass source and includes to parents
+set(C10_SRCS ${C10_SRCS} PARENT_SCOPE)
+set(C10_INCLUDE ${C10_INCLUDE} PARENT_SCOPE)
+set(C10_CUDA_SRCS ${C10_CUDA_SRCS} PARENT_SCOPE)
+set(C10_CUDA_INCLUDE ${C10_CUDA_INCLUDE} PARENT_SCOPE)
+set(C10_HIP_SRCS ${C10_HIP_SRCS} PARENT_SCOPE)
+set(C10_HIP_INCLUDE ${C10_HIP_INCLUDE} PARENT_SCOPE)

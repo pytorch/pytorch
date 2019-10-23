@@ -26,8 +26,6 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   add_library(Caffe2_perfkernels_avx2 STATIC ${avx2_srcs})
   add_dependencies(Caffe2_perfkernels_avx Caffe2_PROTO)
   add_dependencies(Caffe2_perfkernels_avx2 Caffe2_PROTO)
-  target_link_libraries(Caffe2_perfkernels_avx PRIVATE c10)
-  target_link_libraries(Caffe2_perfkernels_avx2 PRIVATE c10)
   if (MSVC)
     target_compile_options(Caffe2_perfkernels_avx
         PRIVATE "/arch:AVX"
@@ -60,7 +58,6 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   if (CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
     add_library(Caffe2_perfkernels_avx512 STATIC ${avx512_srcs})
     add_dependencies(Caffe2_perfkernels_avx512 Caffe2_PROTO)
-    target_link_libraries(Caffe2_perfkernels_avx512 PRIVATE c10)
     if (MSVC)
       target_compile_options(Caffe2_perfkernels_avx512
           PRIVATE "/D__AVX512F__"

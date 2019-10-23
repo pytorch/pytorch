@@ -31,16 +31,17 @@ if (INTERN_BUILD_ATEN_OPS)
   add_dependencies(aten_op_header_gen __aten_op_header_gen)
 
   # Add source, includes, and libs to lists
-  list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
-  list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
-  list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
+  list(APPEND Caffe2_CPU_SRCS ${C10_SRCS} ${ATen_CPU_SRCS})
+  list(APPEND Caffe2_GPU_SRCS ${C10_CUDA_SRCS} ${ATen_CUDA_SRCS})
+  list(APPEND Caffe2_HIP_SRCS ${C10_HIP_SRCS} ${ATen_HIP_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
   list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
   list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
-  list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
-  list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
-  list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
+  list(APPEND Caffe2_CPU_INCLUDE ${C10_INCLUDE} ${ATen_CPU_INCLUDE})
+  list(APPEND Caffe2_GPU_INCLUDE ${C10_CUDA_INCLUDE} ${ATen_CUDA_INCLUDE})
+  list(APPEND Caffe2_HIP_INCLUDE ${C10_HIP_INCLUDE} ${ATen_HIP_INCLUDE})
+  # NB: c10 doesn't have any extra dependency settings
   list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
   list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
@@ -918,7 +919,6 @@ if (USE_OPENMP AND OPENMP_FOUND)
   target_link_libraries(torch PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
-target_link_libraries(torch PUBLIC c10)
 target_link_libraries(torch PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(torch PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(torch PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
@@ -929,10 +929,19 @@ target_include_directories(torch SYSTEM PRIVATE "${Caffe2_DEPENDENCY_INCLUDE}")
 torch_set_target_props(torch)
 
 
+# NB: The C10 macros exist for hysterical raisins
 target_compile_options(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+target_compile_options(torch PRIVATE "-DC10_BUILD_MAIN_LIB")
+target_compile_options(torch PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
+target_compile_options(torch PRIVATE "-DC10_HIP_BUILD_MAIN_LIB")
 # NB: This must be target_compile_definitions, not target_compile_options,
 # as the latter is not respected by nvcc
+#
+# NB: This is because torch contains both CPU and GPU code.  If we ever
+# split, you only need to apply the nvcc workaround for the CUDA library
 target_compile_definitions(torch PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
+# NB: C10 macros don't need this workaround as these components don't
+# contain any files
 
 
 # ATen parallelism settings
