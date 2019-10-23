@@ -299,7 +299,7 @@ TEST(TensorIndexingTest, TestIntIndicesBroadcast) {
 */
 TEST(TensorIndexingTest, TestEmptyIndex) {
   auto x = torch::arange(0, 12).view({4, 3});
-  auto idx = torch::randn({0}, torch::kLong);
+  auto idx = torch::tensor({}, torch::kLong);
   ASSERT_EQ(x(idx).numel(), 0);
 
   // empty assignment should have no effect but not throw an exception
@@ -345,9 +345,9 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex) {
   }
   {
     auto x = torch::empty({10, 0});
-    assert_equal(x(torch::tensor({1, 2})).sizes(), {2, 0});
-    assert_equal(x(torch::randn({0}), torch::randn({0})).sizes(), {0});
-    ASSERT_THROWS_WITH(x({}, torch::tensor({0, 1})), "for dimension with size 0");
+    assert_equal(x(torch::tensor({1, 2}, torch::kLong)).sizes(), {2, 0});
+    assert_equal(x(torch::tensor({}, torch::kLong), torch::tensor({}, torch::kLong)).sizes(), {0});
+    ASSERT_THROWS_WITH(x({}, torch::tensor({0, 1}, torch::kLong)), "for dimension with size 0");
   }
 }
 
