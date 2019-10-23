@@ -25,6 +25,8 @@
 
 #include <TH/THMath.h>
 
+using namespace std;
+
 namespace {
 /*
  * This section is a counterpart to Distributions.cu
