@@ -12,6 +12,7 @@ import torch
 # needs to be imported after torch
 import cpp_extension # noqa
 
+import cpp_extension # noqa
 import benchmark_utils
 from collections import namedtuple
 
@@ -71,13 +72,21 @@ class BenchmarkRunner(object):
         self.max_iters = 1e6
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
-        if self.args.iterations:
+        self.print_per_iter = False
+        # 100 is the default warmup iterations 
+        if self.args.warmup_iterations == -1: 
+            self.args.warmup_iterations = 100
+        if self.args.iterations and self.args.iterations != -1:
             self.has_explicit_iteration_count = True
             self.iters = self.args.iterations
         # when a specific test is selected by a user, we don't need
         # to match the tag anymore
         if self.args.test_name is not None:
             self.args.tag_filter = None
+
+        if self.args.ai_pep_format:
+            self.print_per_iter = True
+
 
     def _print_header(self):
         DASH_LINE = '-' * 40
@@ -102,6 +111,8 @@ class BenchmarkRunner(object):
     def _print_perf_result(self, reported_run_time_us, test_case):
         if self.args.ai_pep_format:
             # Output for AI-PEP
+            # Print out per iteration execution time instead of avg time
+            return
             test_name = '_'.join([test_case.framework, test_case.test_config.test_name])
             for run in range(self.num_runs):
                 print("{}Observer ".format(test_case.framework) + json.dumps(
@@ -146,26 +157,28 @@ class BenchmarkRunner(object):
                 has_explicit_iteration_count) and
                 curr_test_total_time > self.args.min_time_per_test)
 
-    def _launch_forward(self, test_case, iters):
+    def _launch_forward(self, test_case, iters, print_per_iter):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
-        forward_time = timeit.timeit(functools.partial(func, iters), number=1)
+        forward_time = timeit.timeit(functools.partial(func, iters, print_per_iter), number=1)
         return forward_time
 
-    def _launch_backward(self, test_case, iters):
+    def _launch_backward(self, test_case, iters, print_per_iter=False):
         """ This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
-        test_case.run_forward(num_runs=1)
+        test_case.run_forward(num_runs=1, print_per_iter=False)
         if test_case.framework == "PyTorch":
             test_case._output_mean()
-        backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters), number=1)
+        backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters,
+                                                        print_per_iter),
+                                      number=1)
         return backward_time
 
-    def _measure_time(self, launch_test, test_case, iters):
+    def _measure_time(self, launch_test, test_case, iters, print_per_iter):
         """
         This function execute the operator for <iters> iterations then look at the time.
         If it's not significant, the number of iterations will be increased before rerun.
@@ -177,13 +190,16 @@ class BenchmarkRunner(object):
             if self.args.wipe_cache:
                 torch.ops.operator_benchmark._clear_cache()
 
-            run_time_sec = launch_test(test_case, iters)
+            run_time_sec = launch_test(test_case, iters, print_per_iter)
             curr_test_total_time += run_time_sec
             # Analyze time after each run to decide if the result is stable
             results_are_significant = self._iteration_result_is_significant(
                 iters, run_time_sec, curr_test_total_time, self.has_explicit_iteration_count)
 
             if results_are_significant:
+                # Print out the last 50 values when running with AI PEP
+                if self.args.ai_pep_format:
+                    test_case._print_per_iter()
                 break
 
             # Re-estimate the hopefully-sufficient
@@ -251,9 +267,10 @@ class BenchmarkRunner(object):
                 launch_func = self._launch_forward
 
             # Warmup
-            launch_func(test_case, self.args.warmup_iterations)
+            launch_func(test_case, self.args.warmup_iterations, print_per_iter=False)
             # Actual Execution
-            reported_time = [self._measure_time(launch_func, test_case, self.iters)
+            reported_time = [self._measure_time(launch_func, test_case,
+                                                self.iters, self.print_per_iter)
                              for _ in range(self.num_runs)]
 
             self._print_perf_result(reported_time, test_case)
