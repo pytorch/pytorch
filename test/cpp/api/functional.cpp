@@ -232,11 +232,6 @@ TEST_F(FunctionalTest, GridSample) {
   auto expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
 
   ASSERT_TRUE(output.allclose(expected));
-  
-  // default options (bilinear, zeros, true) same result as above
-  output = F::grid_sample(input, grid);
-
-  ASSERT_TRUE(output.allclose(expected));
 
   // bilinear, zeros, false
   options = GridSampleOptions()
@@ -245,6 +240,11 @@ TEST_F(FunctionalTest, GridSample) {
                 .align_corners(false);
   output = F::grid_sample(input, grid, options);
   expected = torch::tensor({{{{0., 0., 0.5}, {1.5, 4., 2.5}, {3.5, 2., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // default options (bilinear, zeros, false) same result as above
+  output = F::grid_sample(input, grid);
 
   ASSERT_TRUE(output.allclose(expected));
 

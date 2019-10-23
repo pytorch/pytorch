@@ -60,7 +60,7 @@ inline Tensor grid_sample(
   if ((options.padding_mode().compare("zeros") != 0) && 
       (options.padding_mode().compare("border") != 0) && 
       (options.padding_mode().compare("reflection") != 0)) {
-    TORCH_CHECK(false, "nn.functional.grid_sample(): expected padding_mode ",
+    TORCH_CHECK(false, "nn::functional::grid_sample(): expected padding_mode ",
                          "to be 'zeros', 'border', or 'reflection', ",
                          "but got: '", options.padding_mode(), "'");
   }
@@ -85,10 +85,11 @@ inline Tensor grid_sample(
   }
   
   if (!options.align_corners().has_value()) {
-    TORCH_WARN("Default grid_sample and affine_grid behavior will be changed ",
-                "to align_corners=False from 1.4.0. ",
-                "See the documentation of grid_sample for details.");
-    options.align_corners(true);
+    TORCH_WARN("Default grid_sample and affine_grid behavior has changed ",
+                   "to align_corners=False since 1.3.0. Please specify ",
+                   "align_corners=True if the old behavior is desired. ",
+                   "See the documentation of grid_sample for details.");
+    options.align_corners(false);
   }
   
   return torch::grid_sampler(input, grid, mode_enum, padding_mode_enum, options.align_corners().value());
