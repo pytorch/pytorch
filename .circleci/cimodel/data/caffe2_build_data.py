@@ -20,7 +20,7 @@ CONFIG_TREE_DATA = [
         ([Ver("android")], [XImportant("py2")]),
     ]),
     (Ver("centos", "7"), [
-        ([Ver("devtoolset", "7"), Ver("cuda", "10.1")], [X("py3.6")]),
+        ([Ver("devtoolset", "7"), Ver("cuda", "9.2")], [X("py3.6")]),
     ]),
     (Ver("macos", "10.13"), [
         # TODO ios and system aren't related. system qualifies where the python comes
