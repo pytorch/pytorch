@@ -252,17 +252,17 @@ class TestGatherRanges(serial.SerializedTestCase):
 
         workspace.RunOperatorOnce(getOpWithThreshold())
 
-        with self.assertRaises(RuntimeError):
-            workspace.RunOperatorOnce(getOpWithThreshold(max_empty_ratio=0.2))
-
-        with self.assertRaises(RuntimeError):
-            workspace.RunOperatorOnce(getOpWithThreshold(max_mismatched_ratio=0.4))
+        # A critical log should be triggered by this setting.
+        workspace.RunOperatorOnce(getOpWithThreshold(max_empty_ratio=0.2))
 
         workspace.RunOperatorOnce(
             getOpWithThreshold(
                 max_empty_ratio=0.2, max_mismatched_ratio=0.4, min_observation=5
             )
         )
+
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(getOpWithThreshold(max_mismatched_ratio=0.4))
 
 
 if __name__ == "__main__":
