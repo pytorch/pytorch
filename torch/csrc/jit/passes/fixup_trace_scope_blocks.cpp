@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 
-#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 
 #include <algorithm>
@@ -208,9 +208,9 @@ void createMethodCalls(const std::shared_ptr<Graph>& g, script::Module* self) {
 
       WithInsertPoint ip(n);
       Value* submod_val = g->insertGetAttr(self_val, submod_name);
-      Function *f = nullptr;
+      Function* f = nullptr;
 
-      for (size_t method_idx = 0; ; method_idx++) {
+      for (size_t method_idx = 0;; method_idx++) {
         std::string method_name = "forward";
         if (method_idx != 0) {
           method_name += std::to_string(method_idx);
@@ -269,7 +269,7 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
   LintGraph(g);
 }
 
-void runCleanupPasses(script::Module *m) {
+void runCleanupPasses(script::Module* m) {
   auto methods = m->get_methods();
   for (auto module : m->get_modules()) {
     runCleanupPasses(&module.module);
