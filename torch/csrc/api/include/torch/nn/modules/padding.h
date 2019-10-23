@@ -19,6 +19,8 @@ class TORCH_API ReflectionPadImpl : public torch::nn::Cloneable<Derived> {
 
   void reset() override;
 
+  Tensor forward(const Tensor& input);
+
   /// Pretty prints the `ReflectionPad{1,2}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
@@ -34,7 +36,6 @@ class TORCH_API ReflectionPadImpl : public torch::nn::Cloneable<Derived> {
 class TORCH_API ReflectionPad1dImpl : public ReflectionPadImpl<1, ReflectionPad1dImpl> {
  public:
   using ReflectionPadImpl<1, ReflectionPad1dImpl>::ReflectionPadImpl;
-  Tensor forward(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `ReflectionPad1dImpl`.
@@ -51,7 +52,6 @@ TORCH_MODULE(ReflectionPad1d);
 class TORCH_API ReflectionPad2dImpl : public ReflectionPadImpl<2, ReflectionPad2dImpl> {
  public:
   using ReflectionPadImpl<2, ReflectionPad2dImpl>::ReflectionPadImpl;
-  Tensor forward(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `ReflectionPad2dImpl`.
@@ -72,6 +72,8 @@ class TORCH_API ReplicationPadImpl : public torch::nn::Cloneable<Derived> {
 
   void reset() override;
 
+  Tensor forward(const Tensor& input);
+
   /// Pretty prints the `ReplicationPad{1,2}d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
@@ -87,7 +89,6 @@ class TORCH_API ReplicationPadImpl : public torch::nn::Cloneable<Derived> {
 class TORCH_API ReplicationPad1dImpl : public ReplicationPadImpl<1, ReplicationPad1dImpl> {
  public:
   using ReplicationPadImpl<1, ReplicationPad1dImpl>::ReplicationPadImpl;
-  Tensor forward(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `ReplicationPad1dImpl`.
@@ -104,7 +105,6 @@ TORCH_MODULE(ReplicationPad1d);
 class TORCH_API ReplicationPad2dImpl : public ReplicationPadImpl<2, ReplicationPad2dImpl> {
  public:
   using ReplicationPadImpl<2, ReplicationPad2dImpl>::ReplicationPadImpl;
-  Tensor forward(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `ReplicationPad2dImpl`.
@@ -121,7 +121,6 @@ TORCH_MODULE(ReplicationPad2d);
 class TORCH_API ReplicationPad3dImpl : public ReplicationPadImpl<3, ReplicationPad3dImpl> {
  public:
   using ReplicationPadImpl<3, ReplicationPad3dImpl>::ReplicationPadImpl;
-  Tensor forward(const Tensor& input);
 };
 
 /// A `ModuleHolder` subclass for `ReplicationPad3dImpl`.
