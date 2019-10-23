@@ -142,8 +142,8 @@ Tensor& atan2_(Tensor& self, const Tensor& other) {
 // types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
 // to Python.
 
-static Tensor wrapped_scalar_tensor(Scalar scalar) {
-  auto tensor = scalar_to_tensor(scalar);
+static inline Tensor wrapped_scalar_tensor(Scalar scalar, const Device device) {
+  auto tensor = scalar_to_tensor(scalar, device);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
 }
@@ -157,21 +157,21 @@ static void check_convert(Scalar scalar, ScalarType scalarType) {
 
 static Tensor wrapped_scalar_tensor_and_check_convert(Scalar scalar, Tensor tensor) {
   check_convert(scalar, tensor.scalar_type());
-  return wrapped_scalar_tensor(scalar);
+  return wrapped_scalar_tensor(scalar, tensor.device());
 }
 
 Tensor add(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::add(self, wrapped_scalar_tensor(other), alpha);
+  return native::add(self, wrapped_scalar_tensor(other, self.device()), alpha);
 }
 
 Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
-  return native::add_(self, wrapped_scalar_tensor(other), alpha);
+  return native::add_(self, wrapped_scalar_tensor(other, self.device()), alpha);
 }
 
 // WARNING: There doesn't appear to be any testing for this function
 // with sparse self input.
 Tensor div(const Tensor& self, Scalar other) {
-  return self.div(wrapped_scalar_tensor(other)); // redispatch!
+  return self.div(wrapped_scalar_tensor(other, self.device())); // redispatch!
 }
 
 // WARNING: This function, with a sparse self, is currently only
@@ -179,27 +179,27 @@ Tensor div(const Tensor& self, Scalar other) {
 // (you need to exercise it from C++, because this overload is never
 // used for Python)
 Tensor& div_(Tensor& self, Scalar other) {
-  return self.div_(wrapped_scalar_tensor(other)); // redispatch!
+  return self.div_(wrapped_scalar_tensor(other, self.device())); // redispatch!
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
-  return native::mul(self, wrapped_scalar_tensor(other));
+  return native::mul(self, wrapped_scalar_tensor(other, self.device()));
 }
 
 Tensor& mul_(Tensor& self, Scalar other) {
-  return native::mul_(self, wrapped_scalar_tensor(other));
+  return native::mul_(self, wrapped_scalar_tensor(other, self.device()));
 }
 
 Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::sub(self, wrapped_scalar_tensor(other), alpha);
+  return native::sub(self, wrapped_scalar_tensor(other, self.device()), alpha);
 }
 
 Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
-  return native::sub_(self, wrapped_scalar_tensor(other), alpha);
+  return native::sub_(self, wrapped_scalar_tensor(other, self.device()), alpha);
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::rsub(self, wrapped_scalar_tensor(other), alpha);
+  return native::rsub(self, wrapped_scalar_tensor(other, self.device()), alpha);
 }
 
 template <typename Stub>
