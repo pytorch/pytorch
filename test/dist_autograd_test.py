@@ -471,6 +471,27 @@ class DistAutogradTest(object):
         self.assertTrue(success)
 
     @dist_init
+    def test_context_cleanup_nested_rpc(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        nested_dst_rank = (dst_rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=True)
+            t2 = torch.zeros(3, 3, requires_grad=True)
+            ret = rpc.rpc_sync("worker{}".format(dst_rank),
+                               my_py_nested_call, args=(t1, t2, dst_rank, self.world_size, 1))
+            # tell next worker and nested next worker to store this context id
+            # so we can verify that it has been cleaned up
+            rpc.rpc_sync("worker{}".format(dst_rank), _store_context_id, args=(context_id,))
+            rpc.rpc_sync("worker{}".format(nested_dst_rank), _store_context_id, args=(context_id,))
+        dist.barrier()  # let all nodes finish sending their RPCs
+        success = _all_contexts_cleaned_up(num_contexts=2)
+        self.assertTrue(success)
+
+
+
+
+
+    @dist_init
     def test_worker_ids_recorded(self):
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
