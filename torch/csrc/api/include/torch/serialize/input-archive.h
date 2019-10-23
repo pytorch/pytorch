@@ -102,6 +102,7 @@ class TORCH_API InputArchive final {
 
  private:
   jit::script::Module module_;
+  std::string hierarchy_prefix;
 };
 } // namespace serialize
 } // namespace torch
