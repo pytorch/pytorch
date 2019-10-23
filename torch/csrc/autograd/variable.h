@@ -364,7 +364,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   std::weak_ptr<Node> grad_accumulator_;
 
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
-  std::shared_ptr<CppHooksList> cpp_hooks_list_;
+  std::shared_ptr<hooks_list> cpp_hooks_list;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
@@ -408,8 +408,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
   AutogradMeta(
     at::TensorImpl* self_impl,
     bool requires_grad = false,
-    std::shared_ptr<Node> grad_fn = nullptr,
-    uint32_t output_nr = 0);
+    Edge gradient_edge = Edge());
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -498,9 +497,7 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
-  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
-    std::shared_ptr<Node> grad_fn = nullptr,
-    uint32_t output_nr = 0);
+  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge);
   ~DifferentiableViewMeta();
 };
 
@@ -532,7 +529,7 @@ inline Variable make_variable_view(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::DifferentiableViewMeta>(
-        data_impl_copy.get(), std::move(base), std::move(gradient_edge.function), /*output_nr*/gradient_edge.input_nr));
+        data_impl_copy.get(), std::move(base), std::move(gradient_edge)));
       return Variable(data_impl_copy);
     } else {
       /// Non-differentiable view. Just share version counter.
@@ -540,7 +537,7 @@ inline Variable make_variable_view(
         /*version_counter=*/base.version_counter(),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
       data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
-        data_impl_copy.get(), false, std::move(gradient_edge.function), /*output_nr*/gradient_edge.input_nr));
+        data_impl_copy.get(), false, std::move(gradient_edge)));
       return Variable(data_impl_copy);
     }
   }
@@ -584,7 +581,7 @@ inline Variable make_variable(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
-      data_impl_copy.get(), false, std::move(gradient_edge.function), /*output_nr*/ gradient_edge.input_nr));
+      data_impl_copy.get(), false, std::move(gradient_edge)));
     return Variable(data_impl_copy);
   }
   return Variable();
@@ -704,15 +701,15 @@ template <typename T>
 auto Variable::register_hook(T&& hook) -> Variable::hook_return_void_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
-  auto &list = get_autograd_meta()->cpp_hooks_list_;
+  auto &list = get_autograd_meta()->cpp_hooks_list;
   if(!list) {
     create_cpp_hook();
   }
-  unsigned idx = list->hooks_list_.size();
+  unsigned idx = list->size();
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Variable return type
   std::function<void(Variable)> fn(hook);
-  list->hooks_list_.emplace_back([fn](Variable grad){
+  list->emplace_back([fn](Variable grad){
    fn(grad);
     return Variable();});
   return idx;
@@ -722,12 +719,12 @@ template <typename T>
 auto Variable::register_hook(T&& hook) -> Variable::hook_return_var_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
-  auto &list = get_autograd_meta()->cpp_hooks_list_;
+  auto &list = get_autograd_meta()->cpp_hooks_list;
   if(!list) {
     create_cpp_hook();
   }
-  unsigned idx = list->hooks_list_.size();
-  list->hooks_list_.push_back(hook);
+  unsigned idx = list->size();
+  list->push_back(hook);
   return idx;
 }
 
