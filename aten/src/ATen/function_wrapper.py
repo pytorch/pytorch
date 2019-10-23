@@ -311,11 +311,6 @@ if (${check_name}.dim() == 0) {
     return ${api_name}(${zero_dim_actuals});
 }""")
 
-ZERO_DIM_ONLY = CodeTemplate("""\
-AT_ERROR("${api_name} only supports a 0-dimensional ${check_name} tensor, but got tensor "
-    "with ", ${check_name}.dim(), " dimension(s).");
-""")
-
 SPARSE_CHECK = CodeTemplate("""\
 if(${check_name}.is_sparse()) {
     return static_cast<const TypeExtendedInterface*>(this)->${api_name}(${sparse_actuals});
@@ -692,7 +687,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'when_sparse_dispatch': str,
     'with_gil': bool,
     'zero_dim_dispatch_when_scalar': str,
-    'zero_dim_tensor_only': bool,
 })
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
@@ -1570,9 +1564,6 @@ def create_derived(backend_type_env, declarations):
         if not zero_dim_dispatch:
             return []
         broadcasts_arg = zero_dim_dispatch in option.get('broadcast_actuals', '')
-        zero_dim_only = option.get('zero_dim_tensor_only', False)
-        # this combination doesn't seem to make sense
-        assert not (broadcasts_arg and zero_dim_only)
         # if the argument broadcasts, then this would only affect cases where all broadcasted
         # tensors were zero-dim, which is inconsistent with the scalar handling.
         if broadcasts_arg:
@@ -1581,14 +1572,6 @@ def create_derived(backend_type_env, declarations):
                             if arg['name'] != zero_dim_dispatch else "{}.item()".format(arg['name'])
                             for arg in option['formals_list']]
         return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
-
-    def handle_only_zero_dim(env, option):
-        # type: (Environment, FunctionOption) -> Optional[List[str]]
-        if option.get('zero_dim_tensor_only', False):
-            check_name = option['zero_dim_dispatch_when_scalar']
-            return [ZERO_DIM_ONLY.substitute(env, check_name=check_name)]
-        else:
-            return None
 
     def allocate_arg(env, arg, output_count):
         # type: (Environment, THFormal, int) -> List[str]
@@ -1645,11 +1628,6 @@ def create_derived(backend_type_env, declarations):
         # type: (Environment, FunctionOption, List[str]) -> List[str]
         body = []  # type: List[str]
         body += handle_zero_dim(env, option)
-        only_zero_dim_check = handle_only_zero_dim(env, option)
-        if only_zero_dim_check is not None:
-            #  code below only_zero_dim_check is unreachable so we do not need to generate the rest.
-            body += only_zero_dim_check
-            return body
 
         cases = []
         for scalar_name, c_type, accreal, _ in scalar_types:
