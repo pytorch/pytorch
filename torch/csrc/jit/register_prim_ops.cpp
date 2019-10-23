@@ -932,9 +932,9 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::AutogradAnyNonZero(...) -> int",
-         [](const Node* node) {
+         [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
-           return [=](Stack& stack) {
+           return [num_inputs](Stack& stack) {
              bool result = false;
              for (const IValue& v : last(stack, num_inputs)) {
                if (v.isTensor()) {
@@ -946,7 +946,6 @@ RegisterOperators reg(
                  for (const at::Tensor& t : v.toTensorListRef()) {
                    result = true;
                  }
-                 
                  if (result) {
                    break;
                  }

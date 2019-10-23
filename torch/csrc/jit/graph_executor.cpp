@@ -494,6 +494,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   }
 
   ExecutionPlan getPlanFor(Stack& stack) override {
+    TORCH_INTERNAL_ASSERT(false);
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
@@ -552,7 +553,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
     //          left in that may inhibit optimization
     Inline(*opt_graph);
-    LowerGradOf(*g);
+    LowerGradOf(*opt_graph);
     specializeAutogradZero(*opt_graph);
     LowerSimpleTuples(opt_graph);
     ConstantPooling(opt_graph);
@@ -632,7 +633,6 @@ void GraphExecutor::run(Stack& inputs) {
 }
 
 ExecutionPlan GraphExecutor::getPlanFor(Stack& inputs) {
-  TORCH_INTERNAL_ASSERT(false);
   return pImpl->getPlanFor(inputs);
 }
 

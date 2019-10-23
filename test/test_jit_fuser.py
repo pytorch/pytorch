@@ -15,7 +15,7 @@ from itertools import product, permutations
 
 from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
     backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
-    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
+    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything, IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR
 from jit_utils import enable_profiling_mode, ProfilingMode
 
 torch._C._jit_set_profiling_executor(True)
@@ -117,6 +117,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(not RUN_CUDA_HALF, "no half support")
+    @unittest.skipIf(IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR, "no half support")
     def test_cuda_half(self):
         x = torch.randn(4, 4, dtype=torch.half, device='cuda')
         y = torch.randn(4, 4, dtype=torch.half, device='cuda')
@@ -299,10 +300,10 @@ class TestFuser(JitTestCase):
         funcs = (func2, funcInf, funcOptMin, funcOptMax)
         for f, inputs in product(funcs, [[a, b], [a, nan]]):
             inp1, inp2 = inputs
-            s = self.checkScript(f, (inp1, inp2), profiling=True)
+            s = self.checkScript(f, (inp1, inp2), profiling=ProfilingMode.FULL)
             self.assertAllFused(s.graph_for(inp1, inp2), except_for={'aten::size', 'aten::_size_if_not_equal'})
             c = s(inp1, inp2)
-            with enable_profiling_mode(profile):
+            with enable_profiling_mode(ProfilingMode.FULL):
                 warmup_backward(c.sum())
             graph = backward_graph(s)
             self.assertAllFused(graph, except_for={'aten::Float'})
@@ -458,6 +459,7 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR, "fuser requires CUDA")
     @_inline_everything
     def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):

@@ -233,18 +233,18 @@ bool Operator::matches(const Node* node) const {
       return false;
     }
 
-    TypePtr formal = *matched_type.type;
-    if (!actuals[i]->type()->isSubtypeOf(formal) &&
-        !(formal->cast<OptionalType>() &&
-          actuals[i]->type()->cast<NoneType>()) &&
-        !(formal->kind() == TensorType::Kind && actuals[i]->type()->kind() == TensorType::Kind) &&
-        !(formal->kind() == ListType::Kind && actuals[i]->type()->kind() == ListType::Kind &&
-          formal->expect<ListType>()->getElementType()->kind() == TensorType::Kind &&
-          actuals[i]->type()->expect<ListType>()->getElementType()->kind() == TensorType::Kind
-        )  
-          ) {
-      return false;
-    }
+    //TypePtr formal = *matched_type.type;
+    // if (!actuals[i]->type()->isSubtypeOf(formal) &&
+    //     !(formal->cast<OptionalType>() &&
+    //       actuals[i]->type()->cast<NoneType>()) &&
+    //     !(formal->kind() == TensorType::Kind && actuals[i]->type()->kind() == TensorType::Kind) &&
+    //     !(formal->kind() == ListType::Kind && actuals[i]->type()->kind() == ListType::Kind &&
+    //       formal->expect<ListType>()->getElementType()->kind() == TensorType::Kind &&
+    //       actuals[i]->type()->expect<ListType>()->getElementType()->kind() == TensorType::Kind
+    //     )  
+    //       ) {
+    //   return false;
+    // }
 
     TypePtr resolved = tryEvalTypeVariables(formal, type_env);
     if (resolved) {
@@ -254,7 +254,13 @@ bool Operator::matches(const Node* node) const {
     // not resolved all type variables, e.g. if None was matched to Optional[T]
     // we will not succeed at matching T. However None <: Optional[T] so this
     // check can still succeed.
-    if (!actuals[i]->type()->isSubtypeOf(formal)) {
+    if (!actuals[i]->type()->isSubtypeOf(formal) && 
+        !(formal->kind() == TensorType::Kind && actuals[i]->type()->kind() == TensorType::Kind) &&
+        !(formal->kind() == ListType::Kind && actuals[i]->type()->kind() == ListType::Kind &&
+          formal->expect<ListType>()->getElementType()->kind() == TensorType::Kind &&
+          actuals[i]->type()->expect<ListType>()->getElementType()->kind() == TensorType::Kind
+        )  
+    ) {
       return false;
     }
   }

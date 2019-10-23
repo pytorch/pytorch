@@ -137,7 +137,7 @@ def doAutodiffCheck(testname):
     return True
 
 
-func_call = torch._C.Function.__call__
+func_call = torch._C.ScriptFunction.__call__
 meth_call = torch._C.ScriptMethod.__call__
 
 def get_current_profiling_mode():
@@ -246,7 +246,7 @@ torch._C._jit_set_profiling_executor(True)
 #         # print("enabling profiling executor")
 #         return meth_call(*args, **kwargs)
 
-torch._C.Function.__call__ = prof_func_call
+torch._C.ScriptFunction.__call__ = prof_func_call
 torch._C.ScriptMethod.__call__ = prof_meth_call
 
 
@@ -2308,23 +2308,23 @@ graph(%Ra, %Rb):
         # which is not included in TestJitGeneratedFunctional
         x = torch.ones(4, 4).cuda().requires_grad_()
 
-        @torch.jit.script
-        def func(x):
-            return torch.nn.functional.dropout(x)
+        with enable_profiling_mode(ProfilingMode.FULL):
+            @torch.jit.script
+            def func(x):
+                return torch.nn.functional.dropout(x)
 
-        with freeze_rng_state():
-            out_ref = torch.nn.functional.dropout(x)
-            #grad_ref = torch.autograd.grad(out_ref.sum(), x)
+            with freeze_rng_state():
+                out_ref = torch.nn.functional.dropout(x)
+                out_ref = torch.nn.functional.dropout(x)
+                grad_ref = torch.autograd.grad(out_ref.sum(), x)
 
-        with freeze_rng_state():
-            out = func(x)
-            #grad = torch.autograd.grad(out.sum(), x)
+            with freeze_rng_state():
+                out = func(x)
+                out = func(x)
+                grad = torch.autograd.grad(out.sum(), x)
 
-        print(str(out))
-        print("out ref")
-        print(str(out_ref))
-        self.assertEqual(out, out_ref)
-        #self.assertEqual(grad, grad_ref)
+            self.assertEqual(out, out_ref)
+            self.assertEqual(grad, grad_ref)
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40)
@@ -11015,8 +11015,9 @@ a")
 
         fw_graph = slstm.graph_for(*inputs)
         bw_graph = backward_graph(slstm, diff_graph_idx=0)
-        self.assertTrue('prim::MMBatchSide' in str(fw_graph))
-        self.assertTrue('prim::MMTreeReduce' in str(bw_graph))
+        if not IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+            self.assertTrue('prim::MMBatchSide' in str(fw_graph))
+            self.assertTrue('prim::MMTreeReduce' in str(bw_graph))
 
         sout = slstm(*inputs)
         out = lstm(*inputs)

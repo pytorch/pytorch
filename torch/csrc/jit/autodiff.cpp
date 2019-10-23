@@ -788,8 +788,6 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   for (auto& offset : grad_desc.df_input_captured_outputs)
     add_capture(graph.outputs()[offset]);
 
-  GRAPH_DUMP(" forward graph: ", &graph);
-  GRAPH_DEBUG(" backward graph: ", *(reverse_block->owningNode()));
   grad_desc.df = std::make_shared<Graph>();
   grad_desc.df->block()->cloneFrom(reverse_block, [&](Value* v) {
     return grad_desc.df->inputs()[capture_to_formal_index.at(v)];
@@ -813,6 +811,8 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
      }
   }
 
+  GRAPH_DUMP(" forward graph: ", &graph);
+  GRAPH_DEBUG(" backward graph: ", *(reverse_block->owningNode()));
   // reverse_node was just to hold onto reverse_block in a debuggable way
   // we can remove it now.
   reverse_block->owningNode()->destroy();

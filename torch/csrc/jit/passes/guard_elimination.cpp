@@ -175,7 +175,7 @@ struct GuardElimination {
     size_t i = 0;
     for (auto input : n->inputs()) {
       if ((input->node()->kind() == prim::Guard &&
-           input->type()->expect<TensorType>()->isSummarized()) ||
+           !input->type()->expect<TensorType>()->isSummarized()) ||
           input->node()->kind() == prim::Constant ||
           input->type()->isSubtypeOf(NumberType::get()) ||
           except.count(i) != 0) {
