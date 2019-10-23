@@ -90,6 +90,14 @@ public:
    */
   RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
 
+  /**
+   * Register a fallback kernel for a backend.
+   * If an operator is called but there is no concrete kernel for the dispatch
+   * key of the given operator arguments, it will check if there is such a
+   * fallback kernel for the given dispatch key and, if yes, call that one.
+   */
+  RegistrationHandleRAII registerBackendFallbackKernel(TensorTypeId dispatch_key, KernelFunction kernel);
+
   template<class Return, class... Args>
   Return callUnboxed(const OperatorHandle& op, Args... args) const;
 
@@ -112,11 +120,13 @@ private:
   OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options);
 
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
+  void deregisterBackendFallbackKernel_(TensorTypeId dispatchKey);
 
-  const KernelFunction& dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatch_key) const;
+  static const KernelFunction& dispatch_(const DispatchTable& dispatchTable, const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels, c10::optional<TensorTypeId> dispatch_key);
 
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
+  LeftRight<ska::flat_hash_map<TensorTypeId, KernelFunction>> backendFallbackKernels_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
@@ -168,9 +178,11 @@ template<class Return, class... Args>
 inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
-    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
-    const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-    return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
+    return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
+      c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
+      const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
+      return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
+    });
   });
 }
 
@@ -178,32 +190,41 @@ template<class Return, class... Args>
 inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
-    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
-    const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-    return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
+    return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
+      c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
+      const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
+      return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
+    });
   });
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) {
-    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
-    const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
-    kernel.callBoxed(stack);
+    return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) {
+      c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
+      const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
+      kernel.callBoxed(stack);
+    });
   });
 }
 
-inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, c10::optional<TensorTypeId> dispatchKey) const {
-  if (dispatchKey.has_value()) {
+inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels, c10::optional<TensorTypeId> dispatchKey) {
+  if (C10_LIKELY(dispatchKey.has_value())) {
     const KernelFunction* backendKernel = dispatchTable.lookup(*dispatchKey);
 
     if (nullptr != backendKernel) {
       return *backendKernel;
     }
+
+    auto backendFallbackKernel = backendFallbackKernels.find(*dispatchKey);
+    if (backendFallbackKernel == backendFallbackKernels.end()) {
+      return backendFallbackKernel->second;
+    }
   }
 
   const KernelFunction* catchallKernel = dispatchTable.lookupCatchallKernel();
-  if (nullptr != catchallKernel) {
+  if (C10_LIKELY(nullptr != catchallKernel)) {
     return *catchallKernel;
   }
 
