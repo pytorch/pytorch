@@ -3411,7 +3411,7 @@ at::Tensor interpolate(
         input, _output_size(input, 3, size, scale_factors));
   if (input_dim == 3 && mode == "linear")
     return at::upsample_linear1d(
-        input, _output_size(input, 1, size, scale_factors), scale_factors_1, *align_corners);
+        input, _output_size(input, 1, size, scale_factors), *align_corners, scale_factors_1);
   if (input_dim == 3 && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
   if (input_dim == 3 && mode == "bicubic")
@@ -3422,10 +3422,10 @@ at::Tensor interpolate(
     throw std::runtime_error("Got 4D input, but linear mode needs 3D input");
   if (input_dim == 4 && mode == "bilinear")
     return at::upsample_bilinear2d(
-        input, _output_size(input, 2, size, scale_factors), scale_factors_1, scale_factors_2, *align_corners);
+        input, _output_size(input, 2, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2);
   if (input_dim == 4 && mode == "bicubic")
     return at::upsample_bicubic2d(
-        input, _output_size(input, 2, size, scale_factors), scale_factors_1, scale_factors_2, *align_corners);
+        input, _output_size(input, 2, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2);
   if (input_dim == 4 && mode == "trilinear")
     throw std::runtime_error("Got 4D input, but trilinear mode needs 5D input");
   if (input_dim == 5 && mode == "linear")
@@ -3436,7 +3436,7 @@ at::Tensor interpolate(
     throw std::runtime_error("Got 5D input, but bicubic mode needs 4D input");
   if (input_dim == 5 && mode == "trilinear")
     return at::upsample_trilinear3d(
-        input, _output_size(input, 3, size, scale_factors), scale_factors_1, scale_factors_2, scale_factors_3, *align_corners);
+        input, _output_size(input, 3, size, scale_factors), *align_corners, scale_factors_1, scale_factors_2, scale_factors_3);
 
   AT_ERROR(
       "Input Error: Only 3D, 4D and 5D input Tensors supported",
