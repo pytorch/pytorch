@@ -4049,6 +4049,20 @@
   variants: function, method
   supports_named_tensor: True
 
+- func: index_max_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
+  use_c10_dispatcher: unboxed_only
+  variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_index_max_
+    CUDA: legacy::cuda::_th_index_max_
+
+- func: index_max(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: index_max.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor
+  variants: function, method
+
 - func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method

@@ -2608,6 +2608,18 @@ class _TestTorchMixin(object):
             dest2[idx[i]] = dest2[idx[i]] + src[i]
         self.assertEqual(dest, dest2)
 
+    def test_index_max(self):
+        num_copy, num_dest = 3, 3
+        dest = torch.randn(num_dest, 4, 5)
+        src = torch.randn(num_copy, 4, 5)
+        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
+        dest2 = dest.clone()
+        dest.index_max_(0, idx, src)
+        for i in range(idx.size(0)):
+            if src[i] > dest2[idx[i]]:
+                dest2[idx[i]] = src[i]
+        self.assertEqual(dest, dest2)
+
     def test_t(self):
         # Test 0D tensors
         x = torch.randn(())
@@ -5769,6 +5781,7 @@ def add_neg_dim_tests():
         ('index_add', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
         ('index_copy', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
         ('index_fill', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), 12], [INPLACE_METHOD]),
+        ('index_max', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
         ('scatter', (10, 10), lambda: [DIM_ARG, idx_tensor((10, 10), 10), torch.randn(10, 10)], [INPLACE_METHOD]),
         ('select', (10, 20), lambda: [DIM_ARG, 3], [METHOD]),
         ('unfold', (10, 20), lambda: [DIM_ARG, 5, 2], [METHOD]),
@@ -10618,7 +10631,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(z, z.scatter_(2, torch.empty((2, 3, 0), dtype=torch.int64, device=device), z_src))
         self.assertEqual(z, z.scatter_add_(2, torch.empty((2, 3, 0), dtype=torch.int64, device=device), z_src))
 
-        # index_fill, index_copy, index_add
+        # index_fill, index_copy, index_add, index_max
         c = x.clone()
         c_clone = c.clone()
         ind_empty = torch.tensor([], dtype=torch.int64, device=device)
@@ -10632,6 +10645,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(c_clone, c.index_add_(0, ind_empty, torch.empty((0, 1, 2, 0), device=device)))
         self.assertEqual(c_clone, c.index_add_(2, ind_empty, torch.empty((0, 1, 0, 0), device=device)))
         self.assertEqual(c_clone, c.index_add_(2, ind_01, torch.empty((0, 1, 2, 0), device=device)))
+        self.assertEqual(c_clone, c.index_max_(0, ind_empty, torch.empty((0, 1, 2, 0), device=device)))
+        self.assertEqual(c_clone, c.index_max_(2, ind_empty, torch.empty((0, 1, 0, 0), device=device)))
+        self.assertEqual(c_clone, c.index_max_(2, ind_01, torch.empty((0, 1, 2, 0), device=device)))
 
         c = torch.randn((0, 1, 2), device=device)
         c_clone = c.clone()
@@ -10642,13 +10658,15 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(c_clone, c.index_copy_(0, ind_empty, torch.empty((0, 1, 2), device=device)))
         self.assertEqual(c_clone, c.index_add_(0, ind_empty, torch.empty((0, 1, 2), device=device)))
 
-        # index fill/copy/add non-empty
+        # index fill/copy/add/max non-empty
         z = torch.randn((2, 3, 4), device=device)
         self.assertEqual(z, z.index_fill_(0, ind_empty, -1))
         z = torch.randn((2, 3, 4), device=device)
         self.assertEqual(z, z.index_copy_(0, ind_empty, torch.empty((0, 3, 4), device=device)))
         z = torch.randn((2, 3, 4), device=device)
         self.assertEqual(z, z.index_add_(0, ind_empty, torch.empty((0, 3, 4), device=device)))
+        z = torch.randn((2, 3, 4), device=device)
+        self.assertEqual(z, z.index_max_(0, ind_empty, torch.empty((0, 3, 4), device=device)))
 
         # index_select
         self.assertEqual(x, x.index_select(0, ind_empty))

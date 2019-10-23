@@ -397,6 +397,11 @@
   source: grad.index_select(dim, index)
   index: non_differentiable
 
+- name: index_max(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
+  self: grad * (result == self)
+  source: grad.index_select(dim, index) * (result.index_select(dim, index) == source)
+  index: non_differentiable
+
 - name: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
   self: grad.clone().index_fill_(dim, index, 0)
   source: grad.index_select(dim, index)
