@@ -118,16 +118,16 @@ class Conf:
         job_def.update(self.gen_workflow_params(phase))
 
         if job_def['name'] == 'pytorch_linux_xenial_py3_6_gcc5_4_build':
-            job_def.update({'resource_class' : 'xlarge'})
+            job_def.update({'resource_class' : 'l1.large'})
 
         if job_def['name'] == 'pytorch_linux_xenial_py3_6_gcc5_4_test':
-            job_def.update({'resource_class' : 'xlarge'})
+            job_def.update({'resource_class' : 'l1.large'})
 
         if job_def['name'] == 'pytorch_linux_xenial_py3_clang5_asan_build':
-            job_def.update({'resource_class' : 'xlarge'})
+            job_def.update({'resource_class' : 'l1.large'})
 
         if job_def['name'] == 'pytorch_linux_xenial_py3_clang5_asan_test':
-            job_def.update({'resource_class' : 'xlarge'})
+            job_def.update({'resource_class' : 'l1.large'})
 
 
 
