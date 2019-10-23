@@ -1154,9 +1154,9 @@ class OneCycleLR(_LRScheduler):
         max_lrs = self._format_param('max_lr', self.optimizer, max_lr)
         if last_epoch == -1:
             for idx, group in enumerate(self.optimizer.param_groups):
-                group['lr'] = max_lrs[idx] / div_factor
+                group['initial_lr'] = max_lrs[idx] / div_factor
                 group['max_lr'] = max_lrs[idx]
-                group['min_lr'] = group['lr'] / final_div_factor
+                group['min_lr'] = group['initial_lr'] / final_div_factor
 
         # Initialize momentum variables
         self.cycle_momentum = cycle_momentum
