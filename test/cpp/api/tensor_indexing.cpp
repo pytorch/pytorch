@@ -259,8 +259,8 @@ TEST(TensorIndexingTest, TestIntIndices) {
 TEST(TensorIndexingTest, TestIntIndices2d) {
   // From the NumPy indexing example
   auto x = torch::arange(0, 12).view({4, 3});
-  auto rows = torch::tensor({{0, 0}, {3, 3}});
-  auto columns = torch::tensor({{0, 2}, {0, 2}});
+  auto rows = torch::tensor({{0, 0}, {3, 3}}, torch::kLong);
+  auto columns = torch::tensor({{0, 2}, {0, 2}}, torch::kLong);
   assert_equal(x(rows, columns), torch::tensor({{0, 2}, {9, 11}}));
 }
 
