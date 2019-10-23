@@ -372,7 +372,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_slice_neg_large(self):
         class NegSlice(torch.nn.Module):
             def forward(self, x):
-                return x[:, :, :, :, -3]
+                return x[:, :, -3:-1, :, -1]
 
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
@@ -386,6 +386,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -395,8 +396,14 @@ class TestONNXRuntime(unittest.TestCase):
                 return tuple(results)
 
         x = torch.rand(5, 5, 5)
-        self.run_test(DynamicSliceExportMod(), x)
+        y = torch.randn(6, 7, 8)
+        self.run_test(DynamicSliceExportMod(), x, test_with_inputs=[y],
+                      input_names=['input_1'],
+                      output_names=['output_1'],
+                      dynamic_axes={'input_1': [0, 1, 2],
+                                    'output_1': [0, 1, 2]})
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic_script(self):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -406,6 +413,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(1, 2)
         self.run_test(DynamicSliceModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic_to_end(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -415,7 +423,9 @@ class TestONNXRuntime(unittest.TestCase):
                 return tuple(results)
 
         x = torch.rand(5, 5, 5)
-        self.run_test(DynamicSliceExportMod(), x)
+        self.run_test(DynamicSliceExportMod(), x,
+                      dynamic_axes={'input_1': [0, 1, 2],
+                      'output_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_dynamic(self):
