@@ -5306,6 +5306,7 @@
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   use_c10_dispatcher: unboxed_only
   variants: method
+  device_guard: False
   dispatch:
     CPU: unfold
     CUDA: unfold
