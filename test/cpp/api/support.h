@@ -51,7 +51,12 @@ inline bool pointer_equal(at::Tensor first, at::Tensor second) {
 
 // yf225 TODO: clean these up!
 inline void assert_equal(const at::Tensor& first, const at::Tensor& second) {
-  ASSERT_TRUE(first.sizes() == second.sizes() && first.allclose(second));
+  ASSERT_TRUE(first.sizes() == second.sizes());
+  if (first.dtype() == torch::kBool && second.dtype() == torch::kBool) {
+    ASSERT_TRUE(first.equal(second));
+  } else {
+    ASSERT_TRUE(first.allclose(second));
+  }
 }
 
 #define TENSOR(T, S) \
