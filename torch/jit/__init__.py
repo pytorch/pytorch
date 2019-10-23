@@ -338,7 +338,7 @@ class ONNXTracedModule(Module):
                 state['inputs_states'] = _unflatten(args[:len(in_vars)], in_desc)
             outs = state['outs'] = self.inner(*trace_inputs)
             if self._return_inputs_states:
-                state['inputs_states'] = (state['inputs_states'], args)
+                state['inputs_states'] = (state['inputs_states'], trace_inputs)
             out_vars, _ = _flatten(outs)
             if len(out_vars) == 1:
                 return out_vars[0]
