@@ -22,7 +22,7 @@ executors:
 
   windows-cuda:
     machine:
-      # resource_class: l1.large
+      resource_class: windows.medium
       image: windows-server-2019-vs2019:edge
       shell: bash.exe
 ##############################################################################
@@ -38,6 +38,9 @@ jobs:
       USE_CUDA: "1"
     steps:
       - checkout
+      - run:
+          name: install cuda
+          command: choco install cuda -y --no-progress
       - run:
           name: Build
           no_output_timeout: "90m"
