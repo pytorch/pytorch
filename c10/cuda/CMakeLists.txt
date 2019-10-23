@@ -14,21 +14,8 @@ configure_file(
 # Note: if you add a new source file/header, you will need to update
 # torch/utils/hipify/cuda_to_hip_mappings.py for new files
 # and headers you add
-set(C10_CUDA_SRCS
-    CUDAStream.cpp
-    CUDACachingAllocator.cpp
-    impl/CUDAGuardImpl.cpp
-    impl/CUDATest.cpp
-)
-set(C10_CUDA_HEADERS
-    CUDAException.h
-    CUDAGuard.h
-    CUDAMacros.h
-    CUDAMathCompat.h
-    CUDAStream.h
-    impl/CUDAGuardImpl.h
-    impl/CUDATest.h
-)
+file(GLOB C10_CUDA_SRCS *.cpp impl/*.cpp)
+file(GLOB_RECURSE C10_CUDA_HEADERS *.h impl/*.h)
 
 set(C10_CUDA_INCLUDE
     ${CMAKE_CURRENT_SOURCE_DIR}/../..
