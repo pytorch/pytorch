@@ -1133,7 +1133,7 @@ TEST_F(FunctionalTest, Interpolate) {
     auto input = torch::ones({1, 1, 2});
     auto options = InterpolationOptions()
                        .size(std::vector<int64_t>{4})
-                       .mode(torch::Interpolation::Nearest);
+                       .mode(torch::kNearest);
     auto output = F::interpolate(input, options);
     auto expected = torch::ones({1, 1, 4});
 
@@ -1147,7 +1147,7 @@ TEST_F(FunctionalTest, Interpolate) {
         auto input = torch::ones({1, 1, 2, 2});
         auto options = UpsampleOptions()
                            .scale_factor({{scale_factor, scale_factor}})
-                           .mode(torch::Interpolation::Bilinear)
+                           .mode(torch::kBilinear)
                            .align_corners(align_corners);
         auto output = F::interpolate(input, options);
         auto expected_size =
@@ -1166,7 +1166,7 @@ TEST_F(FunctionalTest, Interpolate) {
         auto options =
             UpsampleOptions()
                 .scale_factor({{scale_factor, scale_factor, scale_factor}})
-                .mode(torch::Interpolation::Trilinear)
+                .mode(torch::kTrilinear)
                 .align_corners(align_corners);
         auto output = F::interpolate(input, options);
         auto expected_size =
@@ -1206,7 +1206,7 @@ TEST_F(FunctionalTest, Interpolate) {
         F::interpolate(
             input,
             InterpolationOptions()
-                .mode(torch::Interpolation::Nearest)
+                .mode(torch::kNearest)
                 .align_corners(true)),
         "align_corners option can only be set with the "
         "interpolating modes: linear | bilinear | bicubic | trilinear");

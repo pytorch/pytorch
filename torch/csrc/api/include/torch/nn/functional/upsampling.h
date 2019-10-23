@@ -44,8 +44,8 @@ inline Tensor interpolate(const Tensor& input, const InterpolationOptions& optio
     return sizes;
   };
 
-  if (options.mode() == Interpolation::Nearest ||
-      options.mode() == Interpolation::Area) {
+  if (c10::get_if<enumtype::kNearest>(&options.mode()) ||
+      c10::get_if<enumtype::kArea>(&options.mode())) {
     if (options.align_corners() != c10::nullopt) {
       TORCH_CHECK(
           false,
@@ -63,37 +63,37 @@ inline Tensor interpolate(const Tensor& input, const InterpolationOptions& optio
   }
   bool align_corners = options.align_corners().value_or(false);
 
-  if (input.dim() == 3 && options.mode() == Interpolation::Nearest) {
+  if (input.dim() == 3 && c10::get_if<enumtype::kNearest>(&options.mode())) {
     return torch::upsample_nearest1d(input, _output_size(1));
-  } else if (input.dim() == 4 && options.mode() == Interpolation::Nearest) {
+  } else if (input.dim() == 4 && c10::get_if<enumtype::kNearest>(&options.mode())) {
     return torch::upsample_nearest2d(input, _output_size(2));
-  } else if (input.dim() == 5 && options.mode() == Interpolation::Nearest) {
+  } else if (input.dim() == 5 && c10::get_if<enumtype::kNearest>(&options.mode())) {
     return torch::upsample_nearest3d(input, _output_size(3));
-  } else if (input.dim() == 3 && options.mode() == Interpolation::Area) {
+  } else if (input.dim() == 3 && c10::get_if<enumtype::kArea>(&options.mode())) {
     return adaptive_avg_pool1d(input, _output_size(1));
-  } else if (input.dim() == 4 && options.mode() == Interpolation::Area) {
+  } else if (input.dim() == 4 && c10::get_if<enumtype::kArea>(&options.mode())) {
     return adaptive_avg_pool2d(input, _output_size(2));
-  } else if (input.dim() == 5 && options.mode() == Interpolation::Area) {
+  } else if (input.dim() == 5 && c10::get_if<enumtype::kArea>(&options.mode())) {
     return adaptive_avg_pool3d(input, _output_size(3));
-  } else if (input.dim() == 3 && options.mode() == Interpolation::Linear) {
+  } else if (input.dim() == 3 && c10::get_if<enumtype::kLinear>(&options.mode())) {
     return torch::upsample_linear1d(input, _output_size(1), align_corners);
-  } else if (input.dim() == 3 && options.mode() == Interpolation::Bilinear) {
+  } else if (input.dim() == 3 && c10::get_if<enumtype::kBilinear>(&options.mode())) {
     TORCH_CHECK(false, "Got 3D input, but bilinear mode needs 4D input");
-  } else if (input.dim() == 3 && options.mode() == Interpolation::Trilinear) {
+  } else if (input.dim() == 3 && c10::get_if<enumtype::kTrilinear>(&options.mode())) {
     TORCH_CHECK(false, "Got 3D input, but trilinear mode needs 5D input");
-  } else if (input.dim() == 4 && options.mode() == Interpolation::Linear) {
+  } else if (input.dim() == 4 && c10::get_if<enumtype::kLinear>(&options.mode())) {
     TORCH_CHECK(false, "Got 4D input, but linear mode needs 3D input");
-  } else if (input.dim() == 4 && options.mode() == Interpolation::Bilinear) {
+  } else if (input.dim() == 4 && c10::get_if<enumtype::kBilinear>(&options.mode())) {
     return torch::upsample_bilinear2d(input, _output_size(2), align_corners);
-  } else if (input.dim() == 4 && options.mode() == Interpolation::Trilinear) {
+  } else if (input.dim() == 4 && c10::get_if<enumtype::kTrilinear>(&options.mode())) {
     TORCH_CHECK(false, "Got 4D input, but trilinear mode needs 5D input");
-  } else if (input.dim() == 5 && options.mode() == Interpolation::Linear) {
+  } else if (input.dim() == 5 && c10::get_if<enumtype::kLinear>(&options.mode())) {
     TORCH_CHECK(false, "Got 5D input, but linear mode needs 3D input");
-  } else if (input.dim() == 5 && options.mode() == Interpolation::Bilinear) {
+  } else if (input.dim() == 5 && c10::get_if<enumtype::kBilinear>(&options.mode())) {
     TORCH_CHECK(false, "Got 5D input, but bilinear mode needs 4D input");
-  } else if (input.dim() == 5 && options.mode() == Interpolation::Trilinear) {
+  } else if (input.dim() == 5 && c10::get_if<enumtype::kTrilinear>(&options.mode())) {
     return torch::upsample_trilinear3d(input, _output_size(3), align_corners);
-  } else if (input.dim() == 4 && options.mode() == Interpolation::Bicubic) {
+  } else if (input.dim() == 4 && c10::get_if<enumtype::kBicubic>(&options.mode())) {
     return torch::upsample_bicubic2d(input, _output_size(2), align_corners);
   } else {
     TORCH_CHECK(

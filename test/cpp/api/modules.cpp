@@ -1637,7 +1637,7 @@ TEST_F(ModulesTest, Upsampling1D) {
   {
     Upsample model(UpsampleOptions()
                        .size(std::vector<int64_t>{4})
-                       .mode(torch::Interpolation::Nearest));
+                       .mode(torch::kNearest));
     auto input = torch::ones({1, 1, 2}, torch::requires_grad());
     auto output = model->forward(input);
     auto expected = torch::ones({1, 1, 4});
@@ -1653,7 +1653,7 @@ TEST_F(ModulesTest, Upsampling1D) {
       for (const auto scale_factor : {0.5, 1.5, 2.0}) {
         Upsample model(UpsampleOptions()
                            .scale_factor(std::vector<double>{scale_factor})
-                           .mode(torch::Interpolation::Linear)
+                           .mode(torch::kLinear)
                            .align_corners(align_corners));
         auto input = torch::ones({1, 1, 2}, torch::requires_grad());
         auto output = model->forward(input);
@@ -1672,7 +1672,7 @@ TEST_F(ModulesTest, Upsampling1D) {
     // linear (1D) upsampling spatial invariance
     Upsample model(UpsampleOptions()
                        .scale_factor(std::vector<double>{3})
-                       .mode(torch::Interpolation::Linear)
+                       .mode(torch::kLinear)
                        .align_corners(false));
     auto input = torch::zeros({1, 1, 9});
     input.narrow(2, 0, 4).normal_();
@@ -1687,7 +1687,7 @@ TEST_F(ModulesTest, Upsampling2D) {
   {
     Upsample model(UpsampleOptions()
                        .size(std::vector<int64_t>{4, 4})
-                       .mode(torch::Interpolation::Nearest));
+                       .mode(torch::kNearest));
     auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
     auto output = model->forward(input);
     auto expected = torch::ones({1, 1, 4, 4});
@@ -1703,7 +1703,7 @@ TEST_F(ModulesTest, Upsampling2D) {
       for (const auto scale_factor : {0.5, 1.5, 2.0}) {
         Upsample model(UpsampleOptions()
                            .scale_factor({{scale_factor, scale_factor}})
-                           .mode(torch::Interpolation::Bilinear)
+                           .mode(torch::kBilinear)
                            .align_corners(align_corners));
         auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
         auto output = model->forward(input);
@@ -1724,7 +1724,7 @@ TEST_F(ModulesTest, Upsampling2D) {
       for (const auto scale_factor : {0.5, 1.5, 2.0}) {
         Upsample model(UpsampleOptions()
                            .scale_factor({{scale_factor, scale_factor}})
-                           .mode(torch::Interpolation::Bicubic)
+                           .mode(torch::kBicubic)
                            .align_corners(align_corners));
         auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
         auto output = model->forward(input);
@@ -1745,7 +1745,7 @@ TEST_F(ModulesTest, Upsampling3D) {
   {
     Upsample model(UpsampleOptions()
                        .size(std::vector<int64_t>{4, 4, 4})
-                       .mode(torch::Interpolation::Nearest));
+                       .mode(torch::kNearest));
     auto input = torch::ones({1, 1, 2, 2, 2}, torch::requires_grad());
     auto output = model->forward(input);
     auto expected = torch::ones({1, 1, 4, 4, 4});
@@ -1762,7 +1762,7 @@ TEST_F(ModulesTest, Upsampling3D) {
         Upsample model(
             UpsampleOptions()
                 .scale_factor({{scale_factor, scale_factor, scale_factor}})
-                .mode(torch::Interpolation::Trilinear)
+                .mode(torch::kTrilinear)
                 .align_corners(align_corners));
         auto input = torch::ones({1, 1, 2, 2, 2}, torch::requires_grad());
         auto output = model->forward(input);

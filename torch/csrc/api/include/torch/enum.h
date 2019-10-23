@@ -47,6 +47,11 @@ TORCH_ENUM_DECLARE(Constant)
 TORCH_ENUM_DECLARE(Reflect)
 TORCH_ENUM_DECLARE(Replicate)
 TORCH_ENUM_DECLARE(Circular)
+TORCH_ENUM_DECLARE(Nearest)
+TORCH_ENUM_DECLARE(Bilinear)
+TORCH_ENUM_DECLARE(Bicubic)
+TORCH_ENUM_DECLARE(Trilinear)
+TORCH_ENUM_DECLARE(Area)
 
 namespace torch {
 namespace enumtype {
@@ -68,6 +73,11 @@ struct enum_name {
   TORCH_ENUM_PRETTY_PRINT(Reflect)
   TORCH_ENUM_PRETTY_PRINT(Replicate)
   TORCH_ENUM_PRETTY_PRINT(Circular)
+  TORCH_ENUM_PRETTY_PRINT(Nearest)
+  TORCH_ENUM_PRETTY_PRINT(Bilinear)
+  TORCH_ENUM_PRETTY_PRINT(Bicubic)
+  TORCH_ENUM_PRETTY_PRINT(Trilinear)
+  TORCH_ENUM_PRETTY_PRINT(Area)
 };
 } // namespace enumtype
 } // namespace torch
