@@ -721,7 +721,7 @@ class DistAutogradTest(object):
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
 
-            time.sleep(10);
+            time.sleep(390);
             if self.rank == 2:
                 pass
             else:

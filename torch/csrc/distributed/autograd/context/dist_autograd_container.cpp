@@ -9,7 +9,7 @@ namespace autograd {
 constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
 constexpr int kMaxWorkerId = 65535;
-const std::chrono::duration<double> kContextTimeout = std::chrono::seconds(2);
+const std::chrono::duration<double> kContextTimeout = std::chrono::seconds(200);
 
 constexpr int64_t kInvalidContextId = -1;
 
