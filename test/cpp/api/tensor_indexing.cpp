@@ -242,9 +242,9 @@ TEST(TensorIndexingTest, TestByteMask2d) {
 */
 TEST(TensorIndexingTest, TestIntIndices) {
   auto v = torch::randn({5, 7, 3});
-  assert_equal(v(torch::tensor({0, 4, 2})).sizes(), {3, 7, 3});
-  assert_equal(v({}, torch::tensor({0, 4, 2})).sizes(), {5, 3, 3});
-  assert_equal(v({}, torch::tensor({{0, 1}, {4, 3}})).sizes(), {5, 2, 2, 3});
+  assert_equal(v(torch::tensor({0, 4, 2}, torch::kLong)).sizes(), {3, 7, 3});
+  assert_equal(v({}, torch::tensor({0, 4, 2}, torch::kLong)).sizes(), {5, 3, 3});
+  assert_equal(v({}, torch::tensor({{0, 1}, {4, 3}}, torch::kLong)).sizes(), {5, 2, 2, 3});
 }
 
 
