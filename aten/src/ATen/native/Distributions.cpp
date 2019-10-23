@@ -7,6 +7,8 @@
 #include <c10/util/Exception.h>
 #include <ATen/core/EnableNamedTensor.h>
 
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>
 #include <ATen/core/DistributionsHelper.h>
@@ -22,8 +24,6 @@
 #include <float.h>
 
 #include <TH/THMath.h>
-#include <ATen/native/TensorIterator.h>
-#include <ATen/native/cpu/Loops.h>
 
 namespace {
 /*
