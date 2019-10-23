@@ -65,7 +65,7 @@ void InputArchive::read(
   TORCH_CHECK(
       try_read(key, tensor, is_buffer),
       "No such serialized tensor '",
-      hierarchy_prefix,
+      hierarchy_prefix_,
       key,
       "'");
 }
@@ -73,7 +73,7 @@ void InputArchive::read(
 bool InputArchive::try_read(const std::string& key, InputArchive& archive) {
   if (auto named_module = module_.find_module(key)) {
     archive.module_ = std::move(*named_module);
-    archive.hierarchy_prefix = hierarchy_prefix + key + ".";
+    archive.hierarchy_prefix_ = hierarchy_prefix_ + key + ".";
     return true;
   } else {
     return false;
@@ -84,7 +84,7 @@ void InputArchive::read(const std::string& key, InputArchive& archive) {
   TORCH_CHECK(
       try_read(key, archive),
       "No such serialized submodule: '",
-      hierarchy_prefix,
+      hierarchy_prefix_,
       key,
       "'");
 }
