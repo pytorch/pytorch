@@ -66,11 +66,11 @@
   variants: method
   supports_named_tensor: True
 
-- func: align_to(Tensor(a) self, DimnameList names) -> Tensor(a)
+- func: align_to(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
   supports_named_tensor: True
 
-- func: align_to(Tensor(a) self, DimnameList order, int ellipsis_idx) -> Tensor(a)
+- func: align_to(Tensor(a) self, Dimname[] order, int ellipsis_idx) -> Tensor(a)
   variants: method
   supports_named_tensor: True
 
@@ -83,15 +83,15 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
 
-- func: refine_names(Tensor(a) self, DimnameList names) -> Tensor(a)
+- func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
   supports_named_tensor: True
 
-- func: unflatten(Tensor self, Dimname dim, int[] sizes, DimnameList names) -> Tensor
+- func: unflatten(Tensor self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor
   variants: method
   supports_named_tensor: True
 
-- func: unflatten(Tensor self, int dim, int[] sizes, DimnameList names) -> Tensor
+- func: unflatten(Tensor self, int dim, int[] sizes, Dimname[] names) -> Tensor
   variants: method
   supports_named_tensor: True
 
@@ -1241,7 +1241,7 @@
   variants: function, method
   supports_named_tensor: True
 
-- func: flatten.DimnameList(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor
+- func: flatten.DimnameList(Tensor self, Dimname[] dims, Dimname out_dim) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
