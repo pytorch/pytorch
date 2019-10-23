@@ -401,7 +401,11 @@ void initJITBindings(PyObject* module) {
              const std::string& name,
              const char* data,
              size_t size) { return self.writeRecord(name, data, size); })
-      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile);
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("write_a_storage", [](PyTorchStreamWriter& self, const std::string& name, const at::Tensor& storage_tensor) {
+        size_t size = storage_tensor.storage().numel() * storage_tensor.storage().elementSize();
+        self.writeRecord(name, storage_tensor.storage().data(), size);
+      });
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
