@@ -19,7 +19,7 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/native/Math.h>
 #include <ATen/AccumulateType.h>
-
+#include <ATen/native/SortingUtils.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -323,54 +323,20 @@ static void rsqrt_kernel(TensorIterator& iter) {
   });
 }
 
-static void cumsum_kernel(Tensor& result, const Tensor& self, int64_t dimension) {
+static void cumsum_kernel(Tensor& result, const Tensor& self, int64_t dim) {
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cumsum_cpu", [&] {
-    using accscalar_t = at::acc_type<scalar_t, false>;
-    const scalar_t * const self_ptr = self.data_ptr<scalar_t>();
-    scalar_t * const res_ptr = result.data_ptr<scalar_t>();
-    int64_t d_size = self.size(dimension);
-    int64_t self_stride = self.stride(dimension);
-    int64_t res_stride = self.stride(dimension);
-    int64_t total = self.numel() / d_size;
-
-    parallel_for(0, total, internal::GRAIN_SIZE, [&](int64_t s, int64_t e) {
-      const int64_t self_dim = self.dim();
-      std::vector<int64_t> position_in_dims(self_dim);
-      int64_t index_in_curr_dim = s;
-      int64_t self_start = 0;
-      int64_t result_start = 0;
-      for (int64_t i = 0; i < self.dim(); i++) {
-        if (i == dimension) continue;
-        position_in_dims[i] = index_in_curr_dim % self.size(i);
-        self_start += (index_in_curr_dim % self.size(i)) * self.stride(i);
-        result_start += (index_in_curr_dim % result.size(i)) * result.stride(i);
-        index_in_curr_dim = index_in_curr_dim / self.size(i);
-      }
-
-      while (s < e) {
-        accscalar_t cumsum = 0;
-        for (int64_t j = 0; j < d_size; j++) {
-          cumsum += self_ptr[self_start + j * self_stride];
-          res_ptr[result_start + j * res_stride] = cumsum;
-        }
-        s++;
-        for (int i = 0; i < self.dim(); i++) {
-          if (i == dimension) {
-            continue;
+    dim_apply(
+        {self, result},
+        dim,
+        [&](int64_t i, TensorList tl) {
+          auto self_ptr = tl[0].accessor<scalar_t, 1>();
+          auto result_ptr = tl[1].accessor<scalar_t, 1>();
+          scalar_t cumsum = static_cast<scalar_t>(0);
+          for (int64_t j = 0; j < self_ptr.size(0); j++) {
+            cumsum += self_ptr[j];
+            result_ptr[j] = cumsum;
           }
-          position_in_dims[i]++;
-          self_start += self.stride(i);
-          result_start += result.stride(i);
-          if (position_in_dims[i] == self.size(i) && i != self.dim()-1) {
-            self_start -= position_in_dims[i] * self.stride(i);
-            result_start -= position_in_dims[i] * result.stride(i);
-            position_in_dims[i] = 0;
-          } else {
-            break;
-          }
-        }
-      }
-    });
+        });
   });
 }
 
