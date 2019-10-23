@@ -27,13 +27,17 @@ struct Node;
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                                Variable
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// A `Variable` augments a `Tensor` with the ability to interact in our
+/// A `Variable` is a `Tensor` augmented with the ability to interact in our
 /// autograd machinery. Conceptually, `Variable`s travel along `Edge`s between
 /// `Node`s in the autograd graph. A `Variable` can either be a leaf, like a
 /// weight in a neural network, or an interior variable, when it is the result
 /// of an operation between variables. Every `Variable` also stores another
 /// `Variable` called its `grad` (gradient). If the variable is a leaf, its
 /// gradient will be accumulated into this variable.
+///
+/// Variables are just another type of Tensor; a Tensor you have in your hand
+/// could very well be a Variable.  Some tensors are NOT variables, although
+/// we hope to eliminate this case in the near future.
 ///
 ///                              Gradient Edges
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -67,26 +71,13 @@ struct Node;
 /// `Variable`s will not be registered as having view relations, even if they
 /// share storage.
 /// See NOTE [ Autograd View Variables ] for more details.
-///
-///
-///                               Interface
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// `Variable` inherits from `Tensor` and thus its API is a superset of that of
-/// `Tensor`. This means you can perform all the usual mathematical and other
-/// operations you can perform on `Tensor`s also on `Variable`s. Furthermore,
-/// `Variable` and `Tensor` actually convert implicitly between each other. You
-/// can thus call functions defined on `Tensor`s also with `Variable`s. For
-/// this, the `Variable` class allows implicit construction from `Tensor`. It is
-/// the responsibility of calling code to ensure that this constructor is
-/// invoked only when the `Tensor` contains autograd metadata. Most notably, it
-/// is *not* correct to construct a brand new `Variable` from a `Tensor` using
-/// this constructor. To do so, you must use the `make_variable` free function
-/// instead. To create a view variable, use `make_variable_view`.
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct AutogradMeta;
-struct DifferentiableViewMeta;
 
+// NB: Historically Variable had a separate static type from Tensor, providing
+// an extended interface that isn't valid on all Tensors (because Variables
+// "wrapped" Tensors).  When we merged Variable and Tensor, this distinction
+// became less meaningful; however, we still define Variable as an alias for
+// Tensor for backwards compatibility.
 using Variable = at::Tensor;
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -348,15 +339,18 @@ inline Variable make_variable(
 // Tensor Conversion
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// Downcasts the `Tensor` reference to a `Variable` reference. If compiling
-/// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
-/// throws a `std::invalid_argument` exception.
+/// Tests if a `Tensor` reference actually is a `Variable`, and returns the ref
+/// if so.  (Historically, this also did a static cast, but now that Tensor
+/// and Variable are the same type, this is a no-op.)
+///
+/// TODO: Remove this when the dynamic distinction between Variable and Tensor
+/// is removed.
 inline Variable& as_variable_ref(at::Tensor& tensor) {
   TORCH_CHECK(
       tensor.is_variable(),
       "Attempted to cast a Tensor to a Variable, but "
       "the dynamic type of the value is not Variable.");
-  return static_cast<Variable&>(tensor);
+  return tensor;
 }
 
 inline const Variable& as_variable_ref(const at::Tensor& tensor) {
@@ -364,7 +358,7 @@ inline const Variable& as_variable_ref(const at::Tensor& tensor) {
       tensor.is_variable(),
       "Attempted to cast a Tensor to a Variable, but "
       "the dynamic type of the value is not Variable.");
-  return static_cast<const Variable&>(tensor);
+  return tensor;
 }
 
 TORCH_API void _create_cpp_hook(const at::Tensor& self);

@@ -39,16 +39,8 @@ inline __host__ __device__ THHalf exp(THHalf a) {
   return THCNumerics<THHalf>::exp(a);
 }
 
-inline __host__ __device__ THHalf log1p(THHalf a) {
-  return THCNumerics<THHalf>::log1p(a);
-}
-
 inline __host__ __device__ THHalf pow(THHalf a, THHalf b) {
   return THCNumerics<THHalf>::pow(a, b);
-}
-
-inline __host__ __device__ THHalf sqrt(THHalf a) {
-  return THCNumerics<THHalf>::sqrt(a);
 }
 
 inline __host__ __device__ THHalf tanh(THHalf a) {
