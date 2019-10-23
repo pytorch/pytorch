@@ -478,7 +478,7 @@ TEST(CustomAutogradTest, DeepReentrant) {
   };
 
   // This should not stack overflow
-  auto v = torch::tensor(8193, torch::requires_grad());
+  auto v = torch::tensor({8193}, torch::requires_grad());
   DeepReenter::apply(v).sum().backward();
 }
 
@@ -518,8 +518,8 @@ TEST(CustomAutogradTest, ReentrantPriority) {
     }
   };
 
-  auto a = MyFunction::apply(torch::tensor(6, torch::requires_grad()));
-  auto b = Reenter::apply(torch::tensor(9, torch::requires_grad()));
+  auto a = MyFunction::apply(torch::tensor({6}, torch::requires_grad()));
+  auto b = Reenter::apply(torch::tensor({9}, torch::requires_grad()));
   auto v = a*b;
   v.backward();
 
