@@ -305,6 +305,7 @@ void LayerNormKernelImplInternal(
           N, eps, X_data, mean_data, rstd_data);
   LayerNormForwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
       N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void LayerNormKernelImpl(
