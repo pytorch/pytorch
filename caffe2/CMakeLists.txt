@@ -488,6 +488,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/autograd_metadata.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.cpp
+      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
       ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
@@ -556,6 +558,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/distance.cpp
@@ -570,6 +573,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/named_any.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/batchnorm.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/normalization.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/conv.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/dropout.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/linear.cpp
@@ -1069,8 +1073,8 @@ if(USE_CUDA)
   # These public dependencies must go after the previous dependencies, as the
   # order of the libraries in the linker call matters here when statically
   # linking; libculibos and cublas must be last.
-  target_link_libraries(
-      torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+  target_link_libraries(torch PUBLIC ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+
 
 endif()
 
