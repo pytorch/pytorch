@@ -243,7 +243,11 @@ Tensor& cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dimension) {
   TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cumsum only supports CPU and CUDA devices, result got: ", device2);
   TORCH_CHECK(device1 == device2, "self and result must have the same device type. self: ", device1, " result: ", device2);
   TORCH_CHECK(!self.is_cuda() || self.get_device() == result.get_device(), "device of self (", self.get_device(), ") must match device of result (", result.get_device(), ")");
-  cumsum_stub(device1, result, self, dim);
+  if (self.dim() < 1) {
+    result.copy_(self);
+  } else {
+    cumsum_stub(device1, result, self, dim);
+  }
   return result;
 }
 
