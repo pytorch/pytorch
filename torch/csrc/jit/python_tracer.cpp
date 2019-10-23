@@ -63,25 +63,24 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
   };
 
   auto outs = tracer::trace(
-    trace_inputs,
-    [&func](Stack inputs) -> Stack {
-      size_t num_func_inputs = inputs.size();
-      py::tuple py_inputs(num_func_inputs);
-      for (size_t i = 0; i < num_func_inputs; ++i) {
-        py_inputs[i] = py::cast(inputs[i]);
-      }
-      auto out = func(*py_inputs);
-      if (out.ptr() == Py_None) {
-        AT_ERROR(
-            "The traced function didn't return any values! Side-effects are not "
-            "captured in traces, so it would be a no-op.");
-      }
-      return {toTypeInferredIValue(out)};
-    },
-    lookup_fn_adapter,
-    force_outplace,
-    self
-  );
+      std::move(trace_inputs),
+      [&func](Stack inputs) -> Stack {
+        size_t num_func_inputs = inputs.size();
+        py::tuple py_inputs(num_func_inputs);
+        for (size_t i = 0; i < num_func_inputs; ++i) {
+          py_inputs[i] = py::cast(inputs[i]);
+        }
+        auto out = func(*py_inputs);
+        if (out.ptr() == Py_None) {
+          AT_ERROR(
+              "The traced function didn't return any values! Side-effects are not "
+              "captured in traces, so it would be a no-op.");
+        }
+        return {toTypeInferredIValue(out)};
+      },
+      lookup_fn_adapter,
+      force_outplace,
+      self);
   return std::make_pair(std::get<0>(outs)->graph, std::get<1>(outs));
 }
 

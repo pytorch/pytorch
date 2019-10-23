@@ -2076,7 +2076,7 @@ graph(%Ra, %Rb):
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
         g, outputs, inputs = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x,
-                                                           _force_outplace=True, return_inputs=True)
+                                                       _force_outplace=True, return_inputs=True)
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
 
