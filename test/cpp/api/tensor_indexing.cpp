@@ -636,8 +636,8 @@ TEST(TensorIndexingTest, TestIndexScalarWithBoolMask_CUDA) {
         self.assertEqual(r, r[...])
 */
 TEST(TensorIndexingTest, TestGetitemScalars) {
-  auto zero = torch::tensor(0, torch::kInt64); // yf225 TODO: needs the torch::tensor bug fix
-  auto one = torch::tensor(1, torch::kInt64); // yf225 TODO: needs the torch::tensor bug fix
+  auto zero = torch::tensor(0, torch::kInt64);
+  auto one = torch::tensor(1, torch::kInt64);
 
   // non-scalar indexed with scalars
   auto a = torch::randn({2, 3});
