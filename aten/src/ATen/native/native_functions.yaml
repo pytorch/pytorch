@@ -70,7 +70,7 @@
   variants: method
   supports_named_tensor: True
 
-- func: align_to(Tensor(a) self, Dimname[] order, int ellipsis_idx) -> Tensor(a)
+- func: align_to.ellipsis_idx(Tensor(a) self, Dimname[] order, int ellipsis_idx) -> Tensor(a)
   variants: method
   supports_named_tensor: True
 
@@ -87,11 +87,11 @@
   variants: method
   supports_named_tensor: True
 
-- func: unflatten(Tensor self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor
+- func: unflatten.Dimname(Tensor self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor
   variants: method
   supports_named_tensor: True
 
-- func: unflatten(Tensor self, int dim, int[] sizes, Dimname[] names) -> Tensor
+- func: unflatten.int(Tensor self, int dim, int[] sizes, Dimname[] names) -> Tensor
   variants: method
   supports_named_tensor: True
 
@@ -1659,11 +1659,11 @@
     CUDA: logspace_cuda_out
 
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
-- func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+- func: log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
-- func: log_softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+- func: log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
@@ -2554,11 +2554,11 @@
   variants: function, method
 
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
-- func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+- func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
-- func: softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+- func: softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
@@ -4006,7 +4006,7 @@
 - func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor
   variants: function, method
 
-- func: index_fill_.Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
+- func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
   supports_named_tensor: True
@@ -4014,12 +4014,12 @@
     CPU: legacy::cpu::_th_index_fill_
     CUDA: legacy::cuda::_th_index_fill_
 
-- func: index_fill.Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+- func: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: function, method
 
-- func: index_fill_.Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
+- func: index_fill_.int_Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
@@ -4027,24 +4027,24 @@
     CUDA: legacy::cuda::_th_index_fill_
   supports_named_tensor: True
 
-- func: index_fill.Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
+- func: index_fill.int_Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   supports_named_tensor: True
 
-- func: index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
+- func: index_fill_.Dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
-- func: index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
+- func: index_fill_.Dimname_Tensor(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
-- func: index_fill.dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
+- func: index_fill.Dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
-- func: index_fill.dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
+- func: index_fill.Dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
@@ -6681,7 +6681,7 @@
     CPU: slow_conv_transpose2d_cpu
     CUDA: slow_conv_transpose2d_cuda
 
-- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose2d_backward_out_cpu
@@ -6706,7 +6706,7 @@
     CPU: slow_conv_transpose3d_cpu
     CUDA: slow_conv_transpose3d_cuda
 
-- func: slow_conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose3d_backward_out_cpu
@@ -6737,7 +6737,7 @@
     CPU: legacy::cpu::_thnn_conv2d_forward
     CUDA: legacy::cuda::_thnn_conv2d_forward
 
-- func: thnn_conv2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: thnn_conv2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_conv2d_backward_out
@@ -6766,7 +6766,7 @@
   dispatch:
     CUDA: legacy::cuda::_thnn_conv_depthwise2d_forward
 
-- func: thnn_conv_depthwise2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight) -> (Tensor(a!), Tensor(b!))
+- func: thnn_conv_depthwise2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight) -> (Tensor(a!), Tensor(b!))
   python_module: nn
   dispatch:
     CUDA: legacy::cuda::_thnn_conv_depthwise2d_backward_out
@@ -6793,7 +6793,7 @@
   dispatch:
     CPU: legacy::cpu::_thnn_conv3d_forward
 
-- func: thnn_conv3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: thnn_conv3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_conv3d_backward_out
