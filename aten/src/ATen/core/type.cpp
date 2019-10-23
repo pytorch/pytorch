@@ -569,10 +569,10 @@ InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_modu
 bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
-    if (!is_module() && iface->is_module()) {
+    if (!is_module() && iface.is_module()) {
       if (why_not) {
         *why_not << "Interface '" << python_str() << "' is not a subtype of "
-                  << "the module interface '" << rhs->python_str() << ".\n";
+                  << "the module interface '" << rhs->python_str() << ".\n"
       }
       return false;
     }

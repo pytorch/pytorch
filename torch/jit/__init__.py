@@ -1743,7 +1743,7 @@ if _enabled:
                                            "tried to replace existing module '{}': {}".format(attr, value))
                 else:
                     raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                                       "tried to replace existing module '{}': {}".format(attr, value))
+                                        "tried to replace existing module '{}': {}".format(attr, value))
             elif self._c._has_parameter(attr):
                 self._c._set_parameter(attr, value)
             elif hasattr(self, "_concrete_type") and attr in self._concrete_type.get_constants().keys():
