@@ -10,7 +10,7 @@ namespace nn {
 namespace functional {
 
 inline Tensor interpolate(const Tensor& input, const InterpolationOptions& options) {
-  auto _check_size_scale_factor = [input, options](size_t dim) {
+  auto _check_size_scale_factor = [options](size_t dim) {
     if (options.size() == c10::nullopt &&
         options.scale_factor() == c10::nullopt) {
       TORCH_CHECK(false, "either size or scale_factor should be defined");
@@ -24,7 +24,7 @@ inline Tensor interpolate(const Tensor& input, const InterpolationOptions& optio
       TORCH_CHECK(
           false,
           "scale_factor shape must match input shape. "
-          "Input is ", input.dim(), "D, scale_factor size is ",
+          "Input is ", dim, "D, scale_factor size is ",
           options.scale_factor()->size());
     }
   };

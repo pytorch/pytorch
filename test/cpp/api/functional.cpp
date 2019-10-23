@@ -1201,7 +1201,7 @@ TEST_F(FunctionalTest, Interpolate) {
     ASSERT_THROWS_WITH(
         F::interpolate(input, InterpolationOptions().scale_factor({{3, 2}})),
         "scale_factor shape must match input shape. "
-        "Input is 3D, scale_factor size is 2");
+        "Input is 1D, scale_factor size is 2");
     ASSERT_THROWS_WITH(
         F::interpolate(
             input,
