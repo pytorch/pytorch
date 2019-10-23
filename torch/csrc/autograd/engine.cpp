@@ -290,7 +290,10 @@ auto Engine::thread_main(
     // The outer graph_task represents the overall graph_task we need to execute
     // for reentrant execution.
     std::shared_ptr<GraphTask> local_graph_task;
-    if (!reentrant_thread && !(local_graph_task = task.base_.lock())) {
+    if (!(local_graph_task = task.base_.lock())) {
+      // Reentrant thread's graph task should not expire since we hold a
+      // reference to it in this method.
+      TORCH_INTERNAL_ASSERT(!reentrant_thread);
       LOG(INFO) << "GraphTask for function " << task.fn_->name()
                 << " is no longer valid, skipping execution";
       continue;
