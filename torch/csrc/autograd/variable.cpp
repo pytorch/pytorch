@@ -21,12 +21,11 @@
 
 namespace torch {
 namespace autograd {
-// NB: output_nr is input_nr on an Edge!
-AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, std::shared_ptr<Node> grad_fn, uint32_t output_nr) {
-  grad_fn_ = std::move(grad_fn);
+AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge gradient_edge) {
+  grad_fn_ = std::move(gradient_edge.function);
   requires_grad_ = false;
   is_view_ = false;
-  output_nr_ = output_nr;
+  output_nr_ = gradient_edge.input_nr;
 
   // set_requires_grad also checks error conditions.
   set_requires_grad(requires_grad, self_impl);
@@ -107,8 +106,8 @@ void Variable::set_data(const at::Tensor &new_data) const {
   get()->shallow_copy_from(new_data.getIntrusivePtr());
 }
 
-DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, std::shared_ptr<Node> grad_fn, uint32_t output_nr)
-    : AutogradMeta(self_impl, false, std::move(grad_fn), output_nr) {
+DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
+    : Variable::AutogradMeta(self_impl, false, std::move(gradient_edge)) {
   base_ = std::move(base);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
@@ -172,8 +171,8 @@ void Variable::rebase_history(Edge gradient_edge) {
 }
 
 void Variable::create_cpp_hook() {
-  auto &list = get_autograd_meta()->cpp_hooks_list_;
-  list.reset(new CppHooksList());
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  list.reset(new hooks_list());
   std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, output_nr()));
   clear_hooks();
   add_hook(std::make_shared<CppFunctionPreHook>(list, 0));
@@ -184,10 +183,10 @@ void Variable::create_cpp_hook() {
 }
 
 void Variable::remove_hook(unsigned pos) {
-  auto &list = get_autograd_meta()->cpp_hooks_list_;
-  TORCH_CHECK(list && pos < list->hooks_list_.size() , "Invalid index, no hook at position ", pos);
+  auto &list = get_autograd_meta()->cpp_hooks_list;
+  TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
-  list->hooks_list_[pos] = nullptr;
+  (*list)[pos] = nullptr;
 }
 
 }} // namespace torch::autograd
