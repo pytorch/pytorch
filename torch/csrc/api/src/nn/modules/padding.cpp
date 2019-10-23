@@ -65,7 +65,7 @@ void ZeroPad2dImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor ZeroPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(*options.padding()).mode(torch::kConstant).value(0));
+  return F::pad(input, PadOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kConstant).value(0));
 }
 
 } // namespace nn
