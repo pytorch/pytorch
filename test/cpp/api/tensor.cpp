@@ -320,6 +320,16 @@ TEST(TensorTest, MultidimTensorCtor) {
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
+    auto tensor = torch::tensor({{true, false}});
+    ASSERT_EQ(tensor.dtype(), torch::kBool);
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 2}));
+    auto expected = torch::empty(tensor.sizes(), torch::kBool);
+    expected[0][0] = true;
+    expected[0][1] = false;
+    ASSERT_TRUE(torch::equal(tensor, expected));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
     auto tensor = torch::tensor({{1.0, 2.0}});
     ASSERT_EQ(tensor.dtype(), torch::kDouble);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 2}));
@@ -338,6 +348,16 @@ TEST(TensorTest, MultidimTensorCtor) {
     ASSERT_EQ(tensor.dtype(), torch::kInt);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({2, 1}));
     ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kInt).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    auto tensor = torch::tensor({{true}, {false}});
+    ASSERT_EQ(tensor.dtype(), torch::kBool);
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({2, 1}));
+    auto expected = torch::empty(tensor.sizes(), torch::kBool);
+    expected[0][0] = true;
+    expected[1][0] = false;
+    ASSERT_TRUE(torch::equal(tensor, expected));
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
