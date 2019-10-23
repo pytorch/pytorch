@@ -97,6 +97,7 @@ class TORCH_API DistAutogradContainer {
   // function should be called with the lock.
   void eraseContextIdAndReset(int64_t context_id);
 
+  // Sleeps for set timeout and then proceeds to release DistAutogradContexts
   void cleanupContextWatchdog();
 
   // Auto incrementing context id used to identify unique autograd passes.
@@ -119,7 +120,7 @@ class TORCH_API DistAutogradContainer {
   // and worker_id_ are immutable.
   mutable std::mutex autograd_context_lock_;
 
-  // Atomic var to control when the watchdog thread is killed.
+  // Atomic variable to control when the watchdog thread is killed.
   std::atomic<bool> terminateWatchdog_;
 
   // Autograd message id to identify unique send/recv autograd function pairs.

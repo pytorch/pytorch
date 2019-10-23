@@ -132,7 +132,7 @@ DistAutogradContext& DistAutogradContainer::currentContext() {
   TORCH_CHECK(
       it != autograd_context_.end(),
       "Couldn't find autograd context "
-      "data for current autograd context id.");
+      "data for current autograd context id");
   return it->second;
 }
 
