@@ -52,7 +52,7 @@ def my_py_nested_call(t1, t2, dst, world_size, hops):
 # after dist autograd context is cleaned up, it should be cleaned up on other
 # nodes. This helper allows timeout_seconds for those RPCs to be completed, and
 # ensures that all the contexts have been cleaned up in that timeframe.any
-def _all_contexts_cleaned_up(num_contexts, timeout_seconds=10):
+def _all_contexts_cleaned_up(timeout_seconds=10):
     global known_context_ids
     start = time.time()
     context_id_to_raised = {}
@@ -62,10 +62,10 @@ def _all_contexts_cleaned_up(num_contexts, timeout_seconds=10):
                 dist_autograd._retrieve_context(context_id)
             except RuntimeError:
                 context_id_to_raised[context_id] = True
-        if len(context_id_to_raised) == num_contexts:
+        if len(context_id_to_raised) == len(known_context_ids):
             break
     # all contexts have been cleaned up if trying to retrieve any context resulted in a RuntimeError.
-    success = len(context_id_to_raised) == num_contexts and all(context_id_to_raised.values())
+    success = len(context_id_to_raised) == len(known_context_ids) and all(context_id_to_raised.values())
     return success
 
 
@@ -455,7 +455,6 @@ class DistAutogradTest(object):
 
     @dist_init
     def test_context_cleanup_many_workers(self):
-        global known_context_ids
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
@@ -467,7 +466,7 @@ class DistAutogradTest(object):
         with self.assertRaises(RuntimeError):
             dist_autograd._retrieve_context(context_id)
         # check that all contexts have been cleaned up.
-        success = _all_contexts_cleaned_up(num_contexts=len(dst_ranks))
+        success = _all_contexts_cleaned_up()
         self.assertTrue(success)
 
     @dist_init
@@ -484,12 +483,8 @@ class DistAutogradTest(object):
             rpc.rpc_sync("worker{}".format(dst_rank), _store_context_id, args=(context_id,))
             rpc.rpc_sync("worker{}".format(nested_dst_rank), _store_context_id, args=(context_id,))
         dist.barrier()  # let all nodes finish sending their RPCs
-        success = _all_contexts_cleaned_up(num_contexts=2)
+        success = _all_contexts_cleaned_up()
         self.assertTrue(success)
-
-
-
-
 
     @dist_init
     def test_worker_ids_recorded(self):
