@@ -2121,36 +2121,6 @@ TEST_F(ModulesTest, PrettyPrintReplicationPad) {
       "torch::nn::ReplicationPad3d(padding=[1, 2, 1, 2, 1, 2])");
 }
 
-TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
-  ASSERT_EQ(
-      c10::str(ZeroPad2d(ZeroPad2dOptions(2))),
-      "torch::nn::ZeroPad2d(padding=[2, 2, 2, 2])");
-  ASSERT_EQ(
-      c10::str(ZeroPad2d(ZeroPad2dOptions({1, 1, 2, 0}))),
-      "torch::nn::ZeroPad2d(padding=[1, 1, 2, 0])");
-}
-
-TEST_F(ModulesTest, PrettyPrintConstantPad) {
-  ASSERT_EQ(
-      c10::str(ConstantPad1d(ConstantPad1dOptions(2, 3.5))),
-      "torch::nn::ConstantPad1d(padding=[2, 2], value=3.5)");
-  ASSERT_EQ(
-      c10::str(ConstantPad1d(ConstantPad1dOptions({3, 1}, 3.5))),
-      "torch::nn::ConstantPad1d(padding=[3, 1], value=3.5)");
-  ASSERT_EQ(
-      c10::str(ConstantPad2d(ConstantPad2dOptions(2, 3.5))),
-      "torch::nn::ConstantPad2d(padding=[2, 2, 2, 2], value=3.5)");
-  ASSERT_EQ(
-      c10::str(ConstantPad2d(ConstantPad2dOptions({3, 0, 2, 1}, 3.5))),
-      "torch::nn::ConstantPad2d(padding=[3, 0, 2, 1], value=3.5)");
-  ASSERT_EQ(
-      c10::str(ConstantPad3d(ConstantPad3dOptions(1, 3.5))),
-      "torch::nn::ConstantPad3d(padding=[1, 1, 1, 1, 1, 1], value=3.5)");
-  ASSERT_EQ(
-      c10::str(ConstantPad3d(ConstantPad3dOptions({1, 2, 1, 2, 1, 2}, 3.5))),
-      "torch::nn::ConstantPad3d(padding=[1, 2, 1, 2, 1, 2], value=3.5)");
-}
-
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
   struct InnerTestModule : torch::nn::Module {
     InnerTestModule()
