@@ -403,13 +403,18 @@ void Pickler::pushSpecializedList(
 }
 
 void Pickler::pushDouble(double value) {
-  AT_ASSERT(sizeof(double) == 8);
-  char* bytes = reinterpret_cast<char*>(&value);
-
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
-  for (size_t i = 0; i < 8; ++i) {
-    push<uint8_t>(bytes[8 - i - 1]);
-  }
+
+  // Python pickle format is big endian, swap.
+  static_assert(sizeof(double) == 8, "double length");  // NOLINT
+  auto swapEndian = [](double value) -> double {
+    double out;
+    const char* const bytes = reinterpret_cast<char*>(&value);
+    std::reverse_copy(bytes, bytes + sizeof(double),
+                      reinterpret_cast<char*>(&out));
+    return out;
+  };
+  push<double>(swapEndian(value));
 }
 
 void Pickler::pushLong(const std::string& data) {
