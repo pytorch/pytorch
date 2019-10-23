@@ -88,6 +88,8 @@ using Variable = at::Tensor;
 /// metadata fields that are necessary for tracking the Variable's autograd history.
 
 struct TORCH_API AutogradMeta {
+  virtual ~AutogradMeta();
+
   std::string name_;
 
   Variable grad_;
