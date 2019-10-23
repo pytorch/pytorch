@@ -490,6 +490,10 @@ class TestOperators(TestCase):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x[:, 1:2], x)
 
+    def test_slice_dynamic(self):
+        x = torch.rand(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x[x.size(0):, x.size(1) - 3], x, opset_version=10)
+
     def test_sign(self):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.sign(), x)

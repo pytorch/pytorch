@@ -14,6 +14,7 @@
 #include <mutex>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/jit/script/function_schema_parser.h>
 
 // TODO: Rewrite this comment
 //
