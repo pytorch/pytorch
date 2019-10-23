@@ -2821,55 +2821,19 @@ workflows:
     jobs:
       - setup
       - binary_mac_build:
-          name: binary_macos_wheel_2_7_cpu_build
-          build_environment: "wheel 2.7 cpu"
-          requires:
-            - setup
-      - binary_mac_build:
-          name: binary_macos_wheel_3_5_cpu_build
-          build_environment: "wheel 3.5 cpu"
-          requires:
-            - setup
-      - binary_mac_build:
-          name: binary_macos_wheel_3_6_cpu_build
-          build_environment: "wheel 3.6 cpu"
-          requires:
-            - setup
-      - binary_mac_build:
-          name: binary_macos_wheel_3_7_cpu_build
-          build_environment: "wheel 3.7 cpu"
+          name: binary_macos_libtorch_2_7_cpu_build
+          build_environment: "libtorch 2.7 cpu"
           requires:
             - setup
 ##############################################################################
 # Nightly tests
 ##############################################################################
       - binary_mac_upload:
-          name: binary_macos_wheel_2_7_cpu_upload
-          build_environment: "wheel 2.7 cpu"
+          name: binary_macos_libtorch_2_7_cpu_upload
+          build_environment: "libtorch 2.7 cpu"
           requires:
             - setup
-            - binary_macos_wheel_2_7_cpu_build
-          context: org-member
-      - binary_mac_upload:
-          name: binary_macos_wheel_3_5_cpu_upload
-          build_environment: "wheel 3.5 cpu"
-          requires:
-            - setup
-            - binary_macos_wheel_3_5_cpu_build
-          context: org-member
-      - binary_mac_upload:
-          name: binary_macos_wheel_3_6_cpu_upload
-          build_environment: "wheel 3.6 cpu"
-          requires:
-            - setup
-            - binary_macos_wheel_3_6_cpu_build
-          context: org-member
-      - binary_mac_upload:
-          name: binary_macos_wheel_3_7_cpu_upload
-          build_environment: "wheel 3.7 cpu"
-          requires:
-            - setup
-            - binary_macos_wheel_3_7_cpu_build
+            - binary_macos_libtorch_2_7_cpu_build
           context: org-member
 
   # Scheduled to run 4 hours after the binary jobs start
