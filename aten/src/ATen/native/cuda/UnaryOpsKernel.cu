@@ -190,6 +190,10 @@ void lgamma_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void cumsum_kernel_cuda(Tensor& result, const Tensor& self, int64_t dimension) {
+
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
@@ -207,4 +211,5 @@ REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel_cuda);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel_cuda);
 REGISTER_DISPATCH(lgamma_stub, &lgamma_kernel_cuda);
+REGISTER_DISPATCH(cumsum_stub, &cumsum_kernel_cuda);
 }}

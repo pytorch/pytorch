@@ -1146,7 +1146,8 @@
 [[
   name: _th_cumsum
   cname: cumsum
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants: function
   return: argument 0

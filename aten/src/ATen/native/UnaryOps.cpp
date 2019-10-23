@@ -235,6 +235,24 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
 
+Tensor& cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dimension) {
+  TORCH_CHECK(dimension >= 0 && dimension < self.dim(), "dimension ", dimension, " out of range");
+  auto device1 = self.type().device_type();
+  TORCH_CHECK(device1 == kCPU || device1 == kCUDA, "cumsum only supports CPU and CUDA devices, self got: ", device1);
+  auto device2 = result.type().device_type();
+  TORCH_CHECK(device2 == kCPU || device2 == kCUDA, "cumsum only supports CPU and CUDA devices, result got: ", device2);
+  TORCH_CHECK(device1 == device2, "self and result must have the same device type. self: ", device1, " result: ", device2);
+  TORCH_CHECK(!self.is_cuda() || self.get_device() == result.get_device(), "device of self (", self.get_device(), ") must match device of result (", result.get_device(), ")");
+  cumsum_stub(device1, result, self, dimension);
+  return result;
+}
+
+Tensor cumsum_cpu(const Tensor& self, int64_t dimension) {
+  Tensor result = at::empty_like(self);
+  cumsum_out_cpu(result, self, dimension);
+  return result;
+}
+
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
@@ -334,5 +352,6 @@ DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trunc_stub);
 DEFINE_DISPATCH(lgamma_stub);
+DEFINE_DISPATCH(cumsum_stub);
 }
 } // namespace at
