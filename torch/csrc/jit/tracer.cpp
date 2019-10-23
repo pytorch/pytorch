@@ -306,12 +306,11 @@ static void gatherParametersAndBuffers(
 }
 
 std::pair<std::shared_ptr<TracingState>, Stack> trace(
-  Stack inputs,
-  std::function<Stack(Stack)> traced_fn,
-  std::function<std::string(const Variable&)> var_name_lookup_fn,
-  bool force_outplace,
-  script::Module* self
-) {
+    Stack inputs,
+    const std::function<Stack(Stack)>& traced_fn,
+    std::function<std::string(const Variable&)> var_name_lookup_fn,
+    bool force_outplace,
+    script::Module* self) {
   try {
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
@@ -335,7 +334,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     }
     auto graph = state->graph;
 
-    getTracingState()->lookup_var_name_fn = var_name_lookup_fn;
+    getTracingState()->lookup_var_name_fn = std::move(var_name_lookup_fn);
     getTracingState()->force_outplace = force_outplace;
 
     // Invoke the traced function

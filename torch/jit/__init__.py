@@ -347,7 +347,7 @@ class ONNXTracedModule(Module):
             else:
                 return tuple(out_vars)
 
-        trace, out = torch._C._create_graph_by_tracing(
+        graph, out = torch._C._create_graph_by_tracing(
             wrapper,
             in_vars + module_state,
             _create_interpreter_name_lookup_fn(),
@@ -355,11 +355,11 @@ class ONNXTracedModule(Module):
         )
 
         if self._return_inputs:
-            return trace, outs[0], ret_inputs[0]
+            return graph, outs[0], ret_inputs[0]
         if self._return_inputs_states:
-            return trace, outs[0], inputs_states[0]
+            return graph, outs[0], inputs_states[0]
         else:
-            return trace, outs[0]
+            return graph, outs[0]
 
 
 def _clone_inputs(args):
