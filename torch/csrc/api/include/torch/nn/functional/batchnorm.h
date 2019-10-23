@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/nn/options/batchnorm.h>
 #include <torch/types.h>
 #include <torch/cuda.h>
 
@@ -8,10 +7,10 @@ namespace torch {
 namespace nn {
 namespace functional {
 
-inline Tensor batch_norm1d(const Tensor& input, const Tensor& running_mean,
-                           const Tensor& running_var, const Tensor& weight,
-                           const Tensor& bias, bool training,
-                           const BatchNorm1dOptions& options) {
+inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
+                         const Tensor& running_var, const Tensor& weight,
+                         const Tensor& bias, bool training,
+                         double momentum, double eps) {
   if (training) {
     std::vector<int64_t> size = input.sizes().vec();
     int64_t size_prods = size[0];
@@ -29,8 +28,8 @@ inline Tensor batch_norm1d(const Tensor& input, const Tensor& running_mean,
     running_mean,
     running_var,
     training,
-    options.momentum(),
-    options.eps(),
+    momentum,
+    eps,
     torch::cuda::cudnn_is_available());
 }
 

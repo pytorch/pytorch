@@ -31,8 +31,8 @@ struct TORCH_API BatchNormOptions {
 };
 
 template <size_t D>
-struct BatchNormOptionsv2 {
-  BatchNormOptionsv2(int64_t num_features) : num_features_(num_features) {}
+struct BatchNormBaseOptions {
+  BatchNormBaseOptions(int64_t num_features) : num_features_(num_features) {}
 
   /// The number of features of the input tensor.
   /// Changing this parameter after construction __has no effect__.
@@ -44,7 +44,7 @@ struct BatchNormOptionsv2 {
 
   /// A momentum multiplier for the mean and variance.
   /// Changing this parameter after construction __is effective__.
-  TORCH_ARG(double, momentum) = 0.1;
+  TORCH_ARG(c10::optional<double>, momentum) = 0.1;
 
   /// Whether to learn a scale and bias that are applied in an affine
   /// transformation on the input.
@@ -57,7 +57,7 @@ struct BatchNormOptionsv2 {
   TORCH_ARG(bool, track_running_stats) = true;
 };
 
-using BatchNorm1dOptions = BatchNormOptionsv2<1>;
+using BatchNorm1dOptions = BatchNormBaseOptions<1>;
 
 } // namespace nn
 } // namespace torch

@@ -18,8 +18,8 @@ namespace torch {
 namespace nn {
 
 BatchNormImpl::BatchNormImpl(const BatchNormOptions& options_) : options(options_) {
-  LOG(WARNING) << "torch::nn::BatchNorm module is deprecated."
-               << "Use BatchNorm{1,2,3}d instead.";
+  TORCH_WARN("torch::nn::BatchNorm module is deprecated."
+             "Use BatchNorm{1,2,3}d instead.");
   reset();
 }
 
@@ -79,16 +79,23 @@ Tensor BatchNormImpl::pure_forward(
 }
 
 template <size_t D, typename Derived>
-BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormOptionsv2<D>& options_)
+BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormBaseOptions<D>& options_)
     : options(options_) {
   if (options.affine()) {
     weight = this->register_parameter("weight", torch::ones({options.num_features()}));
     bias = this->register_parameter("bias", torch::zeros({options.num_features()}));
+  } else {
+    weight = this->register_parameter("weight", Tensor());
+    bias = this->register_parameter("bias", Tensor());
   }
   if (options.track_running_stats()) {
     running_mean = this->register_buffer("running_mean", torch::zeros({options.num_features()}));
     running_var = this->register_buffer("running_var", torch::ones({options.num_features()}));
     num_batches_tracked = this->register_buffer("num_batches_tracked", torch::tensor(0, torch::dtype(torch::kLong)));
+  } else {
+    running_mean = this->register_buffer("running_mean", Tensor());
+    running_var = this->register_buffer("running_var", Tensor());
+    num_batches_tracked = this->register_buffer("num_batches_tracked", Tensor());
   }
   reset();
 }
@@ -122,28 +129,48 @@ void BatchNormImplBase<D, Derived>::pretty_print(std::ostream& stream) const {
          << "torch::nn::BatchNorm" << D << "d("
          << "num_features=" << options.num_features() << ", "
          << "eps=" << options.eps() << ", "
-         << "momentum=" << options.momentum() << ", "
+         << "momentum=" << options.momentum().value() << ", "
          << "affine=" << options.affine() << ", "
          << "track_running_stats=" << options.track_running_stats() << ")";
 }
 
-Tensor BatchNorm1dImpl::forward(const Tensor& input) {
-  TORCH_CHECK(
-      input.dim() != 2 && input.dim() !=3,
-      "expected 2D or 3D input (got %dD input)", input.dim());         
+template <size_t D, typename Derived>
+Tensor BatchNormImplBase<D, Derived>::forward(const Tensor& input) {
+  _check_input_dim(input);
 
-  if (is_training() && options.track_running_stats()) {
-    num_batches_tracked += 1;
+  double exponential_average_factor;
+  if (options.momentum() == c10::nullopt) {
+    exponential_average_factor = 0.0;
+  } else {
+    exponential_average_factor = options.momentum().value();
   }
 
-  return F::batch_norm1d(
+  if (this->is_training() && options.track_running_stats()) {
+    if (num_batches_tracked.defined()) {
+      num_batches_tracked += 1;
+      if (options.momentum() == c10::nullopt) {
+        exponential_average_factor = 1.0 / num_batches_tracked.item<double>();
+      } else {
+        exponential_average_factor = options.momentum().value();
+      }
+    }
+  }
+
+  return F::batch_norm(
       input,
       running_mean,
       running_var,
       weight,
       bias,
-      is_training(),
-      options);
+      this->is_training() || !options.track_running_stats(),
+      exponential_average_factor,
+      options.eps());
+}
+
+void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
+  TORCH_CHECK(
+      input.dim() != 2 && input.dim() !=3,
+      "expected 2D or 3D input (got %dD input)", input.dim());
 }
 
 template class BatchNormImplBase<1, BatchNorm1dImpl>;

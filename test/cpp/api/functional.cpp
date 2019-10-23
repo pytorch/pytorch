@@ -894,15 +894,17 @@ TEST_F(FunctionalTest, Threshold) {
 }
 
 TEST_F(FunctionalTest, BatchNorm1d) {
-  BatchNorm1dOptions options = BatchNorm1dOptions(5);
+  int num_features = 5;
+  double eps = 1e-05;
+  double momentum = 0.1;
 
   auto input = torch::randn({2, 5});
   auto mean = torch::randn(5);
   auto variance = torch::rand(5);
-  auto weight = torch::ones({options.num_features()});
-  auto bias = torch::zeros({options.num_features()});
-  auto output = F::batch_norm1d(input, mean, variance, weight, bias, false,
-                                options);
-  auto expected = (input - mean) / torch::sqrt(variance + options.eps());
+  auto weight = torch::ones({num_features});
+  auto bias = torch::zeros({num_features});
+  auto output = F::batch_norm(input, mean, variance, weight, bias, false,
+                              momentum, eps);
+  auto expected = (input - mean) / torch::sqrt(variance + eps);
   ASSERT_TRUE(output.allclose(expected));
 }

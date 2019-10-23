@@ -1699,6 +1699,14 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm) {
       "torch::nn::BatchNorm(features=4, eps=0.5, momentum=0.1, affine=false, stateful=true)");
 }
 
+TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
+  ASSERT_EQ(
+      c10::str(BatchNorm1d(
+          BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false)
+          .track_running_stats(true))),
+      "torch::nn::BatchNorm1d(num_features=4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
 TEST_F(ModulesTest, PrettyPrintEmbedding) {
   ASSERT_EQ(
       c10::str(Embedding(EmbeddingOptions(10, 2))),

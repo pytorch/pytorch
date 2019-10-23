@@ -80,8 +80,13 @@ TORCH_MODULE(BatchNorm);
 /// Base class for all (dimension-specialized) batchnorm modules.
 template <size_t D, typename Derived>
 class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
+ protected:
+  virtual void _check_input_dim(const Tensor& input) = 0;
+
  public:
-  explicit BatchNormImplBase(const BatchNormOptionsv2<D>& options_);
+  explicit BatchNormImplBase(const BatchNormBaseOptions<D>& options_);
+
+  Tensor forward(const Tensor& input);
 
   void reset_parameters();
 
@@ -93,7 +98,7 @@ class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
   void pretty_print(std::ostream& stream) const override;
 
   /// The options with which this module was constructed.
-  BatchNormOptionsv2<D> options;
+  BatchNormBaseOptions<D> options;
 
   /// The learned weight.
   /// Only defined if the `affine` option was `true` upon construction.
@@ -120,10 +125,11 @@ class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm1d to learn
 /// about the exact behavior of this module.
 class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
+ protected:
+  virtual void _check_input_dim(const Tensor& input) override;
+
  public:
   using BatchNormImplBase<1, BatchNorm1dImpl>::BatchNormImplBase;
-
-  Tensor forward(const Tensor& input);
 };
 
 TORCH_MODULE(BatchNorm1d);
