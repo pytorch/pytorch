@@ -46,9 +46,9 @@ class Transformer(Module):
         if custom_encoder is not None:
             self.encoder = custom_encoder
         else:
-            encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation)
             encoder_norm = LayerNorm(d_model)
-            self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+            encoder_layer_args = (d_model, nhead, dim_feedforward, dropout, activation)
+            self.encoder = TransformerEncoder(encoder_layer_args, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
             self.decoder = custom_decoder
@@ -65,6 +65,7 @@ class Transformer(Module):
     def forward(self, src, tgt, src_mask=None, tgt_mask=None,
                 memory_mask=None, src_key_padding_mask=None,
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
+        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor])
         r"""Take in and process masked source/target sequences.
 
         Args:
@@ -151,14 +152,17 @@ class TransformerEncoder(Module):
         >>> src = torch.rand(10, 32, 512)
         >>> out = transformer_encoder(src)
     """
+    __constants__ = ['norm']
 
-    def __init__(self, encoder_layer, num_layers, norm=None):
+    def __init__(self, encoder_layer_args, num_layers, norm=None):
         super(TransformerEncoder, self).__init__()
-        self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
+        layers = [TransformerEncoderLayer(*encoder_layer_args) for i in range(num_layers)]
+        self.layers = torch.nn.ModuleList(layers)
         self.norm = norm
 
     def forward(self, src, mask=None, src_key_padding_mask=None):
+        # type: (Tensor, Optional[Tensor], Optional[Tensor])
         r"""Pass the input through the encoder layers in turn.
 
         Args:
@@ -171,11 +175,10 @@ class TransformerEncoder(Module):
         """
         output = src
 
-        for i in range(self.num_layers):
-            output = self.layers[i](output, src_mask=mask,
-                                    src_key_padding_mask=src_key_padding_mask)
+        for mod in self.layers:
+            output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
 
-        if self.norm:
+        if self.norm is not None:
             output = self.norm(output)
 
         return output
@@ -206,6 +209,7 @@ class TransformerDecoder(Module):
     def forward(self, tgt, memory, tgt_mask=None,
                 memory_mask=None, tgt_key_padding_mask=None,
                 memory_key_padding_mask=None):
+        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor])
         r"""Pass the inputs (and mask) through the decoder layer in turn.
 
         Args:
@@ -221,13 +225,13 @@ class TransformerDecoder(Module):
         """
         output = tgt
 
-        for i in range(self.num_layers):
-            output = self.layers[i](output, memory, tgt_mask=tgt_mask,
+        for mod in self.layers:
+            output = mod(output, memory, tgt_mask=tgt_mask,
                                     memory_mask=memory_mask,
                                     tgt_key_padding_mask=tgt_key_padding_mask,
                                     memory_key_padding_mask=memory_key_padding_mask)
 
-        if self.norm:
+        if self.norm is not None:
             output = self.norm(output)
 
         return output
@@ -266,9 +270,10 @@ class TransformerEncoderLayer(Module):
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
 
-        self.activation = _get_activation_fn(activation)
+        self.activation = _get_activation_mod(activation)
 
     def forward(self, src, src_mask=None, src_key_padding_mask=None):
+        # type: (Tensor, Optional[Tensor], Optional[Tensor])
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -283,10 +288,7 @@ class TransformerEncoderLayer(Module):
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
         src = self.norm1(src)
-        if hasattr(self, "activation"):
-            src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
-        else:  # for backward compatibility
-            src2 = self.linear2(self.dropout(F.relu(self.linear1(src))))
+        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
         src = src + self.dropout2(src2)
         src = self.norm2(src)
         return src
@@ -330,10 +332,12 @@ class TransformerDecoderLayer(Module):
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
 
-        self.activation = _get_activation_fn(activation)
+        self.activation = _get_activation_mod(activation)
+        self.activation = _get_activation_mod(activation)
 
     def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
+        # type: (Tensor, Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor])
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:
@@ -355,10 +359,10 @@ class TransformerDecoderLayer(Module):
                                    key_padding_mask=memory_key_padding_mask)[0]
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
-        if hasattr(self, "activation"):
-            tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
-        else:  # for backward compatibility
-            tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))
+        # if hasattr(self, "activation"):
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
+        # else:  # for backward compatibility
+        #     tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))
         tgt = tgt + self.dropout3(tgt2)
         tgt = self.norm3(tgt)
         return tgt
@@ -368,10 +372,10 @@ def _get_clones(module, N):
     return ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-def _get_activation_fn(activation):
+def _get_activation_mod(activation):
     if activation == "relu":
-        return F.relu
+        return torch.nn.ReLU()
     elif activation == "gelu":
-        return F.gelu
-    else:
-        raise RuntimeError("activation should be relu/gelu, not %s." % activation)
+        return torch.nn.GeLU()
+
+    raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
