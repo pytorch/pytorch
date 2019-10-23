@@ -333,15 +333,14 @@ static void conv_depthwise3d_cuda_template(
     int64_t sizeB, sizeD, isizeT, isizeH, isizeW;
     int64_t istrideD, istrideT, istrideH, istrideW;
     int64_t totalZ;
-  
-    const Tensor& input = input_.ndimension() == 5 ? input_ : input_.contiguous();
-  
+    
     sizeB  = input.size(0);
     sizeD = input.size(1);
     isizeT = input.size(2);
     isizeH = input.size(3);
     isizeW = input.size(4);
 
+    const Tensor& input = input_.contiguous();
     output.resize_({sizeB, sizeD, osizeT, osizeH, osizeW});
     // total num elements
     totalZ = sizeB * sizeD * osizeT;
@@ -365,25 +364,71 @@ static void conv_depthwise3d_cuda_template(
 
     bool bias_flag = (bias != NULL);
 
+    // settring up the CUDA dispatch
+    unsigned int n = output.numel() / sizeB;
+    dim3 bdim{std::min<unsigned int>(
+        at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
+
+    dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+    
+
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "conv_depthwise3d_cuda", [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
+
         scalar_t* input_data = input.data_ptr<scalar_t>();
         scalar_t* output_data = output.data_ptr<scalar_t>();
+        if (kernelSizeW == 3 && kernelSizeH == 3 && kernelSizeT == 3) {
+          depthwiseConv3DOutput<scalar_t, accscalar_t, unsigned int, 3><<<gdim, bdim, 0, stream>>>(
+            input_data, output_data,
+            weight,
+            bias,
+            bias_flag, // if true, bias is not null
+            totalZ, // totalElements
+            osizeD, // ouptut_channels
+            isizeW, isizeH, isizeT, // input
+            osizeW, osizeH, osizeT, // output
+            kernelSizeW, kernelSizeH, kernelSizeT,
+            strideSizeW, strideSizeH, strideSizeT,
+            padSizeW, padSizeH, padSizeT,
+            dilSizeW, dilSizeH, dilSizeT);
+        } else if (kernelSizeW == 1 && kernelSizeH == 1 && kernelSizeT == 1) {
+          depthwiseConv3DOutput<scalar_t, accscalar_t, unsigned int, 1><<<gdim, bdim, 0, stream>>>(
+            input_data, output_data,
+            weight,
+            bias,
+            bias_flag, // if true, bias is not null
+            totalZ, // totalElements
+            osizeD, // ouptut_channels
+            isizeW, isizeH, isizeT, // input
+            osizeW, osizeH, osizeT, // output
+            kernelSizeW, kernelSizeH, kernelSizeT,
+            strideSizeW, strideSizeH, strideSizeT,
+            padSizeW, padSizeH, padSizeT,
+            dilSizeW, dilSizeH, dilSizeT);
+        } else {
+          depthwiseConv3DOutput<scalar_t, accscalar_t, unsigned int, 0><<<gdim, bdim, 0, stream>>>(
+            input_data, output_data,
+            weight,
+            bias,
+            bias_flag, // if true, bias is not null
+            totalZ, // totalElements
+            osizeD, // ouptut_channels
+            isizeW, isizeH, isizeT, // input
+            osizeW, osizeH, osizeT, // output
+            kernelSizeW, kernelSizeH, kernelSizeT,
+            strideSizeW, strideSizeH, strideSizeT,
+            padSizeW, padSizeH, padSizeT,
+            dilSizeW, dilSizeH, dilSizeT);
+        }
+    }); // A10 dispAtch
 
-        depthwiseConv3DOutput(
-          input_data, output_data,
-          weight,
-          bias,
-          bias_flag, // if true, bias is not null
-          totalZ, // totalElements
-          osizeD, // ouptut_channels
-          isizeW, isizeH, isizeT, // input
-          osizeW, osizeH, osizeT, // output
-          kernelSizeW, kernelSizeH, kernelSizeT,
-          strideSizeW, strideSizeH, strideSizeT,
-          padSizeW, padSizeH, padSizeT,
-          dilSizeW, dilSizeH, dilSizeT});
-}
+    AT_CUDA_CHECK(cudaGetLastError());
+
+} // conv_depthwise3d_cuda_template
+
 
 void conv_depthwise3d_backward_input_cuda_template(
   Tensor& gradInput,
@@ -426,7 +471,6 @@ void conv_depthwise3d_backward_input_cuda_template(
   
   // TODO: not sure about these
   totalZ = sizeB * sizeD * isizeT;
-  
 
   // define kernel/stride/pad/dilation
   int64_t kernelSizeW = kernel_size[0];
@@ -445,12 +489,117 @@ void conv_depthwise3d_backward_input_cuda_template(
   int64_t dilSizeH = dilation_size[1];
   int64_t dilSizeT = dilation_size[2];
 
+  // upsample_3d_shape_check makes sure `nbatch != 0`
+  unsigned int n = grad_input.numel() / sizeB;
+  dim3 bdim{std::min<unsigned int>(
+      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
+  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     input.scalar_type(), "conv_depthwise3d_backward_input_cuda", [&] {
+      using accscalar_t = at::acc_type<scalar_t, true>;
+
       scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
       scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
-
-      depthwiseConv3dUpdateGradInput(
+      if (kernelSizeW == 3 && kernelSizeH == 3 && kernelSizeT == 3) 
+        if (strideSizeH == 1 && strideSizeW == 1 && strideSizeT == 1){
+          depthwiseConv3dUpdateGradInput<scalar_t, accscalar_t, unsigned int, 3, 1><<<gdim, bdim, 0, stream>>>(
+              gradOutput_data, gradInput_data,
+              weight,
+              totalZ, //total elements
+              sizeD,  // input channels
+              osizeD, // ouptut channels 
+              isizeW, isizeH, isizeT, // input
+              osizeW, osizeH, osizeT, // output
+              kernelSizeW, kernelSizeH, kernelSizeT,
+              strideSizeW, strideSizeH, strideSizeT,
+              padSizeW, padSizeH, padSizeT,
+              dilSizeW, dilSizeH, dilSizeT);
+        } else if (strideSizeH == 2 && strideSizeW == 2 && strideSizeT == 2){
+          depthwiseConv3dUpdateGradInput<scalar_t, accscalar_t, unsigned int, 3, 2><<<gdim, bdim, 0, stream>>>(
+            gradOutput_data, gradInput_data,
+            weight,
+            totalZ, //total elements
+            sizeD,  // input channels
+            osizeD, // ouptut channels 
+            isizeW, isizeH, isizeT, // input
+            osizeW, osizeH, osizeT, // output
+            kernelSizeW, kernelSizeH, kernelSizeT,
+            strideSizeW, strideSizeH, strideSizeT,
+            padSizeW, padSizeH, padSizeT,
+            dilSizeW, dilSizeH, dilSizeT);
+          } else {
+            depthwiseConv3dUpdateGradInput<scalar_t, accscalar_t, unsigned int, 3, 0><<<gdim, bdim, 0, stream>>>(
+              gradOutput_data, gradInput_data,
+              weight,
+              totalZ, //total elements
+              sizeD,  // input channels
+              osizeD, // ouptut channels 
+              isizeW, isizeH, isizeT, // input
+              osizeW, osizeH, osizeT, // output
+              kernelSizeW, kernelSizeH, kernelSizeT,
+              strideSizeW, strideSizeH, strideSizeT,
+              padSizeW, padSizeH, padSizeT,
+              dilSizeW, dilSizeH, dilSizeT);          
+          }
+      else if (kernelSizeW == 1 && kernelSizeH == 1 && kernelSizeT == 1)
+        if (strideSizeH == 1 && strideSizeW == 1 && strideSizeT == 1){
+          depthwiseConv3dUpdateGradInput<scalar_t, accscalar_t, unsigned int, 1, 1><<<gdim, bdim, 0, stream>>>(
+              gradOutput_data, gradInput_data,
+              weight,
+              totalZ, //total elements
+              sizeD,  // input channels
+              osizeD, // ouptut channels 
+              isizeW, isizeH, isizeT, // input
+              osizeW, osizeH, osizeT, // output
+              kernelSizeW, kernelSizeH, kernelSizeT,
+              strideSizeW, strideSizeH, strideSizeT,
+              padSizeW, padSizeH, padSizeT,
+              dilSizeW, dilSizeH, dilSizeT);
+        } else if (strideSizeH == 2 && strideSizeW == 2 && strideSizeT == 2){
+          depthwiseConv3dUpdateGradInput<scalar_t, accscalar_t, unsigned int, 1, 2><<<gdim, bdim, 0, stream>>>(
+            gradOutput_data, gradInput_data,
+            weight,
+            totalZ, //total elements
+            sizeD,  // input channels
+            osizeD, // ouptut channels 
+            isizeW, isizeH, isizeT, // input
+            osizeW, osizeH, osizeT, // output
+            kernelSizeW, kernelSizeH, kernelSizeT,
+            strideSizeW, strideSizeH, strideSizeT,
+            padSizeW, padSizeH, padSizeT,
+            dilSizeW, dilSizeH, dilSizeT);
+        } else {
+          depthwiseConv3dUpdateGradInput<scalar_t, accscalar_t, unsigned int, 1, 0><<<gdim, bdim, 0, stream>>>(
+            gradOutput_data, gradInput_data,
+            weight,
+            totalZ, //total elements
+            sizeD,  // input channels
+            osizeD, // ouptut channels 
+            isizeW, isizeH, isizeT, // input
+            osizeW, osizeH, osizeT, // output
+            kernelSizeW, kernelSizeH, kernelSizeT,
+            strideSizeW, strideSizeH, strideSizeT,
+            padSizeW, padSizeH, padSizeT,
+            dilSizeW, dilSizeH, dilSizeT);          
+        }
+      else
+      if (strideSizeH == 1 && strideSizeW == 1 && strideSizeT == 1){
+        depthwiseConv3dUpdateGradInput<scalar_t, accscalar_t, unsigned int, 0, 1><<<gdim, bdim, 0, stream>>>(
+            gradOutput_data, gradInput_data,
+            weight,
+            totalZ, //total elements
+            sizeD,  // input channels
+            osizeD, // ouptut channels 
+            isizeW, isizeH, isizeT, // input
+            osizeW, osizeH, osizeT, // output
+            kernelSizeW, kernelSizeH, kernelSizeT,
+            strideSizeW, strideSizeH, strideSizeT,
+            padSizeW, padSizeH, padSizeT,
+            dilSizeW, dilSizeH, dilSizeT);
+      } else if (strideSizeH == 2 && strideSizeW == 2 && strideSizeT == 2){
+        depthwiseConv3dUpdateGradInput<scalar_t, accscalar_t, unsigned int, 0, 2><<<gdim, bdim, 0, stream>>>(
           gradOutput_data, gradInput_data,
           weight,
           totalZ, //total elements
@@ -461,10 +610,26 @@ void conv_depthwise3d_backward_input_cuda_template(
           kernelSizeW, kernelSizeH, kernelSizeT,
           strideSizeW, strideSizeH, strideSizeT,
           padSizeW, padSizeH, padSizeT,
-          dilSizeW, dilSizeH, dilSizeT});
-    });
+          dilSizeW, dilSizeH, dilSizeT);
+      } else {
+        depthwiseConv3dUpdateGradInput<scalar_t, accscalar_t, unsigned int, 0, 0><<<gdim, bdim, 0, stream>>>(
+          gradOutput_data, gradInput_data,
+          weight,
+          totalZ, //total elements
+          sizeD,  // input channels
+          osizeD, // ouptut channels 
+          isizeW, isizeH, isizeT, // input
+          osizeW, osizeH, osizeT, // output
+          kernelSizeW, kernelSizeH, kernelSizeT,
+          strideSizeW, strideSizeH, strideSizeT,
+          padSizeW, padSizeH, padSizeT,
+          dilSizeW, dilSizeH, dilSizeT);          
+      }
+    }); // AT DIspatch
 
+  AT_CUDA_CHECK(cudaGetLastError());
 } // conv_depthwise3d_backward_input_cuda_template
+
 
 void conv_depthwise3d_backward_weight_cuda_template(
   Tensor& gradWeight,
@@ -484,8 +649,6 @@ void conv_depthwise3d_backward_weight_cuda_template(
       "conv_depthwise3d_backward_weight_cuda_template",
       {grad_weight_arg, grad_output_arg, input_arg});
   
-  const Tensor gradOutput = gradOutput_.contiguous();
-
   int64_t sizeB, sizeD, isizeT, isizeH, isizeW;
   int64_t osizeD, osizeT, osizeH, osizeW;
   int64_t totalZ;
@@ -500,44 +663,62 @@ void conv_depthwise3d_backward_weight_cuda_template(
   osizeT = gradOutput.size(2);
   osizeH = gradOutput.size(3);
   osizeW = gradOutput.size(4);
+
+  int kernelC = osizeD / sizeD;
   
   // TODO: not sure about these
   totalZ = sizeB * sizeD * isizeT;
 
-    // define kernel/stride/pad/dilation
-    int64_t kernelSizeW = kernel_size[0];
-    int64_t kernelSizeH = kernel_size[1];
-    int64_t kernelSizeT = kernel_size[2];
+  const Tensor gradOutput = gradOutput_.contiguous();
+
+
+  // define kernel/stride/pad/dilation
+  int64_t kernelSizeW = kernel_size[0];
+  int64_t kernelSizeH = kernel_size[1];
+  int64_t kernelSizeT = kernel_size[2];
+
+  int64_t strideSizeW = stride_size[0];
+  int64_t strideSizeH = stride_size[1];
+  int64_t strideSizeT = stride_size[2];
+
+  int64_t padSizeW = pad_size[0];
+  int64_t padSizeH = pad_size[1];
+  int64_t padSizeT = pad_size[2];
+
+  int64_t dilSizeW = dilation_size[0];
+  int64_t dilSizeH = dilation_size[1];
+  int64_t dilSizeT = dilation_size[2];
+
+    // settring up the CUDA dispatch
+    unsigned int n = osizeD * kernelSizeH * kernelSizeT * kernelSizeD;
+    dim3 bdim{std::min<unsigned int>(
+        at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
+
+    dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   
-    int64_t strideSizeW = stride_size[0];
-    int64_t strideSizeH = stride_size[1];
-    int64_t strideSizeT = stride_size[2];
-  
-    int64_t padSizeW = pad_size[0];
-    int64_t padSizeH = pad_size[1];
-    int64_t padSizeT = pad_size[2];
-  
-    int64_t dilSizeW = dilation_size[0];
-    int64_t dilSizeH = dilation_size[1];
-    int64_t dilSizeT = dilation_size[2];
-  
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-      input.scalar_type(), "conv_depthwise3d_backward_weight_cuda", [&] {
-        scalar_t* gradWeight_data = gradWeight.data_ptr<scalar_t>();
-        scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
-  
-        depthwiseConv3dUpdateGradWeight(
-            gradOutput_data, input, gradWeight_data,
-            sizeB,  // batch size
-            sizeD,  // input channels
-            osizeD, // ouptut channels (should be kernelchannels? where is that)
-            isizeW, isizeH, isizeT, // input
-            osizeW, osizeH, osizeT, // output
-            kernelSizeW, kernelSizeH, kernelSizeT,
-            strideSizeW, strideSizeH, strideSizeT,
-            padSizeW, padSizeH, padSizeT,
-            dilSizeW, dilSizeH, dilSizeT});
-      });
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    input.scalar_type(), "conv_depthwise3d_backward_weight_cuda", [&] {
+      using accscalar_t = at::acc_type<scalar_t, true>;
+      scalar_t* gradWeight_data = gradWeight.data_ptr<scalar_t>();
+      scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
+
+      int smem = block.x * sizeof(accscalar_t);
+
+      depthwiseConv3dUpdateGradWeight<scalar_t, accscalar_t, unsigned int><<<grid, block, smem, THCState_getCurrentStream(state)>>>(
+          gradOutput_data, input, gradWeight_data,
+          sizeB,  // batch size
+          sizeD,  // input channels
+          kernelC, // ouptut channels (should be kernelchannels? where is that)
+          isizeW, isizeH, isizeT, // input
+          osizeW, osizeH, osizeT, // output
+          kernelSizeW, kernelSizeH, kernelSizeT,
+          strideSizeW, strideSizeH, strideSizeT,
+          padSizeW, padSizeH, padSizeT,
+          dilSizeW, dilSizeH, dilSizeT);
+    }); // AT Dispatch
+    
+  AT_CUDA_CHECK(cudaGetLastError());
 
 } //conv_depthwise3d_backward_weight_cuda_template
 
