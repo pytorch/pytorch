@@ -5257,7 +5257,7 @@ Returns:
 
         - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`. The eigenvalues in ascending order.
         - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
-          If ``eigenvectors=False``, it's a tensor filled with zeros.
+          If ``eigenvectors=False``, it's an empty tensor.
           Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
 Examples::
