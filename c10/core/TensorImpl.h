@@ -38,6 +38,10 @@ namespace at {
 class Tensor;
 }
 
+namespace torch { namespace autograd {
+struct AutogradMeta;
+}} // namespace torch::autograd
+
 namespace c10 {
 class Scalar;
 struct Storage;
@@ -130,14 +134,6 @@ struct C10_API PlacementDeleteContext {
 };
 
 struct TensorImpl;
-
-struct C10_API AutogradMetaInterface {
-  virtual void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) = 0;
-  virtual bool requires_grad() const = 0;
-  virtual at::Tensor& grad() = 0;
-  virtual const at::Tensor& grad() const = 0;
-  virtual ~AutogradMetaInterface();
-};
 
 struct C10_API NamedTensorMetaInterface {
   virtual ~NamedTensorMetaInterface() {};
@@ -305,6 +301,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     : TensorImpl(std::move(storage), TensorTypeSet(type_id)) {}
   TensorImpl(TensorTypeId type_id, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
     : TensorImpl(TensorTypeSet(type_id), data_type, device_opt) {}
+
+  // Default destructor, but defined out-of-line because we have some unique
+  // pointers to incomplete types
+  ~TensorImpl();
 
  private:
   // This constructor is private, because the data_type is redundant with
@@ -525,10 +525,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  void set_requires_grad(bool requires_grad) {
-    TORCH_INTERNAL_ASSERT(autograd_meta(), "set_requires_grad is not implemented for Tensor");
-    autograd_meta()->set_requires_grad(requires_grad, this);
-  }
+  void set_requires_grad(bool requires_grad);
 
   /**
    * True if a tensor requires gradient.  Tensors which require gradient
@@ -540,10 +537,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  bool requires_grad() const {
-    TORCH_INTERNAL_ASSERT(autograd_meta(), "requires_grad is not implemented for Tensor");
-    return autograd_meta()->requires_grad();
-  }
+  bool requires_grad() const;
 
   /**
    * Return a mutable reference to the gradient.  This is conventionally
@@ -826,29 +820,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Set the pointer to autograd metadata.
    */
-  void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta) {
-    autograd_meta_ = std::move(autograd_meta);
-    if (autograd_meta_) {
-      type_set_ = type_set_.add(TensorTypeId::VariableTensorId);
-    } else {
-      type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
-    }
-  }
+  void set_autograd_meta(std::unique_ptr<torch::autograd::AutogradMeta> autograd_meta);
 
   /**
    * Return the pointer to autograd metadata.
    */
-  c10::AutogradMetaInterface* autograd_meta() const {
+  torch::autograd::AutogradMeta* autograd_meta() const {
     return autograd_meta_.get();
   }
 
   /**
    * Detach the autograd metadata unique_ptr from this tensor, and return it.
    */
-  std::unique_ptr<c10::AutogradMetaInterface> detach_autograd_meta() {
-    type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
-    return std::move(autograd_meta_);
-  }
+  // NB: you might think that this would be OK to define inline, as detaching
+  // doesn't ever require destructing the unique pointer, but moving a unique
+  // pointer involves a sizeof() test so, no dice!
+  std::unique_ptr<torch::autograd::AutogradMeta> detach_autograd_meta();
 
   /**
    * Set the pointer to named tensor metadata.
@@ -1580,7 +1567,13 @@ private:
   // at a time).
   // This is private because we must maintain dispatcher invariants on it
   // in type_set_.
-  std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
+  //
+  // NB: We CANNOT default this to nullptr, as that will result in an invocation
+  // of std::default_delete<AutogradMeta> which won't work as AutogradMeta
+  // is incomplete at this point.  But the defaulting to nullptr is also
+  // pointless because unique_ptr has a default constructor which will do the
+  // right thing.
+  std::unique_ptr<torch::autograd::AutogradMeta> autograd_meta_;
 
 protected:
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;

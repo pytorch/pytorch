@@ -5,6 +5,8 @@
 #include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/util/Optional.h>
 
+#include <torch/csrc/autograd/variable.h>
+
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
@@ -222,6 +224,33 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
           device};
 }
 
-AutogradMetaInterface::~AutogradMetaInterface() {}
+// These methods all live here because they cannot be implemented when
+// AutogradMeta is incomplete
+
+TensorImpl::~TensorImpl() = default;
+
+void TensorImpl::set_autograd_meta(std::unique_ptr<torch::autograd::AutogradMeta> autograd_meta) {
+  autograd_meta_ = std::move(autograd_meta);
+  if (autograd_meta_) {
+    type_set_ = type_set_.add(TensorTypeId::VariableTensorId);
+  } else {
+    type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
+  }
+}
+
+void TensorImpl::set_requires_grad(bool requires_grad) {
+  TORCH_INTERNAL_ASSERT(autograd_meta(), "set_requires_grad is not implemented for Tensor");
+  autograd_meta()->set_requires_grad(requires_grad, this);
+}
+
+bool TensorImpl::requires_grad() const {
+  TORCH_INTERNAL_ASSERT(autograd_meta(), "requires_grad is not implemented for Tensor");
+  return autograd_meta()->requires_grad();
+}
+
+std::unique_ptr<torch::autograd::AutogradMeta> TensorImpl::detach_autograd_meta() {
+  type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
+  return std::move(autograd_meta_);
+}
 
 } // namespace c10

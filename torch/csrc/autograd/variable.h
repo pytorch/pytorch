@@ -87,7 +87,7 @@ using Variable = at::Tensor;
 /// Each `Variable` has one unique `AutogradMeta` struct, which stores autograd
 /// metadata fields that are necessary for tracking the Variable's autograd history.
 
-struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
+struct TORCH_API AutogradMeta {
   std::string name_;
 
   Variable grad_;
@@ -116,23 +116,24 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
-  void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override {
+  void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) {
     TORCH_CHECK(
       !requires_grad || at::isFloatingType(at::typeMetaToScalarType(self_impl->dtype())),
       "Only Tensors of floating point dtype can require gradients");
     requires_grad_ = requires_grad;
   }
 
-  bool requires_grad() const override {
+  // TODO: devirtualize this guy
+  virtual bool requires_grad() const {
     return requires_grad_ || grad_fn_;
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
-  Variable& grad() override {
+  Variable& grad() {
     return grad_;
   }
 
-  const Variable& grad() const override {
+  const Variable& grad() const {
     return grad_;
   }
 
