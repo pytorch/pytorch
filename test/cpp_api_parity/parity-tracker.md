@@ -77,7 +77,7 @@ torch.nn.SyncBatchNorm|No|No
 torch.nn.InstanceNorm1d|No|No
 torch.nn.InstanceNorm2d|No|No
 torch.nn.InstanceNorm3d|No|No
-torch.nn.LayerNorm|No|No
+torch.nn.LayerNorm|Yes|No
 torch.nn.LocalResponseNorm|No|No
 torch.nn.RNN|No|No
 torch.nn.LSTM|No|No
