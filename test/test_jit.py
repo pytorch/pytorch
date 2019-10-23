@@ -140,50 +140,7 @@ def doAutodiffCheck(testname):
 func_call = torch._C.ScriptFunction.__call__
 meth_call = torch._C.ScriptMethod.__call__
 
-def get_current_profiling_mode():
-    old_exec = torch._C._jit_set_profiling_executor(True)
-    old_prof = torch._C._jit_set_profiling_mode(True)
-    torch._C._jit_set_profiling_executor(old_exec)
-    torch._C._jit_set_profiling_mode(old_prof)
-    if old_exec:
-        if old_prof:
-            return ProfilingMode.FULL
-        else:
-            return ProfilingMode.EXECUTOR
-    else:
-        return ProfilingMode.OFF
-
-"""
 def prof_callable(callable, *args, **kwargs):
-    #print("prof_func_call")
-    profiling_mode = kwargs['profile'] if 'profile' in kwargs else get_current_profiling_mode()
-    check_script = 'check_script' in kwargs
-
-    # delete both profile and check_script if present
-    # so they aren't passed to the actual calls
-    if 'profile' in kwargs:
-        del kwargs['profile']
-    if 'check_script' in kwargs:
-        del kwargs['check_script']
-    if profiling_mode == ProfilingMode.FULL and not check_script:
-        with enable_profiling_mode(ProfilingMode.FULL):
-            # print("prof_func_call")
-            # profile
-            # print ("args = ", args)
-
-            # sys_stdout = sys.stdout
-            # prof_sio = StringIO()
-            # sys.stdout = prof_sio
-            callable(*args, **kwargs)
-            #sys.stdout = sys_stdout
-            # optimize
-            # print ("args2 = ", args)
-            return callable(*args, **kwargs)
-"""
-
-def prof_callable(callable, *args, **kwargs):
-    
-    #print ("running prof_callable")
     if 'profile_and_replay' in kwargs:
         with enable_profiling_mode(ProfilingMode.FULL):
             #print ("removing profile")
@@ -193,58 +150,14 @@ def prof_callable(callable, *args, **kwargs):
 
     return callable(*args, **kwargs)
 
-
 def prof_func_call(*args, **kwargs):
     return prof_callable(func_call, *args, **kwargs)
 
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
-# enable profiling graph executor for all tests in this file
+# enable profiling graph executor for all tests in this file by default
 torch._C._jit_set_profiling_executor(True)
-
-# orig_trace = torch.jit.trace
-
-# def new_trace(*arg, **kwargs):
-#     print ("running new trace")
-#     with enable_profiling_mode(ProfilingMode.EXECUTOR):
-#         return orig_trace(*arg, **kwargs)
-
-# torch.jit['trace'] = new_trace
-
-# def prof_func_call(*args, **kwargs):
-#     #print("prof_func_call")
-#     profiling_mode = kwargs['profile'] if 'profile' in kwargs else ProfilingMode.EXECUTOR
-#     if profiling_mode == ProfilingMode.FULL:
-#         with enable_profiling_mode(ProfilingMode.FULL):
-#             # print("prof_func_call")
-#             del kwargs['profile']
-#             # profile
-#             # print ("args = ", args)
-#             func_call(*args, **kwargs)  
-#             # optimize
-#             # print ("args2 = ", args)
-#             return func_call(*args, **kwargs)
-
-#     with enable_profiling_mode(profiling_mode):
-#         # print("enabling profiling executor")
-#         return func_call(*args, **kwargs)
-
-# def prof_meth_call(*args, **kwargs):
-#     #print("prof_meth_call")
-#     profiling_mode = kwargs['profile'] if 'profile' in kwargs else ProfilingMode.EXECUTOR
-#     if profiling_mode == ProfilingMode.FULL:
-#         with enable_profiling_mode(ProfilingMode.FULL):
-#             # print("prof_method_call")
-#             del kwargs['profile']
-#             #profile
-#             meth_call(*args, **kwargs)  
-#             #optimize
-#             return meth_call(*args, **kwargs)
-
-#     with enable_profiling_mode(profiling_mode):
-#         # print("enabling profiling executor")
-#         return meth_call(*args, **kwargs)
 
 torch._C.ScriptFunction.__call__ = prof_func_call
 torch._C.ScriptMethod.__call__ = prof_meth_call
@@ -656,8 +569,6 @@ class TestJit(JitTestCase):
             # the unprofiled graph should return the correct result
             self.assertEqual(func(input, profile_and_replay = True), result)
             gre = func.graph_for(input)
-
-            
             FileCheck().check("prim::Constant").check_next("prim::BailoutTemplate").run(gre)
 
         def test_dim():
@@ -2445,7 +2356,6 @@ graph(%Ra, %Rb):
         self.assertExportImport(g, (x,))
 
     def run_ge_tests(self, optimize, use_cuda):
-        print("run_ge_tests")
         with torch.jit.optimized_execution(optimize):
             def rand(*args):
                 t = torch.rand(*args).float()
@@ -2459,15 +2369,13 @@ graph(%Ra, %Rb):
                b, a), [rand(1), rand(1)])
 
             def foo(a):
-                t = a + 3
+                t = a * a
                 return t * t, 4 * t
-
             self.checkTrace(foo, [rand(1)])
             # unused input
             self.checkTrace(
                 lambda a, b: a * a, [rand(1), rand(1)], allow_unused=True)
             # test outputs that do not get used in grad
-
             self.checkTrace(foo, [rand(1)], drop=1)
             # test autograd fallback
             self.checkTrace(lambda a, b: a * b /
@@ -5561,11 +5469,8 @@ a")
         loop_outputs = list(loop_body.outputs())
 
         self.assertTrue(loop_inputs[1].requires_grad())
-
         bailouts_in_outer_block = graph.findAllNodes("prim::BailOut", False)
         self.assertFalse(bailouts_in_outer_block[1].output().requires_grad())
-        #self.assertFalse(loop_outputs[1].requires_grad())
-        #self.assertTrue(loop.output().requires_grad())
 
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
@@ -6960,9 +6865,6 @@ a")
                 scope = {}
                 exec(code, globals(), scope)
                 fn = self.checkScript(code, ())
-                #cu = torch.jit.CompilationUnit(code)
-                #torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
-                #FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
                 FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(fn.graph_for())
 
         @torch.jit.script
@@ -10974,8 +10876,8 @@ a")
         fn = self.checkScript(test_rand, ())
         out = fn()
         self.assertEqual(out.dtype, torch.double)
-        FileCheck().check("Double(3, 4)").check_not("Float(3, 4)").run(fn.graph_for())
         # Testing shape analysis correctly setting type
+        FileCheck().check("Double(3, 4)").check_not("Float(3, 4)").run(fn.graph_for())
         
         @torch.jit.script
         def randint():
@@ -13853,7 +13755,6 @@ a")
             return word_ids
         self.checkScript(fn, ())
 
-    @unittest.skip("@#$")
     def test_mutable_dce_wildcards(self):
         def fn():
             x = torch.ones(2, 3)
@@ -16493,8 +16394,6 @@ def create_traced_fn(self, fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
-        # print("after trace")
-        # print(str(traced.graph_for(*inputs_tensors)))
         self.assertExportImport(traced.graph, inputs_tensors)
         output = traced(*inputs_tensors)
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)
@@ -16566,19 +16465,12 @@ def create_script_fn(self, method_name, func_type, output_process_fn):
     def script_fn(*args, **kwargs):
         formals, tensors, actuals = get_script_args(args)
         call = get_call(method_name, func_type, actuals, kwargs)
-
         script = script_template.format(', '.join(formals), call)
 
-        print ("create_script_fn start")
-        # print(str(script))
         CU = torch.jit.CompilationUnit(script)
-        print ("before assertExportImport")
         self.assertExportImport(CU.the_method.graph, tensors)
-        print ("after assertExportImport")
         output = output_process_fn(CU.the_method(*tensors))
-        print ("after output_process_fn")
         script_fn.last_graph = CU.the_method.graph_for(*tensors)
-        print ("create_script_fn end")
         return output
     return script_fn
 
@@ -16620,76 +16512,31 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
     nograd_inputs, nograd_tensors = clone_inputs(False)
     recording_inputs, recording_tensors = clone_inputs(True)
 
-    # the caller of check_against_reference will be doing fusion/autodiff checks
-    # against the last_optimized_graph which is run against tensors with requires_grad=True
-    # so we profile and optimize this configuration first
-    # no_grad configuration will go through bailout path which the tests don't check
-    # anyways
-
-
-    #print ("enable profiling" , no_grad)
-    # with enable_profiling_mode(ProfilingMode.FULL):
-    #     # profile
-    #     recording_inputs_profiling, recording_tensors_profiling = clone_inputs(not no_grad)
-    #     print("profiling")
-    #     self.runAndSaveRNG(func, recording_inputs_profiling, kwargs)
-    #     #print(str(func.last_graph))
-    #     recording_inputs_optimized, recording_tensors_optimized = clone_inputs(not no_grad)
-    #     self.runAndSaveRNG(func, recording_inputs_optimized, kwargs)
-    #     print("optimize")
-    #     #print(str(func.last_graph))
-
-
-    print ("no grad", file=sys.stderr)
     # test no gradients case
     outputs = self.runAndSaveRNG(reference_func, nograd_inputs, kwargs)
     with enable_profiling_mode(ProfilingMode.FULL):
         outputs_test = self.runAndSaveRNG(func, nograd_inputs, kwargs)
-    #print("no grad graph:", file=sys.stderr)
-    #print(str(func.last_graph))
     self.assertEqual(outputs, outputs_test)
 
     if check_types:
         check_output_types(self, func, outputs_test, nograd_inputs, kwargs)
 
     if no_grad:
-        print("skipping", file=sys.stderr)
         # skip grad tests
         return
 
-    print ("grad", file=sys.stderr)
     with enable_profiling_mode(ProfilingMode.FULL):
-    # test single grad case
+        # test single grad case
         outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
         grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                     allow_unused=allow_unused)
 
         outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
-        print ("ran func for grad")
         grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
                                         allow_unused=allow_unused)
         self.assertEqual(outputs, outputs_test)
         self.assertEqual(grads, grads_test)
 
-        # print("running optimized grad start")
-        # recording_inputs_opt, recording_tensors_opt = clone_inputs(True)
-        # outputs2 = self.runAndSaveRNG(reference_func, recording_inputs_opt, kwargs)
-        # grads2 = torch.autograd.grad(allSum(outputs), recording_tensors_opt,
-        #                             allow_unused=allow_unused)
-        # grads2_2 = torch.autograd.grad(allSum(outputs), recording_tensors_opt,
-        #                             allow_unused=allow_unused)
-
-        # outputs_test2 = self.runAndSaveRNG(func, recording_inputs_opt, kwargs)
-        # grads_test2 = torch.autograd.grad(allSum(outputs_test), recording_tensors_opt,
-        #                                 allow_unused=allow_unused)
-        # grads_test2_2 = torch.autograd.grad(allSum(outputs_test), recording_tensors_opt,
-        #                                 allow_unused=allow_unused)
-        # self.assertEqual(outputs2, outputs_test2)
-        # self.assertEqual(grads2, grads_test2)
-        # self.assertEqual(grads2_2, grads_test2_2)
-        # print("running optimized grad end")
-
-        print ("grad grad", file=sys.stderr)
         # test the grad grad case
         if self._testMethodName in nn_functional_single_grad:
             return
@@ -16699,25 +16546,15 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                     allow_unused=allow_unused)
 
-        
         l2 = (allSum(grads) * l1)
         grads2 = torch.autograd.grad(l2, recording_tensors, allow_unused=allow_unused)
-
-        # jit
-        print ("run jitted func")
-
         recording_inputs, recording_tensors = clone_inputs(True)
-
         outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
         l1_test = allSum(outputs_test)
         grads_test = torch.autograd.grad(
             l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
 
-        # print ("asserting", file=sys.stderr)
-        # self.assertEqual(grads[0], grads_test[0])
-        # print ("after asserting")
         l2_test = (allSum(grads_test) * l1_test)
-        print ("computing grad grad")
         grads2_test = torch.autograd.grad(l2_test, recording_tensors, allow_unused=allow_unused)
 
         self.assertEqual(outputs, outputs_test)
@@ -16725,9 +16562,6 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         for g2, g2_test in zip(grads2, grads2_test):
             if g2 is None and g2_test is None:
                 continue
-            
-            #print("g2 = ", str(g2), file=sys.stderr)
-            #print("g2_test = ", str(g2_test), file=sys.stderr)
             self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
 
 
@@ -17106,8 +16940,8 @@ nn_functional_tests = [
     ('max_unpool1d', torch.tensor([[[2., 4]]]), (torch.tensor([[[1, 3]]]), 2, 2, 0)),
     ('max_unpool2d', torch.tensor([[[[2., 4]]]]), (torch.tensor([[[[1, 3]]]]), 2, 2, 0)),
     ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
-    #('lp_pool1d', (S, S, S), (2., 3, 2,)),
-    #('lp_pool2d', (S, S, S, S), (2., 3, 2,)),
+    ('lp_pool1d', (S, S, S), (2., 3, 2,)),
+    ('lp_pool2d', (S, S, S, S), (2., 3, 2,)),
     ('adaptive_max_pool1d', (S, S, S), (5,)),
     ('adaptive_max_pool2d', (S, S, S, S), ([5, 7],)),
     ('adaptive_max_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
@@ -17155,8 +16989,8 @@ nn_functional_tests = [
     ('bilinear', (S, S, S), ((S, S, M), torch.zeros(M, S, M),),),
     ('embedding', torch.tensor([[1, 2, 4, 5], [4, 3, 2, 5]]), (torch.rand(6, 3), ), '', (True,)),
     ('embedding_bag', torch.tensor([1, 2, 4, 2]), (torch.rand(5, 3), torch.tensor([0, 4]),),),
-    # ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
-    #    '', (False, 'aten::_batch_norm_impl_index')),
+    ('batch_norm', (S, S), (non_differentiable(torch.randn(S)), non_differentiable(torch.ones(S)), ),
+        '', (False, 'aten::_batch_norm_impl_index')),
     ('instance_norm', (S, S, S), (non_differentiable(torch.zeros(S)), non_differentiable(torch.ones(S))),),
     ('layer_norm', (S, S, S, S), ([5],), '',
      (False, ['aten::contiguous', 'aten::_batch_norm_impl_index'])),
@@ -17197,9 +17031,9 @@ nn_functional_tests = [
     ('unfold', (S, S, S, S), ([2, 3]),),
     ('fold', (1, 3 * 2 * 2, 12), ([4, 5], [2, 2]),),
     ('grid_sample', (S, S, S, S), (non_differentiable(torch.rand(S, S, S, 2)),),),
-    # ('gumbel_softmax', (S, S), (2.,), '', (True, ['aten::softmax', 'aten::add', 'aten::div'], ['aten::neg'])),
-    # ('gumbel_softmax', (S, S), (2., True,), 'hard', (True, ['aten::softmax', 'aten::add', 'aten::div'], ['aten::neg'])),
-    # ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
+    ('gumbel_softmax', (S, S), (2.,), '', (True, ['aten::softmax', 'aten::add', 'aten::div'], ['aten::neg'])),
+    ('gumbel_softmax', (S, S), (2., True,), 'hard', (True, ['aten::softmax', 'aten::add', 'aten::div'], ['aten::neg'])),
+    ('multilabel_margin_loss', torch.tensor([[0.2, -0.2, 0.07]]), (torch.tensor([[0, 0, 1]]),),),
     ('multi_margin_loss', (S, S), (non_differentiable(torch.randint(S, (S, ), dtype=torch.int64)),
                                    1, 1., non_differentiable(torch.randn(S))),),
     ('binary_cross_entropy', torch.randn(3, 2).sigmoid(), (non_differentiable(torch.rand(3, 2)),
@@ -17356,16 +17190,6 @@ def add_autograd_test(
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
 
-                            #print(str(traced_fn.last_graph))
-
-
-                            # def get_optimized_graph(script_module):   
-                            #     ge_state = script_module.get_debug_state()
-                            #     fwd_plan = get_execution_plan(ge_state)
-                            #     return fwd_plan.graph()
-
-                            # print (get_optimized_graph(traced_fn))
-
                             print(traced_fn.last_graph)
                             if (doAutodiffCheck(test_name)):
                                 self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
@@ -17457,8 +17281,6 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
 
         f_args_variable = (self_variable,) + args_variable
         f_args_tensor = (self_tensor,) + args_tensor
-
-        #print("kwargs = ", str(kwargs_variable))
         should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
         
         if test_name not in EXCLUDE_SCRIPT:
@@ -17466,13 +17288,9 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                 # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
                 #      so that we don't regress on autodiff support.
                 with disable_autodiff_subgraph_inlining():
-                    print ("before script_fn")
                     script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn)
-                    print ("after script_fn")
                     check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
                     # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
-                    print(str(script_fn.last_graph))
-
                     if (doAutodiffCheck(test_name)):
                         self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
@@ -17554,13 +17372,11 @@ def add_nn_module_test(*args, **kwargs):
 
             # module cannot be imported / exported
             if module_name in EXCLUDE_MODULE_EXPORT_IMPORT:
-                print ("emit hooks disabled!")
                 with torch.jit._disable_emit_hooks():
                     module = make_module(script)
                     create_script_module.last_graph = module.graph
                     mod = module(*args)
             else:
-                print ("running emit hooks")
                 module = make_module(script)
                 self.assertExportImportModule(module, tensors)
                 create_script_module.last_graph = module.graph

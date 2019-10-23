@@ -139,10 +139,7 @@ class TestFuser(JitTestCase):
             fusion = torch.jit.trace(fn, local_fusion_inputs, check_trace=False)
             outputs = fn(*local_inputs)
             fusion_outputs = fusion(*local_fusion_inputs)
-            fusion_outputs = fusion(*local_fusion_inputs)
             outputs_half = [t.half() for t in outputs]
-            print("fusion_outputs = ", fusion_outputs[0])
-            print("outputs_half = ", outputs_half[0])
             self.assertEqual(outputs_half, fusion_outputs)
 
             # Verifies gradients
@@ -448,7 +445,7 @@ class TestFuser(JitTestCase):
 
     @staticmethod
     def fn_test_exp(x, y):
-        return (x + float(.5) * y).exp()
+        return (x + .5 * y).exp()
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_exp_cuda(self):
