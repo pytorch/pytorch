@@ -798,7 +798,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
    */
   bool is_variable() const {
-    return autograd_meta_ != nullptr && !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
+    return type_set_.has(TensorTypeId::VariableTensorId) &&
+           !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
   }
 
   /**
@@ -1566,7 +1567,7 @@ private:
   // This pointer always has unique ownership (meaning only one TensorImpl can own it
   // at a time).
   // This is private because we must maintain dispatcher invariants on it
-  // in type_set_.
+  // in type_set_, namely, that autograd_meta_ != nullptr iff type_set_.has(VariableTensorId).
   //
   // NB: We CANNOT default this to nullptr, as that will result in an invocation
   // of std::default_delete<AutogradMeta> which won't work as AutogradMeta
