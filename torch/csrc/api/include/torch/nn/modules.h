@@ -20,3 +20,4 @@
 #include <torch/nn/modules/rnn.h>
 #include <torch/nn/modules/pixelshuffle.h>
 #include <torch/nn/modules/activation.h>
+#include <torch/nn/modules/normalization.h>
