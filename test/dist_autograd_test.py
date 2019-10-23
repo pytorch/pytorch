@@ -476,7 +476,7 @@ class DistAutogradTest(object):
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = rpc.rpc_sync("worker{}".format(dst_rank),
+            rpc.rpc_sync("worker{}".format(dst_rank),
                                my_py_nested_call, args=(t1, t2, dst_rank, self.world_size, 0))
             # tell next worker and nested next worker to store this context id
             # so we can verify that it has been cleaned up
@@ -495,7 +495,7 @@ class DistAutogradTest(object):
             t1 = torch.ones(3, 3, requires_grad=False)
             t2 = torch.zeros(3, 3, requires_grad=False)
             for dst_rank in dst_ranks:
-                ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+                rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
                 rpc.rpc_sync(
                     "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
