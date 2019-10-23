@@ -9,15 +9,7 @@
 
 #include <test/cpp/common/support.h>
 
-template <typename T>
-bool exactly_equal(at::Tensor left, T right) {
-  return left.item<T>() == right;
-}
-
-template <typename T>
-bool almost_equal(at::Tensor left, T right, T tolerance = 1e-4) {
-  return std::abs(left.item<T>() - right) < tolerance;
-}
+using namespace torch::test;
 
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)            \
   ASSERT_TRUE(                                                             \

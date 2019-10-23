@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+// yf225 TODO: do we need to add an entry for c10::ValueError in the following list?
 #define HANDLE_TH_ERRORS                                                       \
   try {
 #define END_HANDLE_TH_ERRORS_RET(retval)                           \
