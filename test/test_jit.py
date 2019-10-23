@@ -6,8 +6,13 @@ import torch
 # JIT tests use double as the default dtype
 torch.set_default_dtype(torch.double)
 
-from jit.test_recursive_script import TestRecursiveScript
-TestRecursiveScript = TestRecursiveScript
+# This is how we include tests located in test/jit/...
+# They are included here so that they are invoked when you call `test_jit.py`,
+# do not run these test files directly.
+from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
+from jit.test_type_sharing import TestTypeSharing  # noqa: F401
+from jit.test_logging import TestLogging  # noqa: F401
+from jit.test_list_dict import TestList, TestDict  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -28,7 +33,7 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
-from torch.quantization._quantize_script import PackedParams
+from torch.quantization._quantize_script import ConvPackedParams, LinearPackedParams
 
 # Testing utils
 import jit_utils
@@ -49,7 +54,7 @@ from test_module.future_div import div_int_future, div_float_future
 from test_module.no_future_div import div_int_nofuture, div_float_nofuture
 
 # Standard library
-from collections import namedtuple, OrderedDict
+from collections import namedtuple
 from copy import deepcopy
 from functools import wraps
 from itertools import product, chain
@@ -1164,21 +1169,17 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         input_strs = [
             # aten::conv2d --> quantized::conv2d
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype,
+%r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: quantized::conv_prepack
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %c, %d, %e, %f)
-        # CHECK-NOT: aten::quantize_per_tensor
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # addmm -> quantized::linear
@@ -1393,9 +1394,9 @@ graph(%input, %weight):
     )
     @_tmp_donotuse_dont_inline_everything
     def test_fold_prepack(self):
-        class M(torch.nn.Module):
+        class QLinear(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super(QLinear, self).__init__()
                 self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
                 self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
 
@@ -1408,30 +1409,60 @@ graph(%input, %weight):
                 rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
                 return rq
 
+        class QConv(torch.nn.Module):
+            def __init__(self):
+                super(QConv, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand((2, 3, 3, 3), dtype=torch.float))
+                self.bias = torch.nn.Parameter(torch.rand((2,), dtype=torch.float))
 
-        m = torch.jit.script(M())
-        data = torch.randn((5, 5), dtype=torch.float)
-        ref_res = m._c._get_method('forward')(data)
-        torch._C._jit_pass_fold_prepack(m._c, torch.jit.script(PackedParams())._c)
-        res = m._c._get_method('forward')(data)
-        # check attribute and graph
-        self.assertTrue(m._c._has_module('_packed_linear_weight_bias'))
-        # check values
-        original_w = m._c._get_parameter('weight')
-        ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
-        ref_b = m._c._get_parameter('bias')
-        w, b = m._c._get_module('_packed_linear_weight_bias')._get_method('_weight_bias')()
-        self.assertEqual(ref_w, w.dequantize())
-        self.assertEqual(ref_b, b)
-        self.assertEqual(ref_res, res)
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 2, torch.quint8)
+                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
+                stride, padding, dilation, groups = [1, 1], [0, 0], [1, 1], 1
+                packed = torch.ops.quantized.conv_prepack(wq, self.bias, stride, padding, dilation, groups)
+                w_unpacked, b_unpacked = torch.ops.quantized.conv_unpack(packed)
+                r = torch.nn.functional.conv2d(xq.dequantize(),
+                                               w_unpacked.dequantize(),
+                                               b_unpacked,
+                                               stride,
+                                               padding,
+                                               dilation,
+                                               groups)
+                rq = torch.quantize_per_tensor(r, 0.2, 2, torch.quint8)
+                return rq
 
-        # test serialization
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-        buffer.seek(0)
-        loaded_mod = torch.jit.load(buffer)
-        loaded_res = loaded_mod._c._get_method('forward')(data)
-        self.assertEqual(ref_res, loaded_res)
+        for name, M, data in [('linear', QLinear, torch.randn((5, 5), dtype=torch.float)),
+                              ('conv', QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
+            m = torch.jit.script(M())
+            ref_res = get_forward(m._c)(data)
+            linear_packed_params = torch.jit.script(LinearPackedParams())._c
+            conv_packed_params = torch.jit.script(ConvPackedParams())._c
+            torch._C._jit_pass_fold_prepack(m._c,
+                                            linear_packed_params,
+                                            conv_packed_params)
+            res = get_forward(m._c)(data)
+            # check attribute and graph
+            packed_module_list = [x for x, _ in m._c._get_modules()
+                                  if x.startswith('_' + name + '_packed_params_module')]
+            assert len(packed_module_list) == 1, \
+                'Expected to have one packed_params_module'
+            packed_module_name = packed_module_list[0]
+            # check values
+            original_w = m._c._get_parameter('weight')
+            ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
+            ref_b = m._c._get_parameter('bias')
+            w, b = m._c._get_module(packed_module_name)._get_method('_weight_bias')()
+            self.assertEqual(ref_w, w.dequantize())
+            self.assertEqual(ref_b, b)
+            self.assertEqual(ref_res, res)
+
+            # test serialization
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+            buffer.seek(0)
+            loaded_mod = torch.jit.load(buffer)
+            loaded_res = loaded_mod._c._get_method('forward')(data)
+            self.assertEqual(ref_res, loaded_res)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -1762,6 +1793,40 @@ graph(%Ra, %Rb):
         y = torch.randn(2, 7)
         self.assertEqual(ge(y).shape, y.shape)
         self.assertEqual(ge(x).shape, x.shape)
+
+    def do_trace_slice(self, requires_grad):
+        def slice(x):
+            results = []
+            for i in range(4):
+                results.append(x[:x.size(0) - i, i:x.size(2), i:3])
+            return tuple(results)
+
+        def slice_select(x):
+            results = []
+            for i in range(4):
+                results.append(x[:, i:, x.size(2) - 5])
+            return tuple(results)
+
+        x = torch.randn(5, 6, 7, requires_grad=requires_grad)
+        y = torch.randn(7, 8, 9, requires_grad=requires_grad)
+
+        # Check that it behaves as expected
+        traced_slice = torch.jit.trace(slice, x)
+        self.assertEqual(traced_slice(y), slice(y))
+        self.assertEqual(traced_slice(x), slice(x))
+
+        traced_slice_select = torch.jit.trace(slice_select, x)
+        self.assertEqual(traced_slice_select(y), slice_select(y))
+        self.assertEqual(traced_slice_select(x), slice_select(x))
+
+    def test_trace_slice(self):
+        self.do_trace_slice(False)
+
+    # test the different graph_executor path that happens when
+    # gradients are required and sizes are involved
+    def test_trace_slice_with_grad(self):
+        self.do_trace_slice(True)
+
 
     def test_trace_casts(self):
         casts = [
@@ -12769,7 +12834,7 @@ a")
 
         f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
-            DynamicSliceExportMod(), (input,), f, example_outputs=example_outs)
+            DynamicSliceExportMod(), (input,), f, example_outputs=example_outs, opset_version=10)
 
     def test_string_frontend_elif(self):
         code = '''
@@ -17811,1159 +17876,6 @@ class TestDataParallel(JitTestCase):
         r1_forward = replica[1].forward(x1)
         self.assertEqual(first_forward, r1_forward)
 
-
-class TestList(JitTestCase):
-    def test_in_check(self):
-        def int_in(x):
-            # type: (List[int]) -> bool
-            return 2 in x
-
-        self.checkScript(int_in, ([1, 2, 3],))
-        self.checkScript(int_in, ([1, 3, 3],))
-
-        def float_in(x):
-            # type: (List[float]) -> bool
-            return 2. in x
-
-        self.checkScript(float_in, ([1., 2., 3.],))
-        self.checkScript(float_in, ([1., 3., 3.],))
-
-        def str_in(x):
-            # type: (List[str]) -> bool
-            return 'hi' in x
-
-        self.checkScript(str_in, (['not', 'here'],))
-        self.checkScript(str_in, (['hi', 'bye'],))
-        self.checkScript(str_in, ([],))
-
-    def test_list_literal(self):
-        def reassign():
-            x = [1]
-            if True:
-                x = [2, 3]
-            return
-        self.checkScript(reassign, (), optimize=False)
-
-        def reassign_arity_change():
-            x = [1]
-            if True:
-                x = [1, 2, 3]
-            return
-        self.checkScript(reassign_arity_change, (), optimize=False)
-
-        def reassign_from_empty_literal():
-            x = []
-            if True:
-                x = [1, 2, 3]
-            return
-        with self.assertRaisesRegex(RuntimeError, r"previously has type List\[Tensor\]"):
-            self.checkScript(reassign_from_empty_literal, (), optimize=False)
-
-        def reassign_from_empty_builtin():
-            x = torch.jit.annotate(List[int], [])
-            if True:
-                x = [1, 2, 3]
-            y = torch.jit.annotate(List[float], [])
-            if True:
-                y = [1.0, 2.0, 3.0]
-            z = []
-            if True:
-                z = [torch.randn([1])]
-            return
-        self.checkScript(reassign_from_empty_builtin, (), optimize=False)
-
-        def reassign_bad_type():
-            x = [1]
-            if True:
-                x = [1.0]
-            return
-        with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            self.checkScript(reassign_bad_type, (), optimize=False)
-
-        def reassign_nested():
-            x = torch.jit.annotate(List[int], [])
-            if True:
-                x = [1, 2, 3]
-                if True:
-                    x = [1.0]
-            return
-        with self.assertRaisesRegex(RuntimeError, "previously has type"):
-            self.checkScript(reassign_nested, (), optimize=False)
-
-    def test_min_bool_list(self):
-        def jit_min_list(a, b):
-            # type: (List[bool], List[bool]) -> List[bool]
-            return min(a, b)
-
-        self.checkScript(jit_min_list, ([True, False], [False, True]))
-
-    def test_min_max_list(self):
-        def jit_min_list(a, b):
-            # type: (List[int], List[int]) -> List[int]
-            return min(a, b)
-
-        def jit_min_list_float(a, b):
-            # type: (List[float], List[float]) -> List[float]
-            return min(a, b)
-
-        def jit_min_list_bool(a, b):
-            # type: (List[bool], List[bool]) -> List[bool]
-            return min(a, b)
-
-        def run_tests(func, a, b):
-            for t in zip(a, b):
-                self.checkScript(func, t)
-
-        args_left_int = [[1, 8, 8], [2, 1, 1], [], [2], [1], [1, 2, 3]]
-        args_right_int = [[2, 1, 1], [1, 8, 8], [], [1], [], [1, 2]]
-        run_tests(jit_min_list, args_left_int, args_right_int)
-
-        args_left_float = [[1., 8., 8.], [2., 1., 1.], [], [2.], [1.], [1., 2., 3.]]
-        args_right_float = [[2., 1., 1.], [1., 8., 8.], [], [1.], [], [1., 2.]]
-        run_tests(jit_min_list_float, args_left_float, args_right_float)
-
-        args_left_bool = [[], [], [], [False], [True], [False, True], [True, True],
-                          [False, False, False], [False, False, True]]
-        args_right_bool = [[], [False], [True], [True], [False], [True, True],
-                           [False, True], [False, False, True], [False, False, False]]
-        run_tests(jit_min_list_bool, args_left_bool, args_right_bool)
-
-        def jit_max_list(a, b):
-            # type: (List[int], List[int]) -> List[int]
-            return max(a, b)
-
-        def jit_max_list_float(a, b):
-            # type: (List[float], List[float]) -> List[float]
-            return max(a, b)
-
-        def jit_max_list_bool(a, b):
-            # type: (List[bool], List[bool]) -> List[bool]
-            return max(a, b)
-
-        args_left_int = [[1, 8, 8], [8, 1, 1], [], [1], [], [1, 2]]
-        args_right_int = [[8, 1, 1], [1, 8, 8], [], [2], [1], [1, 2, 3]]
-        run_tests(jit_max_list, args_left_int, args_right_int)
-
-        args_left_float = [[1., 8., 8.], [8., 1., 1.], [], [1.], [], [1., 2.]]
-        args_right_float = [[8., 1., 1.], [1., 8., 8.], [], [2.], [1.], [1., 2., 3.]]
-        run_tests(jit_max_list_float, args_left_float, args_right_float)
-
-        run_tests(jit_max_list_bool, args_left_bool, args_right_bool)
-
-    def test_list_gather(self):
-        def index():
-            a = [1, 2, 3]
-            return a[1]
-
-        self.checkScript(index, ())
-
-        def negative_index():
-            a = [1, 2, 3]
-            return a[-1]
-
-        self.checkScript(negative_index, ())
-
-        def bad_index():
-            a = [1, 2, 3]
-            return a[4]
-
-        self.checkScriptRaisesRegex(bad_index, (), Exception,
-                                    "list index out of range")
-
-        def bad_negative_index():
-            a = [1, 2, 3]
-            return a[-5]
-
-        self.checkScriptRaisesRegex(bad_negative_index, (), Exception,
-                                    "list index out of range")
-
-    def test_list_len(self):
-        def func():
-            a = [1, 2, 3]
-            return len(a) == 3
-
-        self.checkScript(func, ())
-
-        def func2():
-            a = []
-            return len(a) == 0
-
-        self.checkScript(func2, ())
-
-    def test_list_ops(self):
-        def test_equality():
-            a = [1, 2, 3]
-            b = [1, 2, 3]
-            return a == b
-
-        self.checkScript(test_equality, (), optimize=True)
-
-        def test_inequality():
-            a = [1, 2, 3]
-            b = [1, 2, 3]
-            return a != b
-
-        self.checkScript(test_equality, (), optimize=True)
-
-        def test_non_equality():
-            a = [1, 2, 3]
-            b = [3]
-            return a == b
-
-        self.checkScript(test_non_equality, (), optimize=True)
-
-        def test_non_inequality():
-            a = [1, 2, 3]
-            b = [3]
-            return a != b
-
-        self.checkScript(test_non_equality, (), optimize=True)
-
-        def test_list_equality_as_cond():
-            a = [1, 2, 3]
-            b = [3]
-            if a == b:
-                c = 1
-            else:
-                c = 2
-            return c
-
-        self.checkScript(test_list_equality_as_cond, (), optimize=True)
-
-        def test_list_add():
-            a = [1, 2, 3]
-            b = [2]
-            c = a + b
-            return c == [1, 2, 3, 2]
-
-        self.checkScript(test_list_add, (), optimize=True)
-
-        def test_list_add_empty():
-            a = [1, 2, 3]
-            b = torch.jit.annotate(List[int], [])
-            c = a + b
-            return c == [1, 2, 3]
-
-        self.checkScript(test_list_add_empty, (), optimize=True)
-
-        def test_tensor_list_equality():
-            t1 = torch.ones([1, 1])
-            t2 = torch.ones([1, 1])
-            x = [t1, t2]
-            y = [t2, t1]
-            return x == y
-
-        self.checkScript(test_tensor_list_equality, (), optimize=True)
-
-        def test_invalid_list_equality():
-            t1 = torch.ones([2, 2])
-            t2 = torch.ones([2, 2])
-            x = [t1, t2]
-            y = [t2, t1]
-            # will throw since the tensors have more than one element
-            return x == y
-
-        self.checkScriptRaisesRegex(
-            test_invalid_list_equality,
-            (),
-            RuntimeError,
-            "bool value of Tensor")
-
-    def test_list_sort(self):
-        template = dedent('''
-        def func():
-            li_1 = {list_create}
-            li_2 = {list_create}
-            li_3 = {list_create}
-            li_1.sort()
-            li_2.sort(reverse=True)
-            li_4 = sorted(li_3)
-            return li_1, li_2, li_3, li_4
-        ''')
-
-        lists = ["[]", "[1, 3, 2]", "[True, False, True]", "[1.2, .2, 3.2]",
-                 "[torch.tensor(1.0), torch.tensor(0.2), torch.tensor(0.5)]",
-                 "[torch.tensor(5), torch.tensor(-2), torch.tensor(4)]"]
-        for li in lists:
-            code = template.format(list_create=li)
-            scope = {}
-            exec(code, globals(), scope)
-            cu = torch.jit.CompilationUnit(code)
-            t1 = cu.func()
-            t2 = scope['func']()
-            self.assertEqual(t1, t2)
-
-        def test_fail(x):
-            # type: (List[Tensor]) -> List[Tensor]
-            x.sort()
-            return x
-
-        self.checkScriptRaisesRegex(test_fail, (([torch.zeros([2]), torch.zeros([2])],)), Exception,
-                                    "bool value of Tensor with more than one value")
-
-        @torch.jit.script
-        def test_mutation():
-            a = [1, 2, 3]
-            a.sort()
-            return a
-
-        test_mutation()
-        FileCheck().check("aten::sort").run(test_mutation.graph_for())
-
-    def test_list_slice(self):
-        def test_regular_slice():
-            a = [0, 1, 2, 3, 4]
-            return a[2:3] == [2]
-        self.checkScript(test_regular_slice, ())
-
-        def test_open_ended_slice():
-            a = [0, 1, 2, 3, 4]
-            return a[2:] == [2, 3, 4]
-        self.checkScript(test_open_ended_slice, ())
-
-        def test_open_ended_slice2():
-            a = [0, 1, 2, 3, 4]
-            return a[:2] == [0, 1]
-        self.checkScript(test_open_ended_slice2, ())
-
-        def test_negative_slice():
-            a = [0, 1, 2, 3, 4]
-            return a[:-1] == [0, 1, 2, 3]
-        self.checkScript(test_negative_slice, ())
-
-        def test_negative_slice2():
-            a = [0, 1, 2, 3, 4]
-            return a[-3:-1] == [2, 3]
-        self.checkScript(test_negative_slice2, ())
-
-        def test_backward_slice():
-            a = [0, 1, 2, 3, 4]
-            return a[3:2] == torch.jit.annotate(List[int], [])
-        self.checkScript(test_backward_slice, ())
-
-        def test_over_slice():
-            a = [0, 1, 2, 3, 4]
-            return a[3:10] == [3, 4]
-        self.checkScript(test_backward_slice, ())
-
-    def test_mutable_list_append(self):
-        def test_append():
-            a = [0, 1]
-            a.append(2)
-            a.append(3)
-            return a == [0, 1, 2, 3]
-        self.checkScript(test_append, ())
-
-    def test_comprehensions_basic(self):
-        def comp(l):
-            # type: (List[int]) -> List[int]
-
-            n = [x * 3 for x in l]
-            return n
-
-        comp([1, 2, 3])
-        self.checkScript(comp, ([1, 2, 3],))
-
-    def test_comprehensions_basic_float(self):
-        def comp(l):
-            # type: (List[float]) -> List[float]
-
-            n = [x * 3 for x in l]
-            return n
-
-        self.checkScript(comp, ([1.0, 2.0, 3.0],))
-
-    def test_comprehensions_two_comps(self):
-        @torch.jit.script
-        def comp(l1, l2):
-            # type: (List[int], List[int]) -> List[int]
-
-            n = [x * 3 for x in l1]
-            n2 = [x + 2 for x in l2]
-            return n + n2
-
-        self.assertEqual(comp([1, 2, 3], [4, 5]), [3, 6, 9, 6, 7])
-
-    def test_comprehension_out_type_not_in_type(self):
-        def list_cast():
-            # type: () -> int
-            li = [int(i) for i in [torch.tensor(0), torch.tensor(1), torch.tensor(2)]]
-            return li[0] + li[1] + li[2]
-
-        self.checkScript(list_cast, ())
-
-    def test_comprehension_iterable(self):
-        def test_func(fn, inputs):
-            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
-
-        def foo(names, results):
-            # type: (List[int], List[int])
-            return [(k + 5, v - 2) for k, v in zip(names, results)]
-
-        test_func(foo, ([1, 2, 4], [4, 7, 9]))
-        test_func(foo, ([5], [4, 7, 9]))
-
-        def fn(x):
-            # type: (int)
-            return [i for i in range(x)]
-
-        test_func(fn, (9,))
-        test_func(fn, (0,))
-        test_func(fn, (-1,))
-
-        def changes_type():
-            a = [float(i) for i in range(5)]
-            b = [float(i) for i in [1, 2, 3, 4]]
-            c = [(float(i), j) for i, j in enumerate([1, 2, 3, 8])]
-            return a, b, c
-
-        test_func(changes_type, ())
-
-        def test_zero_iter():
-            return [str(i) for i, j in zip("", "")]
-
-        test_func(test_zero_iter, ())
-
-    def test_mutable_list_append_2(self):
-        def test_append_2():
-            a = [0, 1]
-            a.append(2)
-            a = [1]
-            a.append(4)
-            return a == [1, 4]
-        self.checkScript(test_append_2, ())
-
-    def test_mutable_list_append_if(self):
-        def test_append_if():
-            a = [1]
-            if True:
-                a.append(4)
-            return a == [1, 4]
-        self.checkScript(test_append_if, ())
-
-    def test_mutable_list_append_if_else(self):
-        def test_append_if_else():
-            a = [1]
-            if False:
-                a.append(4)
-            else:
-                a.append(10)
-            return a == [1, 10]
-        self.checkScript(test_append_if_else, ())
-
-    def test_mutable_list_append_loop(self):
-        def test_append_loop():
-            a = torch.jit.annotate(List[int], [])
-            for i in range(5):
-                a.append(i)
-
-            return a == [0, 1, 2, 3, 4]
-        self.checkScript(test_append_loop, ())
-
-    def test_mutable_list_append_loop_if(self):
-        def test_append_loop_if():
-            a = torch.jit.annotate(List[int], [])
-            for i in range(5):
-                if i > 3:
-                    a.append(i)
-                else:
-                    a.append(0)
-
-            return a == [0, 0, 0, 0, 4]
-        self.checkScript(test_append_loop_if, ())
-
-    def test_mutable_list_nested_loop(self):
-        def test_nested_loop():
-            a = torch.jit.annotate(List[int], [])
-            for i in range(2):
-                for j in range(2):
-                    a.append(i + j)
-
-            return a == [0, 1, 1, 2]
-        self.checkScript(test_nested_loop, ())
-
-    def test_mutable_list_function_inline(self):
-        @torch.jit.script
-        def bar(y):
-            # type: (List[int]) -> None
-            y.append(4)
-
-        @torch.jit.script
-        def foo():
-            x = [1, 2, 3]
-            bar(x)
-            return x
-
-        self.assertEqual(foo(), [1, 2, 3, 4])
-
-    def test_mutable_list_reverse_empty(self):
-        def test_reverse_empty():
-            a = []
-            a.reverse()
-
-            return a == []
-        self.checkScript(test_reverse_empty, ())
-
-    def test_mutable_list_reverse(self):
-        def test_reverse():
-            a = [1, 2, 3, 4]
-            a.reverse()
-
-            return a == [4, 3, 2, 1]
-        self.checkScript(test_reverse, ())
-
-    def test_mutable_tensor_list_reverse(self):
-        def test_tensor_reverse():
-            a = [torch.tensor(1), torch.tensor(2)]
-            a.reverse()
-
-            return a == [torch.tensor(2), torch.tensor(1)]
-        self.checkScript(test_tensor_reverse, ())
-
-    def test_mutable_list_pop_empty(self):
-        @torch.jit.script
-        def test_pop_empty():
-            a = torch.jit.annotate(List[int], [])
-            return a.pop()
-
-        with self.assertRaisesRegex(RuntimeError, "pop from empty list"):
-            test_pop_empty()
-
-    def test_mutable_list_pop(self):
-        def test_pop():
-            a = [1, 2, 3, 4]
-            b = a.pop()
-
-            return b == 4
-
-        self.checkScript(test_pop, ())
-
-    def test_mutable_list_pop2(self):
-        def test_pop2():
-            a = [1, 2, 3, 4]
-            b = a.pop()
-
-            return len(a) == 3
-
-        self.checkScript(test_pop2, ())
-
-    def test_mutable_list_pop_at(self):
-        def test_pop_at():
-            a = [1, 2, 3, 4]
-            b = a.pop(1)
-
-            return b == 2
-
-        self.checkScript(test_pop_at, ())
-
-    def test_mutable_list_pop_at2(self):
-        def test_pop_at2():
-            a = [1, 2, 3, 4]
-            b = a.pop(1)
-
-            return len(a) == 3
-
-        self.checkScript(test_pop_at2, ())
-
-    def test_mutable_list_pop_at_negative(self):
-        def test_pop_at_negative():
-            a = [1, 2, 3, 4]
-            b = a.pop(-2)
-
-            return b == 3
-
-        self.checkScript(test_pop_at_negative, ())
-
-    def test_mutable_list_pop_at_negative2(self):
-        def test_pop_at_negative2():
-            a = [1, 2, 3, 4]
-            b = a.pop(-2)
-
-            return len(a) == 3
-
-        self.checkScript(test_pop_at_negative2, ())
-
-    def test_mutable_list_pop_slice(self):
-        def test_pop_slice():
-            a = [1, 2, 3, 4]
-            b = [1, 2, 3, 4]
-
-            a.pop()
-            b = b[:-1]
-
-            return a == b
-
-        self.checkScript(test_pop_slice, ())
-
-    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
-    def test_mutable_list_clear_empty(self):
-        def test_clear_empty():
-            a = torch.jit.annotate(List[int], [])
-            a.clear()
-
-            return len(a) == 0
-        self.checkScript(test_clear_empty, ())
-
-    @unittest.skipIf(sys.version_info < (3, 3), "clear not supported in version < 3.3")
-    def test_mutable_list_clear(self):
-        def test_clear():
-            a = [1, 2, 3, 4]
-            a.clear()
-
-            return len(a) == 0
-        self.checkScript(test_clear, ())
-
-    def test_mutable_list_insert(self):
-        def test_list_insert():
-            a = [1, 2, 3, 4]
-            a.insert(2, 5)
-
-            return a == [1, 2, 5, 3, 4]
-        self.checkScript(test_list_insert, ())
-
-    def test_mutable_list_insert_negative(self):
-        def test_list_insert_negative():
-            a = [1, 2, 3, 4]
-            a.insert(-1, 5)
-
-            return a == [1, 2, 3, 5, 4]
-        self.checkScript(test_list_insert_negative, ())
-
-    def test_mutable_list_insert_neg_out_of_bounds(self):
-        def test_list_insert_neg_out_of_bounds():
-            a = [1, 2, 3, 4]
-            a.insert(-10, 5)
-
-            return a == [5, 1, 2, 3, 4]
-        self.checkScript(test_list_insert_neg_out_of_bounds, ())
-
-    def test_mutable_list_insert_out_of_bounds(self):
-        def test_list_insert_out_of_bounds():
-            a = [1, 2, 3, 4]
-            a.insert(10, 5)
-
-            return a == [1, 2, 3, 4, 5]
-        self.checkScript(test_list_insert_out_of_bounds, ())
-
-    def test_mutable_list_remove_not_existing(self):
-        @torch.jit.script
-        def test_list_remove_not_existing():
-            a = [1, 2, 3, 4]
-            a.remove(5)
-
-            return a
-
-        with self.assertRaisesRegex(RuntimeError, "x not in list"):
-            test_list_remove_not_existing()
-
-    def test_mutable_list_remove(self):
-        def test_list_remove():
-            a = [1, 2, 3, 4]
-            a.remove(3)
-
-            return a == [1, 2, 4]
-        self.checkScript(test_list_remove, ())
-
-    def test_list_index_not_existing(self):
-        @torch.jit.script
-        def list_index_not_existing():
-            a = [4, 1, 3, 2]
-            i = a.index(5)
-
-            return i
-
-        with self.assertRaisesRegex(RuntimeError, "'5' is not in list"):
-            list_index_not_existing()
-
-    def test_list_index(self):
-        def list_index():
-            a = [4, 1, 3, 2]
-            i = a.index(3)
-
-            return i == 2
-        self.checkScript(list_index, ())
-
-    def test_tensor_list_index(self):
-        def tensor_list_index():
-            a = [torch.tensor(4), torch.tensor(1), torch.tensor(3), torch.tensor(2)]
-            i = a.index(torch.tensor(3))
-
-            return i == 2
-        self.checkScript(tensor_list_index, ())
-
-    def test_tensor_list_index_not_existing(self):
-        @torch.jit.script
-        def tensor_list_index_not_existing():
-            a = [torch.tensor(4), torch.tensor(1), torch.tensor(3), torch.tensor(2)]
-            i = a.index(torch.tensor(5))
-
-            return i
-
-        with self.assertRaisesRegex(RuntimeError, "is not in list"):
-            tensor_list_index_not_existing()
-
-    def test_list_count(self):
-        def list_count():
-            a = [4, 1, 4, 2, 4]
-            i = a.count(4)
-
-            return i == 3
-        self.checkScript(list_count, ())
-
-    def test_list_count_not_existing(self):
-        def list_count_not_existing():
-            a = [4, 1, 4, 2, 4]
-            i = a.count(5)
-
-            return i == 0
-        self.checkScript(list_count_not_existing, ())
-
-    def test_tensor_list_count(self):
-        def tensor_list_count():
-            a = [torch.tensor(4), torch.tensor(1), torch.tensor(4), torch.tensor(4)]
-            i = a.count(torch.tensor(4))
-
-            return i == 3
-        self.checkScript(tensor_list_count, ())
-
-    def test_tensor_list_count_not_existing(self):
-        def tensor_list_count_not_existing():
-            a = [torch.tensor(4), torch.tensor(1), torch.tensor(4), torch.tensor(4)]
-            i = a.count(torch.tensor(5))
-
-            return i == 0
-        self.checkScript(tensor_list_count_not_existing, ())
-
-    def test_mutable_list_remove_tensor(self):
-        def test_list_remove_tensor():
-            a = [torch.ones(1), torch.zeros(1), torch.ones(2)]
-            a.remove(torch.zeros(1))
-
-            return len(a) == 2
-        self.checkScript(test_list_remove_tensor, ())
-
-    def test_mutable_list_remove2(self):
-        def test_list_remove2():
-            a = [1]
-            a.remove(1)
-
-            return len(a) == 0
-        self.checkScript(test_list_remove2, ())
-
-    def test_extend_list_mutable(self):
-        @torch.jit.script
-        def extend_list(a, b):
-            # type: (List[Tensor], List[Tensor]) -> List[Tensor]
-
-            a.extend(b)
-            return a
-
-        for l in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
-            for r in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
-                self.assertEqual(extend_list(l, r), l + r)
-
-    def test_extend_list_immutable(self):
-        @torch.jit.script
-        def extend_list(a, b):
-            # type: (List[int], List[int]) -> List[int]
-
-            a.extend(b)
-            return a
-
-        for l in [[], [1], [1, 2, 3]]:
-            for r in [[], [1], [1, 2, 3]]:
-                self.assertEqual(extend_list(l, r), l + r)
-
-    def test_copy_list_mutable(self):
-        @torch.jit.script
-        def copy_list(a):
-            # type: (List[Tensor]) -> List[Tensor]
-            return a.copy()
-
-        for l in [[], [torch.rand(2)], [torch.rand(2), torch.rand(2), torch.rand(2)]]:
-            self.assertEqual(copy_list(l), l)
-
-    def test_copy_list_immutable(self):
-        @torch.jit.script
-        def copy_list(a):
-            # type: (List[int]) -> List[int]
-            return a.copy()
-
-        for l in [[], [1], [1, 2, 3]]:
-            self.assertEqual(copy_list(l), l)
-
-    def test_min_max_single_list(self):
-        def min_intlist(li):
-            # type: (List[int]) -> int
-            return min(li)
-
-        def max_intlist(li):
-            # type: (List[int]) -> int
-            return max(li)
-
-        def min_boollist(li):
-            # type: (List[bool]) -> bool
-            return min(li)
-
-        def max_boollist(li):
-            # type: (List[bool]) -> bool
-            return max(li)
-
-        def min_floatlist(li):
-            # type: (List[float]) -> float
-            return min(li)
-
-        def max_floatlist(li):
-            # type: (List[float]) -> float
-            return max(li)
-
-
-        int_lists = [1], [2, 1, 2], [-3, 4, 2], [-2, -7, 1, 4], [2, 1, 0, 4], []
-
-        def check_list(fn, li):
-            if len(li) == 0:
-                self.checkScriptRaisesRegex(fn, (li,), Exception, "arg is an empty sequence")
-            else:
-                self.checkScript(fn, (li,))
-
-        for int_list in int_lists:
-            check_list(min_intlist, int_list)
-            check_list(max_intlist, int_list)
-
-            bool_li = list(map(lambda x: bool(x), int_list))
-            check_list(min_boollist, bool_li)
-            check_list(max_boollist, bool_li)
-
-            float_li = list(map(lambda x: float(x), int_list))
-            check_list(min_floatlist, float_li)
-            check_list(max_floatlist, float_li)
-
-
-class TestDict(JitTestCase):
-    def dict(self):
-        return {u'a': torch.ones(1), u'b': torch.ones(1) + 1, u'c': torch.ones(1) + 2}
-
-    def dict2(self):
-        return {'x': torch.ones(1) + 100, 'y': torch.ones(1) + 101, 'z': torch.ones(1) + 102}
-
-    def test_keys(self):
-        @torch.jit.script
-        def keys(x):
-            # type: (Dict[str, Tensor]) -> List[str]
-            return list(x.keys())
-
-        self.assertEqual(set(keys(self.dict())), set(self.dict().keys()))
-
-        @torch.jit.script
-        def specialized_list():
-            li = {1: 1, 2: 2}.keys()
-            li.append(3)
-            return li
-
-        self.assertTrue(set(specialized_list()) == set([1, 2, 3]))
-
-    def test_values(self):
-        @torch.jit.script
-        def values(x):
-            # type: (Dict[str, Tensor]) -> List[Tensor]
-            return list(x.values())
-
-        the_dict = self.dict()
-        self.assertEqual(set(values(the_dict)), set(the_dict.values()))
-
-    def test_len(self):
-        def length(x):
-            # type: (Dict[str, Tensor]) -> int
-            return len(x)
-
-        self.checkScript(length, (self.dict(),))
-
-    def test_copy(self):
-        def func(x):
-            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
-            return x.copy()
-
-        self.checkScript(func, (self.dict(),))
-
-    def test_items(self):
-        def func(x):
-            # type: (Dict[str, Tensor]) -> List[Tuple[str, Tensor]]
-            return x.items()
-
-        # The value returned by Python is in arbitrary order, so we can't use
-        # checkScript
-        scripted_func = torch.jit.script(func)
-
-        eager_out = (func(self.dict()))
-        script_out = (scripted_func(self.dict()))
-
-        self.assertEqual(len(eager_out), len(script_out))
-        for item in eager_out:
-            self.assertTrue(item in script_out)
-
-    def test_pop(self):
-        def pop(x, key):
-            # type: (Dict[str, Tensor], str) -> Tuple[Tensor, Dict[str, Tensor]]
-            return x.pop(key), x
-
-        # checkScript doesn't copy the inputs, so we can't use it since this mutates
-        # the dict
-        def tester(fn, *args):
-            eager_out = fn(self.dict(), *args)
-            script_out = torch.jit.script(fn)(self.dict(), *args)
-            self.assertEqual(eager_out, script_out)
-
-        tester(pop, 'a')
-
-        with self.assertRaisesRegex(RuntimeError, "KeyError"):
-            torch.jit.script(pop)(self.dict(), 'x')
-
-
-        def default_pop(x, key, default):
-            # type: (Dict[str, Tensor], str, Tensor) -> Tuple[Tensor, Dict[str, Tensor]]
-            return x.pop(key, default), x
-
-        tester(default_pop, 'a', torch.randn(2, 2))
-        tester(default_pop, 'x', torch.randn(2, 2))
-
-    def test_setdefault(self):
-        def setdefault(x, key, default):
-            # type: (Dict[str, Tensor], str, Tensor) -> Dict[str, Tensor]
-            x.setdefault(key, default)
-            return x
-
-        self.checkScript(setdefault, (self.dict(), 'a', torch.randn(2, 2)))
-        self.checkScript(setdefault, (self.dict(), 'nonexistant', torch.randn(2, 2)))
-
-    def test_update(self):
-        def update(a, b):
-            # type: (Dict[str, Tensor], Dict[str, Tensor]) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]
-            a.update(b)
-            return a, b
-
-        self.checkScript(update, (self.dict(), self.dict()))
-        self.checkScript(update, (self.dict(), self.dict2()))
-
-    def test_aug_assign(self):
-        def aug_assign_dict_tensor(a):
-            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
-            a['a'] += 1
-            a['b'] -= 12
-            a['c'] *= 122
-            a['c'] /= 2
-            return a
-
-        def aug_assign_dict_prim(a):
-            # type: (Dict[str, float]) -> Dict[str, float]
-            a['a'] += 3.4
-            a['b'] -= 2.4
-            a['c'] *= 3.0
-            a['c'] /= 2.0
-            return a
-
-        self.checkScript(aug_assign_dict_tensor, (self.dict(),))
-        self.checkScript(aug_assign_dict_prim, ({'a': 3.0, 'b': 2.0, 'c': 4.0},))
-
-    def test_popitem(self):
-        @torch.jit.script
-        def popitem(x):
-            # type: (Dict[str, Tensor]) -> Tuple[Tuple[str, Tensor], Dict[str, Tensor]]
-            item = x.popitem()
-            return item, x
-
-        # The value returned by Python is arbitrary, so we can't use checkScript
-        eager_in = self.dict()
-        eager_out = (eager_in.popitem(), eager_in)
-
-        script_out = popitem(self.dict())
-
-        # Check that an item was removed
-        self.assertEqual(len(eager_out[1]), len(script_out[1]))
-
-        # Check that the item is the correct types
-        if PY2:
-            self.assertTrue(isinstance(script_out[0][0], unicode))
-        else:
-            self.assertTrue(isinstance(script_out[0][0], str))
-        self.assertTrue(isinstance(script_out[0][1], torch.Tensor))
-
-    def test_clear(self):
-        def clear(x):
-            # type: (Dict[str, Tensor]) -> Dict[str, Tensor]
-            x.clear()
-            return x
-
-        self.checkScript(clear, (self.dict(),))
-
-    def test_get(self):
-        def get(x, key):
-            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
-            return x.get(key)
-
-        self.checkScript(get, (self.dict(), 'a'))
-        self.checkScript(get, (self.dict(), "doesn't exist"))
-
-        def get_default(x, key):
-            # type: (Dict[str, Tensor], str) -> Optional[Tensor]
-            return x.get(key, torch.randn(2, 2))
-
-        self.checkScript(get, (self.dict(), 'a'))
-        self.checkScript(get, (self.dict(), "doesn't exist"))
-
-    def test_basic(self):
-        def simple(x):
-            # type: (Dict[str, int]) -> Dict[str, int]
-            return x
-
-        self.checkScript(simple, ({'item': 20, 'other_item': 120},))
-
-        def index(x):
-            # type: (Dict[str, int]) -> int
-            return x['item']
-
-        self.checkScript(index, ({'item': 20, 'other_item': 120},))
-
-        def type_default():
-            # type: () -> Dict[str, Tensor]
-            return {}
-
-        self.checkScript(type_default, ())
-
-        @torch.jit.script
-        def missing_index(x):
-            # type: (Dict[str, int]) -> int
-            return x['dne']
-
-        with self.assertRaisesRegex(RuntimeError, "KeyError"):
-            missing_index({'item': 20, 'other_item': 120})
-
-        code = dedent('''
-            def literal1():
-                return torch.jit.annotate(Dict[int, float], {})
-            def literal2():
-                return torch.jit.annotate(Dict[int, float], {10: 1.2})
-        ''')
-        cu = torch.jit.CompilationUnit(code)
-        self.assertEqual({}, cu.literal1())
-        self.assertEqual({10: 1.2}, cu.literal2())
-
-        cu = torch.jit.CompilationUnit(dedent('''
-            def literal3():
-                return torch.jit.annotate(Dict[int, float], {10: 1.2, 11: 1.3})
-        '''))
-        self.assertEqual({10: 1.2, 11: 1.3}, cu.literal3())
-
-        def list_of_dicts():
-            # type: () -> List[Dict[str, Tensor]]
-            return [{'word': torch.ones(2) + 3}, {'other word': torch.ones(1) + 2}]
-
-        self.checkScript(list_of_dicts, ())
-
-    def test_mutability(self):
-        @torch.jit.script
-        def fn():
-            # type: () -> Dict[str, int]
-            a = torch.jit.annotate(Dict[str, int], {})
-            a['ok'] = 10
-            return a
-
-        self.assertEqual(fn(), {'ok': 10})
-
-    def test_key_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected key type 'None' to subtype"):
-            @torch.jit.script
-            def fn(a):
-                # type: (Dict[str, int]) -> int
-                return a[None]
-
-    def test_loop(self):
-        @torch.jit.script
-        def fn(x):
-            # type: (int) -> Dict[str, int]
-            a = torch.jit.annotate(Dict[str, int], {})
-            for i in range(x):
-                a['ok'] = i
-            return a
-
-        self.assertEqual(fn(10), {'ok': 9})
-
-    def test_view(self):
-        def fn(x, y):
-            l = {"a": x}
-            x_view = l["a"]
-            a = x + x
-            x_view.add_(y)
-            b = x + x
-            return a == b
-        self.checkScript(fn, (torch.rand(2, 3), torch.rand(2, 3)))
-
-    def test_membership(self):
-        def fn(x, y):
-            # type: (Dict[int, int], int) -> int
-            return x.get(y, 3)
-
-        d = {1: 2, 3: 4}
-        self.checkScript(fn, (d, 3))
-        self.checkScript(fn, (d, 2))
-
-        def optional(x, y):
-            # type: (Dict[int, int], int) -> bool
-            res = x.get(y)
-            return res is None
-
-        self.checkScript(fn, (d, 3))
-        self.checkScript(fn, (d, 2))
-
-        with self.assertRaisesRegex(RuntimeError, "is actually of type Optional"):
-            @torch.jit.script
-            def bad_types(x, y):
-                # type: (Dict[int, int], int) -> int
-                return x.get(y)  # noqa: T484
-
-    def test_dict_to_python(self):
-        @torch.jit.ignore
-        def python_lookup(my_dict, keys):
-            # type: (Dict[str, int], List[str]) -> List[int]
-            return [my_dict[k] for k in keys]
-
-        def fn(my_dict, keys):
-            # type: (Dict[str, int], List[str]) -> List[int]
-            return python_lookup(my_dict, keys)
-
-        a_dict = {'a': torch.ones(1), 'b': torch.ones(1) + 1, 'c': torch.ones(1) + 2}
-        self.checkScript(fn, (a_dict, ('a', 'c')))
-
-    def test_ordered_dict(self):
-        def test_func(fn, inputs):
-            self.assertEqual(fn(*inputs), torch.jit.script(fn)(*inputs))
-
-        def repeated_key():
-            return OrderedDict([(1, 2), (2, 3), (1, 4)])
-
-        test_func(repeated_key, ())
-
-        def no_args():
-            a = OrderedDict()
-            a["one"] = torch.tensor(1)
-            a["two"] = torch.tensor(2)
-
-        test_func(no_args, ())
-
-        def test_dict_constructor():
-            a = dict()
-            a["one"] = torch.tensor(1)
-            return a, dict([(1, 2), (2, 3), (1, 4)])  # noqa: C406
-
-        test_func(test_dict_constructor, ())
-
-        def test_dict_error():
-            a = dict()
-            a[1] = 2
-            return a
-
-        with self.assertRaisesRegex(Exception, "Arguments for call are not"):
-            torch.jit.script(test_dict_error)
-
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
         @torch.jit.script
@@ -19841,107 +18753,6 @@ class TestClassType(JitTestCase):
                 def __init__(self):
                     self.parent = torch.jit.annotate(Optional[Tree], None)
 
-
-class TestLogging(JitTestCase):
-    def test_bump_numeric_counter(self):
-        class ModuleThatLogs(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                for i in range(x.size(0)):
-                    x += 1.0
-                    torch.jit._logging.add_stat_value('foo', 1)
-
-                if bool(x.sum() > 0.0):
-                    torch.jit._logging.add_stat_value('positive', 1)
-                else:
-                    torch.jit._logging.add_stat_value('negative', 1)
-                return x
-
-        logger = torch.jit._logging.LockingLogger()
-        old_logger = torch.jit._logging.set_logger(logger)
-        try:
-
-            mtl = ModuleThatLogs()
-            for i in range(5):
-                mtl(torch.rand(3, 4, 5))
-
-            self.assertEqual(logger.get_counter_val('foo'), 15)
-            self.assertEqual(logger.get_counter_val('positive'), 5)
-        finally:
-            torch.jit._logging.set_logger(old_logger)
-
-    def test_trace_numeric_counter(self):
-        def foo(x):
-            torch.jit._logging.add_stat_value('foo', 1)
-            return x + 1.0
-
-        traced = torch.jit.trace(foo, torch.rand(3, 4))
-        logger = torch.jit._logging.LockingLogger()
-        old_logger = torch.jit._logging.set_logger(logger)
-        try:
-            traced(torch.rand(3, 4))
-
-            self.assertEqual(logger.get_counter_val('foo'), 1)
-        finally:
-            torch.jit._logging.set_logger(old_logger)
-
-    def test_time_measurement_counter(self):
-        class ModuleThatTimes(torch.jit.ScriptModule):
-            def forward(self, x):
-                tp_start = torch.jit._logging.time_point()
-                for i in range(30):
-                    x += 1.0
-                tp_end = torch.jit._logging.time_point()
-                torch.jit._logging.add_stat_value('mytimer', tp_end - tp_start)
-                return x
-
-        mtm = ModuleThatTimes()
-        logger = torch.jit._logging.LockingLogger()
-        old_logger = torch.jit._logging.set_logger(logger)
-        try:
-            mtm(torch.rand(3, 4))
-            self.assertGreater(logger.get_counter_val('mytimer'), 0)
-        finally:
-            torch.jit._logging.set_logger(old_logger)
-
-    def test_time_measurement_counter_script(self):
-        class ModuleThatTimes(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                tp_start = torch.jit._logging.time_point()
-                for i in range(30):
-                    x += 1.0
-                tp_end = torch.jit._logging.time_point()
-                torch.jit._logging.add_stat_value('mytimer', tp_end - tp_start)
-                return x
-
-        mtm = ModuleThatTimes()
-        logger = torch.jit._logging.LockingLogger()
-        old_logger = torch.jit._logging.set_logger(logger)
-        try:
-            mtm(torch.rand(3, 4))
-            self.assertGreater(logger.get_counter_val('mytimer'), 0)
-        finally:
-            torch.jit._logging.set_logger(old_logger)
-
-    def test_counter_aggregation(self):
-        def foo(x):
-            for i in range(3):
-                torch.jit._logging.add_stat_value('foo', 1)
-            return x + 1.0
-
-        traced = torch.jit.trace(foo, torch.rand(3, 4))
-        logger = torch.jit._logging.LockingLogger()
-        logger.set_aggregation_type('foo', torch.jit._logging.AggregationType.AVG)
-        old_logger = torch.jit._logging.set_logger(logger)
-        try:
-            traced(torch.rand(3, 4))
-
-            self.assertEqual(logger.get_counter_val('foo'), 1)
-        finally:
-            torch.jit._logging.set_logger(old_logger)
-
-
 class TestDocs(unittest.TestCase):
     @slowTest
     def test_docs(self):
@@ -19955,358 +18766,6 @@ class TestDocs(unittest.TestCase):
             out = result.stdout.decode('utf-8')
             err = result.stderr.decode('utf-8')
             raise RuntimeError("{}\n{}\nDocs build failed (run `cd docs && make doctest`)".format(err, out))
-
-class TestTypeSharing(JitTestCase):
-    def assertSameType(self, m1, m2):
-        if not isinstance(m1, torch.jit.ScriptModule):
-            m1 = torch.jit.script(m1)
-        if not isinstance(m2, torch.jit.ScriptModule):
-            m2 = torch.jit.script(m2)
-        self.assertEqual(m1._c._type(), m2._c._type())
-
-    def assertDifferentType(self, m1, m2):
-        if not isinstance(m1, torch.jit.ScriptModule):
-            m1 = torch.jit.script(m1)
-        if not isinstance(m2, torch.jit.ScriptModule):
-            m2 = torch.jit.script(m2)
-        self.assertNotEqual(m1._c._type(), m2._c._type())
-
-    def test_basic(self):
-        class M(torch.nn.Module):
-            def __init__(self, a, b, c):
-                super(M, self).__init__()
-                self.a = a
-                self.b = b
-                self.c = c
-
-            def forward(self, x):
-                return x
-        a = torch.rand(2, 3)
-        b = torch.rand(2, 3)
-        c = torch.rand(2, 3)
-        m1 = M(a, b, c)
-        m2 = M(a, b, c)
-        self.assertSameType(m1, m2)
-
-    def test_diff_attr_values(self):
-        """
-        Types should be shared even if attribute values differ
-        """
-        class M(torch.nn.Module):
-            def __init__(self, a, b, c):
-                super(M, self).__init__()
-                self.a = a
-                self.b = b
-                self.c = c
-
-            def forward(self, x):
-                return x
-        a = torch.rand(2, 3)
-        b = torch.rand(2, 3)
-        c = torch.rand(2, 3)
-        m1 = M(a, b, c)
-        m2 = M(a * 2, b * 3, c * 4)
-        self.assertSameType(m1, m2)
-
-    def test_constants(self):
-        """
-        Types should be shared for identical constant values, and different for different constant values
-        """
-        class M(torch.nn.Module):
-            __constants__ = ["const"]
-
-            def __init__(self, attr, const):
-                super(M, self).__init__()
-                self.attr = attr
-                self.const = const
-
-            def forward(self):
-                return self.const
-
-        attr = torch.rand(2, 3)
-        m1 = M(attr, 1)
-        m2 = M(attr, 1)
-        self.assertSameType(m1, m2)
-
-        # a different constant value
-        m3 = M(attr, 2)
-        self.assertDifferentType(m1, m3)
-
-    def test_linear(self):
-        """
-        Simple example with a real nn Module
-        """
-        a = torch.nn.Linear(5, 5)
-        b = torch.nn.Linear(5, 5)
-        c = torch.nn.Linear(10, 10)
-        a = torch.jit.script(a)
-        b = torch.jit.script(b)
-        c = torch.jit.script(c)
-
-        self.assertSameType(a, b)
-        self.assertDifferentType(a, c)
-
-    def test_submodules(self):
-        """
-        If submodules differ, the types should differ.
-        """
-        class M(torch.nn.Module):
-            def __init__(self, in1, out1, in2, out2):
-                super(M, self).__init__()
-                self.submod1 = torch.nn.Linear(in1, out1)
-                self.submod2 = torch.nn.Linear(in2, out2)
-
-            def forward(self, x):
-                x = self.submod1(x)
-                x = self.submod2(x)
-                return x
-
-        a = M(1, 1, 2, 2)
-        b = M(1, 1, 2, 2)
-        self.assertSameType(a, b)
-        self.assertSameType(a.submod1, b.submod1)
-        c = M(2, 2, 2, 2)
-        self.assertDifferentType(a, c)
-
-        self.assertSameType(b.submod2, c.submod1)
-        self.assertDifferentType(a.submod1, b.submod2)
-
-    def test_param_vs_attribute(self):
-        """
-        The same module with an `foo` as a parameter vs. attribute shouldn't
-        share types
-        """
-        class M(torch.nn.Module):
-            def __init__(self, foo):
-                super(M, self).__init__()
-                self.foo = foo
-
-            def forward(self, x):
-                return x + self.foo
-
-        as_param = torch.nn.Parameter(torch.ones(2, 2))
-        as_attr = torch.ones(2, 2)
-        param_mod = M(as_param)
-        attr_mod = M(as_attr)
-        self.assertDifferentType(attr_mod, param_mod)
-
-    def test_same_but_different_classes(self):
-        """
-        Even if everything about the module is the same, different originating
-        classes should prevent type sharing.
-        """
-        class A(torch.nn.Module):
-            __constants__ = ["const"]
-
-            def __init__(self, in1, out1, in2, out2):
-                super(A, self).__init__()
-                self.submod1 = torch.nn.Linear(in1, out1)
-                self.submod2 = torch.nn.Linear(in2, out2)
-                self.const = 5
-
-            def forward(self, x):
-                x = self.submod1(x)
-                x = self.submod2(x)
-                return x * self.const
-
-        class B(torch.nn.Module):
-            __constants__ = ["const"]
-
-            def __init__(self, in1, out1, in2, out2):
-                super(B, self).__init__()
-                self.submod1 = torch.nn.Linear(in1, out1)
-                self.submod2 = torch.nn.Linear(in2, out2)
-                self.const = 5
-
-            def forward(self, x):
-                x = self.submod1(x)
-                x = self.submod2(x)
-                return x * self.const
-
-        a = A(1, 1, 2, 2)
-        b = B(1, 1, 2, 2)
-        self.assertDifferentType(a, b)
-
-    def test_mutate_attr_value(self):
-        """
-        Mutating the value of an attribute should not change type sharing
-        """
-        class M(torch.nn.Module):
-            def __init__(self, in1, out1, in2, out2):
-                super(M, self).__init__()
-                self.submod1 = torch.nn.Linear(in1, out1)
-                self.submod2 = torch.nn.Linear(in2, out2)
-                self.foo = torch.ones(in1, in1)
-
-            def forward(self, x):
-                x = self.submod1(x)
-                x = self.submod2(x)
-                return x + self.foo
-
-        a = M(1, 1, 2, 2)
-        b = M(1, 1, 2, 2)
-        a.foo = torch.ones(2, 2)
-        b.foo = torch.rand(2, 2)
-        self.assertSameType(a, b)
-
-    def test_assign_python_attr(self):
-        """
-        Assigning a new (python-only) attribute should not change type sharing
-        """
-        class M(torch.nn.Module):
-            def __init__(self, in1, out1, in2, out2):
-                super(M, self).__init__()
-                self.submod1 = torch.nn.Linear(in1, out1)
-                self.submod2 = torch.nn.Linear(in2, out2)
-                self.foo = torch.ones(in1, in1)
-
-            def forward(self, x):
-                x = self.submod1(x)
-                x = self.submod2(x)
-                return x + self.foo
-
-        # explicitly call script() to freeze the type
-        a = torch.jit.script(M(1, 1, 2, 2))
-        b = torch.jit.script(M(1, 1, 2, 2))
-        a.new_attr = "foo bar baz"
-        self.assertSameType(a, b)
-
-        # but if we assign attributes *before* calling script(), the types
-        # should be different, since `new_attr` should be turned into a Script
-        # attribute
-        a = M(1, 1, 2, 2)
-        b = M(1, 1, 2, 2)
-        a.new_attr = "foo bar baz"
-        self.assertDifferentType(a, b)
-
-    def test_failed_attribute_compilation(self):
-        """
-        Attributes whose type cannot be inferred should fail cleanly with nice hints
-        """
-        class NotScriptable(object):
-            pass
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                # assign a type we know can't be converted to TorchScript
-                self.foo = NotScriptable()
-
-            def forward(self):
-                # try to use it in forward
-                return self.foo
-
-        m = M()
-        with self.assertRaisesRegex(RuntimeError, "failed to convert Python type"):
-            torch.jit.script(m)
-
-    def test_script_function_attribute(self):
-        """
-        Different functions passed in should lead to different types
-        """
-        @torch.jit.script
-        def fn1(x):
-            return x + x
-
-        @torch.jit.script
-        def fn2(x):
-            return x - x
-
-        class M(torch.nn.Module):
-            def __init__(self, fn):
-                super(M, self).__init__()
-                self.fn = fn
-
-            def forward(self, x):
-                return self.fn(x)
-
-        fn1_mod = M(fn1)
-        fn2_mod = M(fn2)
-
-        self.assertDifferentType(fn1_mod, fn2_mod)
-
-    def test_python_function_attribute(self):
-        """
-        Different functions passed in should lead to different types
-        """
-        def fn1(x):
-            return x + x
-
-        def fn2(x):
-            return x - x
-
-        class M(torch.nn.Module):
-            def __init__(self, fn):
-                super(M, self).__init__()
-                self.fn = fn
-
-            def forward(self, x):
-                return self.fn(x)
-
-        fn1_mod = M(fn1)
-        fn2_mod = M(fn2)
-
-        self.assertDifferentType(fn1_mod, fn2_mod)
-
-    def test_tracing_gives_different_types(self):
-        """
-        Since we can't guarantee that methods are the same between different
-        trace runs, tracing must always generate a unique type.
-        """
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
-            def forward(self, x, y):
-                if x.sum() > y.sum():
-                    return x
-                else:
-                    return y
-
-        a = torch.jit.trace(M(), (torch.zeros(1, 1), torch.ones(1, 1)))
-        b = torch.jit.trace(M(), (torch.ones(1, 1), torch.zeros(1, 1)))
-        self.assertDifferentType(a, b)
-
-    def test_ignored_fns(self):
-        class M(torch.nn.Module):
-            def __init__(self, foo):
-                super(M, self).__init__()
-                self.foo = foo
-
-            @torch.jit.ignore
-            def ignored(self):
-                return self.foo
-
-            def forward(self):
-                return self.ignored()
-
-        a = torch.jit.script(M(torch.ones(1)))
-        b = torch.jit.script(M(torch.ones(2)))
-        self.assertSameType(a, b)
-        self.assertNotEqual(a(), b())
-
-    def test_script_module_containing_traced_module(self):
-        class Traced(torch.nn.Module):
-            def __init__(self):
-                super(Traced, self).__init__()
-
-            def forward(self, x):
-                if x.sum() > 0:
-                    return x
-                else:
-                    return x + x
-
-        class M(torch.nn.Module):
-            def __init__(self, input):
-                super(M, self).__init__()
-                self.traced = torch.jit.trace(Traced(), input)
-
-            def forward(self, x):
-                return self.traced(x)
-
-        a = M((torch.ones(1), ))
-        b = M((torch.zeros(1), ))
-        self.assertDifferentType(a, b)
 
 for test in autograd_method_tests():
     add_autograd_test(*test)
