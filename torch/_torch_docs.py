@@ -7047,7 +7047,7 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 
 add_docstr(torch.quantize_per_tensor,
            r"""
-quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+quantize_per_tensor(input, scale, zero_point, dtype) -> Tensor
 
 Converts a float tensor to quantized tensor with given scale and zero point.
 
@@ -7072,7 +7072,7 @@ Example::
 
 add_docstr(torch.quantize_per_channel,
            r"""
-quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
+quantize_per_channel(input, scales, zero_points, axis, dtype) -> Tensor
 
 Converts a float tensor to per-channel quantized tensor with given scales and zero points.
 
