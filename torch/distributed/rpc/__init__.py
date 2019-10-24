@@ -46,7 +46,7 @@ if sys.version_info >= (3, 0):
         # Initialize RPC.
         _init_rpc(
             backend,
-            store,
+            init_method,
             self_name,
             self_rank,
             worker_name_to_id,

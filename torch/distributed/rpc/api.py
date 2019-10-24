@@ -65,7 +65,7 @@ class RpcBackend(Enum):
 # TODO: add a context manager to wrap _init_rpc and join_rpc
 def _init_rpc(
     backend=RpcBackend.PROCESS_GROUP,
-    store=None,
+    init_method=None,
     self_name=None,
     self_rank=-1,
     worker_name_to_id=None,
