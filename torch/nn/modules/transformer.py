@@ -271,11 +271,6 @@ class TransformerEncoderLayer(Module):
 
         self.activation = _get_activation_fn(activation)
 
-    def __setstate__(self, state):
-        if 'activation' not in state['_modules']:
-            state['activation'] = None
-        super(TransformerEncoderLayer, self).__setstate__(state)
-
     def forward(self, src, src_mask=None, src_key_padding_mask=None):
         # type: (Tensor, Optional[Tensor], Optional[Tensor])
         r"""Pass the input through the encoder layer.
@@ -338,11 +333,6 @@ class TransformerDecoderLayer(Module):
         self.dropout3 = Dropout(dropout)
 
         self.activation = _get_activation_fn(activation)
-
-    def __setstate__(self, state):
-        if 'activation' not in state['_modules']:
-            state['activation'] = None
-        super(TransformerDecoderLayer, self).__setstate__(state)
 
     def forward(self, tgt, memory, tgt_mask=None, memory_mask=None,
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
