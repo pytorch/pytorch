@@ -489,7 +489,7 @@ Args:
 Example::
 
     >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
-    tensor([ 135.,  135,  325])
+    tensor([ 135.,  135,  -45])
 """.format(**common_args))
 
 add_docstr(torch.as_strided,
