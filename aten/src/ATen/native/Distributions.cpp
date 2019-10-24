@@ -236,12 +236,14 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    CPU_tensor_apply2<scalar_t, scalar_t>(ret, lambda,
-      [generator](scalar_t& ret_val, const scalar_t& lambda){
-        ret_val = static_cast<scalar_t>(sample_poisson(static_cast<double>(lambda), generator));
-      }
-    );
+    auto iter = TensorIterator();
+    iter.add_input(lambda);
+    iter.add_output(ret);
+    iter.build();
+    cpu_serial_kernel(iter, [&](const scalar_t lambda_val) -> scalar_t {
+      return static_cast<scalar_t>(sample_poisson(static_cast<double>(lambda_val), generator));
     });
+  });
   return ret;
 }
 
