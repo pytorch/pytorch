@@ -253,25 +253,26 @@ Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    CPU_tensor_apply2<scalar_t, scalar_t>(ret, alpha,
-      [generator](scalar_t& ret_val, const scalar_t& alpha){
+    auto iter = TensorIterator();
+    iter.add_input(alpha);
+    iter.add_output(ret);
+    iter.build();
+    cpu_serial_kernel(iter, [&](const scalar_t alpha_val) -> scalar_t {
+      auto uniform_lambda = [generator] () {
+        at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
+        return standard_uniform(generator);
+      };
+      BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
 
-        auto uniform_lambda = [generator] () {
-          at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
-          return standard_uniform(generator);
-        };
-        BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
-
-        auto normal_lambda = [generator] () {
-          at::normal_distribution<double> normal(0.0, 1.0);
-          return normal(generator);
-        };
-        BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
-        auto sample = sample_gamma<scalar_t, double, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
-        ret_val = std::max(std::numeric_limits<scalar_t>::min(), (scalar_t) sample);
-      }
-    );
+      auto normal_lambda = [generator] () {
+        at::normal_distribution<double> normal(0.0, 1.0);
+        return normal(generator);
+      };
+      BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
+      auto sample = sample_gamma<scalar_t, double, decltype(uniform_lambda), decltype(normal_lambda)>(alpha_val, standard_uniform, standard_normal);
+      return std::max(std::numeric_limits<scalar_t>::min(), (scalar_t) sample);
     });
+  });
 
   return ret;
 }
