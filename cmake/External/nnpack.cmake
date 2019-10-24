@@ -2,7 +2,7 @@ if (__NNPACK_INCLUDED)
   return()
 endif()
 set(__NNPACK_INCLUDED TRUE)
- 
+
 if (NOT USE_NNPACK)
   return()
 endif()
@@ -14,7 +14,7 @@ endif()
 ##############################################################################
 
 ##############################################################################
-# (1) MSVC - unsupported 
+# (1) MSVC - unsupported
 ##############################################################################
 
 if (MSVC)
@@ -71,6 +71,7 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
     # We build static versions of nnpack and pthreadpool but link
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET nnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET nnpack_reference_layers PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
