@@ -14,6 +14,27 @@ namespace torch {
 namespace jit {
 namespace script {
 
+EntityType get_entity_type(ClassTypePtr type, size_t offset_) {
+  TORCH_CHECK(offset_ < type->numAttributes());
+  if (type->is_parameter(offset_)) {
+    return EntityType::PARAMETER;
+  }
+  at::TypePtr t = type->getAttribute(offset_);
+  if (auto cls = t->cast<at::ClassType>()) {
+    if (cls->is_module()) {
+      return EntityType::MODULE;
+    }
+  }
+  return EntityType::ATTRIBUTE;
+}
+
+c10::optional<EntityType> get_entity_type(ClassTypePtr type, const std::string& name) {
+  if (auto slot_idx = type->findAttributeSlot(name)) {
+    return get_entity_type(type, *slot_idx);
+  }
+  return c10::nullopt;
+}
+
 static ModulePtr create_module_object(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,

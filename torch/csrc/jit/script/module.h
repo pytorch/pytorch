@@ -56,6 +56,10 @@ using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 
 enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 
+TORCH_API EntityType get_entity_type(ClassTypePtr type, size_t offset_);
+
+TORCH_API c10::optional<EntityType> get_entity_type(ClassTypePtr type, const std::string& name);
+
 // A method in a module, e.g. f in:
 //
 // class M(ScriptModule):
@@ -341,23 +345,10 @@ struct TORCH_API Module {
     return module_object()->slots().size();
   }
   c10::optional<EntityType> entity_type(const std::string& name) const {
-    if (auto slot_idx = type()->findAttributeSlot(name)) {
-      return entity_type(*slot_idx);
-    }
-    return c10::nullopt;
+    return get_entity_type(type(), name);
   }
   EntityType entity_type(size_t offset_) const {
-    TORCH_CHECK(offset_ < type()->numAttributes());
-    if (type()->is_parameter(offset_)) {
-      return EntityType::PARAMETER;
-    }
-    at::TypePtr t = type()->getAttribute(offset_);
-    if (auto cls = t->cast<at::ClassType>()) {
-      if (cls->is_module()) {
-        return EntityType::MODULE;
-      }
-    }
-    return EntityType::ATTRIBUTE;
+    return get_entity_type(type(), offset_);
   }
 
  private:
