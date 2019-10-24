@@ -6,6 +6,8 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/EnableNamedTensor.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
 
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>
@@ -139,22 +141,26 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    using self_t = scalar_t;
     if (p_.scalar_type() == kDouble) {
       auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
-      CPU_tensor_apply2<self_t, double>(
-        self, p, [generator](self_t& ret_val, double& p_val) {
-          at::bernoulli_distribution<double> bernoulli(p_val);
-          ret_val = static_cast<self_t>(bernoulli(generator));
-        });
+      auto iter = TensorIterator();
+      iter.add_input(p);
+      iter.add_output(self);
+      iter.build();
+      cpu_serial_kernel(iter, [&](const scalar_t p_val) -> scalar_t {
+        at::bernoulli_distribution<double> bernoulli(p_val);
+        return static_cast<scalar_t>(bernoulli(generator));
+      });
     } else {
       AT_DISPATCH_FLOATING_TYPES(p_.scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
         auto p = std::get<0>(expand_inplace(self, p_.to(kCPU)));
-        using p_t = scalar_t;
-        CPU_tensor_apply2<self_t, p_t>(
-          self, p, [generator](self_t& ret_val, p_t& p_val) {
-            at::bernoulli_distribution<float> bernoulli(p_val);
-            ret_val = static_cast<self_t>(bernoulli(generator));
+        auto iter = TensorIterator();
+        iter.add_input(p);
+        iter.add_output(self);
+        iter.build();
+        cpu_serial_kernel(iter, [&](const scalar_t p_val) -> scalar_t {
+          at::bernoulli_distribution<float> bernoulli(p_val);
+          return static_cast<scalar_t>(bernoulli(generator));
         });
       });
     }
