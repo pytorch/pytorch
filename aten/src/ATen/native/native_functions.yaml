@@ -3936,8 +3936,8 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_is_set_to
-    CUDA: legacy::cuda::_th_is_set_to
+    CPU: is_set_to
+    CUDA: is_set_to
 
 - func: masked_fill_.Scalar(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
   use_c10_dispatcher: unboxed_only
