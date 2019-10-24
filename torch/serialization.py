@@ -193,16 +193,23 @@ class _open_file_like(object):
         self.f = f
         self.mode = mode
 
-    def open(self):
+    def open_path(self):
         return open(self.f, self.mode)
 
-    def __enter__(self):
-        if isinstance(self.f, str) or \
-                (sys.version_info[0] == 2 and isinstance(self.f, unicode)) or \
-                (sys.version_info[0] == 3 and isinstance(self.f, pathlib.Path)):
-            self.fd = self.open()
-            return self.fd
+    def open_handle(self):
         return self.f
+
+    def is_path(self):
+        return isinstance(self.f, str) or \
+                (sys.version_info[0] == 2 and isinstance(self.f, unicode)) or \
+                (sys.version_info[0] == 3 and isinstance(self.f, pathlib.Path))
+
+    def __enter__(self):
+        if self.is_path():
+            self.fd = self.open_path()
+            return self.fd
+
+        return self.open_handle()
 
     def __exit__(self, *args):
         if hasattr(self, 'fd'):
@@ -210,8 +217,21 @@ class _open_file_like(object):
 
 
 class _open_zipfile_like(_open_file_like):
-    def open(self):
-        return zipfile.ZipFile(self.f, self.mode)
+    def open_path(self):
+        return torch._C.PyTorchFileWriter(self.f)
+
+    def open_handle(self):
+        def write(capsule, size):
+            self.f.write(torch._C.make_bytes(capsule, size))
+            return size
+
+        self.fd = torch._C.PyTorchFileWriter(write)
+        return self.fd
+
+    def __exit__(self, *args):
+        self.fd.write_end_of_file()
+        if not self.is_path():
+            self.f.flush()
 
 
 def _is_compressed_file(f):
@@ -335,28 +355,26 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         "sys_info": sys_info
     }
 
-    out = torch._C.PyTorchFileWriter('output.zip')
-    def write_buf(name, buf):
-        out.write_record(name, buf.getvalue(), len(buf.getvalue()))
-
     # Write system metadata
     metadata_buf = io.BytesIO()
     pickle_module.dump(metadata, metadata_buf)
-    write_buf('metadata.pkl', metadata_buf)
+    metadata_value = metadata_buf.getvalue()
+    zip_file.write_record('metadata.pkl', metadata_value, len(metadata_value))
 
     # Write the pickle data for `obj`
     data_buf = io.BytesIO()
     pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
     pickler.persistent_id = persistent_id
     pickler.dump(obj)
-    write_buf('data.pkl', data_buf)
+    data_value = data_buf.getvalue()
+    zip_file.write_record('data.pkl', data_value, len(data_value))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
     for key in sorted(serialized_storages.keys()):
         name = 'tensors/{}'.format(key)
         storage = serialized_storages[key]
-        a = torch.empty(0).set_(storage)
-        out.write_a_storage(name, a)
+        num_bytes = storage.size() * storage.element_size()
+        zip_file.write_record(name, storage.data_ptr(), num_bytes)
 
 
 def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
