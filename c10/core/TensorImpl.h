@@ -1555,12 +1555,6 @@ private:
   // at a time).
   // This is private because we must maintain dispatcher invariants on it
   // in type_set_, namely, that autograd_meta_ != nullptr iff type_set_.has(VariableTensorId).
-  //
-  // NB: We CANNOT default this to nullptr, as that will result in an invocation
-  // of std::default_delete<AutogradMeta> which won't work as AutogradMeta
-  // is incomplete at this point.  But the defaulting to nullptr is also
-  // pointless because unique_ptr has a default constructor which will do the
-  // right thing.
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
 protected:
