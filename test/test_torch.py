@@ -6370,11 +6370,18 @@ class TestTorchDeviceType(TestCase):
         t2 = torch.tensor([0], dtype=torch.bool, device=device).set_(t1)
         self.assertTrue(t1.is_set_to(t2))
 
+        # test that sizes must match
+        t1 = torch.empty([2, 3, 4], device=device)
+        t2 = t1.view(4, 3, 2)
+        self.assertFalse(t1.is_set_to(t2))
+        self.assertFalse(t2.is_set_to(t1))
+
         # test that legacy empty size behavior used to be respected (i.e. all
         # empty tensors were logically collapsed to size [0]).
-        t1 = torch.empty([0, 2, 5, 0], device=device)
+        t1 = torch.empty([2, 5, 0], device=device)
         t2 = t1.view([0])
         self.assertFalse(t1.is_set_to(t2))
+        self.assertFalse(t2.is_set_to(t1))
 
     @slowTest
     @skipCUDAIfNoMagma
