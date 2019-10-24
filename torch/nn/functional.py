@@ -3361,7 +3361,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
             key_padding_mask.unsqueeze(1).unsqueeze(2),
             float('-inf'),
         )
-        attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+        attn_output_weights = attn_output_weights.reshape(bsz * num_heads, tgt_len, src_len)
 
     attn_output_weights = softmax(
         attn_output_weights, dim=-1)
