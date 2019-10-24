@@ -6370,11 +6370,18 @@ class TestTorchDeviceType(TestCase):
         t2 = torch.tensor([0], dtype=torch.bool, device=device).set_(t1)
         self.assertTrue(t1.is_set_to(t2))
 
+        # test that sizes must match
+        t1 = torch.empty([2, 3, 4], device=device)
+        t2 = t1.view(4, 3, 2)
+        self.assertFalse(t1.is_set_to(t2))
+        self.assertFalse(t2.is_set_to(t1))
+
         # test that legacy empty size behavior used to be respected (i.e. all
         # empty tensors were logically collapsed to size [0]).
-        t1 = torch.empty([0, 2, 5, 0], device=device)
+        t1 = torch.empty([2, 5, 0], device=device)
         t2 = t1.view([0])
         self.assertFalse(t1.is_set_to(t2))
+        self.assertFalse(t2.is_set_to(t1))
 
     @slowTest
     @skipCUDAIfNoMagma
@@ -9976,6 +9983,27 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(
             torch.tensor([1], dtype=torch.float, device=device),
             actual)
+        # tensors with inf; min, max not provided -- should throw a RuntimeError
+        with self.assertRaisesRegex(RuntimeError, r'range of \[inf, inf\] is not finite'):
+            torch.histc(torch.tensor([float("inf")], dtype=torch.float, device=device))
+        with self.assertRaisesRegex(RuntimeError, r'range of \[1, inf\] is not finite'):
+            torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device))
+        # tensors with inf; min, max provided
+        self.assertEqual(
+            torch.histc(torch.tensor([float("inf")], dtype=torch.float, device=device),
+                        bins=1, min=0, max=3),
+            torch.tensor([0], dtype=torch.float, device=device))
+        self.assertEqual(
+            torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device),
+                        bins=4, max=3),
+            torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
+        # tensor with nan -- should throw a RuntimeError
+        with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
+            torch.histc(torch.tensor([float("nan")], dtype=torch.float, device=device))
+        # tensors with min > max -- should throw a RuntimeError
+        with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
+            torch.histc(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
+                        bins=4, min=5, max=1)
 
         # test against numpy.histogram()
         def test_against_np(tensor, bins=100, min=0, max=0):
@@ -10079,14 +10107,17 @@ class TestTorchDeviceType(TestCase):
 
     def test_fill_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
-            x = torch.tensor((1, 1), dtype=dt, device=device)
-            if (self.device_type == 'cuda' and dt == torch.bfloat16):
-                self.assertRaises(RuntimeError, lambda: x.fill_(1))
-                continue
-            x.fill_(1)
-
-            self.assertEqual(x, torch.tensor([1, 1], dtype=dt, device=device))
-            self.assertEqual(dt, x.dtype)
+            for x in [torch.tensor((10, 10), dtype=dt, device=device),
+                      torch.empty(10000, dtype=dt, device=device)]:  # large tensor
+                numel = x.numel()
+                if (self.device_type == 'cuda' and dt == torch.bfloat16):
+                    self.assertRaises(RuntimeError, lambda: x.fill_(1))
+                    continue
+                bound = 100 if dt in (torch.uint8, torch.int8) else 2000
+                for n in range(-bound, bound, bound // 10):
+                    x.fill_(n)
+                    self.assertEqual(x, torch.tensor([n] * numel, dtype=dt, device=device))
+                    self.assertEqual(dt, x.dtype)
 
     def test_clone_all_dtypes_and_devices(self, device):
         for dt in torch.testing.get_all_dtypes():
