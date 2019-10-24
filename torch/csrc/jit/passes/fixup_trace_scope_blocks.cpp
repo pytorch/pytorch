@@ -1,7 +1,9 @@
 #include <torch/csrc/jit/passes/fixup_trace_scope_blocks.h>
 
+#include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 
 #include <algorithm>
@@ -9,29 +11,11 @@
 namespace torch {
 namespace jit {
 
-struct BlockInfo {
-  int level;
-};
-using BlockInfoMap = std::unordered_map<Block*, BlockInfo>;
-
-bool explodeTupleOutput(std::shared_ptr<Graph>& graph) {
-  bool was_tuple_output = false;
-  if (graph->outputs().size() == 1 &&
-      graph->outputs()[0]->node()->kind() == prim::TupleConstruct) {
-    Node* output_tup_construct = graph->outputs()[0]->node();
-    for (Value* o : output_tup_construct->inputs()) {
-      graph->registerOutput(o);
-    }
-    graph->eraseOutput(0);
-    output_tup_construct->destroy();
-    was_tuple_output = true;
-  }
-  return was_tuple_output;
-}
+using BlockInfoMap = std::unordered_map<Block*, int>;
 
 void inspectBlocks(Block* b, BlockInfoMap& block_info, int level = 0) {
   TORCH_INTERNAL_ASSERT(!block_info.count(b));
-  block_info[b] = BlockInfo{level};
+  block_info[b] = level;
   for (Node* n : b->nodes()) {
     if (n->kind() == prim::FakeScopeBlock) {
       inspectBlocks(n->blocks()[0], block_info, level + 1);
@@ -65,7 +49,7 @@ void makeDefsDominateUses(
     Block* their_provenance = n->owningBlock();
     while (their_provenance) {
       if (seen.count(their_provenance)) {
-        return block_info.at(their_provenance).level;
+        return block_info.at(their_provenance);
       }
       if (!their_provenance->owningNode()) {
         their_provenance = nullptr;
@@ -84,8 +68,8 @@ void makeDefsDominateUses(
         int ancestor_level = find_common_ancestor_block_level(inp->node());
 
         Block* origin_block = inp->node()->owningBlock();
-        if (ancestor_level == block_info.at(origin_block).level) {
-          remap[inp] = {inp, block_info.at(origin_block).level};
+        if (ancestor_level == block_info.at(origin_block)) {
+          remap[inp] = {inp, block_info.at(origin_block)};
         } else {
           Value* v_itr = inp;
           Block* b = origin_block;
@@ -93,13 +77,13 @@ void makeDefsDominateUses(
           // Start off where we left off if there's an existing mapping
           if (remap.count(inp)) {
             int existing_level = remap[inp].level;
-            while (block_info.at(b).level > existing_level) {
+            while (block_info.at(b) > existing_level) {
               b = b->owningNode()->owningBlock();
             }
             v_itr = remap[inp].v;
           }
 
-          while (block_info.at(b).level > ancestor_level) {
+          while (block_info.at(b) > ancestor_level) {
             b->registerOutput(v_itr);
             Value* remapped = b->owningNode()->addOutput();
             v_itr = remapped;
@@ -265,6 +249,7 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
   if (script::getInlineEverythingMode()) {
     Inline(*g);
   }
+  LowerSimpleTuples(g);
   EliminateDeadCode(g);
   LintGraph(g);
 }
@@ -274,7 +259,7 @@ void runCleanupPasses(script::Module* m) {
   for (auto module : m->get_modules()) {
     runCleanupPasses(&module.module);
   }
-  for (auto method : methods) {
+  for (auto& method : methods) {
     runCleanupPasses(method.graph());
   }
 }
@@ -282,27 +267,38 @@ void runCleanupPasses(script::Module* m) {
 void FixupTraceScopeBlocks(
     std::shared_ptr<Graph>& graph,
     script::Module* self) {
-  bool was_tuple_output = explodeTupleOutput(graph);
-  // Gather level information about blocks in the graph
+  // Gather level information about blocks in the graph.
+  // Assign each block a number, with graph->block() gettng
+  // 0 and each sub-block gets a higher number based on how
+  // deeply nested it is.
   BlockInfoMap block_info;
   inspectBlocks(graph->block(), block_info);
+  // Iterate through all the nodes in program order and--for each use--
+  // if the Value referenced is not in a scope that dominates the node,
+  // add block and Node outputs to lift it into a scope in which
+  // it dominates the Use.
   RemappingTable table;
   makeDefsDominateUses(graph->block(), table, block_info);
+  // For all blocks except graph->block(), convert multiple block
+  // returns to a TupleConstruct. This is required for turning the
+  // blocks into Methods. (and in the case that self is nullptr,
+  // it is required to properly inline the blocks).
   convertReturnsToTuples(graph->block());
-  if (was_tuple_output || graph->outputs().size() > 1) {
-    WithInsertPoint guard(graph->return_node());
-    Value* out_tup =
-        graph->insertNode(graph->createTuple(graph->outputs()))->output();
-    while (graph->outputs().size()) {
-      graph->eraseOutput(0);
-    }
-    graph->registerOutput(out_tup);
-  }
   if (!self) {
+    // We have no Module, so we're just going to inline everything.
+    // This should give us a totally flag graph.
     inlineScopeBlocks(graph->block());
     runCleanupPasses(graph);
   } else {
+    // Lambda lift Values (i.e. add Graph inputs for the purpose of
+    // referencing values that dominate the block) and convert
+    // the block to a Graph. blocks()[0] on each FakeScopeBlock then
+    // appears as a Graph attribute attr::Subgraph
     lambdaLiftBlocksAndConvertToGraph(graph->block());
+    // Register the attr::Subgraph Graph values as Functions in the
+    // class compilation unit and register that Function as a method
+    // on the corresponding Module in the Module hierarchy. Note that we
+    // unique the methods by naming them forward, forward1, forward2...
     createMethodCalls(graph, self);
     runCleanupPasses(self);
     // `graph` isn't referenced in `self` yet, so we need to run

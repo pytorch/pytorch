@@ -354,8 +354,6 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
       Inline(*graph);
     }
     FixupTraceScopeBlocks(graph, self);
-    LowerSimpleTuples(graph);
-    EliminateDeadCode(graph);
 
     return {state, out_stack};
   } catch (...) {
