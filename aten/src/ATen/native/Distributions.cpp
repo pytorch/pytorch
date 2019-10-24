@@ -198,11 +198,14 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "_standard_gamma_grad_cpu", [&] {
-    CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, self, output,
-      [](scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {
-        ret_val = standard_gamma_grad_one<scalar_t, double>(self_val, output_val);
-      }
-    );
+    auto iter = TensorIterator();
+    iter.add_input(self);
+    iter.add_input(output);
+    iter.add_output(ret);
+    iter.build();
+    cpu_serial_kernel(iter, [&](const scalar_t self_val, const scalar_t output_val) -> scalar_t {
+      return standard_gamma_grad_one<scalar_t, double>(self_val, output_val);
+    });
   });
   return ret;
 }
