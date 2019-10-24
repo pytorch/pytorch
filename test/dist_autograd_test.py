@@ -22,14 +22,11 @@ ctx_ids = [-1, -1, -1, -1]
 
 known_context_ids = []
 
-# we don't need a lock here since the GIL is held while executing remote
-# python UDFs, so access to known_context_ids is serialized across several workers.
-def _store_context_id(context_id):
-    global known_context_ids
-    known_context_ids.append(context_id)
 
 # Send rpc done info and context_id to
 # dst_rank = (self.rank + rank_distance) % self.world_size
+# we don't need a lock here since the GIL is held while executing remote
+# python UDFs, so access is serialized across several workers.
 def _set_rpc_done(ctx_id, rank_distance):
     global rpc_done
     global ctx_ids
