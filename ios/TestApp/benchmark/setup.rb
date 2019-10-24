@@ -1,8 +1,6 @@
-
 require 'xcodeproj'
 require 'fileutils'
 require 'optparse'
-
 
 options = {}
 option_parser = OptionParser.new do |opts| 

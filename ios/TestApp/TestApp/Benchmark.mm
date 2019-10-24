@@ -70,6 +70,7 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
     std::cout << module.forward(inputs) << std::endl;
   }
   UI_LOG(@"Start benchmarking...", nil);
+  UI_LOG(@"Running warmup runs")
   CAFFE_ENFORCE(FLAGS_warmup >= 0, "Number of warm up runs should be non negative, provided ",
                 FLAGS_warmup, ".");
   for (int i = 0; i < FLAGS_warmup; ++i) {
