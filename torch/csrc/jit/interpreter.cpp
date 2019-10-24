@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/backward.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/instruction.h>
 #include <torch/csrc/jit/operator.h>
