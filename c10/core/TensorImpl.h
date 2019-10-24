@@ -853,11 +853,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   c10::AutogradMetaInterface* autograd_meta() const;
 
   /**
-   * Detach the autograd metadata unique_ptr from this tensor, and return it.
-   */
-  std::unique_ptr<c10::AutogradMetaInterface> detach_autograd_meta();
-
-  /**
    * Set the pointer to named tensor metadata.
    */
   void set_named_tensor_meta(std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta) {
