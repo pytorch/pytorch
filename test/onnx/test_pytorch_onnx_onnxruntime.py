@@ -602,6 +602,32 @@ class TestONNXRuntime(unittest.TestCase):
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
 
+    def test_groupnorm(self):
+        model = torch.nn.GroupNorm(3, 6, 0.002)
+        x = torch.randn(4, 6, 180, 180, 180)
+        self.run_test(model, x)
+
+        model = torch.nn.GroupNorm(1, 6, 0.002)
+        x = torch.randn(4, 6, 180, 180)
+        self.run_test(model, x)
+
+        model = torch.nn.GroupNorm(6, 6, 0.002)
+        x = torch.randn(4, 6, 180, 180)
+        self.run_test(model, x)
+
+    def test_groupnorm_noaffine(self):
+        model = torch.nn.GroupNorm(4, 8, 0.002, affine=False)
+        x = torch.randn(3, 8, 224, 224)
+        self.run_test(model, x)
+
+        model = torch.nn.GroupNorm(1, 6, 0.002, affine=False)
+        x = torch.randn(4, 6, 180, 180)
+        self.run_test(model, x)
+
+        model = torch.nn.GroupNorm(6, 6, 0.002, affine=False)
+        x = torch.randn(4, 6, 180, 180)
+        self.run_test(model, x)
+
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
