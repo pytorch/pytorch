@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
 
 namespace torch {
@@ -144,12 +143,15 @@ static void unpackReturnTuple(Stack &stack) {
   stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
 }
 
-struct DifferentiableGraphBackward : public autograd::Node {
-  DifferentiableGraphBackward(
+// DifferentiableGraphBackward contains methods that meant to be exposed to the public
+// while DifferentiableGraphBackwardInternal contains the data and methods to deal
+// with JIT internally
+struct DifferentiableGraphBackwardInternal : public detail::DifferentiableGraphBackward {
+  DifferentiableGraphBackwardInternal(
       GraphExecutor executor,
       size_t input_size,
       size_t capture_size)
-      : executor(std::move(executor)),
+      : DifferentiableGraphBackward(std::move(executor)),
         captures_(capture_size),
         input_instructions_(input_size) {}
 
@@ -252,8 +254,6 @@ struct DifferentiableGraphBackward : public autograd::Node {
     }
   }
 
-  friend struct ExecutionPlan;
-  GraphExecutor executor;
   CaptureList captures_;
   UnpackInstructions input_instructions_;
 };
@@ -273,7 +273,7 @@ struct DifferentiableGraphOp {
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   int operator()(Stack& stack) const {
-    auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
+    auto grad_fn = std::make_shared<DifferentiableGraphBackwardInternal>(
         grad_executor,
         grad.df_input_vjps.size(),
         grad.df_input_captured_inputs.size() +
@@ -347,14 +347,14 @@ struct DifferentiableGraphOp {
   }
   // Capture (save) inputs that would be required to subsequently run backwards
   void captureInputs(
-      DifferentiableGraphBackward& grad_fn,
+      DifferentiableGraphBackwardInternal& grad_fn,
       at::ArrayRef<IValue> inputs) const {
     for (size_t offset : grad.df_input_captured_inputs) {
       grad_fn.capture(inputs[offset], /*is_output*/ false);
     }
   }
   void captureOutputs(
-      DifferentiableGraphBackward& grad_fn,
+      DifferentiableGraphBackwardInternal& grad_fn,
       at::ArrayRef<IValue> outputs) const {
     for (size_t offset : grad.df_input_captured_outputs) {
       grad_fn.capture(outputs[offset], /*is_output*/ true);
