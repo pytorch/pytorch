@@ -52,5 +52,21 @@ template class ReplicationPadImpl<1, ReplicationPad1dImpl>;
 template class ReplicationPadImpl<2, ReplicationPad2dImpl>;
 template class ReplicationPadImpl<3, ReplicationPad3dImpl>;
 
+// ============================================================================
+
+ZeroPad2dImpl::ZeroPad2dImpl(const ZeroPad2dOptions& options_)
+    : options(options_) {}
+
+void ZeroPad2dImpl::reset() {}
+
+void ZeroPad2dImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::ZeroPad2d"
+         << "(padding=" << options.padding() << ")";
+}
+
+Tensor ZeroPad2dImpl::forward(const Tensor& input) {
+  return F::pad(input, PadOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kConstant).value(0));
+}
+
 } // namespace nn
 } // namespace torch
