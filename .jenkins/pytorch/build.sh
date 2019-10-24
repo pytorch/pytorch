@@ -202,16 +202,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   popd
   assert_git_not_dirty
 else
-  # Test standalone c10 build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-    mkdir -p c10/build
-    pushd c10/build
-    cmake ..
-    make -j
-    popd
-    assert_git_not_dirty
-  fi
-
   # Test no-Python build
   echo "Building libtorch"
   # NB: Install outside of source directory (at the same level as the root
