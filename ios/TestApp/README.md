@@ -31,7 +31,7 @@ The benchmark code is written in C++, see `benchmark.mm` for more details.
 
 > The script can only be run on MacOS
 
-For those who want to do perf testing but don't have any iOS dev experience. The `bootstrap.sh` is the right tool for you. It'll automatically build and install the app on the device. But it does require you to have 
+For those who want to do perf testing but don't have any iOS dev experience, the `bootstrap.sh` is the right tool for you. It'll automatically build and install the app on the device. But it does require you to have 
 
 1. A valid iOS dev certificate installed on your local machine. 
 2. A valid provisioning profile for code signing
@@ -42,6 +42,8 @@ To run the script, simply type the command below and make sure your phone is unl
 ```shell
 ./bootstrap -t ${TEAM_ID} -p ${PROVISIONING_PROFILE}
 ```
+
+Open the app, the benchmark log will be displayed on the screen.
 
 > Note This requires ios-deploy to be installed. Please have a look at [ios-deploy](https://github.com/ios-control/ios-deploy). To quickly install it, use `npm -g i ios-deploy`
 
