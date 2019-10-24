@@ -324,7 +324,7 @@ class TestTypeSharing(JitTestCase):
 
     def test_python_function_attribute_same(self):
         """
-        Different functions passed in should lead to different types
+        Same functions passed in should lead to same types
         """
         def fn(x):
             return x + x

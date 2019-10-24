@@ -535,6 +535,7 @@ class TestRecursiveScript(JitTestCase):
         class N(nn.Module):
             def __init__(self, norm):
                 super(N, self).__init__()
+                self.activation = torch.nn.functional.relu
                 self.norm = norm
 
             def forward(self, src):

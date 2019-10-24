@@ -38,7 +38,7 @@ ClassTypePtr ConcreteModuleType::createNewTypeFromThis() {
 
   for (const auto& moduleInfo : modules_) {
     cls->addAttribute(
-        moduleInfo.name, moduleInfo.meta->getJitType(), /*isParameter=*/false);
+        moduleInfo.name, moduleInfo.meta->getJitType(), /*is_parameter=*/false);
   }
 
   jitType_ = std::move(cls);
@@ -138,7 +138,7 @@ void ConcreteModuleType::addAttribute(
 
 void ConcreteModuleType::addFunctionAttribute(
     std::string name,
-    TypePtr type,
+    const TypePtr& type,
     py::object pyFunction) {
   TORCH_INTERNAL_ASSERT(type);
   TORCH_INTERNAL_ASSERT(!jitType_);

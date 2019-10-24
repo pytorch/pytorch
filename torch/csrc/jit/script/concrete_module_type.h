@@ -60,7 +60,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   void addAttribute(std::string name, TypePtr type, bool isParameter);
   void addFunctionAttribute(
       std::string name,
-      TypePtr type,
+      const TypePtr& type,
       py::object pyFunction);
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
   void addOverload(
