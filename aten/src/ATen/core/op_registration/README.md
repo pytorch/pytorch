@@ -23,7 +23,7 @@ If you’re just using the custom operator API to add new kernels for existing o
 
 * It will not get a C++ API generated. There will not be `Tensor::your_op()` methods or `at::your_op()` functions to call your operator.
 * The API for calling the operator from Python looks a little bit different. It needs to be called through `torch.ops.your_op()` instead of `torch._C`.
-* Setting up autograd for custom operators is harder. You don’t get it automatically but need to use `torch::autograd::Function` to implement autograd. Note also that `torch::autograd::Function` does not work together with dispatch yet, so if you have different kernels for different backends (say CPU and CUDA), you need to manually write if/else statements for that.
+* Setting up autograd for custom operators is harder. You don’t get it automatically but need to use `torch::autograd::Function` to implement autograd ([example](https://github.com/pytorch/pytorch/blob/d762ad09df7f5808196b0e2e417b6592e0d30a30/test/cpp/api/autograd.cpp#L126-L152)). Note also that `torch::autograd::Function` does not work together with dispatch yet, so if you have different kernels for different backends (say CPU and CUDA), you need to manually write if/else statements for that.
 
 ## Writing custom operators
 
