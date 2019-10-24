@@ -168,7 +168,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
           bias.size(0) == K,
-          "bias should have K elements: " + std::to_string(K));
+          "bias should have K elements: " + c10::to_string(K));
       bias_ptr = bias.data_ptr<float>();
     }
 
