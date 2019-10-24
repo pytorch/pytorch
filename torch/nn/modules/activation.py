@@ -678,7 +678,7 @@ class MultiheadAttention(Module):
         'bias_k': torch._jit_internal.Optional[torch.Tensor],
         'bias_v': torch._jit_internal.Optional[torch.Tensor],
     }
-    __constants__ = ['q_proj_weight', 'k_proj_weight', 'v_proj_weight']
+    __constants__ = ['q_proj_weight', 'k_proj_weight', 'v_proj_weight', 'in_proj_weight']
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
         super(MultiheadAttention, self).__init__()
@@ -696,6 +696,7 @@ class MultiheadAttention(Module):
             self.q_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
             self.k_proj_weight = Parameter(torch.Tensor(embed_dim, self.kdim))
             self.v_proj_weight = Parameter(torch.Tensor(embed_dim, self.vdim))
+            self.register_parameter('in_proj_weight', None)
         else:
             self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
             self.register_parameter('q_proj_weight', None)
@@ -717,14 +718,6 @@ class MultiheadAttention(Module):
         self.add_zero_attn = add_zero_attn
 
         self._reset_parameters()
-
-    def __setstate__(self, state):
-        if '_qkv_same_embed_dim' not in state:
-            state['_qkv_same_embed_dim'] = False
-            warnings.warn('A new version of MultiheadAttention module has been implemented. \
-                Please re-train your model with the new module',
-                            DeprecationWarning)
-        return super(MultiheadAttention, self).__setstate__(state)
 
     def _reset_parameters(self):
         if self._qkv_same_embed_dim:
