@@ -23,6 +23,8 @@ struct TORCH_API AdagradOptions {
   TORCH_ARG(double, learning_rate);
   TORCH_ARG(double, lr_decay) = 0;
   TORCH_ARG(double, weight_decay) = 0;
+  TORCH_ARG(double, initial_accumulator_value) = 0;
+  TORCH_ARG(double, eps) = 1e-10;
 };
 
 class TORCH_API Adagrad : public Optimizer {
@@ -34,23 +36,22 @@ class TORCH_API Adagrad : public Optimizer {
       : Optimizer(std::forward<ParameterContainer>(parameters)),
         options(options_) {}
 
-  void step() override;
+  template <typename Closure>
+  void step(Closure closure) override;
 
   AdagradOptions options;
 
   void save(serialize::OutputArchive& archive) const override;
   void load(serialize::InputArchive& archive) override;
 
-  std::vector<Tensor> sum_buffers;
-  std::vector<int64_t> step_buffers;
+  c10::Dict<std::string, at::IValue> state;
 
  private:
   Adagrad() : options(0) {}
 
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    _TORCH_OPTIM_SERIALIZE(sum_buffers);
-    _TORCH_OPTIM_SERIALIZE(step_buffers);
+    _TORCH_OPTIM_SERIALIZE(state);
   }
 };
 } // namespace optim
