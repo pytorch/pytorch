@@ -403,14 +403,13 @@ void Pickler::pushSpecializedList(
 }
 
 static inline double swapDouble(double value) {
-  static_assert(sizeof(double) == 8, "double length");  // NO LINT
   const char* bytes = reinterpret_cast<const char*>(&value);
   double flipped;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
   for (size_t i = 0; i < sizeof(double); ++i) {
     out_bytes[i] = bytes[sizeof(double) - i - 1];
   }
-  return flipped;
+  return *reinterpret_cast<double*>(out_bytes);
 }
 
 void Pickler::pushDouble(double value) {
