@@ -13,6 +13,10 @@ using namespace torch::test;
 
 struct SequentialTest : torch::test::SeedingFixture {};
 
+TEST_F(SequentialTest, CanContainThings) {
+  Sequential sequential(Linear(3, 4), ReLU(), BatchNorm(3));
+}
+
 TEST_F(SequentialTest, ConstructsFromSharedPointer) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
