@@ -14,6 +14,27 @@ namespace torch {
 namespace jit {
 namespace script {
 
+EntityType get_entity_type(ClassTypePtr type, size_t offset_) {
+  TORCH_CHECK(offset_ < type->numAttributes());
+  if (type->is_parameter(offset_)) {
+    return EntityType::PARAMETER;
+  }
+  at::TypePtr t = type->getAttribute(offset_);
+  if (auto cls = t->cast<at::ClassType>()) {
+    if (cls->is_module()) {
+      return EntityType::MODULE;
+    }
+  }
+  return EntityType::ATTRIBUTE;
+}
+
+c10::optional<EntityType> get_entity_type(ClassTypePtr type, const std::string& name) {
+  if (auto slot_idx = type->findAttributeSlot(name)) {
+    return get_entity_type(type, *slot_idx);
+  }
+  return c10::nullopt;
+}
+
 static ModulePtr create_module_object(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
@@ -259,34 +280,27 @@ Module Module::clone_impl(
 
 Module Module::create_module_from_shadow_impl(
     const Module& m,
-    ShadowClassTypePtr s_cls,
+    const ShadowClassTypePtr& s_cls,
     std::unordered_map<TypePtr, TypePtr>& type_remap) {
   Module r(m.name(), m.class_compilation_unit(), true);
   type_remap[m.type()] = r.type();
-  auto names = s_cls->attributeNames();
 
   // Copy slots. If a slot is a module - recursively clone it.
   for (const auto& name: s_cls->attributeNames()) {
     auto slot_idx = m.type()->findAttributeSlot(name);
     // TODO: type check for m.type() and s_cls
-    if (slot_idx) {
-      // initialize existing attribute
-      const auto& value = m.module_object()->getSlot(*slot_idx);
-      if (*m.entity_type(name) == EntityType::MODULE) {
-        const Module& orig = Module(value.toObject());
-        Module cloned = create_module_from_shadow_impl(orig, s_cls->getAttribute(name)->expect<ShadowClassType>(), type_remap);
-        type_remap[orig.type()] = cloned.type();
-        r.register_module(name, cloned);
-      } else {
-        r.register_attribute(
-            name,
-            s_cls->getAttribute(name),
-            value,
-            *m.entity_type(name) == EntityType::PARAMETER);
-      }
+    const auto& value = slot_idx ? m.module_object()->getSlot(*slot_idx) : IValue();
+    if (get_entity_type(s_cls, name) == EntityType::MODULE) {
+      const Module& orig = Module(value.toObject());
+      Module cloned = create_module_from_shadow_impl(orig, s_cls->getAttribute(name)->expect<ShadowClassType>(), type_remap);
+      type_remap[orig.type()] = cloned.type();
+      r.register_module(name, cloned);
     } else {
-      // initializing non-existing attribute
-      // TODO: refactor entity_type
+      r.register_attribute(
+          name,
+          s_cls->getAttribute(name),
+          value,
+          get_entity_type(s_cls, name) == EntityType::PARAMETER);
     }
   }
 

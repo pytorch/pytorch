@@ -801,19 +801,15 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct CAFFE2_API TupleType : public NamedType {
-  static std::shared_ptr<FunctionSchema> namedTupleSchemaFromNamesAndTypes(
-      c10::QualifiedName,
-      std::vector<std::string>,
-      std::vector<TypePtr>);
-
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<std::string>& field_names,
+      const std::vector<TypePtr>& types);
   static TupleTypePtr create(
-      std::vector<TypePtr> types,
-      c10::optional<c10::QualifiedName> name = c10::nullopt,
-      std::shared_ptr<FunctionSchema> schema = nullptr) {
+      std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
         std::move(types),
-        std::move(name),
-        std::move(schema))); // NOLINT(modernize-make-shared)
+        c10::nullopt,
+        nullptr)); // NOLINT(modernize-make-shared)
   }
 
   at::ArrayRef<TypePtr> elements() const {
@@ -833,7 +829,8 @@ struct CAFFE2_API TupleType : public NamedType {
   }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
-    return create(std::move(contained_types));
+    return std::shared_ptr<TupleType>(
+        new TupleType(std::move(contained_types), name(), schema()));
   }
   const std::shared_ptr<FunctionSchema>& schema() const {
     return schema_;
@@ -1359,9 +1356,6 @@ struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
 
-struct ShadowClassType;
-using ShadowClassTypePtr = std::shared_ptr<ShadowClassType>;
-
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public NamedType {
   // Create a class type with name `name` and its methods stored in `cu`.
@@ -1539,7 +1533,7 @@ struct CAFFE2_API ClassType : public NamedType {
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
   static const TypeKind Kind = TypeKind::ClassType;
 
- protected:
+ private:
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
@@ -1564,6 +1558,9 @@ struct CAFFE2_API ClassType : public NamedType {
   std::vector<Function*> methods_;
   friend struct ShadowClassType;
 };
+
+struct ShadowClassType;
+using ShadowClassTypePtr = std::shared_ptr<ShadowClassType>;
 
 struct TORCH_API ShadowClassType : ClassType {
   static ShadowClassTypePtr create(c10::ClassTypePtr shadowed) {
