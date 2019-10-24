@@ -285,7 +285,7 @@ std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(const Tensor& tensor)
   TORCH_CHECK(dimensions >= 2,
     "Fan in and fan out can not be computed "
     "for tensor with fewer than 2 dimensions")
-  
+
   int64_t fan_in, fan_out;
   if (dimensions == 2) { // Linear
     fan_in = tensor.size(1);

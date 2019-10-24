@@ -38,12 +38,12 @@ void LinearImpl::reset() {
     bias = register_parameter("bias", {}, /*requires_grad=*/false);
   }
 
-  torch::nn::init::kaiming_uniform_(weight, sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+  torch::nn::init::kaiming_uniform_(weight, std::sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
   if (bias.defined()) {
     int64_t fan_in, fan_out;
     std::tie(fan_in, fan_out) =
       torch::nn::init::_calculate_fan_in_and_fan_out(weight);
-    const auto bound = 1 / sqrt(fan_in);
+    const auto bound = 1 / std::sqrt(fan_in);
     torch::nn::init::uniform_(bias, -bound, bound);
   }
 }
