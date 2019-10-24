@@ -395,28 +395,6 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
   self->set_sizes_and_strides(newSize, newStride);
 }
 
-/* we have to handle the case where the result is a number */
-void THTensor_(squeeze)(THTensor *self, THTensor *src)
-{
-  if(!src)
-    src = self;
-
-  THTensor_(set)(self, src);
-
-  std::vector<int64_t> newSize;
-  std::vector<int64_t> newStride;
-  for(int d = 0; d < src->dim(); ++d)
-  {
-    if(src->size(d) != 1)
-    {
-      newSize.push_back(src->size(d));
-      newStride.push_back(src->stride(d));
-    }
-  }
-
-  self->set_sizes_and_strides(newSize, newStride);
-}
-
 void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 {
   int d;
@@ -523,23 +501,6 @@ int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor* src)
       return 0;
   }
   return 1;
-}
-
-int THTensor_(isSetTo)(const THTensor *self, const THTensor* src)
-{
-  if (THTensor_getStoragePtr(self) == THTensor_getStoragePtr(src) &&
-      self->storage_offset() == src->storage_offset() &&
-      THTensor_nDimension(self) == THTensor_nDimension(src))
-  {
-    int d;
-    for (d = 0; d < THTensor_nDimension(self); ++d)
-    {
-      if (self->size(d) != src->size(d) || self->stride(d) != src->stride(d))
-        return 0;
-    }
-    return 1;
-  }
-  return 0;
 }
 
 ptrdiff_t THTensor_(nElement)(const THTensor *self)
