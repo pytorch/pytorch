@@ -1,0 +1,154 @@
+ir_version: 4
+producer_name: "pytorch"
+producer_version: "1.3"
+graph {
+  node {
+    output: "2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\000@"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "3"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\200?"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "2"
+    input: "3"
+    output: "4"
+    op_type: "Pow"
+  }
+  node {
+    input: "0"
+    input: "4"
+    output: "5"
+    op_type: "Div"
+  }
+  node {
+    output: "6"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 7
+        raw_data: "\002\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "6"
+    output: "7"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 2
+      type: INT
+    }
+  }
+  node {
+    input: "1"
+    input: "7"
+    output: "8"
+    op_type: "BitShift"
+    attribute {
+      name: "direction"
+      s: "RIGHT"
+      type: STRING
+    }
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: 2
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "5"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "8"
+    type {
+      tensor_type {
+        elem_type: 2
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 11
+}
