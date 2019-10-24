@@ -153,13 +153,6 @@ ${return_type} ${api_name}(${type_method_formals}) {
 }
 """)
 
-LEGACY_WRAPPER_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyATenKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-""")
-
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
@@ -480,12 +473,9 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         if declaration['use_c10_dispatcher'] == 'full':
             wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
                 declaration, formal_types=formal_types))
-        elif declaration['use_c10_dispatcher'] == 'unboxed_only':
-            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
         else:
-            assert declaration['use_c10_dispatcher'] == 'no'
-            wrapper_registrations.append(LEGACY_WRAPPER_REGISTRATION.substitute(
+            assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                 declaration, formal_types=formal_types))
 
     env = {
