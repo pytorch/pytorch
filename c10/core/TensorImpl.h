@@ -150,6 +150,9 @@ namespace impl {
 struct C10_API AutogradMetaFactory {
   virtual ~AutogradMetaFactory() = default;
   virtual std::unique_ptr<AutogradMetaInterface> make() const = 0;
+  // This method is the dumbest method.  But I don't have access
+  // to Tensor (not TensorImpl) which is undefined in this header.
+  virtual const at::Tensor& undefined_tensor() const = 0;
 };
 
 C10_API void SetAutogradMetaFactory(AutogradMetaFactory* factory);

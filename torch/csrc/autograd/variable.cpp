@@ -214,9 +214,14 @@ void Variable::remove_hook(unsigned pos) {
 
 namespace {
 
+at::Tensor singleton_undefined_tensor;
+
 struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
   std::unique_ptr<c10::AutogradMetaInterface> make() const override {
     return c10::guts::make_unique<AutogradMeta>();
+  }
+  const at::Tensor& undefined_tensor() const override {
+    return singleton_undefined_tensor;
   }
 };
 

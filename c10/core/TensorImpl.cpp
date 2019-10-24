@@ -29,16 +29,18 @@ const char * const TensorImpl::err_msg_tensor_metadata_change_not_allowed =
     "        x.set_(y)";
 
 at::Tensor& TensorImpl::grad() {
-  if (autograd_meta()) {
-    return autograd_meta()->grad();
+  if (type_set_.has(TensorTypeId::VariableTensorId)) {
+    if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+    return autograd_meta_->grad();
   } else {
     AT_ERROR("grad is not implemented for Tensor");
   }
 }
 
 const at::Tensor& TensorImpl::grad() const {
-  if (autograd_meta()) {
-    return autograd_meta()->grad();
+  if (type_set_.has(TensorTypeId::VariableTensorId)) {
+    if (!autograd_meta_) impl::GetAutogradMetaFactory()->undefined_tensor();
+    return autograd_meta_->grad();
   } else {
     AT_ERROR("grad is not implemented for Tensor");
   }
