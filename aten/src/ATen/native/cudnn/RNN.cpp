@@ -540,7 +540,7 @@ namespace {
         auto param_from = *a, param_to = *b;
         AT_ASSERTM(param_from.type() == param_to.type(), "parameter types mismatch");
         if (copy) {
-            param_to.copy_(param_from.view_as(param_to));
+            param_to.copy_(param_from.resize_as_(param_to));
         } else {
             param_from.resize_as_(param_to);
         }

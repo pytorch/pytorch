@@ -1150,6 +1150,9 @@ Tensor view(const Tensor& self, IntArrayRef size) {
   auto stride = at::detail::computeStride(self.sizes(),
                                           self.strides(),
                                           inferred_size);
+  if (!stride.has_value()) {
+    printf("Error!!!\n");
+  }
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
