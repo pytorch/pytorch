@@ -257,6 +257,46 @@ Module Module::clone_impl(
   return r;
 }
 
+Module Module::create_module_from_shadow_impl(
+    const Module& m,
+    ShadowClassTypePtr s_cls,
+    std::unordered_map<TypePtr, TypePtr>& type_remap) {
+  Module r(m.name(), m.class_compilation_unit(), true);
+  type_remap[m.type()] = r.type();
+  auto names = s_cls->attributeNames();
+
+  // Copy slots. If a slot is a module - recursively clone it.
+  for (const auto& name: s_cls->attributeNames()) {
+    auto slot_idx = m.type()->findAttributeSlot(name);
+    // TODO: type check for m.type() and s_cls
+    if (slot_idx) {
+      // initialize existing attribute
+      const auto& value = m.module_object()->getSlot(*slot_idx);
+      if (*m.entity_type(name) == EntityType::MODULE) {
+        const Module& orig = Module(value.toObject());
+        Module cloned = create_module_from_shadow_impl(orig, s_cls->getAttribute(name)->expect<ShadowClassType>(), type_remap);
+        type_remap[orig.type()] = cloned.type();
+        r.register_module(name, cloned);
+      } else {
+        r.register_attribute(
+            name,
+            s_cls->getAttribute(name),
+            value,
+            *m.entity_type(name) == EntityType::PARAMETER);
+      }
+    } else {
+      // initializing non-existing attribute
+      // TODO: refactor entity_type
+    }
+  }
+
+  // Clone methods remapping the types to the cloned ones.
+  for (auto& fn : m.type()->methods()) {
+    r.clone_method(m, *fn, type_remap);
+  }
+  return r;
+}
+
 void Module::train(bool on) {
   for (NameModule s : get_modules()) {
     s.module.train(on);

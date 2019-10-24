@@ -49,7 +49,8 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(FunctionType)           \
   _(ClassType)              \
   _(CapsuleType)            \
-  _(InterfaceType)
+  _(InterfaceType)          \
+  _(ShadowClassType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -1358,6 +1359,9 @@ struct ClassType;
 using ClassTypePtr = std::shared_ptr<ClassType>;
 using ::torch::jit::script::CompilationUnit;
 
+struct ShadowClassType;
+using ShadowClassTypePtr = std::shared_ptr<ShadowClassType>;
+
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public NamedType {
   // Create a class type with name `name` and its methods stored in `cu`.
@@ -1535,7 +1539,7 @@ struct CAFFE2_API ClassType : public NamedType {
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
   static const TypeKind Kind = TypeKind::ClassType;
 
- private:
+ protected:
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
@@ -1558,9 +1562,37 @@ struct CAFFE2_API ClassType : public NamedType {
 
   // List of methods associated with this class.
   std::vector<Function*> methods_;
-
+  friend struct ShadowClassType;
 };
 
+struct TORCH_API ShadowClassType : ClassType {
+  static ShadowClassTypePtr create(c10::ClassTypePtr shadowed) {
+    return c10::ShadowClassTypePtr(new ShadowClassType(shadowed));
+  }
+
+  void removeAttribute(const std::string& name);
+  std::vector<std::string> attributeNames() const {
+    return attributeNames_;
+  }
+
+protected:
+  explicit ShadowClassType(c10::ClassTypePtr shadowed) : ClassType(shadowed->name(), shadowed->compilation_unit(), shadowed->is_module()) {
+    auto& names = shadowed->attributeNames_;
+    auto& types = shadowed->attributeTypes_;
+    for(size_t i = 0; i < names.size(); ++i) {
+      if (types[i]->kind() == TypeKind::ClassType) {
+        addAttribute(names[i], ShadowClassType::create(types[i]->expect<ClassType>()));
+      } else {
+        addAttribute(names[i], types[i]);
+      }
+    }
+    // Copy methods over
+    // TODO: validate the type here
+    for (const auto& method : shadowed->methods()) {
+      addMethod(method);
+    }
+  }
+};
 
 struct InterfaceType;
 using InterfaceTypePtr = std::shared_ptr<InterfaceType>;

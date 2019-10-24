@@ -337,6 +337,11 @@ struct TORCH_API Module {
 
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
+  Module create_module_from_shadow(ShadowClassTypePtr s_cls) {
+    std::unordered_map<TypePtr, TypePtr> type_remap;
+    return create_module_from_shadow_impl(*this, s_cls, type_remap);
+  }
+
   size_t num_slots() const {
     return module_object()->slots().size();
   }
@@ -367,6 +372,11 @@ struct TORCH_API Module {
       const Module& orig,
       const Function& method,
       const std::unordered_map<TypePtr, TypePtr>& type_remap);
+
+  static Module create_module_from_shadow_impl(
+      const Module& m,
+      ShadowClassTypePtr s_cls,
+      std::unordered_map<TypePtr, TypePtr>& type_remap);
 
   c10::QualifiedName getNameForMethod(std::string basename) const {
     return QualifiedName(name(), basename);

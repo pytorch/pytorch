@@ -435,6 +435,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/script/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/sugared_value.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/class_type.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/shadow_class_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/builtin_functions.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/canonicalize_modified_loop.cpp
