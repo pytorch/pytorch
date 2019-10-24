@@ -527,14 +527,12 @@ int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor* src)
 
 int THTensor_(isSetTo)(const THTensor *self, const THTensor* src)
 {
-  if (!THTensor_getStoragePtr(self))
-    return 0;
   if (THTensor_getStoragePtr(self) == THTensor_getStoragePtr(src) &&
       self->storage_offset() == src->storage_offset() &&
-      THTensor_nDimensionLegacyAll(self) == THTensor_nDimensionLegacyAll(src))
+      THTensor_nDimension(self) == THTensor_nDimension(src))
   {
     int d;
-    for (d = 0; d < THTensor_nDimensionLegacyAll(self); ++d)
+    for (d = 0; d < THTensor_nDimension(self); ++d)
     {
       if (self->size(d) != src->size(d) || self->stride(d) != src->stride(d))
         return 0;
