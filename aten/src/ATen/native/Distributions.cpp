@@ -285,35 +285,40 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, Generator *gen) {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     /* Generate gamma sample by casting alpha to double to prevent underflow. */
-    CPU_tensor_apply2<double, scalar_t>(gamma, alpha,
-      [generator](double& ret_val, const scalar_t& alpha){
-        auto uniform_lambda = [generator] () {
-          at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
-          return standard_uniform(generator);
-        };
-        BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+    auto iter = TensorIterator();
+    iter.add_input(alpha);
+    iter.add_output(gamma);
+    iter.build();
+    cpu_serial_kernel(iter, [&](const scalar_t alpha_val) -> scalar_t {
+      auto uniform_lambda = [generator] () {
+        at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
+        return standard_uniform(generator);
+      };
+      BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
 
-        auto normal_lambda = [generator] () {
-          at::normal_distribution<double> normal(0.0, 1.0);
-          return normal(generator);
-        };
-        BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
-        auto sample = sample_gamma<double, double, decltype(uniform_lambda), decltype(normal_lambda)>
-          (alpha, standard_uniform, standard_normal);
-        ret_val = std::max(std::numeric_limits<double>::min(), sample);
-      }
-    );
+      auto normal_lambda = [generator] () {
+        at::normal_distribution<double> normal(0.0, 1.0);
+        return normal(generator);
+      };
+      BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
+      auto sample = sample_gamma<double, double, decltype(uniform_lambda), decltype(normal_lambda)>
+          (alpha_val, standard_uniform, standard_normal);
+      return std::max(std::numeric_limits<double>::min(), sample);
+    });
     /* Normalize and cast back to scalar_t. */
     Tensor gamma_sum = gamma.sum(-1, true).expand(alpha.sizes());
-    CPU_tensor_apply3<scalar_t, double , double>(ret, gamma, gamma_sum,
-      [](scalar_t& ret_val, const double& gamma, const double& gamma_sum){
-        ret_val = gamma / gamma_sum;
-        auto min_val = std::numeric_limits<scalar_t>::min();
-        auto max_val = std::nexttoward(static_cast<scalar_t>(1.0f), 0.0f);
-        ret_val = std::min(max_val, std::max(min_val, ret_val));
-        ret_val = static_cast<scalar_t>(ret_val);
-      }
-    );
+    iter = TensorIterator();
+    iter.add_input(gamma);
+    iter.add_input(gamma_sum);
+    iter.add_output(ret);
+    iter.build();
+    cpu_serial_kernel(iter, [&](const scalar_t gamma_val, const scalar_t gamma_sum_val) -> scalar_t {
+      scalar_t ret_val = gamma_val / gamma_sum_val;
+      auto min_val = std::numeric_limits<scalar_t>::min();
+      auto max_val = std::nexttoward(static_cast<scalar_t>(1.0f), 0.0f);
+      ret_val = std::min(max_val, std::max(min_val, ret_val));
+      return static_cast<scalar_t>(ret_val);
+    });
   });
   return ret;
 }
