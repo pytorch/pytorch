@@ -269,7 +269,7 @@ class TransformerEncoderLayer(Module):
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
 
-        self.activation = _get_activation_mod(activation)
+        self.activation = _get_activation_fn(activation)
 
     def __setstate__(self, state):
         if 'activation' not in state['_modules']:
@@ -292,10 +292,7 @@ class TransformerEncoderLayer(Module):
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
         src = self.norm1(src)
-        if self.activation is not None:
-            src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
-        else:
-            src2 = self.linear2(self.dropout(F.relu(self.linear1(src))))
+        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
         src = src + self.dropout2(src2)
         src = self.norm2(src)
         return src
@@ -340,7 +337,7 @@ class TransformerDecoderLayer(Module):
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
 
-        self.activation = _get_activation_mod(activation)
+        self.activation = _get_activation_fn(activation)
 
     def __setstate__(self, state):
         if 'activation' not in state['_modules']:
@@ -371,10 +368,7 @@ class TransformerDecoderLayer(Module):
                                    key_padding_mask=memory_key_padding_mask)[0]
         tgt = tgt + self.dropout2(tgt2)
         tgt = self.norm2(tgt)
-        if self.activation is not None:
-            tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
-        else:
-            tgt2 = self.linear2(self.dropout(F.relu(self.linear1(tgt))))
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
         tgt = tgt + self.dropout3(tgt2)
         tgt = self.norm3(tgt)
         return tgt
@@ -384,10 +378,10 @@ def _get_clones(module, N):
     return ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-def _get_activation_mod(activation):
+def _get_activation_fn(activation):
     if activation == "relu":
-        return torch.nn.ReLU()
+        return F.relu
     elif activation == "gelu":
-        return torch.nn.GeLU()
+        return F.gelu
 
     raise RuntimeError("activation should be relu/gelu, not {}".format(activation))
