@@ -846,12 +846,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * Set the pointer to autograd metadata.
+   * Set the pointer to autograd metadata.  A nullptr autograd metadata means
+   * that you are setting this tensor to not require grad and not track
+   * gradients.  (In the period of time when we still have Variable and
+   * non-Variable tensors, explicitly setting null is still useful as it
+   * turns a tensor into a variable.)
    */
   void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta);
 
   /**
-   * Return the pointer to autograd metadata.
+   * Return the pointer to autograd metadata.  May return nullptr if the
+   * tensor does not track gradients.
    */
   c10::AutogradMetaInterface* autograd_meta() const;
 
@@ -1556,14 +1561,17 @@ private:
   // (such as grad_ / grad_fn_ / grad_accumulator_).
   // This pointer always has unique ownership (meaning only one TensorImpl can own it
   // at a time).
-  // This is private because we must maintain dispatcher invariants on it
-  // in type_set_, namely, that autograd_meta_ != nullptr iff type_set_.has(VariableTensorId).
   //
-  // NB: We CANNOT default this to nullptr, as that will result in an invocation
-  // of std::default_delete<AutogradMeta> which won't work as AutogradMeta
-  // is incomplete at this point.  But the defaulting to nullptr is also
-  // pointless because unique_ptr has a default constructor which will do the
-  // right thing.
+  // autograd_meta_ can be nullptr, as an optimization.  When this occurs, it is
+  // equivalent to having an autograd_meta_ pointing to a default constructed
+  // AutogradMeta; intuitively, tensors which don't require grad will have this
+  // field set to null.  If !type_set_.has(VariableTensorId), then
+  // autograd_meta == nullptr (but not vice versa, due to the nullptr
+  // optimization)
+  //
+  // This means accessors on autograd_meta_ have to be careful to test if they
+  // got a nullptr, and handle default behavior appropriately in that case.
+  //
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
 protected:
