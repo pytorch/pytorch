@@ -60,6 +60,7 @@ TESTS = [
     'type_promotion',
     'jit_disabled',
     'function_schema',
+    'overrides',
 ]
 
 # skip < 3.6 b/c fstrings added in 3.6 for jit_py3
