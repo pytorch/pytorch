@@ -55,6 +55,7 @@ bool _nnpack_available() {
 #else
 
 #include "nnpack.h"
+#include "nnpack/reference.h"
 
 #include "caffe2/utils/threadpool/ThreadPoolMobile.h"
 
@@ -124,43 +125,41 @@ bool _nnpack_available() {
 static thread_local void* workspace = nullptr;
 static thread_local size_t workspace_size = 0;
 
-// NNPack has alignment requirements
-const size_t nnpack_memory_alignment_boundary = 64;
-
 static inline void deallocate_workspace() {
-  if (workspace)
+  if (workspace) {
     std::free(workspace);
-  workspace = nullptr;
+    workspace = nullptr;
+  }
 }
 
 static inline void allocate_workspace() {
-  if (workspace)
+  if (workspace) {
     deallocate_workspace();
+  }
+
+  // NNPack has alignment requirements
+  constexpr size_t nnpack_memory_alignment_boundary = 64;
+
   // Won't work on Windows, but NNPACK doesn't support Windows either
   posix_memalign(&workspace, nnpack_memory_alignment_boundary, workspace_size);
 }
 
-constexpr int input_batch_size_dim = 0;
-// constexpr int input_channels_dim = 1;
-constexpr int input_height_dim = 2;
-constexpr int input_width_dim = 3;
-constexpr int output_batch_size_dim = 0;
-constexpr int output_channels_dim = 1;
-constexpr int output_height_dim = 2;
-constexpr int output_width_dim = 3;
-constexpr int weight_output_channels_dim = 0;
-// constexpr int weight_input_channels_dim = 1;
-constexpr int weight_height_dim = 2;
-constexpr int weight_width_dim = 3;
-
-// Often written as 2 + max_dim (extra dims for batch size and channels)
-// constexpr int max_dim = 3;
-
-std::vector<int64_t> conv_output_size(
+static std::vector<int64_t> conv_output_size(
     const IntArrayRef input_size,
     const IntArrayRef weight_size,
     const IntArrayRef stride,
     const IntArrayRef padding) {
+  constexpr size_t input_batch_size_dim = 0;
+  constexpr size_t input_height_dim = 2;
+  constexpr size_t input_width_dim = 3;
+  constexpr size_t output_batch_size_dim = 0;
+  constexpr size_t output_channels_dim = 1;
+  constexpr size_t output_height_dim = 2;
+  constexpr size_t output_width_dim = 3;
+  constexpr size_t weight_output_channels_dim = 0;
+  constexpr size_t weight_height_dim = 2;
+  constexpr size_t weight_width_dim = 3;
+
   const auto calc_output_dimension = [](
     const int64_t input, const int64_t kernel, const int64_t stride, const int64_t padding) {
     return 1 + (input - kernel + 2 * padding) / stride;
@@ -185,6 +184,7 @@ Tensor _nnpack_spatial_convolution(
     const at::Tensor& bias,
     const IntArrayRef stride,
     const IntArrayRef padding) {
+  printf("+ _nnpack_spatial_convolution\n");
   at::Tensor output = at::empty(
       conv_output_size(input.sizes(), weight.sizes(), stride, padding),
       input.options());
@@ -228,11 +228,6 @@ Tensor _nnpack_spatial_convolution(
     throw std::runtime_error(err.str());
   }
 
-  // Setup parameters for the NNPack convolution output function call
-
-  // For now, we use the default algorithm
-  auto algorithm = nnp_convolution_algorithm_auto;
-
   // All Tensors must be float Tensors
   if (input.device().type() != kCPU || input.scalar_type() != kFloat ||
       weight.device().type() != kCPU || weight.scalar_type() != kFloat ||
@@ -241,6 +236,11 @@ Tensor _nnpack_spatial_convolution(
     throw std::runtime_error(
         "Mismatched Tensor types in NNPack convolutionOutput");
   }
+
+  // Setup parameters for the NNPack convolution output function call
+
+  // For now, we use the default algorithm
+  const auto algorithm = nnp_convolution_algorithm_auto;
 
   const size_t batch_size = input.size(0);
   const size_t input_channels = input.size(1);
@@ -253,16 +253,35 @@ Tensor _nnpack_spatial_convolution(
                                             .left = (size_t)padding[1]};
   const struct nnp_size kernel_size = {.width = (size_t)weight.size(3),
                                        .height = (size_t)weight.size(2)};
+  const nnp_size output_subsample = {.width = stride[1], .height = stride[0]};
 
+  const auto input_ = input.contiguous();
   // If we don't have a defined bias Tensor, we need to create one filled with
   // zeroes
-  auto bias_ =
+  const auto bias_ =
       bias.defined() ? bias : at::zeros({weight.size(0)}, input.options());
 
   // Note: we assume that the output is shaped correctly, probably should add an
   // assert
-  auto input_ = input.contiguous();
   auto batched = [&]() -> nnp_status {
+    if ((output_subsample.width != 1) || (output_subsample.height != 1)) {
+      nnp_convolution_output__reference(
+          batch_size,
+          input_channels,
+          output_channels,
+          input_size,
+          input_padding,
+          kernel_size,
+          output_subsample,
+          input_.data_ptr<float>(),
+          weight.data_ptr<float>(),
+          bias_.data_ptr<float>(),
+          output.data_ptr<float>(),
+          nnpack_threadpool());
+
+      return nnp_status_success;
+    }
+
     return nnp_convolution_output(
         algorithm,
         batch_size,
@@ -271,12 +290,12 @@ Tensor _nnpack_spatial_convolution(
         input_size,
         input_padding,
         kernel_size,
-        (float*)input_.data_ptr(),
-        (float*)weight.data_ptr(),
-        (float*)bias_.data_ptr(),
-        (float*)output.data_ptr(),
-        workspace, // workspace_buffer
-        &workspace_size, // workspace_size
+        input_.data_ptr<float>(),
+        weight.data_ptr<float>(),
+        bias_.data_ptr<float>(),
+        output.data_ptr<float>(),
+        nullptr,
+        nullptr,
         nnp_activation_identity,
         nullptr, // activation parameters
         nnpack_threadpool(),
@@ -285,8 +304,6 @@ Tensor _nnpack_spatial_convolution(
   };
 
   auto single = [&]() -> nnp_status {
-    const nnp_size output_subsample = {.width = stride[0], .height = stride[1]};
-    auto input_ = input.contiguous();
     return nnp_convolution_inference(
         algorithm,
         nnp_convolution_transform_strategy_compute,
@@ -296,12 +313,12 @@ Tensor _nnpack_spatial_convolution(
         input_padding,
         kernel_size,
         output_subsample,
-        (float*)input_.data_ptr(),
-        (float*)weight.data_ptr(),
-        (float*)bias_.data_ptr(),
-        (float*)output.data_ptr(),
-        workspace, // workspace_buffer
-        &workspace_size, // workspace_size
+        input_.data_ptr<float>(),
+        weight.data_ptr<float>(),
+        bias_.data_ptr<float>(),
+        output.data_ptr<float>(),
+        nullptr,
+        nullptr,
         nnp_activation_identity,
         nullptr, // activation parameters
         nnpack_threadpool(),
@@ -425,11 +442,11 @@ Tensor _nnpack_spatial_convolution_backward_input(
         input_size,
         input_padding,
         kernel_size,
-        (float*)gradOutput.data_ptr(),
-        (float*)weight.data_ptr(),
-        (float*)gradInput.data_ptr(),
-        workspace, // workspace_buffer
-        &workspace_size, // workspace_size
+        gradOutput.data_ptr<float>(),
+        weight.data_ptr<float>(),
+        gradInput.data_ptr<float>(),
+        nullptr,
+        nullptr,
         nnp_activation_identity,
         nullptr, // activation_parameters
         nnpack_threadpool(),
@@ -468,6 +485,8 @@ Tensor _nnpack_spatial_convolution_backward_input(
     throw std::runtime_error(
         "NNPACK SpatialConvolution_updateGradInput failed");
   }
+
+  printf("- _nnpack_spatial_convolution\n");
 
   return gradInput;
 }
@@ -545,11 +564,11 @@ Tensor _nnpack_spatial_convolution_backward_weight(
         input_size,
         input_padding,
         kernel_size,
-        (float*)input_.data_ptr(),
-        (float*)gradOutput.data_ptr(),
-        (float*)gradWeight.data_ptr(),
-        workspace, // workspace_buffer
-        &workspace_size, // workspace_size
+        input_.data_ptr<float>(),
+        gradOutput.data_ptr<float>(),
+        gradWeight.data_ptr<float>(),
+        nullptr,
+        nullptr,
         nnp_activation_identity,
         nullptr, // activation_parameters
         nnpack_threadpool(),
