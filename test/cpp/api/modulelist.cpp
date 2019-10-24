@@ -278,7 +278,7 @@ TEST_F(ModuleListTest, PrettyPrintModuleList) {
   ASSERT_EQ(
       c10::str(list),
       "torch::nn::ModuleList(\n"
-      "  (0): torch::nn::Linear(in=10, out=3, with_bias=true)\n"
+      "  (0): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
       "  (1): torch::nn::Conv2d(input_channels=1, output_channels=2, kernel_size=[3, 3], stride=[1, 1])\n"
       "  (2): torch::nn::Dropout(rate=0.5)\n"
       "  (3): torch::nn::BatchNorm(features=5, eps=1e-05, momentum=0.1, affine=true, stateful=true)\n"

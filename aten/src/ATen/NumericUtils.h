@@ -5,6 +5,7 @@
 #endif
 
 #include <cmath>
+#include <complex>
 #include <type_traits>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Complex.h>
