@@ -106,7 +106,6 @@ struct PythonPrintImpl {
   class TaggedStringStream {
    public:
     TaggedStringStream(const SourceRangeStack* srs) : srs_(srs) {}
-    TaggedStringStream(TaggedStringStream&& rhs) = default;
 
     TaggedStringStream& operator<<(const std::string& s) {
       // This prevents having redundant entries at the same offset,
