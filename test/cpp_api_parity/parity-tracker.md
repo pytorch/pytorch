@@ -37,9 +37,9 @@ torch.nn.AdaptiveAvgPool2d|Yes|No
 torch.nn.AdaptiveAvgPool3d|Yes|No
 torch.nn.ReflectionPad1d|Yes|No
 torch.nn.ReflectionPad2d|Yes|No
-torch.nn.ReplicationPad1d|No|No
-torch.nn.ReplicationPad2d|No|No
-torch.nn.ReplicationPad3d|No|No
+torch.nn.ReplicationPad1d|Yes|No
+torch.nn.ReplicationPad2d|Yes|No
+torch.nn.ReplicationPad3d|Yes|No
 torch.nn.ZeroPad2d|No|No
 torch.nn.ConstantPad1d|No|No
 torch.nn.ConstantPad2d|No|No

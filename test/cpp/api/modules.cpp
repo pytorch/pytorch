@@ -1723,6 +1723,108 @@ TEST_F(ModulesTest, ReflectionPad2d) {
   }
 }
 
+TEST_F(ModulesTest, ReplicationPad1d) {
+  {
+    ReplicationPad1d m(ReplicationPad1dOptions(2));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor({{{0., 0., 0., 1., 2., 3., 3., 3.},
+                                    {4., 4., 4., 5., 6., 7., 7., 7.}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReplicationPad1d m(ReplicationPad1dOptions({3, 1}));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor({{{0., 0., 0., 0., 1., 2., 3., 3.},
+                                    {4., 4., 4., 4., 5., 6., 7., 7.}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ReplicationPad2d) {
+  {
+    ReplicationPad2d m(ReplicationPad2dOptions(2));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{0., 0., 0., 1., 2., 2., 2.},
+                                     {0., 0., 0., 1., 2., 2., 2.},
+                                     {0., 0., 0., 1., 2., 2., 2.},
+                                     {3., 3., 3., 4., 5., 5., 5.},
+                                     {6., 6., 6., 7., 8., 8., 8.},
+                                     {6., 6., 6., 7., 8., 8., 8.},
+                                     {6., 6., 6., 7., 8., 8., 8.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReplicationPad2d m(ReplicationPad2dOptions({1, 1, 2, 0}));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{0., 0., 1., 2., 2.},
+                                     {0., 0., 1., 2., 2.},
+                                     {0., 0., 1., 2., 2.},
+                                     {3., 3., 4., 5., 5.},
+                                     {6., 6., 7., 8., 8.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ReplicationPad3d) {
+  {
+    ReplicationPad3d m(ReplicationPad3dOptions(1));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{0., 0., 1., 1.},
+                                      {0., 0., 1., 1.},
+                                      {2., 2., 3., 3.},
+                                      {2., 2., 3., 3.}},
+                                     {{0., 0., 1., 1.},
+                                      {0., 0., 1., 1.},
+                                      {2., 2., 3., 3.},
+                                      {2., 2., 3., 3.}},
+                                     {{4., 4., 5., 5.},
+                                      {4., 4., 5., 5.},
+                                      {6., 6., 7., 7.},
+                                      {6., 6., 7., 7.}},
+                                     {{4., 4., 5., 5.},
+                                      {4., 4., 5., 5.},
+                                      {6., 6., 7., 7.},
+                                      {6., 6., 7., 7.}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReplicationPad3d m(ReplicationPad3dOptions({1, 2, 1, 2, 1, 2}));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{0., 0., 1., 1., 1.},
+                                      {0., 0., 1., 1., 1.},
+                                      {2., 2., 3., 3., 3.},
+                                      {2., 2., 3., 3., 3.},
+                                      {2., 2., 3., 3., 3.}},
+                                     {{0., 0., 1., 1., 1.},
+                                      {0., 0., 1., 1., 1.},
+                                      {2., 2., 3., 3., 3.},
+                                      {2., 2., 3., 3., 3.},
+                                      {2., 2., 3., 3., 3.}},
+                                     {{4., 4., 5., 5., 5.},
+                                      {4., 4., 5., 5., 5.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.}},
+                                     {{4., 4., 5., 5., 5.},
+                                      {4., 4., 5., 5., 5.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.}},
+                                     {{4., 4., 5., 5., 5.},
+                                      {4., 4., 5., 5., 5.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.},
+                                      {6., 6., 7., 7., 7.}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in_features=3, out_features=4, bias=true)");
@@ -2018,6 +2120,27 @@ TEST_F(ModulesTest, PrettyPrintReflectionPad) {
   ASSERT_EQ(
       c10::str(ReflectionPad2d(ReflectionPad2dOptions({1, 1, 2, 0}))),
       "torch::nn::ReflectionPad2d(padding=[1, 1, 2, 0])");
+}
+
+TEST_F(ModulesTest, PrettyPrintReplicationPad) {
+  ASSERT_EQ(
+      c10::str(ReplicationPad1d(ReplicationPad1dOptions(2))),
+      "torch::nn::ReplicationPad1d(padding=[2, 2])");
+  ASSERT_EQ(
+      c10::str(ReplicationPad1d(ReplicationPad1dOptions({3, 1}))),
+      "torch::nn::ReplicationPad1d(padding=[3, 1])");
+  ASSERT_EQ(
+      c10::str(ReplicationPad2d(ReplicationPad2dOptions(2))),
+      "torch::nn::ReplicationPad2d(padding=[2, 2, 2, 2])");
+  ASSERT_EQ(
+      c10::str(ReplicationPad2d(ReplicationPad2dOptions({1, 1, 2, 0}))),
+      "torch::nn::ReplicationPad2d(padding=[1, 1, 2, 0])");
+  ASSERT_EQ(
+      c10::str(ReplicationPad3d(ReplicationPad3dOptions(1))),
+      "torch::nn::ReplicationPad3d(padding=[1, 1, 1, 1, 1, 1])");
+  ASSERT_EQ(
+      c10::str(ReplicationPad3d(ReplicationPad3dOptions({1, 2, 1, 2, 1, 2}))),
+      "torch::nn::ReplicationPad3d(padding=[1, 2, 1, 2, 1, 2])");
 }
 
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
