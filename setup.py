@@ -184,7 +184,6 @@ from tools.build_pytorch_libs import build_caffe2
 from tools.setup_helpers.env import (IS_WINDOWS, IS_DARWIN,
                                      check_env_flag, build_type)
 from tools.setup_helpers.cmake import CMake
-from tools.setup_helpers.cuda import CUDA_HOME
 
 try:
     FileNotFoundError
@@ -352,7 +351,7 @@ def build_deps():
 install_requires = []
 
 if sys.version_info <= (2, 7):
-    install_requires += ['future']
+    install_requires += ['future', 'typing']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -384,7 +383,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using cuDNN')
         if cmake_cache_vars['USE_CUDA']:
-            report('-- Detected CUDA at ' + CUDA_HOME)
+            report('-- Detected CUDA at ' + cmake_cache_vars['CUDA_TOOLKIT_ROOT_DIR'])
         else:
             report('-- Not using CUDA')
         if cmake_cache_vars['USE_MKLDNN']:
@@ -631,15 +630,8 @@ def configure_extension_build():
     main_link_args.extend(CAFFE2_LIBS)
 
     if cmake_cache_vars['USE_CUDA']:
-        if IS_WINDOWS:
-            cuda_lib_path = CUDA_HOME + '/lib/x64/'
-        else:
-            cuda_lib_dirs = ['lib64', 'lib']
-            for lib_dir in cuda_lib_dirs:
-                cuda_lib_path = os.path.join(CUDA_HOME, lib_dir)
-                if os.path.exists(cuda_lib_path):
-                    break
-        library_dirs.append(cuda_lib_path)
+        library_dirs.append(
+            os.path.dirname(cmake_cache_vars['CUDA_CUDA_LIB']))
 
     if build_type.is_debug():
         if IS_WINDOWS:
