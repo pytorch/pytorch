@@ -184,7 +184,6 @@ Tensor _nnpack_spatial_convolution(
     const at::Tensor& bias,
     const IntArrayRef stride,
     const IntArrayRef padding) {
-  printf("+ _nnpack_spatial_convolution\n");
   at::Tensor output = at::empty(
       conv_output_size(input.sizes(), weight.sizes(), stride, padding),
       input.options());
@@ -485,8 +484,6 @@ Tensor _nnpack_spatial_convolution_backward_input(
     throw std::runtime_error(
         "NNPACK SpatialConvolution_updateGradInput failed");
   }
-
-  printf("- _nnpack_spatial_convolution\n");
 
   return gradInput;
 }
