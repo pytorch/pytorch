@@ -354,6 +354,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/record_function.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/record_function_ops.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
@@ -566,6 +567,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/fold.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/loss.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/padding.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pixelshuffle.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
