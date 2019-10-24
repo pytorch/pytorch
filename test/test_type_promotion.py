@@ -366,7 +366,7 @@ class TestTypePromotion(TestCase):
         tmp = torch.ones(9, 9, dtype=torch.float, device=self.device)
         mask = torch.ones(10, 10, dtype=torch.uint8, device=self.device)
         result = tmp + mask[1:, 1:]
-        expected = torch.empty(9, 9, dtype=torch.float, device=self.device).fill_(2.)
+        expected = torch.full([9, 9], 2., dtype=torch.float, device=self.device).fill_(2.)
         self.assertEqual(result, expected)
 
     def test_transpose(self):
