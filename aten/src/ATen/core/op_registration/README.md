@@ -79,14 +79,14 @@ You can use the following syntactic sugar to define a catch-all kernel function 
 ```
 namespace { Tensor my_kernel_cpu(const Tensor& a, const Tensor& b) {...}
 
-static auto registry = c10::RegisterOperators()
+static auto registry = torch::RegisterOperators()
  .op("my_namespace::my_op", &my_kernel_cpu);
 ```
 
 or for lambdas:
 
 ```
-static auto registry = c10::RegisterOperators()
+static auto registry = torch::RegisterOperators()
  .op("my_namespace::my_op", [] (Tensor a, Tensor b) {...});
 ```
 
@@ -203,7 +203,7 @@ static auto registry = torch::RegisterOperators()
 In this case, you must explicitly specify the full schema and you must not specify a dispatch key.
 This is useful to define the interface of an operator when you don't know a kernel yet. As mentioned above in the “Overloads” section, you will get an error if any kernel registered for this operator has a mismatching signature.
 
-## Calling c10 operators
+## Calling custom operators
 
 ### From PyTorch/JIT
 
@@ -211,10 +211,10 @@ All registered operators are automatically available to PyTorch and JIT under `t
 
 ### From caffe2
 
-C10 operators are not available to the caffe2 frontend by default, but there's a simple macro you can add if you want to make it available. To expose a CPU kernel:
+Custom operators are not available to the caffe2 frontend by default, but there's a simple macro you can add if you want to make it available. To expose a CPU kernel:
 
 ```
-// Expose "my_namespace::my_op" c10 operator to caffe2.
+// Expose "my_namespace::my_op" custom operator to caffe2.
 // In caffe2, the operator will be called "MyCaffe2OperatorName".
 C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     MyCaffe2OperatorName, "my_namespace::my_op")
@@ -229,10 +229,10 @@ C10_EXPORT_C10_OP_TO_CAFFE2_CUDA(
 
 Note that this doesn't autogenerate a caffe2 operator schema for you (yet). If there's need, we might consider adding that in future, but for now you have to write the caffe2 `OPERATOR_SCHEMA` macro manually if you need it.
 
-Also, there's some requirements on the c10 operator schema for it to be callable from caffe2. Some of these restrictions are just because the functionality isn't implemented. If you have a use case that is blocked by them, please reach out to Sebastian Messmer.
+Also, there's some requirements on the operator schema for it to be callable from caffe2. Some of these restrictions are just because the functionality isn't implemented. If you have a use case that is blocked by them, please reach out to Sebastian Messmer.
 
 * There must be either one or more arguments of type `Tensor`, or one argument of type `Tensor[]`. You cannot have both `Tensor` and `Tensor[]`.
-* Except for `Tensor` or `Tensor[]`, only arguments of type `int`, `double` and `bool` are supported. These can be in any position in the argument list and will be read from the caffe2 operator arguments, based on the argument name in the c10 operator schema.
+* Except for `Tensor` or `Tensor[]`, only arguments of type `int`, `double` and `bool` are supported. These can be in any position in the argument list and will be read from the caffe2 operator arguments, based on the argument name in the operator schema.
 * We do not support lists (`int[]`, `double[]` or `bool[]`) or optionals (`int?`, `double?`, `bool?`) yet.
 * The operator must return a single `Tensor` or multiple tensors as in `(Tensor, Tensor, Tensor)`. It cannot return a list `Tensor[]`, optional `Tensor?` or any primitive types.
     
