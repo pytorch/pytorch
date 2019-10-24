@@ -5448,7 +5448,7 @@
     CUDA: legacy::cuda::_th_std
   supports_named_tensor: True
 
-- func: _amp_unscale_inf_check_(Tensor(a!) self, Tensor current_scale, Tensor found_inf) -> Tensor(a!)
+- func: _amp_unscale_inf_check_(Tensor(a!) self, Tensor inv_scale, Tensor found_inf) -> Tensor(a!)
   variants: function
   dispatch:
     CUDA: _amp_unscale_inf_check_cuda
