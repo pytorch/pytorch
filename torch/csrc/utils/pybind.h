@@ -35,15 +35,28 @@ struct type_caster<at::Tensor> {
 
   static handle
   cast(const at::Tensor& src, return_value_policy /* policy */, handle /* parent */) {
-    // Commenting out this test is a bit naughty, but I plan to moot this test
-    // soon (by merging Tensor and Variable), and previously we failed to do
-    // this check on Variable, leading to a (very real) bug in TestScript.test_tensor_grad
-    //
-    //if (!src.is_variable()) {
-    //  throw std::runtime_error(
-    //      "Expected tensor's dynamic type to be Variable, not Tensor");
-    //}
+    if (!src.is_variable()) {
+      throw std::runtime_error(
+          "Expected tensor's dynamic type to be Variable, not Tensor");
+    }
     return handle(THPVariable_Wrap(torch::autograd::Variable(src)));
+  }
+};
+
+template<> struct type_caster<torch::autograd::Variable> {
+public:
+  PYBIND11_TYPE_CASTER(torch::autograd::Variable, _("torch::autograd::Variable"));
+  bool load(handle src, bool) {
+    PyObject *source = src.ptr();
+    if (THPVariable_Check(source)) {
+      value = ((THPVariable*)source)->cdata;
+      return true;
+    } else {
+      return false;
+    }
+  }
+  static handle cast(torch::autograd::Variable src, return_value_policy /* policy */, handle /* parent */) {
+    return handle(THPVariable_Wrap(std::move(src)));
   }
 };
 

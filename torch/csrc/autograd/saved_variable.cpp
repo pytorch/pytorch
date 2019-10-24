@@ -95,7 +95,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // graph).
   if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired())
     throw std::logic_error("No grad accumulator for a saved leaf!");
-  var.get_autograd_meta()->grad_accumulator_ = std::move(grad_accumulator_);
+  var.set_grad_accumulator(grad_accumulator_);
 
   return var;
 }
