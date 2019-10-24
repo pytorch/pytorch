@@ -20,8 +20,10 @@ from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN
 
 class TestFuser(JitTestCase):
     def assertAllFused(self, graph, except_for=()):
+        print("Input GRAPH\n", graph, "\nEND OF GRAPH\n\n")
         if [n.kind() for n in graph.nodes()] == ['prim::DifferentiableGraph']:
             graph = next(graph.nodes()).g('Subgraph')
+        print("Checking GRAPH\n", graph, "\nEND OF GRAPH\n\n")
         allowed_nodes = {'prim::Constant', 'prim::FusionGroup', 'prim::TupleConstruct'} | set(except_for)
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
                         'got {}'.format(graph))
@@ -772,6 +774,8 @@ class TestFuser(JitTestCase):
         script_f = torch.jit.script(fn_test_rand, (x, y))
         out = script_f(x, y)
         self.assertAllFused(script_f.graph_for(x, y))
+        print("Goog one", script_f.graph_for(x, y), "\n\n\n")
+
         x.requires_grad_(True)
         out = script_f(x, y)
         self.assertAllFused(script_f.graph_for(x, y), except_for=("aten::size", "prim::BroadcastSizes",

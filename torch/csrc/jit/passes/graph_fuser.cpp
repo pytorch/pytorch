@@ -170,6 +170,8 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
+    std::cout << "Checking isFusable " << node->kind().toDisplayString()
+              << "\n";
     return callback_(node);
   }
 
