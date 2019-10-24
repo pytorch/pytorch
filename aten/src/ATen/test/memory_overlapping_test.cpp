@@ -16,7 +16,7 @@ TEST(MemoryOverlapTest, TensorExpanded) {
 
 TEST(MemoryOverlapTest, ScalarExpanded) {
   for (auto size : sizes) {
-    Tensor t = at::ones({1}).expand(size);
+    Tensor t = at::tensor(1).expand(size);
     EXPECT_FALSE(t.is_contiguous());
     EXPECT_FALSE(t.is_non_overlapping_and_dense());
   }
