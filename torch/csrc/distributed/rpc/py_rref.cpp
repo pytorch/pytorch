@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/py_rref.h>
 
+#include <torch/csrc/distributed/rpc/python_functions.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/jit/pybind_utils.h>
 
@@ -21,6 +23,67 @@ constexpr int RREF_TUPLE_SIZE = 2;
 
 } // namespace
 
+//////////////////////////  PyFutureToHere  /////////////////////////////////
+
+template <typename T>
+PyFutureToHere<T>::PyFutureToHere(std::shared_ptr<ivalue::Future> future)
+    : future_(std::move(future)) {}
+
+template <>
+py::object PyFutureToHere<IValue>::wait() const {
+  future_->wait();
+  {
+    // acquiring GIL as torch::jit::toPyObject creates new py::object
+    // without grabbing the GIL.
+    AutoGIL ag;
+    return torch::jit::toPyObject(future_->value());
+  }
+}
+
+template <>
+py::object PyFutureToHere<py::object>::wait() const {
+  future_->wait();
+  // PythonRpcHandler acquires the GIL on creating the py::object
+  return PythonRpcHandler::getInstance().deserialize(
+      SerializedPyObj::fromIValues(future_->value().toTuple()->elements()));
+}
+
+template class PyFutureToHere<IValue>;
+template class PyFutureToHere<py::object>;
+
+//////////////////////////  PyFutureLocalValue  ////////////////////////////////
+
+template <typename T>
+PyFutureLocalValue<T>::PyFutureLocalValue(std::shared_ptr<OwnerRRef<T>> rref)
+    : rref_(std::move(rref)) {}
+
+template <>
+py::object PyFutureLocalValue<IValue>::wait() const {
+  auto value = rref_->getValue();
+  {
+    // acquiring GIL as torch::jit::toPyObject creates new py::object without
+    // grabbing the GIL.
+    AutoGIL ag;
+    return torch::jit::toPyObject(std::move(value));
+  }
+}
+
+template <>
+py::object PyFutureLocalValue<py::object>::wait() const {
+  const py::object& value = rref_->getValue();
+  {
+    // acquiring GIL as the return statement construct a new py::object from
+    // a const reference.
+    AutoGIL ag;
+    return value;
+  }
+}
+
+template class PyFutureLocalValue<IValue>;
+template class PyFutureLocalValue<py::object>;
+
+///////////////////////////  PyRRef  //////////////////////////////////
+
 PyRRef::PyRRef(std::shared_ptr<RRef> rref) : rref_(std::move(rref)) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
@@ -33,73 +96,32 @@ worker_id_t PyRRef::owner() const {
   return rref_->owner();
 }
 
-py::object PyRRef::toHere() {
+std::shared_ptr<PyFuture> PyRRef::toHere() {
   if (rref_->isOwner()) {
-    if (rref_->isPyObj()) {
-      const py::object& value =
-          std::static_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
-
-      {
-        // acquiring GIL as the return statement construct a new py::object from
-        // a const reference.
-        AutoGIL ag;
-        return value;
-      }
-    } else {
-      IValue value =
-          std::static_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
-
-      {
-        // acquiring GIL as torch::jit::toPyObject creates new py::object
-        // without grabbing the GIL.
-        AutoGIL ag;
-        return torch::jit::toPyObject(std::move(value));
-      }
-    }
+    return localValue();
   } else {
     if (rref_->isPyObj()) {
-      // UserRRef<py::object>::toHere() calls python_rpc_handler which acquires
-      // GIL.
-      return std::static_pointer_cast<UserRRef<py::object>>(rref_)->toHere();
+      auto userRRef = std::static_pointer_cast<UserRRef<py::object>>(rref_);
+      return std::make_shared<PyFutureToHere<py::object>>(userRRef->toHere());
     } else {
-      IValue value =
-          std::static_pointer_cast<UserRRef<IValue>>(rref_)->toHere();
-
-      {
-        // acquiring GIL as torch::jit::toPyObject creates new py::object
-        // without grabbing the GIL.
-        AutoGIL ag;
-        return torch::jit::toPyObject(std::move(value));
-      }
+      auto userRRef = std::static_pointer_cast<UserRRef<IValue>>(rref_);
+      return std::make_shared<PyFutureToHere<IValue>>(userRRef->toHere());
     }
   }
 }
 
-py::object PyRRef::localValue() {
+std::shared_ptr<PyFuture> PyRRef::localValue() {
   TORCH_CHECK(
       rref_->isOwner(),
       "Cannot call localValue() on a non-local reference. Call it on ",
       RRefContext::getInstance().getWorkerName());
 
   if (rref_->isPyObj()) {
-    const py::object& value =
-        std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_)->getValue();
-
-    {
-      // acquiring GIL as the return statement construct a new py::object from
-      // a const reference.
-      AutoGIL ag;
-      return value;
-    }
+    return std::make_shared<PyFutureLocalValue<py::object>>(
+        std::dynamic_pointer_cast<OwnerRRef<py::object>>(rref_));
   } else {
-    auto value =
-        std::dynamic_pointer_cast<OwnerRRef<IValue>>(rref_)->getValue();
-    {
-      // acquiring GIL as torch::jit::toPyObject creates new py::object without
-      // grabbing the GIL.
-      AutoGIL ag;
-      return torch::jit::toPyObject(std::move(value));
-    }
+    return std::make_shared<PyFutureLocalValue<IValue>>(
+        std::dynamic_pointer_cast<OwnerRRef<IValue>>(rref_));
   }
 }
 

@@ -15,7 +15,7 @@ import sys
 import platform
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment
-from .version import __version__  # noqa: F401
+from .version import __version__
 from ._six import string_classes as _string_classes
 
 __all__ = [
@@ -41,7 +41,7 @@ import os as _dl_flags
 # if we have numpy, it *must* be imported before the call to setdlopenflags()
 # or there is risk that later c modules will segfault when importing numpy
 try:
-    import numpy as _np  # noqa: F401
+    import numpy as _np
 except ImportError:
     pass
 
@@ -301,7 +301,7 @@ del BFloat16StorageBase
 
 import torch.cuda
 import torch.autograd
-from torch.autograd import no_grad, enable_grad, set_grad_enabled  # noqa: F401
+from torch.autograd import no_grad, enable_grad, set_grad_enabled
 import torch.nn
 import torch.nn.intrinsic
 import torch.nn.quantized
@@ -337,8 +337,8 @@ def compiled_with_cxx11_abi():
 
 
 # Import the ops "namespace"
-from torch._ops import ops  # noqa: F401
-from torch._classes import classes  # noqa: F401
+from torch._ops import ops
+from torch._classes import classes
 
 # Import the quasi random sampler
 import torch.quasirandom

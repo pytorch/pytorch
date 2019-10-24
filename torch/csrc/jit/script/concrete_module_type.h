@@ -58,13 +58,16 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   void addPyClass(py::object pyClass);
   void addConstant(std::string name, py::object value);
   void addAttribute(std::string name, TypePtr type, bool isParameter);
+  void addFunctionAttribute(
+      std::string name,
+      const TypePtr& type,
+      py::object pyFunction);
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
   void addFailedAttribute(std::string name, std::string failureReason);
   void setIterableModuleKind(IterableModuleKind kind);
-  void addProperty(std::string propertyName);
   void setPoisoned();
 
   /**
@@ -97,7 +100,6 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, std::pair<TypePtr, bool>> getAttributesPy()
       const;
   std::vector<std::string> getModuleNamesPy() const;
-  bool isProperty(const std::string& name) const;
 
   // This determines whether two modules can share a type. The container structs
   // used by ConcreteModuleType have been defined such that operator==
@@ -117,8 +119,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       lhs.constants_ == rhs.constants_ &&
       lhs.attributes_ == rhs.attributes_ &&
       lhs.overloads_ == rhs.overloads_ &&
-      lhs.functionAttributes_ == rhs.functionAttributes_ &&
-      lhs.properties_ == rhs.properties_;
+      lhs.functionAttributes_ == rhs.functionAttributes_;
     // clang-format on
     if (!equal) {
       return false;
@@ -163,6 +164,20 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
     py::object v_;
   };
 
+  struct FunctionAttribute {
+    FunctionTypePtr function_;
+    py::object pyFunction_;
+
+    friend bool operator==(
+        const FunctionAttribute& lhs,
+        const FunctionAttribute& rhs) {
+      // Functions are not first class, so we can't do type comparison like a
+      // regular attribute. So we do a pointer equality check on the actual
+      // Python function object.
+      return lhs.pyFunction_.is(rhs.pyFunction_);
+    }
+  };
+
   struct Attribute {
     Attribute(TypePtr type, bool isParam)
         : type_(std::move(type)), isParam_(isParam) {}
@@ -199,11 +214,9 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, std::string> failedAttributes_;
   // Any function attributes. These are special right now because functions are
   // not first-class in the type system.
-  std::unordered_map<std::string, FunctionTypePtr> functionAttributes_;
+  std::unordered_map<std::string, FunctionAttribute> functionAttributes_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
-  // Which methods are properties
-  std::unordered_set<std::string> properties_;
 
   // If something is a ModuleDict/ModuleList, it means:
   //   1. The order of the submodules matters for comparing the type

@@ -140,10 +140,6 @@ def infer_raw_concrete_type(nn_module):
     class_annotations = getattr(nn_module, '__annotations__', {})
 
     # populate which methods are properties
-    for name, value in type(nn_module).__dict__.items():
-        if isinstance(value, property):
-            concrete_type.add_property(name)
-
     for name, value in nn_module.__dict__.items():
         if name in blacklist or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
@@ -154,10 +150,14 @@ def infer_raw_concrete_type(nn_module):
             # Don't re-add anything we already added
             continue
 
+        # Handle Python function attributes
         if inspect.isfunction(value) and not inspect.ismethod(value):
-            # This is a Python function attribute. Try to script it.
             try:
-                value = torch.jit.script(value)
+                scripted_fn = torch.jit.script(value)
+                concrete_type.add_function_attribute(
+                    name,
+                    torch._C._jit_try_infer_type(scripted_fn),
+                    value)
             except Exception as e:
                 # If we fail to script the function, it isn't a hard error.
                 # Instead, we will add it to the list of attributes we failed
@@ -168,6 +168,18 @@ def infer_raw_concrete_type(nn_module):
                 concrete_type.add_failed_attribute(name, hint)
                 pass
 
+            continue
+
+        # Handle Script function attributes
+        if isinstance(value, torch.jit.ScriptFunction):
+            concrete_type.add_function_attribute(
+                name,
+                torch._C._jit_try_infer_type(value),
+                value)
+            continue
+
+        # If we got here, this is a regular "data" attribute. Try to infer to
+        # the type and add it to the concrete type
         if name in class_annotations:
             attr_type = torch.jit.annotations.ann_to_type(class_annotations[name])
         elif isinstance(value, torch.jit.Attribute):
@@ -183,6 +195,14 @@ def infer_raw_concrete_type(nn_module):
             hint = ("(This attribute exists on the Python module, "
                     "but we failed to convert Python type: '{}' "
                     "to a TorchScript type.)").format(type(value).__name__)
+            concrete_type.add_failed_attribute(name, hint)
+
+    # Add @property methods as failed attributes, to give a better error message.
+    for name, value in type(nn_module).__dict__.items():
+        if isinstance(value, property):
+            hint = ("\n(This attribute exists on the Python module, but it's an @property "
+                    "method. @property methods are not yet supported in TorchScript. "
+                    "Please file a feature request on Github)")
             concrete_type.add_failed_attribute(name, hint)
 
     return concrete_type
@@ -259,7 +279,7 @@ def create_script_module_for_tracing(nn_module, stubs):
           module can produce different traced methods depending on the inputs.
 
     Arguments:
-        nn_module:  The original Python nn.Module that we are creating a ScriptModule for
+        nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
         stubs:  ScriptMethodStubs to compile as part of the conversion process.
     """
     check_module_initialized(nn_module)
@@ -281,7 +301,7 @@ def create_script_module(nn_module, stubs):
     Creates a new ScriptModule from an nn.Module, sharing underlying JIT types if possible
 
     Arguments:
-        nn_module:  The original Python nn.Module that we are creating a ScriptModule for
+        nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
         stubs:  ScriptMethodStubs to compile as part of the conversion process.
     """
     check_module_initialized(nn_module)
@@ -295,7 +315,7 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
     Convert an nn.Module to a RecursiveScriptModule.
 
     Arguments:
-        nn_module:  The original Python nn.Module that we are creating a ScriptModule for
+        nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
         concrete_type:  The fully initialized ConcreteType of the module.
         cpp_module:  A newly-constructed C++ script::Module to copy stuff into.
         stubs:  ScriptMethodStubs to compile as part of the conversion process.
@@ -480,6 +500,9 @@ def recursive_script(nn_module):
     """
     Makes a ScriptModule from an nn.Module, using the default rules for
     determining which methods to compile.
+
+    Arguments:
+        nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
     """
     if isinstance(nn_module, torch.jit.ScriptModule):
         return nn_module
@@ -543,14 +566,6 @@ def wrap_cpp_module(cpp_module):
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 
 def compile_unbound_method(concrete_type, fn):
-    if isinstance(fn, property):
-        if fn.fset is not None or fn.fdel is not None:
-            err_name = fn.fset.__name__ if fn.fset is not None else fn.fdel.__name__
-            raise RuntimeError(
-                "Found a setter or deleter on `@property` method '{}', "
-                "these are not supported.".format(err_name))
-        fn = fn.fget
-
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = make_stub(fn)
@@ -559,9 +574,6 @@ def compile_unbound_method(concrete_type, fn):
         # this function is not yet complete
         create_methods_from_stubs(concrete_type, (stub,))
     return stub
-
-def is_property(attr):
-    return isinstance(attr, property)
 
 def lazy_bind(concrete_type, unbound_method):
     """

@@ -732,18 +732,40 @@ TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
 }
 
 TEST_F(ModulesTest, Linear) {
-  Linear model(5, 2);
-  auto x = torch::randn({10, 5}, torch::requires_grad());
-  auto y = model(x);
-  torch::Tensor s = y.sum();
+  {
+    Linear model(5, 2);
+    auto x = torch::randn({10, 5}, torch::requires_grad());
+    auto y = model(x);
+    torch::Tensor s = y.sum();
 
-  s.backward();
-  ASSERT_EQ(y.ndimension(), 2);
-  ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.size(0), 10);
-  ASSERT_EQ(y.size(1), 2);
+    s.backward();
+    ASSERT_EQ(y.ndimension(), 2);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(y.size(0), 10);
+    ASSERT_EQ(y.size(1), 2);
 
-  ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
+    ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
+
+    auto y_exp = torch::addmm(model->bias, x, model->weight.t());
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+  {
+    Linear model(LinearOptions(5, 2).bias(false));
+    auto x = torch::randn({10, 5}, torch::requires_grad());
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(y.ndimension(), 2);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(y.size(0), 10);
+    ASSERT_EQ(y.size(1), 2);
+
+    ASSERT_EQ(model->weight.grad().numel(), 2 * 5);
+
+    auto y_exp = torch::mm(x, model->weight.t());
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
 }
 
 TEST_F(ModulesTest, LayerNorm) {
@@ -1655,9 +1677,55 @@ TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
 
+TEST_F(ModulesTest, ReflectionPad1d) {
+  {
+    ReflectionPad1d m(ReflectionPad1dOptions(2));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor({{{2., 1., 0., 1., 2., 3., 2., 1.},
+                                    {6., 5., 4., 5., 6., 7., 6., 5.}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReflectionPad1d m(ReflectionPad1dOptions({3, 1}));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor({{{3., 2., 1., 0., 1., 2., 3., 2.},
+                                    {7., 6., 5., 4., 5., 6., 7., 6.}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ReflectionPad2d) {
+  {
+    ReflectionPad2d m(ReflectionPad2dOptions(2));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{8., 7., 6., 7., 8., 7., 6.},
+                                     {5., 4., 3., 4., 5., 4., 3.},
+                                     {2., 1., 0., 1., 2., 1., 0.},
+                                     {5., 4., 3., 4., 5., 4., 3.},
+                                     {8., 7., 6., 7., 8., 7., 6.},
+                                     {5., 4., 3., 4., 5., 4., 3.},
+                                     {2., 1., 0., 1., 2., 1., 0.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ReflectionPad2d m(ReflectionPad2dOptions({1, 1, 2, 0}));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{7., 6., 7., 8., 7.},
+                                     {4., 3., 4., 5., 4.},
+                                     {1., 0., 1., 2., 1.},
+                                     {4., 3., 4., 5., 4.},
+                                     {7., 6., 7., 8., 7.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
-      c10::str(Linear(3, 4)), "torch::nn::Linear(in=3, out=4, with_bias=true)");
+      c10::str(Linear(3, 4)), "torch::nn::Linear(in_features=3, out_features=4, bias=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintBilinear) {
@@ -1937,6 +2005,21 @@ TEST_F(ModulesTest, PrettyPrintPairwiseDistance) {
       "torch::nn::PairwiseDistance(p=3, eps=0.5, keepdim=true)");
 }
 
+TEST_F(ModulesTest, PrettyPrintReflectionPad) {
+  ASSERT_EQ(
+      c10::str(ReflectionPad1d(ReflectionPad1dOptions(2))),
+      "torch::nn::ReflectionPad1d(padding=[2, 2])");
+  ASSERT_EQ(
+      c10::str(ReflectionPad1d(ReflectionPad1dOptions({3, 1}))),
+      "torch::nn::ReflectionPad1d(padding=[3, 1])");
+  ASSERT_EQ(
+      c10::str(ReflectionPad2d(ReflectionPad2dOptions(2))),
+      "torch::nn::ReflectionPad2d(padding=[2, 2, 2, 2])");
+  ASSERT_EQ(
+      c10::str(ReflectionPad2d(ReflectionPad2dOptions({1, 1, 2, 0}))),
+      "torch::nn::ReflectionPad2d(padding=[1, 1, 2, 0])");
+}
+
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
   struct InnerTestModule : torch::nn::Module {
     InnerTestModule()
@@ -1964,10 +2047,10 @@ TEST_F(ModulesTest, PrettyPrintNestedModel) {
   ASSERT_EQ(
       c10::str(TestModule{}),
       "TestModule(\n"
-      "  (fc): torch::nn::Linear(in=4, out=5, with_bias=true)\n"
+      "  (fc): torch::nn::Linear(in_features=4, out_features=5, bias=true)\n"
       "  (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2)\n"
       "  (inner): InnerTestModule(\n"
-      "    (fc): torch::nn::Linear(in=3, out=4, with_bias=true)\n"
+      "    (fc): torch::nn::Linear(in_features=3, out_features=4, bias=true)\n"
       "    (table): torch::nn::Embedding(num_embeddings=10, embedding_dim=2)\n"
       "  )\n"
       ")");
