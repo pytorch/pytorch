@@ -58,6 +58,7 @@ static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         cudaMemcpyDeviceToDevice,
         copy_stream));
   } else {
+    iter.set_common_dtype(iter.dtype());
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(0), "copy_", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t x) { return x; });
     });
