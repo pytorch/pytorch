@@ -158,7 +158,7 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
         iter.add_input(p);
         iter.add_output(self);
         iter.build();
-        cpu_serial_kernel(iter, [&](const double p_val) -> scalar_t {
+        cpu_serial_kernel(iter, [&](const scalar_t p_val) -> scalar_t {
           at::bernoulli_distribution<float> bernoulli(p_val);
           return static_cast<scalar_t>(bernoulli(generator));
         });
