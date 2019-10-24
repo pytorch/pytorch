@@ -402,19 +402,21 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
+static inline double swapDouble(double value) {
+  static_assert(sizeof(double) == 8, "double length");  // NO LINT
+  const char* bytes = reinterpret_cast<const char*>(&value);
+  double flipped;
+  char* out_bytes = reinterpret_cast<char*>(&flipped);
+  for (size_t i = 0; i < sizeof(double); ++i) {
+    out_bytes[i] = bytes[sizeof(double) - i - 1];
+  }
+  return flipped;
+}
+
 void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
-
   // Python pickle format is big endian, swap.
-  static_assert(sizeof(double) == 8, "double length");  // NOLINT
-  auto swapEndian = [](double value) -> double {
-    double out;
-    const char* const bytes = reinterpret_cast<char*>(&value);
-    std::reverse_copy(bytes, bytes + sizeof(double),
-                      reinterpret_cast<char*>(&out));
-    return out;
-  };
-  push<double>(swapEndian(value));
+  push<double>(swapDouble(value));
 }
 
 void Pickler::pushLong(const std::string& data) {

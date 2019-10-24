@@ -3262,23 +3262,6 @@ class _TestTorchMixin(object):
         self.assertFalse(t1.is_same_size(t3))
         self.assertTrue(t1.is_same_size(t4))
 
-    def test_is_set_to(self):
-        t1 = torch.Tensor(3, 4, 9, 10)
-        t2 = torch.Tensor(3, 4, 9, 10)
-        t3 = torch.Tensor().set_(t1)
-        t4 = t3.clone().resize_(12, 90)
-        self.assertFalse(t1.is_set_to(t2))
-        self.assertTrue(t1.is_set_to(t3))
-        self.assertTrue(t3.is_set_to(t1), "is_set_to should be symmetric")
-        self.assertFalse(t1.is_set_to(t4))
-        self.assertFalse(torch.Tensor().is_set_to(torch.Tensor()),
-                         "Tensors with no storages should not appear to be set "
-                         "to each other")
-
-        t1 = torch.tensor([True, True], dtype=torch.bool)
-        t2 = torch.tensor([0], dtype=torch.bool).set_(t1)
-        self.assertTrue(t1.is_set_to(t2))
-
     def test_tensor_set(self):
         t1 = torch.Tensor()
         t2 = torch.Tensor(3, 4, 9, 10).uniform_()
@@ -6369,6 +6352,29 @@ class TestTorchDeviceType(TestCase):
         empty = torch.randn((4, 0), dtype=dtype, device=device)
         self.assertRaises(RuntimeError, lambda: torch.cat([x, empty], dim=1))
         self.assertRaises(RuntimeError, lambda: torch.cat([empty, x], dim=1))
+
+    def test_is_set_to(self, device):
+        t1 = torch.empty(3, 4, 9, 10, device=device)
+        t2 = torch.empty(3, 4, 9, 10, device=device)
+        t3 = torch.tensor([], device=device).set_(t1)
+        t4 = t3.clone().resize_(12, 90)
+        self.assertFalse(t1.is_set_to(t2))
+        self.assertTrue(t1.is_set_to(t3))
+        self.assertTrue(t3.is_set_to(t1), "is_set_to should be symmetric")
+        self.assertFalse(t1.is_set_to(t4))
+        self.assertFalse(torch.Tensor().is_set_to(torch.Tensor()),
+                         "Tensors with no storages should not appear to be set "
+                         "to each other")
+
+        t1 = torch.tensor([True, True], dtype=torch.bool, device=device)
+        t2 = torch.tensor([0], dtype=torch.bool, device=device).set_(t1)
+        self.assertTrue(t1.is_set_to(t2))
+
+        # test that legacy empty size behavior used to be respected (i.e. all
+        # empty tensors were logically collapsed to size [0]).
+        t1 = torch.empty([0, 2, 5, 0], device=device)
+        t2 = t1.view([0])
+        self.assertFalse(t1.is_set_to(t2))
 
     @slowTest
     @skipCUDAIfNoMagma
