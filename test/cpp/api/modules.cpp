@@ -1825,6 +1825,33 @@ TEST_F(ModulesTest, ReplicationPad3d) {
   }
 }
 
+TEST_F(ModulesTest, ZeroPad2d) {
+  {
+    ZeroPad2d m(ZeroPad2dOptions(2));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{0., 0., 0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 1., 2., 0., 0.},
+                                     {0., 0., 3., 4., 5., 0., 0.},
+                                     {0., 0., 6., 7., 8., 0., 0.},
+                                     {0., 0., 0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 0., 0., 0., 0.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ZeroPad2d m(ZeroPad2dOptions({1, 1, 2, 0}));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 0., 0.},
+                                     {0., 0., 1., 2., 0.},
+                                     {0., 3., 4., 5., 0.},
+                                     {0., 6., 7., 8., 0.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in_features=3, out_features=4, bias=true)");
@@ -2141,6 +2168,15 @@ TEST_F(ModulesTest, PrettyPrintReplicationPad) {
   ASSERT_EQ(
       c10::str(ReplicationPad3d(ReplicationPad3dOptions({1, 2, 1, 2, 1, 2}))),
       "torch::nn::ReplicationPad3d(padding=[1, 2, 1, 2, 1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
+  ASSERT_EQ(
+      c10::str(ZeroPad2d(ZeroPad2dOptions(2))),
+      "torch::nn::ZeroPad2d(padding=[2, 2, 2, 2])");
+  ASSERT_EQ(
+      c10::str(ZeroPad2d(ZeroPad2dOptions({1, 1, 2, 0}))),
+      "torch::nn::ZeroPad2d(padding=[1, 1, 2, 0])");
 }
 
 TEST_F(ModulesTest, PrettyPrintNestedModel) {
