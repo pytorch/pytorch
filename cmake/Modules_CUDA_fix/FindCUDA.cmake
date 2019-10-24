@@ -5,9 +5,7 @@
 # to run.
 # See ./README.md for details.
 
-if(NOT FIND_CUDA_MODULE_DEPRECATED)
 set(UPSTREAM_FIND_CUDA_DIR "${CMAKE_CURRENT_LIST_DIR}/upstream/")
 
 include("${UPSTREAM_FIND_CUDA_DIR}/CMakeInitializeConfigs.cmake")
 include("${UPSTREAM_FIND_CUDA_DIR}/FindCUDA.cmake")
-endif()

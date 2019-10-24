@@ -20,7 +20,7 @@ else
   python_installation="$(dirname $(dirname $(cd /usr && $PYTHON -c 'import os; import caffe2; print(os.path.realpath(caffe2.__file__))')))"
   caffe2_pypath="$python_installation/caffe2"
   cpp_test_dir="$python_installation/torch/test"
-  ld_library_path="$python_installation/torch/lib:$python_installation/caffe2/python"
+  ld_library_path="$python_installation/torch/lib"
 fi
 
 ################################################################################
@@ -86,7 +86,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
   EXTRA_TESTS+=("$caffe2_pypath/contrib/nccl")
 fi
 
-ignore_tests=()
+rocm_ignore_test=()
 if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # Currently these tests are failing on ROCM platform:
 
@@ -109,27 +109,9 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
 fi
 
 pip install --user pytest-sugar
-
-##############################
-# TensorRT integration tests #
-##############################
-if [[ $BUILD_ENVIRONMENT == *caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04* ]]; then
-  export LD_LIBRARY_PATH="$ld_library_path":$LD_LIBRARY_PATH
-  export PYTHONPATH="$caffe2_pypath/python":$PYTHONPATH
-  export PATH="/var/lib/jenkins/.local/bin:$PATH"
-  pip install -q --user torchvision
-  "$PYTHON" \
+"$PYTHON" \
   -m pytest \
-  -v \
-  --disable-warnings \
-  --junit-xml="$pytest_reports_dir/result.xml" \
-  --ignore "$caffe2_pypath/python/test/executor_test.py" \
-  --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
-  --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
-  --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py"
-else
-  "$PYTHON" \
-  -m pytest \
+  -x \
   -v \
   --disable-warnings \
   --junit-xml="$pytest_reports_dir/result.xml" \
@@ -138,10 +120,9 @@ else
   --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
   --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
   --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
-  ${ignore_tests[@]} \
+  ${rocm_ignore_test[@]} \
   "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
-fi
 
 #####################
 # torchvision tests #

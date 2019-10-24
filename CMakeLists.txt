@@ -583,12 +583,10 @@ if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
       "generate files that are not well tested.")
 endif()
 
-if (USE_CUDA)
+if (USE_CUDA OR USE_ROCM)
   # TODO: check if we should include other cuda dependency libraries
   # to the interface as well.
-  if(FIND_CUDA_MODULE_DEPRECATED)
-    enable_language(CUDA)
-  endif()
+
 endif()
 
 # Note(jiayq): when building static libraries, all PRIVATE dependencies
