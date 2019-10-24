@@ -143,6 +143,8 @@ TORCH_API Tensor xavier_uniform_(Tensor tensor, double gain = 1.0);
 /// No gradient will be recorded for this operation.
 TORCH_API Tensor zeros_(Tensor tensor);
 
+TORCH_API std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(const Tensor& tensor);
+
 } // namespace init
 } // namespace nn
 } // namespace torch
