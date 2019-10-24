@@ -207,6 +207,11 @@ if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
 endif()
 
+# yf225 TODO add comment here
+if(LINUX)
+  set(CMAKE_STATIC_LINKER_FLAGS "-Wl,--exclude-libs,libprotobuf.a -Wl,--exclude-libs,libprotobuf-lite.a")
+endif()
+
 if (MSVC)
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
