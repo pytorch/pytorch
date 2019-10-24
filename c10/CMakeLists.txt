@@ -44,10 +44,6 @@ if(USE_ROCM)
   add_subdirectory(hip)
 endif()
 
-# ---[ Installation
-# Note: for now, we will put all export path into one single Caffe2Targets group
-# to deal with the cmake deployment need. Inside the Caffe2Targets set, the
-# individual libraries like libc10.so and libcaffe2.so are still self-contained.
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")
