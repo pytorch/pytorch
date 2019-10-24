@@ -66,6 +66,7 @@ _dtype = dtype
 _device = device
 _qscheme = qscheme
 _size = Union[Size, List[_int], Tuple[_int, ...]]
+_layout = layout
 
 # Meta-type for "numeric" things; matches our docs
 Number = Union[builtins.int, builtins.float, builtins.bool]
@@ -100,7 +101,7 @@ class Tensor:
     @property
     def ndim(self) -> _int: ...
     @property
-    def layout(self) -> layout: ...
+    def layout(self) -> _layout: ...
 
     ${tensor_method_hints}
 
