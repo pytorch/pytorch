@@ -437,6 +437,7 @@ def CppExtension(name, sources, *args, **kwargs):
         kwargs['library_dirs'] = library_dirs
 
         libraries = kwargs.get('libraries', [])
+        libraries.append('c10')
         libraries.append('torch')
         libraries.append('torch_python')
         libraries.append('_C')
@@ -481,6 +482,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries = kwargs.get('libraries', [])
     libraries.append('cudart')
     if IS_WINDOWS:
+        libraries.append('c10')
+        libraries.append('c10_cuda')
         libraries.append('torch')
         libraries.append('torch_python')
         libraries.append('_C')

@@ -1,16 +1,15 @@
 #pragma once
-#include <ATen/Tensor.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <functional>
 #include <memory>
 
 namespace torch { namespace autograd {
 
-using hooks_list = std::vector<std::function<at::Tensor(const at::Tensor&)>>;
+using hooks_list = std::vector<std::function<Variable(const Variable&)>>;
 
 struct CppFunctionPreHook : public FunctionPreHook {
   CppFunctionPreHook(const std::shared_ptr<hooks_list> &hooks, int value_idx);
-  variable_list operator()(const std::vector<at::Tensor>& values) override;
+  variable_list operator()(const variable_list& values) override;
 
   std::shared_ptr<hooks_list> hooks_;
   int value_idx_;

@@ -5,8 +5,6 @@
 #include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/util/Optional.h>
 
-#include <torch/csrc/autograd/variable.h>
-
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
     true,
@@ -224,70 +222,6 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
           device};
 }
 
-// These methods all live here because they cannot be implemented when
-// AutogradMeta is incomplete
-
-TensorImpl::~TensorImpl() = default;
-
-void TensorImpl::set_autograd_meta(std::unique_ptr<torch::autograd::AutogradMeta> autograd_meta) {
-  autograd_meta_ = std::move(autograd_meta);
-  if (autograd_meta_) {
-    type_set_ = type_set_.add(TensorTypeId::VariableTensorId);
-  } else {
-    type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
-  }
-}
-
-void TensorImpl::set_requires_grad(bool requires_grad) {
-  TORCH_INTERNAL_ASSERT(autograd_meta(), "set_requires_grad is not implemented for Tensor");
-  autograd_meta()->set_requires_grad(requires_grad, this);
-}
-
-bool TensorImpl::requires_grad() const {
-  TORCH_INTERNAL_ASSERT(autograd_meta(), "requires_grad is not implemented for Tensor");
-  return autograd_meta()->requires_grad();
-}
-
-std::unique_ptr<torch::autograd::AutogradMeta> TensorImpl::detach_autograd_meta() {
-  type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
-  return std::move(autograd_meta_);
-}
-
-torch::autograd::AutogradMeta* TensorImpl::autograd_meta() const {
-  return autograd_meta_.get();
-}
-
-void TensorImpl::copy_tensor_metadata(
-    const TensorImpl* src_impl,
-    TensorImpl* dest_impl,
-    const c10::VariableVersion& version_counter,
-    bool allow_tensor_metadata_change) {
-  dest_impl->storage_ = src_impl->storage_;
-  dest_impl->sizes_ = src_impl->sizes_;
-  dest_impl->strides_ = src_impl->strides_;
-  dest_impl->storage_offset_ = src_impl->storage_offset_;
-  dest_impl->data_type_ = src_impl->data_type_;
-  dest_impl->device_opt_ = src_impl->device_opt_;
-  // This may temporarily violate invariant that
-  // type_set_.has(VariableTensorId) iff autograd_meta_ != nullptr...
-  dest_impl->type_set_ = src_impl->type_set_;
-  // ...so refresh Variable in autograd_meta_
-  if (dest_impl->autograd_meta_) {
-    dest_impl->type_set_ = dest_impl->type_set_.add(TensorTypeId::VariableTensorId);
-  } else {
-    dest_impl->type_set_ = dest_impl->type_set_.remove(TensorTypeId::VariableTensorId);
-  }
-  dest_impl->is_contiguous_ = src_impl->is_contiguous_;
-  dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
-  dest_impl->is_channels_last_ = src_impl->is_channels_last_;
-  dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
-  dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
-  dest_impl->reserved_ = src_impl->reserved_;
-  dest_impl->set_version_counter(version_counter);
-  dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-  if (src_impl->named_tensor_meta_ != nullptr) {
-    dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
-  }
-}
+AutogradMetaInterface::~AutogradMetaInterface() {}
 
 } // namespace c10
