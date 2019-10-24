@@ -13,7 +13,7 @@ help () {
   echo
   echo "Options:"
   echo "   -t           Team Identifier"
-  echo "   -p           Name of the Provisionging Profile"
+  echo "   -p           Name of the Provisioning Profile"
 }
 bootstrap() {
     echo "starting"
