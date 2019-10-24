@@ -34,6 +34,15 @@ Tensor _shape_as_tensor(const Tensor& self) {
   return at::tensor(self.sizes(), options);
 }
 
+Tensor& set_(Tensor& result) {
+  Storage storage(result.dtype(), 0, c10::GetAllocator(result.device().type()), true);
+  return result.set_(storage, 0, {0}, {});
+}
+
+Tensor& set_(Tensor& result, Storage source) {
+  return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
+}
+
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
