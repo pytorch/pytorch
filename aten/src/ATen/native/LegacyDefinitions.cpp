@@ -86,6 +86,4 @@ Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
   return std::get<1>(at::sort(self, dim, descending));
 }
 
-}
-
 }} // namespace at::native
