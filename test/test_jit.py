@@ -17042,6 +17042,13 @@ additional_module_tests = [
         'constructor_args': (S, S),
         'input_size': (S, S),
     },
+    {
+        'module_name': 'MultiheadAttention',
+        'constructor_args': (128, 8),
+        'input_size': (10, 8, 128),
+        'extra_args': (torch.randn(10, 8, 128), torch.randn(10, 8, 128)),
+        'slowTest': True
+    }
 ]
 
 
