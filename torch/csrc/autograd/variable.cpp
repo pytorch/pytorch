@@ -28,7 +28,10 @@ AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge g
   output_nr_ = gradient_edge.input_nr;
 
   // set_requires_grad also checks error conditions.
-  set_requires_grad(requires_grad, self_impl);
+  if (requires_grad) {
+    TORCH_INTERNAL_ASSERT(self_impl);
+    set_requires_grad(requires_grad, self_impl);
+  }
   TORCH_CHECK(
       !grad_fn_ || !requires_grad_,
       "requires_grad should be false if grad_fn is set");
@@ -107,7 +110,7 @@ void Variable::set_data(const at::Tensor &new_data) const {
 }
 
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
-    : Variable::AutogradMeta(self_impl, false, std::move(gradient_edge)) {
+    : AutogradMeta(self_impl, false, std::move(gradient_edge)) {
   base_ = std::move(base);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
@@ -196,6 +199,8 @@ struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
     return c10::guts::make_unique<AutogradMeta>();
   }
 };
+
+ConcreteAutogradMetaFactory meta_factory;
 
 static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_factory);
 
