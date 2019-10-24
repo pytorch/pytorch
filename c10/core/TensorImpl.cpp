@@ -225,25 +225,27 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 AutogradMetaInterface::~AutogradMetaInterface() {}
 
 void TensorImpl::set_requires_grad(bool requires_grad) {
-  TORCH_INTERNAL_ASSERT(autograd_meta(), "set_requires_grad is not implemented for Tensor");
-  autograd_meta()->set_requires_grad(requires_grad, this);
+  TORCH_INTERNAL_ASSERT(type_set_.has(TensorTypeId::VariableTensorId), "set_requires_grad is not implemented for Tensor");
+  if (!requires_grad && !autograd_meta_) return;
+  if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+  autograd_meta_->set_requires_grad(requires_grad, this);
 }
 
 bool TensorImpl::requires_grad() const {
-  TORCH_INTERNAL_ASSERT(autograd_meta(), "requires_grad is not implemented for Tensor");
-  return autograd_meta()->requires_grad();
+  TORCH_INTERNAL_ASSERT(type_set_.has(TensorTypeId::VariableTensorId), "set_requires_grad is not implemented for Tensor");
+  if (!autograd_meta_) return false;
+  return autograd_meta_->requires_grad();
 }
 
 void TensorImpl::set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta) {
+  // NB: autograd_meta may be null!  That just means it's the default
+  // constructor
   autograd_meta_ = std::move(autograd_meta);
-  if (autograd_meta_) {
-    type_set_ = type_set_.add(TensorTypeId::VariableTensorId);
-  } else {
-    type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
-  }
+  type_set_ = type_set_.add(TensorTypeId::VariableTensorId);
 }
 
 c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
+  // NB: Might return null!
   return autograd_meta_.get();
 }
 
@@ -258,15 +260,14 @@ void TensorImpl::copy_tensor_metadata(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  // This may temporarily violate invariant that
-  // type_set_.has(VariableTensorId) iff autograd_meta_ != nullptr...
-  dest_impl->type_set_ = src_impl->type_set_;
-  // ...so refresh Variable in autograd_meta_
-  if (dest_impl->autograd_meta_) {
-    dest_impl->type_set_ = dest_impl->type_set_.add(TensorTypeId::VariableTensorId);
-  } else {
-    dest_impl->type_set_ = dest_impl->type_set_.remove(TensorTypeId::VariableTensorId);
+  // We can copy tensor metadata from a Variable tensor into a non-Variable
+  // tensor.  In that case, it is WRONG to preserve VariableTensorId,
+  // because metadata copy does NOT transfer autograd_meta_ information.
+  auto type_set = src_impl->type_set_.remove(TensorTypeId::VariableTensorId);
+  if (dest_impl->type_set_.has(TensorTypeId::VariableTensorId)) {
+    type_set = type_set.add(TensorTypeId::VariableTensorId);
   }
+  dest_impl->type_set_ = type_set;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;

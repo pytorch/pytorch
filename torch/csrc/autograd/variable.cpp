@@ -39,6 +39,9 @@ AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge g
 
 std::shared_ptr<Node> Variable::grad_accumulator() const {
   auto autograd_meta = get_autograd_meta();
+  if (!autograd_meta) {
+    return nullptr;
+  }
   if (autograd_meta->grad_fn_) {
     throw std::logic_error(
         "grad_accumulator() should be only called on leaf Variables");
@@ -64,6 +67,9 @@ void Variable::detach_() {
   if (is_view()) {
     AT_ERROR("Can't detach views in-place. Use detach() instead");
   }
+  // I think the choice here is conservative.  But there is some weirdness going
+  // on: why aren't, e.g., hooks cleared in this case?
+  materialize_autograd_meta();
   auto autograd_meta = get_autograd_meta();
   autograd_meta->set_requires_grad(false, unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
@@ -87,14 +93,16 @@ void Variable::set_data(const at::Tensor &new_data) const {
 
   // Resets gradient accumulator if metadata is out of date
   AutogradMeta* autograd_meta = get_autograd_meta();
-  std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
-  auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
-  if (prior_accumulator) {
-    const auto prior_device = prior_accumulator->input_metadata(0).device();
-    const auto new_device = new_data.device();
+  if (autograd_meta) {
+    std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
+    auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
+    if (prior_accumulator) {
+      const auto prior_device = prior_accumulator->input_metadata(0).device();
+      const auto new_device = new_data.device();
 
-    if (new_data.type() != type() || prior_device != new_device) {
-      autograd_meta->grad_accumulator_.reset();
+      if (new_data.type() != type() || prior_device != new_device) {
+        autograd_meta->grad_accumulator_.reset();
+      }
     }
   }
 
@@ -125,8 +133,13 @@ DifferentiableViewMeta::~DifferentiableViewMeta() {
   base_.reset();
 }
 
+namespace {
+  std::shared_ptr<Node> singleton_shared_ptr;
+}
+
 const std::shared_ptr<Node>& Variable::grad_fn() const {
   if (is_view()) {
+    // NB: is_view() ==> get_autograd_meta()
     auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta());
     std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
     if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
@@ -150,13 +163,18 @@ const std::shared_ptr<Node>& Variable::grad_fn() const {
     }
     return diff_view_meta->grad_fn_;
   } else {
-    return get_autograd_meta()->grad_fn_;
+    if (get_autograd_meta()) {
+      return get_autograd_meta()->grad_fn_;
+    } else {
+      return singleton_shared_ptr;
+    }
   }
 }
 
 void Variable::rebase_history(Edge gradient_edge) {
   AT_ASSERT(gradient_edge.function != nullptr);
   if (is_view()) {
+    // NB: is_view() ==> get_autograd_meta()
     auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta());
     AT_ASSERT(gradient_edge.input_nr == 0);
     AT_ASSERT(gradient_edge.function);
@@ -174,6 +192,7 @@ void Variable::rebase_history(Edge gradient_edge) {
 }
 
 void Variable::create_cpp_hook() {
+  materialize_autograd_meta();
   auto &list = get_autograd_meta()->cpp_hooks_list;
   list.reset(new hooks_list());
   std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, output_nr()));
@@ -186,6 +205,7 @@ void Variable::create_cpp_hook() {
 }
 
 void Variable::remove_hook(unsigned pos) {
+  materialize_autograd_meta();
   auto &list = get_autograd_meta()->cpp_hooks_list;
   TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
@@ -204,6 +224,13 @@ ConcreteAutogradMetaFactory meta_factory;
 
 static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_factory);
 
+}
+
+void Variable::materialize_autograd_meta() {
+  auto p = unsafeGetTensorImpl();
+  if (!p->autograd_meta()) {
+    p->set_autograd_meta(c10::guts::make_unique<AutogradMeta>());
+  }
 }
 
 }} // namespace torch::autograd

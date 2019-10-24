@@ -307,6 +307,7 @@ public:
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   at::TensorImpl* get() const;
   void create_cpp_hook();
+  void materialize_autograd_meta();
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -501,8 +502,7 @@ inline Variable make_variable_view(
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/base.version_counter(),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(
-        data_impl_copy.get(), false));
+      data_impl_copy->set_autograd_meta(nullptr);
       return Variable(data_impl_copy);
     }
   }
@@ -525,14 +525,22 @@ inline Variable make_variable(
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.getIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      data_impl->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
+      if (requires_grad) {
+        data_impl->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
+      } else {
+        data_impl->set_autograd_meta(nullptr);
+      }
       return Variable(std::move(data_impl));
     } else {
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(
-        data_impl_copy.get(), requires_grad));
+      if (requires_grad) {
+        data_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(
+          data_impl_copy.get(), requires_grad));
+      } else {
+        data_impl_copy->set_autograd_meta(nullptr);
+      }
       return Variable(data_impl_copy);
     }
   }
@@ -594,7 +602,7 @@ inline at::Tensor Variable::variable_data() const noexcept {
   auto self_impl_copy = get()->shallow_copy_and_detach(
     /*version_counter=*/0,
     /*allow_tensor_metadata_change=*/false);
-  self_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(self_impl_copy.get(), false));
+  self_impl_copy->set_autograd_meta(nullptr);
   return at::Tensor(self_impl_copy);
 }
 
@@ -602,16 +610,25 @@ inline at::Tensor Variable::variable_data() const noexcept {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline Node* Variable::grad_fn_unsafe() const {
-  return get_autograd_meta()->grad_fn_.get();
+  if (get_autograd_meta()) {
+    return get_autograd_meta()->grad_fn_.get();
+  } else {
+    return nullptr;
+  }
 }
 
 inline void Variable::set_grad_accumulator(
     std::weak_ptr<Node> grad_accumulator) {
+  materialize_autograd_meta();
   get_autograd_meta()->grad_accumulator_ = std::move(grad_accumulator);
 }
 
 inline std::shared_ptr<Node> Variable::try_get_grad_accumulator() const {
-  return get_autograd_meta()->grad_accumulator_.lock();
+  if (get_autograd_meta()) {
+    return get_autograd_meta()->grad_accumulator_.lock();
+  } else {
+    return nullptr;
+  }
 }
 
 inline Variable Variable::detach() const {
@@ -623,16 +640,25 @@ inline Variable Variable::detach() const {
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
+  materialize_autograd_meta();
   get_autograd_meta()->grad_fn_ = std::move(edge.function);
   get_autograd_meta()->output_nr_ = edge.input_nr;
 }
 
 inline uint32_t Variable::output_nr() const noexcept {
-  return get_autograd_meta()->output_nr_;
+  if (get_autograd_meta()) {
+    return get_autograd_meta()->output_nr_;
+  } else {
+    return 0;
+  }
 }
 
 inline bool Variable::is_leaf() const noexcept {
-  return get_autograd_meta()->grad_fn_ == nullptr;
+  if (get_autograd_meta()) {
+    return get_autograd_meta()->grad_fn_ == nullptr;
+  } else {
+    return true;
+  }
 }
 
 // Versions
@@ -659,15 +685,27 @@ inline const c10::VariableVersion& Variable::version_counter() const noexcept {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::add_hook(std::shared_ptr<FunctionPreHook> hook) {
+  materialize_autograd_meta();
   get_autograd_meta()->hooks_.push_back(std::move(hook));
 }
 
+namespace {
+  std::vector<std::shared_ptr<FunctionPreHook>> empty_singleton;
+}
+
+// TODO: Return an ArrayRef instead
 inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks()
     const noexcept {
-  return get_autograd_meta()->hooks_;
+  if (get_autograd_meta()) {
+    return get_autograd_meta()->hooks_;
+  } else {
+    return empty_singleton;
+  }
 }
 
 inline void Variable::clear_hooks() {
+  // This is a little goofy, but usually this should be a no oop
+  materialize_autograd_meta();
   get_autograd_meta()->hooks_.clear();
 }
 
@@ -675,6 +713,7 @@ template <typename T>
 auto Variable::register_hook(T&& hook) -> Variable::hook_return_void_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
+  // NB: materialize_autograd_meta unnecessary due to requires grad check
   auto &list = get_autograd_meta()->cpp_hooks_list;
   if(!list) {
     create_cpp_hook();
@@ -693,6 +732,7 @@ template <typename T>
 auto Variable::register_hook(T&& hook) -> Variable::hook_return_var_t<T> {
   TORCH_CHECK(requires_grad(), "cannot register a hook on a variable that "
                            "doesn't require gradient");
+  // NB: materialize_autograd_meta unnecessary due to requires grad check
   auto &list = get_autograd_meta()->cpp_hooks_list;
   if(!list) {
     create_cpp_hook();
@@ -706,11 +746,16 @@ auto Variable::register_hook(T&& hook) -> Variable::hook_return_var_t<T> {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline bool Variable::is_view() const noexcept {
-  return get_autograd_meta()->is_view_;
+  if (get_autograd_meta()) {
+    return get_autograd_meta()->is_view_;
+  } else {
+    return false;
+  }
 }
 
 inline const Variable& Variable::base() const {
   if (is_view()) {
+    // is_view() implies get_autograd_meta()
     auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta());
     return diff_view_meta->base_;
   } else {
@@ -722,11 +767,20 @@ inline const Variable& Variable::base() const {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::set_name(const std::string& name) {
+  materialize_autograd_meta();
   get_autograd_meta()->name_ = name;
 }
 
+namespace {
+  std::string singleton_string;
+}
+
 inline const std::string& Variable::name() const noexcept {
-  return get_autograd_meta()->name_;
+  if (get_autograd_meta()) {
+    return get_autograd_meta()->name_;
+  } else {
+    return singleton_string;
+  }
 }
 
 inline void Variable::set_pyobj(PyObject* pyobj) noexcept {
@@ -738,6 +792,7 @@ inline PyObject* Variable::pyobj() const noexcept {
 }
 
 inline AutogradMeta* Variable::get_autograd_meta() const noexcept {
+  // NB: could return null
   return static_cast<AutogradMeta*>(get()->autograd_meta());
 }
 
