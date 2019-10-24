@@ -213,11 +213,15 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
 Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& total) {
   Tensor ret = at::empty(x.sizes(), x.options());
   AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "_dirichlet_grad_cpu", [&] {
-    CPU_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(ret, x, alpha, total,
-      [](scalar_t& ret_val, const scalar_t& x_val, const scalar_t& alpha_val, const scalar_t& total_val) {
-        ret_val = dirichlet_grad_one<scalar_t, double>(x_val, alpha_val, total_val);
-      }
-    );
+    auto iter = TensorIterator();
+    iter.add_input(x);
+    iter.add_input(alpha);
+    iter.add_input(total);
+    iter.add_output(ret);
+    iter.build();
+    cpu_serial_kernel(iter, [&](const scalar_t x_val, const scalar_t alpha_val, const scalar_t total_val) -> scalar_t {
+      return dirichlet_grad_one<scalar_t, double>(x_val, alpha_val, total_val);
+    });
   });
   return ret;
 }
