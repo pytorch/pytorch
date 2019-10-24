@@ -393,15 +393,8 @@ def init_process_group(backend,
     else:
         # backward compatible API
         if store is None:
-            url = init_method
-            if world_size != -1 and rank != -1:
-                url += "?rank={}&world_size={}".format(rank, world_size)
-            elif rank != -1:
-                url += "?rank={}".format(rank)
-            elif world_size != -1:
-                url += "?world_size={}".format(world_size)
-
-            store, rank, world_size = next(rendezvous(url))
+            rendezvous_iterator = rendezvous(init_method, rank, world_size)
+            store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
         _default_pg = _new_process_group_helper(
