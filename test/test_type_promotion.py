@@ -369,6 +369,11 @@ class TestTypePromotion(TestCase):
         expected = torch.empty(9, 9, dtype=torch.float, device=self.device).fill_(2.)
         self.assertEqual(result, expected)
 
+    def test_transpose(self):
+        # https://github.com/pytorch/pytorch/issues/28502
+        a = torch.tensor([[True, True], [False, True]])
+        self.assertEqual(a.t() == 0, a.t() == False)  # noqa: E712
+
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
     def setUp(self):
