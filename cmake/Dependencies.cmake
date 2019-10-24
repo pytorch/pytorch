@@ -416,6 +416,8 @@ if(USE_GFLAGS)
         "it is strongly recommended that you install gflags. Suppress this "
         "warning with -DUSE_GFLAGS=OFF")
     caffe2_update_option(USE_GFLAGS OFF)
+  else()
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS gflags)
   endif()
 endif()
 

@@ -62,7 +62,6 @@ list(APPEND Caffe2_CPU_SRCS
 
 if (NOT MSVC AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   add_library(caffe2_dnnlowp_avx2_ops OBJECT ${caffe2_dnnlowp_avx2_ops_SRCS})
-  add_dependencies(caffe2_dnnlowp_avx2_ops fbgemm Caffe2_PROTO c10)
   target_include_directories(caffe2_dnnlowp_avx2_ops BEFORE
     PRIVATE $<BUILD_INTERFACE:${FBGEMM_SOURCE_DIR}/include>)
   set_property(SOURCE ${caffe2_dnnlowp_avx2_ops_SRCS}
