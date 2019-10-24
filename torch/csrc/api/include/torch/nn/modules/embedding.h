@@ -6,8 +6,8 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
+#include <cstdint>
 #include <cstddef>
-#include <vector>
 
 namespace torch {
 namespace nn {

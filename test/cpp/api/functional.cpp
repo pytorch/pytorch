@@ -971,6 +971,25 @@ TEST_F(FunctionalTest, Linear) {
   }
 }
 
+TEST_F(FunctionalTest, Embedding) {
+  const auto input = torch::tensor({{1,2,4,5}, {4,3,2,9}}, torch::kLong);
+  auto weight = torch::empty({10, 3});
+  torch::nn::init::normal_(weight);
+  auto y = F::embedding(input, weight, EmbeddingOptions(10, 3));
+  auto y_exp = torch::embedding(weight, input.contiguous(), -1, false, false);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, EmbeddingBag) {
+  const auto input = torch::tensor({1,2,4,5,4,3,2,9}, torch::kLong);
+  auto offsets = torch::tensor({0,4}, torch::kLong);
+  auto weight = torch::empty({10, 3});
+  torch::nn::init::normal_(weight);
+  auto y = F::embedding_bag(input, weight, offsets, EmbeddingBagOptions(10, 3).mode("sum"), torch::Tensor());
+  auto y_exp = std::get<0>(torch::embedding_bag(weight, input, offsets, false, 0, false, torch::Tensor()));;
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(FunctionalTest, Bilinear) {
   auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
   auto input2 = torch::tensor({{7, 4}, {8 ,9}});

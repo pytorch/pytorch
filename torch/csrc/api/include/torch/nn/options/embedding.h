@@ -7,7 +7,6 @@
 
 namespace torch {
 namespace nn {
-
   /// Options for the `Embedding` module.
   struct TORCH_API EmbeddingOptions {
     EmbeddingOptions(int64_t num_embeddings, int64_t embedding_dim);
@@ -53,6 +52,5 @@ namespace nn {
     /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
     TORCH_ARG(torch::Tensor, _weight) = Tensor();
   };
-
 } // namespace nn
 } // namespace torch

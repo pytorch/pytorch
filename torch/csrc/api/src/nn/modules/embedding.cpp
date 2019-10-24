@@ -1,6 +1,7 @@
 #include <torch/nn/modules/embedding.h>
 
 #include <torch/types.h>
+#include <torch/cuda.h>
 #include <torch/utils.h>
 #include <torch/nn/init.h>
 
@@ -88,7 +89,7 @@ torch::Tensor EmbeddingBagImpl::forward(
     const torch::Tensor& input,
     const torch::Tensor& offsets,
     const torch::Tensor& per_sample_weights) {
-  F::embedding_bag(input, offsets, weight, options, per_sample_weights);
+  F::embedding_bag(input, weight, offsets, options, per_sample_weights);
 }
 
 void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
