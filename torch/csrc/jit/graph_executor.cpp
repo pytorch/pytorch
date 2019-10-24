@@ -218,7 +218,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 };
 
-GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
+GraphExecutor::GraphExecutor(const std::shared_ptr<Graph> &graph)
     : pImpl(
           getProfilingMode() ? dynamic_cast<GraphExecutorImplBase*>(
                                    new ProfilingGraphExecutorImpl(graph))

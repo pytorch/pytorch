@@ -179,7 +179,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
     for (IValue& v : stack) {
       if (v.isTensorList()) {
         for (const at::Tensor& tensor : v.toTensorListRef()) {
-          produceOutput(output_index++, std::move(tensor), outputs);
+          produceOutput(output_index++, tensor, outputs);
         }
       } else if (v.isTensor()) {
         produceOutput(output_index++, std::move(v).toTensor(), outputs);
