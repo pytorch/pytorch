@@ -856,8 +856,6 @@ TEST_F(FunctionalTest, GeLU) {
   auto y_exp = torch::tensor({{1.9545, 2.9960}, {3.9999, 5.0000}}) +
         torch::tensor({{-2.3842e-07, -4.9829e-05}, {-2.6703e-05, -1.4305e-06}});
   auto y = F::gelu(x);
-  std::cout<<"y: "<<y<<"\ny_exp: "<<y_exp<<std::endl<<y-y_exp<<std::endl;
-  // std::cout<<"test::: [[2, 3]]\t"<<F::gelu(z);
   ASSERT_EQ(y.ndimension(), 2);
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2}));
   ASSERT_TRUE(torch::allclose(y, y_exp));
