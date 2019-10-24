@@ -1110,7 +1110,9 @@ graph(%x : Tensor,
         get_forward(m._c)(data)
         # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
-        torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
+        m._c = torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False)
+        assert len(m._c._get_modules()) == 1, \
+            'Expected to have single submodule of conv'
 
         get_forward(m._c)(data)
         FileCheck().check_not("aten::quantize_per_tensor") \
