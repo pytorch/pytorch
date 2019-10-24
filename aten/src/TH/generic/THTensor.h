@@ -100,7 +100,6 @@ TH_API void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1_,
 TH_API int THTensor_(isTransposed)(const THTensor *self);
 TH_API void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension_, int64_t size_, int64_t step_);
 
-TH_API void THTensor_(squeeze)(THTensor *self, THTensor *src);
 TH_API void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension_);
 TH_API void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension_);
 
