@@ -333,7 +333,7 @@ struct PythonPrintImpl {
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
-      name = candidate + std::to_string(next_id[name]++);
+      name = candidate + c10::to_string(next_id[name]++);
     }
     used.insert(name);
     return name;
