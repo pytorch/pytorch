@@ -183,7 +183,8 @@ The new usage looks like this:
 
 * The module's ``forward`` is compiled by default. Methods called from ``forward`` are lazily compiled in the order they are used in ``forward``.
 * To compile a method other than ``forward`` that is not called from ``forward``, add ``@torch.jit.export``.
-* To stop the compiler from compiling a method and leave it as a call to Python, add ``@torch.jit.ignore``.
+* To stop the compiler from compiling a method, add :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`@torch.jit.unused <torch.jit.unused>`. ``@ignore`` leaves the
+* method as a call to python, and ``@unused`` replaces it with an exception. ``@ignored`` cannot be exported; ``@unused`` can.
 * Most attribute types can be inferred, so ``torch.jit.Attribute`` is not necessary. For empty container types, annotate their types using `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
 * Constants can be marked with a ``Final`` class annotation instead of adding the name of the member to ``__constants__``.
 * Python 3 type hints can be used in place of ``torch.jit.annotate``
@@ -216,7 +217,7 @@ lazily compiled in the order they are used in ``forward``, as well as any
 
 Functions
 ~~~~~~~~~
-Functions don't change much, they can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` if needed.
+Functions don't change much, they can be decorated with :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`torch.jit.unused <torch.jit.unused>` if needed.
 
 .. testcode::
 
@@ -231,12 +232,18 @@ Functions don't change much, they can be decorated with :func:`@torch.jit.ignore
     def some_fn2():
         return 2
 
+    # As with ignore, if nothing calls it then it has no effect.
+    # If it is called in script it is replaced with an exception.
+    @torch.jit.unused
+    def some_fn3():
+      import pdb; pdb.set_trace()
+      return 4
+
     # Doesn't do anything, this function is already
     # the main entry point
     @torch.jit.export
-    def some_fn3():
+    def some_fn4():
         return 2
-
 
 TorchScript Classes
 ~~~~~~~~~~~~~~~~~~~
@@ -1097,6 +1104,10 @@ check the correctness of the model as you go.
 
 .. autofunction:: ignore
 
+.. autofunction:: unused
+
+.. autofunction:: is_scripting
+
 
 Attribute Lookup On Python Modules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1613,6 +1624,7 @@ Frequently Asked Questions
 
 Q: I would like to train a model on GPU and do inference on CPU. What are the
 best practices?
+
    First convert your model from GPU to CPU and then save it, like so: ::
 
       cpu_model = gpu_model.cpu()
@@ -1684,6 +1696,7 @@ Q: I would like to trace module's method but I keep getting this error:
 
     This error usually means that the method you are tracing uses a module's parameters and
     you are passing the module's method instead of the module instance (e.g. ``my_module_instance.forward`` vs ``my_module_instance``).
+
       - Invoking ``trace`` with a module's method captures module parameters (which may require gradients) as **constants**.
       - On the other hand, invoking ``trace`` with module's instance (e.g. ``my_module``) creates a new module and correctly copies parameters into the new module, so they can accumulate gradients if required.
 

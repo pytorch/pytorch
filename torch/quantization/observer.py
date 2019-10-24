@@ -174,7 +174,7 @@ class MinMaxObserver(_ObserverBase):
     r"""Default Observer Module
     A default implementation of the observer module, only works for
     `per_tensor_affine` quantization scheme.  The module will record the
-     running average of max and min value of the observed Tensor and
+    running average of max and min value of the observed Tensor and
     calculate_qparams will calculate scale and zero_point
     """
 
@@ -639,7 +639,7 @@ class RecordingObserver(_ObserverBase):
 class NoopObserver(Observer):
     r"""
     Observer that doesn't do anything and just passes its configuration to the
-    quantized module's ``.from_float()`.
+    quantized module's ``.from_float()``.
 
     Primarily used for quantization to float16 which doesn't require determining
     ranges.
