@@ -56,6 +56,10 @@ using ModuleLookup = std::function<Module(const std::vector<std::string>&)>;
 
 enum class EntityType { MODULE, PARAMETER, ATTRIBUTE, METHOD };
 
+TORCH_API EntityType get_entity_type(ClassTypePtr type, size_t offset_);
+
+TORCH_API c10::optional<EntityType> get_entity_type(ClassTypePtr type, const std::string& name);
+
 // A method in a module, e.g. f in:
 //
 // class M(ScriptModule):
@@ -337,7 +341,7 @@ struct TORCH_API Module {
 
   IValue create_class(const c10::QualifiedName& name, Stack stack) const;
 
-  Module create_module_from_shadow(ShadowClassTypePtr s_cls) {
+  Module create_module_from_shadow(const ShadowClassTypePtr& s_cls) {
     std::unordered_map<TypePtr, TypePtr> type_remap;
     return create_module_from_shadow_impl(*this, s_cls, type_remap);
   }
@@ -346,23 +350,10 @@ struct TORCH_API Module {
     return module_object()->slots().size();
   }
   c10::optional<EntityType> entity_type(const std::string& name) const {
-    if (auto slot_idx = type()->findAttributeSlot(name)) {
-      return entity_type(*slot_idx);
-    }
-    return c10::nullopt;
+    return get_entity_type(type(), name);
   }
   EntityType entity_type(size_t offset_) const {
-    TORCH_CHECK(offset_ < type()->numAttributes());
-    if (type()->is_parameter(offset_)) {
-      return EntityType::PARAMETER;
-    }
-    at::TypePtr t = type()->getAttribute(offset_);
-    if (auto cls = t->cast<at::ClassType>()) {
-      if (cls->is_module()) {
-        return EntityType::MODULE;
-      }
-    }
-    return EntityType::ATTRIBUTE;
+    return get_entity_type(type(), offset_);
   }
 
  private:
@@ -375,7 +366,7 @@ struct TORCH_API Module {
 
   static Module create_module_from_shadow_impl(
       const Module& m,
-      ShadowClassTypePtr s_cls,
+      const ShadowClassTypePtr& s_cls,
       std::unordered_map<TypePtr, TypePtr>& type_remap);
 
   c10::QualifiedName getNameForMethod(std::string basename) const {
