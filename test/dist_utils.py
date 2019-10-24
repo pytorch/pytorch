@@ -15,7 +15,7 @@ if not dist.is_available():
 
 
 class TestConfig:
-    __slots__ = ['rpc_backend']
+    __slots__ = ["rpc_backend"]
 
     def __init__(self, *args, **kwargs):
         assert len(args) == 0, "TestConfig only takes kwargs."
@@ -24,7 +24,7 @@ class TestConfig:
 
 
 TEST_CONFIG = TestConfig(rpc_backend=getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP))
-INIT_METHOD_TEMPLATE = "file://{file_name}?rank={rank}&world_size={world_size}"
+INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
 MASTER_RANK = 0
@@ -47,71 +47,78 @@ def on_master_follower_report_done(worker_name):
 
 
 def set_termination_signal():
-    assert (
-        not _TERMINATION_SIGNAL.is_set()
-    ), "Termination signal got set twice."
+    assert not _TERMINATION_SIGNAL.is_set(), "Termination signal got set twice."
     _TERMINATION_SIGNAL.set()
 
 
-def dist_init(test_method):
-    """
-    We use this decorator for setting up and tearing down state since
-    MultiProcessTestCase runs each `test*` method in a separate process and
-    each process just runs the `test*` method without actually calling
-    'setUp' and 'tearDown' methods of unittest.
-    """
+def dist_init(setup_model_parallel=True):
+    def decorator(old_test_method):
+        """
+        We use this decorator for setting up and tearing down state since
+        MultiProcessTestCase runs each `test*` method in a separate process and
+        each process just runs the `test*` method without actually calling
+        'setUp' and 'tearDown' methods of unittest.
+        """
 
-    @wraps(test_method)
-    def wrapper(self, *arg, **kwargs):
-        self.worker_id = self.rank
-        global _ALL_NODE_NAMES
-        _ALL_NODE_NAMES = {"worker{}".format(rank) for rank in range(self.world_size)}
+        @wraps(old_test_method)
+        def new_test_method(self, *arg, **kwargs):
+            self.worker_id = self.rank
+            self.worker_name_to_id = {
+                "worker{}".format(rank): rank for rank in range(self.world_size)
+            }
 
-        # Initialize RPC.
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
-        # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
-        rpc.init_model_parallel(
-            self_name="worker%d" % self.rank,
-            backend=TEST_CONFIG.rpc_backend,
-            self_rank=self.rank,
-            init_method=self.init_method,
-            num_send_recv_threads=16
-        )
-        test_method(self, *arg, **kwargs)
+            if setup_model_parallel:
+                global _ALL_NODE_NAMES
+                _ALL_NODE_NAMES = self.worker_name_to_id.keys()
 
-        # Follower reports done.
-        if self.rank == MASTER_RANK:
-            on_master_follower_report_done(
-                "worker{}".format(MASTER_RANK)
-            )
-        else:
-            rpc.rpc_async(
-                "worker{}".format(MASTER_RANK),
-                on_master_follower_report_done,
-                args=("worker{}".format(self.rank),),
-            )
-
-        # Master waits for followers to report done.
-        # Follower waits for master's termination command.
-        _TERMINATION_SIGNAL.wait()
-        if self.rank == MASTER_RANK:
-            # Master sends termination command.
-            futs = []
-            for dst_rank in range(self.world_size):
-                # torch.distributed.rpc module does not support sending to self.
-                if dst_rank == MASTER_RANK:
-                    continue
-                dst_name = "worker{}".format(dst_rank)
-                fut = rpc.rpc_async(
-                    dst_name,
-                    set_termination_signal,
-                    args=(),
+                dist.init_process_group(
+                    backend="gloo",
+                    init_method=self.init_method,
+                    rank=self.rank,
+                    world_size=self.world_size,
                 )
-                futs.append(fut)
-            for fut in futs:
-                assert fut.wait() is None, "Sending termination signal failed."
+                # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
+                rpc.init_model_parallel(
+                    self_name="worker%d" % self.rank,
+                    backend=TEST_CONFIG.rpc_backend,
+                    init_method=self.init_method,
+                    self_rank=self.rank,
+                    worker_name_to_id=self.worker_name_to_id,
+                    num_send_recv_threads=16,
+                )
 
-        # Close RPC.
-        rpc.join_rpc()
+            old_test_method(self, *arg, **kwargs)
 
-    return wrapper
+            if setup_model_parallel:
+                # Follower reports done.
+                if self.rank == MASTER_RANK:
+                    on_master_follower_report_done("worker{}".format(MASTER_RANK))
+                else:
+                    rpc.rpc_async(
+                        "worker{}".format(MASTER_RANK),
+                        on_master_follower_report_done,
+                        args=("worker{}".format(self.rank),),
+                    )
+
+                # Master waits for followers to report done.
+                # Follower waits for master's termination command.
+                _TERMINATION_SIGNAL.wait()
+                if self.rank == MASTER_RANK:
+                    # Master sends termination command.
+                    futs = []
+                    for dst_rank in range(self.world_size):
+                        # torch.distributed.rpc module does not support sending to self.
+                        if dst_rank == MASTER_RANK:
+                            continue
+                        dst_name = "worker{}".format(dst_rank)
+                        fut = rpc.rpc_async(dst_name, set_termination_signal, args=())
+                        futs.append(fut)
+                    for fut in futs:
+                        assert fut.wait() is None, "Sending termination signal failed."
+
+                # Close RPC.
+                rpc.join_rpc()
+
+        return new_test_method
+
+    return decorator
