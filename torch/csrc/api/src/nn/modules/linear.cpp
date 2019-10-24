@@ -56,14 +56,16 @@ Tensor LinearImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
+FlattenImpl::FlattenImpl(const FlattenOptions& options_) : options(options_) {}
+
 void FlattenImpl::reset() {}
 
 void FlattenImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Flatten()";
+  stream << "torch::nn::Flatten(start_dim=" << options.start_dim() << ", end_dim=" << options.end_dim() << ")";
 }
 
 Tensor FlattenImpl::forward(const Tensor& input) {
-  return input.flatten();
+  return torch::flatten(input, options.start_dim(), options.end_dim());
 }
 
 // ============================================================================

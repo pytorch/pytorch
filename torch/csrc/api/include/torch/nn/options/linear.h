@@ -20,6 +20,17 @@ struct TORCH_API LinearOptions {
 
 // ============================================================================
 
+/// Options for the `Flatten` module.
+struct TORCH_API FlattenOptions {
+  FlattenOptions(int64_t start_dim, int64_t end_dim);
+  /// first dim to flatten
+  TORCH_ARG(int64_t, start_dim) = 1;
+  /// last dim to flatten
+  TORCH_ARG(int64_t, end_dim) = -1;
+};
+
+// ============================================================================
+
 /// Options for the `Bilinear` module.
 struct TORCH_API BilinearOptions {
   BilinearOptions(int64_t in1_features, int64_t in2_features, int64_t out_features);

@@ -69,12 +69,19 @@ TORCH_MODULE(Linear);
 /// A placeholder for Flatten operator
 class TORCH_API FlattenImpl : public Cloneable<FlattenImpl> {
  public:
+  FlattenImpl(int64_t start_dim, int64_t end_dim) : FlattenImpl(FlattenOptions(start_dim, end_dim)) {}
+  explicit FlattenImpl(const FlattenOptions& options_);
+
   void reset() override;
 
   /// Pretty prints the `Flatten` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
+  /// Applies a flatten transform on the `input`.
   Tensor forward(const Tensor& input);
+
+  /// The options used to configure this module.
+  FlattenOptions options;
 };
 
 /// A `ModuleHolder` subclass for `FlattenImpl`.
