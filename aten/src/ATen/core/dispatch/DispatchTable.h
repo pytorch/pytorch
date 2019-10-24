@@ -8,6 +8,7 @@
 #include <c10/core/TensorTypeId.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/Variadic.h>
 
 #include <array>
 #include <atomic>
@@ -41,7 +42,7 @@ static inline TensorTypeId dispatchTypeId(TensorTypeSet ts) {
 }
 
 namespace detail {
-  struct MultiDispatchTensorTypeSet : IterArgs<MultiDispatchTensorTypeSet> {
+  struct MultiDispatchTensorTypeSet : at::IterArgs<MultiDispatchTensorTypeSet> {
     TensorTypeSet ts;
     void operator()(const at::Tensor& x) {
       ts = ts | x.type_set();
