@@ -19,6 +19,8 @@ DOCKER_IMAGE_VERSION = 336
 class Conf:
     language: str
     distro: Ver
+    # There could be multiple compiler versions configured (e.g. nvcc
+    # for gpu files and host compiler (gcc/clang) for cpu files)
     compilers: [Ver]
     build_only: bool
     is_important: bool
