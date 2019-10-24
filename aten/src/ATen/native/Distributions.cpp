@@ -182,11 +182,14 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    CPU_tensor_apply1<scalar_t>(
-        self, [generator, p](scalar_t& ret_val) {
-          at::bernoulli_distribution<double> bernoulli(p);
-          ret_val = static_cast<scalar_t>(bernoulli(generator));
-        });
+    auto iter = TensorIterator();
+    iter.add_input(self);
+    iter.add_output(self);
+    iter.build();
+    cpu_serial_kernel(iter, [&](const scalar_t val) -> scalar_t {
+      at::bernoulli_distribution<double> bernoulli(p);
+      return static_cast<scalar_t>(bernoulli(generator));
+    });
   });
   return self;
 }
