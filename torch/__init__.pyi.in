@@ -100,7 +100,7 @@ class Tensor:
     @property
     def ndim(self) -> _int: ...
     @property
-    def layout(self) -> layout:
+    def layout(self) -> layout: ...
 
     ${tensor_method_hints}
 
