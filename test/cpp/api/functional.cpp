@@ -64,6 +64,20 @@ TEST_F(FunctionalTest, AvgPool3d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2, 2, 2}));
 }
 
+TEST_F(FunctionalTest, LPPool1d) {
+  int norm_type = 2;
+  int stride = 2;
+  int kernel_size = 3;
+
+  auto x = torch::ones({1, 1, 5});
+  auto y = F::lp_pool1d(x, LPPool1dOptions(norm_type, kernel_size).stride(stride));
+  auto expected = (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) * kernel_size).pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
 TEST_F(FunctionalTest, CosineSimilarity) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
@@ -645,6 +659,93 @@ TEST_F(FunctionalTest, LogSigmoid) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
 
+TEST_F(FunctionalTest, GumbelSoftmax) {
+  // Test 1: No-options
+  {
+    auto logits = torch::randn({5});
+    int expected_count = 1;
+    auto y_draw = F::gumbel_softmax(logits);
+
+    // All values positive
+    ASSERT_GE(y_draw.min().item<int>(), 0);
+    // Shape unchanged
+    ASSERT_TRUE(y_draw.sizes() == logits.sizes());
+    // One choice per draw
+    ASSERT_TRUE(torch::allclose(y_draw.sum(), torch::tensor(expected_count, torch::kFloat)));
+  }
+
+  // Test 2: 1D shape, 0 and -1 dim
+  for(const auto dim: {0, -1}) {
+    auto logits = torch::randn({5});
+    int expected_count = 1;
+    auto y_draw = F::gumbel_softmax(logits, GumbelSoftmaxOptions().hard(true).dim(dim));
+
+    // All values positive
+    ASSERT_GE(y_draw.min().item<int>(), 0);
+    // Shape unchanged
+    ASSERT_TRUE(y_draw.sizes() == logits.sizes());
+    // One choice per draw
+    ASSERT_TRUE(torch::allclose(y_draw.sum(), torch::tensor(expected_count, torch::kFloat)));
+  }
+
+  { // Test 3: 2D shape, 1 dim
+    auto logits = torch::randn({5, 4});
+    int expected_count = 5;
+    auto y_draw = F::gumbel_softmax(logits, GumbelSoftmaxOptions().hard(true).dim(1));
+
+    // All values positive
+    ASSERT_GE(y_draw.min().item<int>(), 0);
+    // Shape unchanged
+    ASSERT_TRUE(y_draw.sizes() == logits.sizes());
+    // One choice per draw
+    ASSERT_TRUE(torch::allclose(y_draw.sum(), torch::tensor(expected_count, torch::kFloat)));
+  }
+
+  // Test 4: 3D shape, 1 and -1 dim
+  int dims[] = {1, -1};
+  int expected[] = {5*3, 5*4};
+  for(auto i=0; i<2; i++) {
+    auto logits = torch::randn({5, 4, 3});
+    int expected_count = expected[i];
+    auto y_draw = F::gumbel_softmax(logits, GumbelSoftmaxOptions().hard(true).dim(dims[i]));
+
+    // All values positive
+    ASSERT_GE(y_draw.min().item<int>(), 0);
+    // Shape unchanged
+    ASSERT_TRUE(y_draw.sizes() == logits.sizes());
+    // One choice per draw
+    ASSERT_TRUE(torch::allclose(y_draw.sum(), torch::tensor(expected_count, torch::kFloat)));
+  }
+
+  { // Test 5: Straight through
+    int num_draws = 100;
+    auto logits = torch::tensor({{0.2, 0.8, 0.1}});
+    logits = logits.reshape({1, 3});
+    logits.requires_grad();
+    auto probs = logits.softmax(-1);
+
+    auto counts = torch::zeros_like(logits);
+    torch::Tensor y_draw;
+    for (auto i=0; i<num_draws; i++) {
+        y_draw = F::gumbel_softmax(logits, GumbelSoftmaxOptions().hard(true));
+        counts += y_draw;
+    }
+
+    // All values positive
+    ASSERT_GE(y_draw.min().item<int>(), 0);
+    // Each experiment should result in 1 draw
+    ASSERT_EQ(counts.sum().item<int>(), num_draws);
+
+    // Check results are asymptotically as expected
+    auto expected = probs * num_draws;
+    // ~z is approximately N(0,1) for unbiased count
+    auto z = (counts - expected) / (expected * (1 - probs)).sqrt();
+    // A (lazy) approximate 99% two-sided test:
+    // occurs with prob alpha~>=0.01 if unbiased
+    ASSERT_LT(z.abs().max().item<float>(), 2.58);
+  }
+}
+
 TEST_F(FunctionalTest, Softmax) {
   auto input = torch::arange(10, torch::kFloat).reshape({2, 5});
   auto output = F::softmax(input, /*dim=*/1);
@@ -687,12 +788,63 @@ TEST_F(FunctionalTest, PReLU) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, LayerNorm) {
+  const auto input = torch::randn({2, 2});
+  auto y = F::layer_norm(input, LayerNormOptions({2, 2}).eps(2e-5));
+  auto y_exp = torch::layer_norm(input, {2, 2}, torch::Tensor(), torch::Tensor(), 2e-5);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Linear) {
+  {
+    const auto x = torch::arange(100, 118).resize_({3, 3, 2});
+    const auto w = torch::arange(200, 206).resize_({3, 2});
+    const auto b = torch::arange(300, 303);
+    const auto y = F::linear(x, w, b);
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 3}));
+    const auto y_exp = torch::tensor(
+      {{{40601, 41004, 41407},
+        {41403, 41814, 42225},
+        {42205, 42624, 43043}},
+      {{43007, 43434, 43861},
+        {43809, 44244, 44679},
+        {44611, 45054, 45497}},
+      {{45413, 45864, 46315},
+        {46215, 46674, 47133},
+        {47017, 47484, 47951}}},
+      torch::kFloat
+    );
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+  {
+    const auto x = torch::arange(100, 118).resize_({3, 3, 2});
+    const auto w = torch::arange(200, 206).resize_({3, 2});
+    const auto y = F::linear(x, w);
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 3}));
+    const auto y_exp = torch::tensor(
+      {{{40301, 40703, 41105},
+        {41103, 41513, 41923},
+        {41905, 42323, 42741}},
+       {{42707, 43133, 43559},
+        {43509, 43943, 44377},
+        {44311, 44753, 45195}},
+       {{45113, 45563, 46013},
+        {45915, 46373, 46831},
+        {46717, 47183, 47649}}},
+      torch::kFloat
+    );
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
 TEST_F(FunctionalTest, Bilinear) {
   auto input1 = torch::tensor({{1, 2, 3}, {7, 6, 5}});
   auto input2 = torch::tensor({{7, 4}, {8 ,9}});
   auto weight = torch::tensor({{{2, 3}, {9, 7}, {8, 6}}});
   auto bias = torch::tensor({1});
- 
+
   auto y_with_bias = F::bilinear(input1, input2, weight, bias);
   ASSERT_EQ(y_with_bias.ndimension(), 2);
   ASSERT_EQ(y_with_bias.sizes(), torch::IntArrayRef({2, 1}));
@@ -710,10 +862,10 @@ TEST_F(FunctionalTest, Normalize) {
   const auto expected = torch::tensor(
     {{{0.00000000, 0.10000000, 0.2000, 0.30000000, 0.40000000},
       {0.14285715, 0.17142858, 0.2000, 0.22857143, 0.25714287}}}, torch::requires_grad().dtype(torch::kFloat));
-  { // Test #1 
+  { // Test #1
     auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat).requires_grad(true));
     auto norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
-    
+
     // reduce to scalar to call .backward()
     torch::Tensor s = norm.sum();
     s.backward();
@@ -733,7 +885,7 @@ TEST_F(FunctionalTest, Normalize) {
 
     ASSERT_TRUE(torch::allclose(output, expected));
   }
-  
+
   { // Test #3 Base case of scalar tensor
     auto input = torch::randn({}, torch::requires_grad());
     torch::Tensor norm = F::normalize(input, NormalizeOptions().p(1).dim(-1));
@@ -893,6 +1045,24 @@ TEST_F(FunctionalTest, CELUDefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, PixelShuffle) {
+  auto x = torch::tensor(
+    {{{{-17, 19}, {-1, 2}},
+      {{7, 14}, {-3, 1}},
+      {{0, -2}, {-12, 14}},
+      {{-15, 0}, {-3, 9}}}}, torch::kFloat);
+  auto y_exp = torch::tensor(
+    {{{{-17, 7, 19, 14},
+       {0, -15, -2, 0},
+       {-1, -3, 2, 1},
+       {-12, -3, 14, 9}}}}, torch::kFloat);
+  auto y = F::pixel_shuffle(x, 2);
+
+  ASSERT_EQ(y.ndimension(), 4);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 4, 4}));
+  ASSERT_TRUE(y.allclose(y_exp));
+}
+
 TEST_F(FunctionalTest, Softplus) {
   const auto size = 3;
   for (const auto beta : {0.5, 1.0, 2.0}) {
@@ -1005,5 +1175,146 @@ TEST_F(FunctionalTest, Threshold) {
         }
       }
     }
+  }
+}
+
+TEST_F(FunctionalTest, Pad) {
+  {
+    auto input = torch::arange(6, torch::kDouble).reshape({1, 2, 3});
+    auto output = F::pad(input, PadOptions({1, 2}).mode(torch::kCircular));
+    auto expected = torch::tensor({{{2., 0., 1., 2., 0., 1.},
+                                    {5., 3., 4., 5., 3., 4.}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 2, 6}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(9, torch::kDouble).reshape({1, 1, 3, 3});
+    auto output = F::pad(input, PadOptions({3, 3, 3, 1}).mode(torch::kCircular));
+    auto expected = torch::tensor(
+       {{{{0., 1., 2., 0., 1., 2., 0., 1., 2.},
+          {3., 4., 5., 3., 4., 5., 3., 4., 5.},
+          {6., 7., 8., 6., 7., 8., 6., 7., 8.},
+          {0., 1., 2., 0., 1., 2., 0., 1., 2.},
+          {3., 4., 5., 3., 4., 5., 3., 4., 5.},
+          {6., 7., 8., 6., 7., 8., 6., 7., 8.},
+          {0., 1., 2., 0., 1., 2., 0., 1., 2.}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 7, 9}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(12, torch::kDouble).reshape({1, 1, 2, 2, 3});
+    auto output = F::pad(input, PadOptions({3, 3, 2, 1, 2, 2}).mode(torch::kCircular));
+    auto expected = torch::tensor(
+       {{{{{ 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.}},
+
+          {{ 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.}},
+
+          {{ 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.}},
+
+          {{ 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.}},
+
+          {{ 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.},
+           { 3.,  4.,  5.,  3.,  4.,  5.,  3.,  4.,  5.},
+           { 0.,  1.,  2.,  0.,  1.,  2.,  0.,  1.,  2.}},
+
+          {{ 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.},
+           { 9., 10., 11.,  9., 10., 11.,  9., 10., 11.},
+           { 6.,  7.,  8.,  6.,  7.,  8.,  6.,  7.,  8.}}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 6, 5, 9}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(16, torch::kDouble).reshape({2, 2, 2, 2});
+    auto output = F::pad(input, PadOptions({1, 1, 1, 1}).mode(torch::kReflect));
+    auto expected = torch::tensor(
+       {{{{ 3.,  2.,  3.,  2.},
+          { 1.,  0.,  1.,  0.},
+          { 3.,  2.,  3.,  2.},
+          { 1.,  0.,  1.,  0.}},
+
+         {{ 7.,  6.,  7.,  6.},
+          { 5.,  4.,  5.,  4.},
+          { 7.,  6.,  7.,  6.},
+          { 5.,  4.,  5.,  4.}}},
+
+        {{{11., 10., 11., 10.},
+          { 9.,  8.,  9.,  8.},
+          {11., 10., 11., 10.},
+          { 9.,  8.,  9.,  8.}},
+
+         {{15., 14., 15., 14.},
+          {13., 12., 13., 12.},
+          {15., 14., 15., 14.},
+          {13., 12., 13., 12.}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({2, 2, 4, 4}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::arange(12, torch::kDouble).reshape({1, 1, 2, 2, 3});
+    auto output = F::pad(input, PadOptions({1, 2, 2, 1, 1, 2}).mode(torch::kReplicate));
+    auto expected = torch::tensor(
+       {{{{{ 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 3.,  3.,  4.,  5.,  5.,  5.},
+           { 3.,  3.,  4.,  5.,  5.,  5.}},
+
+          {{ 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 0.,  0.,  1.,  2.,  2.,  2.},
+           { 3.,  3.,  4.,  5.,  5.,  5.},
+           { 3.,  3.,  4.,  5.,  5.,  5.}},
+
+          {{ 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 9.,  9., 10., 11., 11., 11.},
+           { 9.,  9., 10., 11., 11., 11.}},
+
+          {{ 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 9.,  9., 10., 11., 11., 11.},
+           { 9.,  9., 10., 11., 11., 11.}},
+
+          {{ 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 6.,  6.,  7.,  8.,  8.,  8.},
+           { 9.,  9., 10., 11., 11., 11.},
+           { 9.,  9., 10., 11., 11., 11.}}}}}, torch::kDouble);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 5, 5, 6}));
+    ASSERT_TRUE(output.allclose(expected, 1e-04));
+  }
+  {
+    auto input = torch::ones({1, 1, 1, 1}, torch::kDouble);
+    auto output = F::pad(input, PadOptions({1, 1}).mode(torch::kConstant).value(0));
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 1, 3}));
+    auto expected = torch::tensor({{{{0., 1., 0.}}}}, torch::kDouble);
+  }
+  {
+    auto input = torch::ones({1, 1, 1, 1}, torch::kDouble);
+    auto output = F::pad(input, PadOptions({1, 1}));
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 1, 3}));
+    auto expected = torch::tensor({{{{0., 1., 0.}}}}, torch::kDouble);
   }
 }

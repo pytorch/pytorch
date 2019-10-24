@@ -8,7 +8,7 @@ namespace nn {
 
 ELUImpl::ELUImpl(const ELUOptions& options_) : options(options_) {}
 
-Tensor ELUImpl::forward(Tensor& input) {
+Tensor ELUImpl::forward(Tensor input) {
   return F::elu(input, options);
 }
 
@@ -26,7 +26,7 @@ void ELUImpl::pretty_print(std::ostream& stream) const {
 
 SELUImpl::SELUImpl(const SELUOptions& options_) : options(options_) {}
 
-Tensor SELUImpl::forward(Tensor& input) {
+Tensor SELUImpl::forward(Tensor input) {
   return F::selu(input, options);
 }
 
@@ -63,7 +63,7 @@ HardtanhImpl::HardtanhImpl(const HardtanhOptions& options_)
   reset();
 }
 
-Tensor HardtanhImpl::forward(Tensor& input) {
+Tensor HardtanhImpl::forward(Tensor input) {
   return F::hardtanh(input, options);
 }
 
@@ -87,7 +87,7 @@ void HardtanhImpl::pretty_print(std::ostream& stream) const {
 LeakyReLUImpl::LeakyReLUImpl(const LeakyReLUOptions& options_)
     : options(options_) {}
 
-Tensor LeakyReLUImpl::forward(Tensor& input) {
+Tensor LeakyReLUImpl::forward(Tensor input) {
   return F::leaky_relu(input, options);
 }
 
@@ -196,7 +196,7 @@ void PReLUImpl::pretty_print(std::ostream& stream) const {
 
 ReLUImpl::ReLUImpl(const ReLUOptions& options_) : options(options_) {}
 
-Tensor ReLUImpl::forward(Tensor& input) {
+Tensor ReLUImpl::forward(Tensor input) {
   return F::relu(input, options);
 }
 
@@ -214,7 +214,7 @@ void ReLUImpl::pretty_print(std::ostream& stream) const {
 
 ReLU6Impl::ReLU6Impl(const ReLU6Options& options_) : options(options_) {}
 
-Tensor ReLU6Impl::forward(Tensor& input) {
+Tensor ReLU6Impl::forward(Tensor input) {
   return F::relu6(input, options);
 }
 
@@ -232,7 +232,7 @@ void ReLU6Impl::pretty_print(std::ostream& stream) const {
 
 RReLUImpl::RReLUImpl(const RReLUOptions& options_) : options(options_) {}
 
-Tensor RReLUImpl::forward(Tensor& input) {
+Tensor RReLUImpl::forward(Tensor input) {
   return F::rrelu(input, options, is_training());
 }
 
@@ -251,7 +251,7 @@ void RReLUImpl::pretty_print(std::ostream& stream) const {
 
 CELUImpl::CELUImpl(const CELUOptions& options_) : options(options_) {}
 
-Tensor CELUImpl::forward(Tensor& input) {
+Tensor CELUImpl::forward(Tensor input) {
   return F::celu(input, options);
 }
 
@@ -349,7 +349,7 @@ void TanhshrinkImpl::pretty_print(std::ostream& stream) const {
 ThresholdImpl::ThresholdImpl(const ThresholdOptions& options_)
     : options(options_) {}
 
-Tensor ThresholdImpl::forward(Tensor& input) {
+Tensor ThresholdImpl::forward(Tensor input) {
   return F::threshold(input, options);
 }
 
