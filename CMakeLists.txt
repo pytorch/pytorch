@@ -208,8 +208,9 @@ if(LINUX)
 endif()
 
 # yf225 TODO add comment here
+# yf225 TODO also remove `libprotobuf-lite.a` symbols?
 if(LINUX)
-  set(CMAKE_STATIC_LINKER_FLAGS "-Wl,--exclude-libs,libprotobuf.a -Wl,--exclude-libs,libprotobuf-lite.a")
+  set(CMAKE_STATIC_LINKER_FLAGS "-Wl,--exclude-libs,libprotobuf.a")
 endif()
 
 if (MSVC)
