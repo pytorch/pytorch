@@ -966,11 +966,6 @@ def unfold(g, input, dimension, size, step):
         return _unimplemented("Unfold", "input size not accessible")
 
 
-@parse_args('v', 'v', 'i')
-def _weight_norm(graph, v, g, dim):
-    return graph.op("ATen", v, g, dim_i=dim, operator_s="_weight_norm")
-
-
 @parse_args('v', 't', 't', 't')
 def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.:
@@ -2027,3 +2022,18 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
     axes = [i for i in range(1, len(input_sizes) - 1)]
     return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
+
+
+@parse_args('v', 'v', 'i')
+def _weight_norm(g, weight_v, weight_g, dim):
+    rank = weight_v.type().dim()
+    if rank:
+        # W = g * ((v) / ||v||)
+        # Compute norm_except_dim for l2 norm
+        axes = list(range(rank))
+        axes.remove(dim)
+        norm_v = norm(g, weight_v, 2, axes, 1)
+        div = g.op("Div", weight_v, norm_v)
+        return g.op("Mul", div, weight_g)
+    else:
+        return g.op("ATen", v, g, dim_i=dim, operator_s="_weight_norm")
