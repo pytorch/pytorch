@@ -80,7 +80,8 @@ TEST(SerializeTest, BasicViaFunc) {
   torch::Tensor z;
   torch::load(z, [&](uint64_t pos, void* buf, size_t n) -> size_t {
     if (pos >= serialized.size()) return 0;
-    size_t nbytes = std::min(pos + n, serialized.size()) - pos;
+    size_t nbytes = std::min(static_cast<size_t>(pos) + n,
+                             serialized.size()) - pos;
     memcpy(buf, serialized.data() + pos, nbytes);
     return nbytes;
   },

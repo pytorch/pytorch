@@ -185,20 +185,6 @@ THC_API void THNN_(MultiMarginCriterion_updateGradInput)(
                   int p,
                   THCTensor *weights,           // [OPTIONAL]
                   accreal margin);
-THC_API void THNN_(SmoothL1Criterion_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *output,
-                  int64_t reduction);
-
-THC_API void THNN_(SmoothL1Criterion_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int64_t reduction);
 
 THC_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCState *state,
@@ -322,6 +308,21 @@ THC_API void THNN_(Sigmoid_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCTensor *output);
+
+THC_API void THNN_(SoftMarginCriterion_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *target,
+                  THCTensor *output,
+                  int64_t reduction);
+
+THC_API void THNN_(SoftMarginCriterion_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *target,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int64_t reduction);
 
 THC_API void THNN_(SoftPlus_updateOutput)(
                   THCState *state,
