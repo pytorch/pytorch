@@ -719,14 +719,6 @@ class MultiheadAttention(Module):
 
         self._reset_parameters()
 
-    def __setstate__(self, state):
-        if '_qkv_same_embed_dim' not in state:
-            state['_qkv_same_embed_dim'] = False
-            warnings.warn('A new version of MultiheadAttention module has been implemented. \
-                          Please re-train your model with the new module',
-                          DeprecationWarning)
-        return super(MultiheadAttention, self).__setstate__(state)
-
     def _reset_parameters(self):
         if self._qkv_same_embed_dim:
             xavier_uniform_(self.in_proj_weight)
