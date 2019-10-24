@@ -230,6 +230,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/options/normalization.cpp",
         "torch/csrc/api/src/nn/options/pooling.cpp",
         "torch/csrc/api/src/nn/options/rnn.cpp",
+        "torch/csrc/api/src/nn/options/vision.cpp",
         "torch/csrc/api/src/optim/adagrad.cpp",
         "torch/csrc/api/src/optim/adam.cpp",
         "torch/csrc/api/src/optim/lbfgs.cpp",
