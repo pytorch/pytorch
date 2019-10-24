@@ -33,7 +33,7 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
-from torch.quantization._quantize_script import PackedParams
+from torch.quantization._quantize_script import ConvPackedParams, LinearPackedParams
 
 # Testing utils
 import jit_utils
@@ -1169,21 +1169,17 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         input_strs = [
             # aten::conv2d --> quantized::conv2d
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype,
+%r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: quantized::conv_prepack
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %c, %d, %e, %f)
-        # CHECK-NOT: aten::quantize_per_tensor
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # addmm -> quantized::linear
@@ -1398,9 +1394,9 @@ graph(%input, %weight):
     )
     @_tmp_donotuse_dont_inline_everything
     def test_fold_prepack(self):
-        class M(torch.nn.Module):
+        class QLinear(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super(QLinear, self).__init__()
                 self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
                 self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
 
@@ -1413,30 +1409,60 @@ graph(%input, %weight):
                 rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
                 return rq
 
+        class QConv(torch.nn.Module):
+            def __init__(self):
+                super(QConv, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand((2, 3, 3, 3), dtype=torch.float))
+                self.bias = torch.nn.Parameter(torch.rand((2,), dtype=torch.float))
 
-        m = torch.jit.script(M())
-        data = torch.randn((5, 5), dtype=torch.float)
-        ref_res = m._c._get_method('forward')(data)
-        torch._C._jit_pass_fold_prepack(m._c, torch.jit.script(PackedParams())._c)
-        res = m._c._get_method('forward')(data)
-        # check attribute and graph
-        self.assertTrue(m._c._has_module('_packed_linear_weight_bias'))
-        # check values
-        original_w = m._c._get_parameter('weight')
-        ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
-        ref_b = m._c._get_parameter('bias')
-        w, b = m._c._get_module('_packed_linear_weight_bias')._get_method('_weight_bias')()
-        self.assertEqual(ref_w, w.dequantize())
-        self.assertEqual(ref_b, b)
-        self.assertEqual(ref_res, res)
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 2, torch.quint8)
+                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
+                stride, padding, dilation, groups = [1, 1], [0, 0], [1, 1], 1
+                packed = torch.ops.quantized.conv_prepack(wq, self.bias, stride, padding, dilation, groups)
+                w_unpacked, b_unpacked = torch.ops.quantized.conv_unpack(packed)
+                r = torch.nn.functional.conv2d(xq.dequantize(),
+                                               w_unpacked.dequantize(),
+                                               b_unpacked,
+                                               stride,
+                                               padding,
+                                               dilation,
+                                               groups)
+                rq = torch.quantize_per_tensor(r, 0.2, 2, torch.quint8)
+                return rq
 
-        # test serialization
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-        buffer.seek(0)
-        loaded_mod = torch.jit.load(buffer)
-        loaded_res = loaded_mod._c._get_method('forward')(data)
-        self.assertEqual(ref_res, loaded_res)
+        for name, M, data in [('linear', QLinear, torch.randn((5, 5), dtype=torch.float)),
+                              ('conv', QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
+            m = torch.jit.script(M())
+            ref_res = get_forward(m._c)(data)
+            linear_packed_params = torch.jit.script(LinearPackedParams())._c
+            conv_packed_params = torch.jit.script(ConvPackedParams())._c
+            torch._C._jit_pass_fold_prepack(m._c,
+                                            linear_packed_params,
+                                            conv_packed_params)
+            res = get_forward(m._c)(data)
+            # check attribute and graph
+            packed_module_list = [x for x, _ in m._c._get_modules()
+                                  if x.startswith('_' + name + '_packed_params_module')]
+            assert len(packed_module_list) == 1, \
+                'Expected to have one packed_params_module'
+            packed_module_name = packed_module_list[0]
+            # check values
+            original_w = m._c._get_parameter('weight')
+            ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
+            ref_b = m._c._get_parameter('bias')
+            w, b = m._c._get_module(packed_module_name)._get_method('_weight_bias')()
+            self.assertEqual(ref_w, w.dequantize())
+            self.assertEqual(ref_b, b)
+            self.assertEqual(ref_res, res)
+
+            # test serialization
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+            buffer.seek(0)
+            loaded_mod = torch.jit.load(buffer)
+            loaded_res = loaded_mod._c._get_method('forward')(data)
+            self.assertEqual(ref_res, loaded_res)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
