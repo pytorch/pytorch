@@ -324,6 +324,17 @@ static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
 }
 
+static inline ScalarType toValueType(ScalarType t) {
+  switch (t) {
+    case ScalarType::ComplexFloat:
+      return ScalarType::Float;
+    case ScalarType::ComplexDouble:
+      return ScalarType::Double;
+    default:
+      return t;
+  }
+}
+
 // see tensor_attributes.rst for detailed explanation and examples
 // of casting rules.
 static inline bool canCast(const ScalarType from, const ScalarType to) {

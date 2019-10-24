@@ -6,15 +6,19 @@ from .backend_registry import *  # noqa: F401
 
 
 if sys.version_info >= (3, 0):
+    from . import api
     from .api import _init_rpc
     from .api import *  # noqa: F401
     import torch.distributed.autograd
 
-    def init_model_parallel(self_name,
-                            backend=RpcBackend.PROCESS_GROUP,
-                            self_rank=-1,
-                            init_method=None,
-                            num_send_recv_threads=4):
+    def init_model_parallel(
+        self_name,
+        backend=RpcBackend.PROCESS_GROUP,
+        init_method=None,
+        self_rank=-1,
+        worker_name_to_id=None,
+        num_send_recv_threads=4,
+    ):
         r"""
         Initializes model parallel primitives such as the local rpc agent
         and distributed autograd.
@@ -39,6 +43,14 @@ if sys.version_info >= (3, 0):
             init_method(str): backend specific init arguments.
             num_send_recv_threads(int): Number of threads for send/recv work.
         """
-        _init_rpc(backend, self_name, self_rank, init_method, num_send_recv_threads)
-        from .api import _agent
-        torch.distributed.autograd._init(_agent.get_worker_info().id)
+        # Initialize RPC.
+        _init_rpc(
+            backend,
+            init_method,
+            self_name,
+            self_rank,
+            worker_name_to_id,
+            num_send_recv_threads,
+        )
+        # Initialize Autograd.
+        torch.distributed.autograd._init(api._agent.get_worker_info().id)
