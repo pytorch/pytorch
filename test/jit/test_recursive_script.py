@@ -544,7 +544,7 @@ class TestRecursiveScript(JitTestCase):
 
         class M(nn.Module):
             def __init__(self):
-                super().__init__()
+                super(M, self).__init__()
                 encoder_norm = nn.ReLU()
                 self.encoder = N(encoder_norm)
 
