@@ -23,7 +23,15 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
 
 @implementation Benchmark
 
-+ (void)benchmarkWithModel:(NSString*)modelPath {
++ (NSString*)benchmarkWithModel:(NSString*)modelPath {
+  std::vector<std::string> logs;
+#define UI_LOG(fmt, ...)                                          \
+  {                                                               \
+    NSString* log = [NSString stringWithFormat:fmt, __VA_ARGS__]; \
+    NSLog(@"%@", log);                                            \
+    logs.push_back(log.UTF8String);                               \
+  }
+
   FLAGS_model = std::string(modelPath.UTF8String);
   CAFFE_ENFORCE_GE(FLAGS_input_dims.size(), 0, "Input dims must be specified.");
   CAFFE_ENFORCE_GE(FLAGS_input_type.size(), 0, "Input type must be specified.");
@@ -61,16 +69,13 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
   if (FLAGS_print_output) {
     std::cout << module.forward(inputs) << std::endl;
   }
-
-  std::cout << "Starting benchmark." << std::endl;
-  std::cout << "Running warmup runs." << std::endl;
+  UI_LOG(@"Start benchmarking...", nil);
   CAFFE_ENFORCE(FLAGS_warmup >= 0, "Number of warm up runs should be non negative, provided ",
                 FLAGS_warmup, ".");
   for (int i = 0; i < FLAGS_warmup; ++i) {
     module.forward(inputs);
   }
-
-  std::cout << "Main runs." << std::endl;
+  UI_LOG(@"Main runs", nil);
   CAFFE_ENFORCE(FLAGS_iter >= 0, "Number of main runs should be non negative, provided ",
                 FLAGS_iter, ".");
   caffe2::Timer timer;
@@ -79,8 +84,16 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
     module.forward(inputs);
   }
   millis = timer.MilliSeconds();
-  std::cout << "Main run finished. Milliseconds per iter: " << millis / FLAGS_iter
-            << ". Iters per second: " << 1000.0 * FLAGS_iter / millis << std::endl;
+  UI_LOG(@"Main run finished. Milliseconds per iter: %.3f", millis / FLAGS_iter, nil);
+  UI_LOG(@"Iters per second: : %.3f", 1000.0 * FLAGS_iter / millis, nil);
+  UI_LOG(@"Done.", nil);
+
+  NSString* results = @"";
+  for (auto& msg : logs) {
+    results = [results stringByAppendingString:[NSString stringWithUTF8String:msg.c_str()]];
+    results = [results stringByAppendingString:@"\n"];
+  }
+  return results;
 }
 
 @end

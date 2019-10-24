@@ -4,7 +4,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface Benchmark : NSObject
 
-+ (void)benchmarkWithModel:(NSString* )modelPath;
++ (NSString* )benchmarkWithModel:(NSString* )modelPath;
 
 @end
 

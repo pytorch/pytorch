@@ -1,6 +1,16 @@
 
 require 'xcodeproj'
 require 'fileutils'
+require 'optparse'
+
+
+options = {}
+option_parser = OptionParser.new do |opts| 
+ opts.banner = 'Script for setting up TestApp.xcodeproj'
+ opts.on('-t', '--team_id ', 'developemnt team ID') { |value|
+    options[:team_id] = value
+ }
+end.parse!
 
 puts "Current directory: #{Dir.pwd}"
 
@@ -25,6 +35,10 @@ target.build_configurations.each do |config|
     config.build_settings['LIBRARY_SEARCH_PATHS']   = libraries_search_path
     config.build_settings['OTHER_LDFLAGS']          = other_linker_flags
     config.build_settings['ENABLE_BITCODE']         = 'No'
+    dev_team_id = options[:team_id]
+    if dev_team_id
+        config.build_settings['DEVELOPMENT_TEAM']   = dev_team_id
+    end
 end
 
 puts "Installing the testing model..."
