@@ -132,7 +132,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 }
 
-static PyObject* get_tensor_torch_function(void)
+static auto get_tensor_torch_function() -> PyObject*
 {
   PyObject* method = PyObject_GetAttrString((PyObject*)THPVariableClass, "__torch_function__");
   assert(method != nullptr);
@@ -140,7 +140,7 @@ static PyObject* get_tensor_torch_function(void)
 }
 
 // checks if `overloaded_args[]` has args with `__torch_function__`
-static bool check_has_torch_function(PyObject* obj)
+static auto check_has_torch_function(PyObject* obj) -> bool
 {
   PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
   if(method != nullptr){
@@ -149,7 +149,7 @@ static bool check_has_torch_function(PyObject* obj)
   return false;
 }
 
-bool FunctionParameter::check_exact(PyObject* obj)
+auto FunctionParameter::check_exact(PyObject* obj) -> bool
 {
   switch (type_) {
     case ParameterType::TENSOR: {
@@ -214,7 +214,7 @@ bool FunctionParameter::check_exact(PyObject* obj)
   }
 }
 
-bool FunctionParameter::check(PyObject* obj)
+auto FunctionParameter::check(PyObject* obj) -> bool
 {
   switch (type_) {
     case ParameterType::TENSOR: {
@@ -576,8 +576,8 @@ pyobject_array_insert(PyObject **array, int length, int index, PyObject *item)
     array[index] = item;
 }
 
-bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
-                               PyObject* overloaded_args[], bool raise_exception) {
+auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
+                              PyObject* overloaded_args[], bool raise_exception) -> bool {  // NOLINT
   int num_overloaded_args = 0;
   int arg_index = 0;
   int j;
@@ -633,7 +633,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         missing_args(*this, i);
       }
       return false;
-    } else if (param.check_exact(obj)) {
+    } else if (param.check_exact(obj)) {  // NOLINT
       dst[i++] = obj;
     // XXX: the Variable check is necessary because sizes become tensors when
     // tracer is enabled. This behavior easily leads to ambiguities, and we
@@ -676,7 +676,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
           ++num_overloaded_args;
         }
       }
-    } else if(param.check(obj)){
+    } else if (param.check(obj)) {
       dst[i++] = obj;
     } else if (raise_exception) {
       if (is_kwd) {
@@ -731,14 +731,14 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
-    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr};
+    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr}; // NOLINT
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
     return PythonArgs(0, traceable, signature, parsed_args, overloaded_args);
   }
 
   int i = 0;
   for (auto& signature : signatures_) {
-    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr};
+    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr};  // NOLINT
     if (signature.parse(args, kwargs, parsed_args, overloaded_args, false)) {
       return PythonArgs(i, traceable, signature, parsed_args, overloaded_args);
     }
@@ -760,7 +760,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
 
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
-    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr};
+    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr};  // NOLINT
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
   }
 
