@@ -54,21 +54,6 @@
       - THTensor* value
 ]]
 [[
-  name: _th_is_set_to
-  cname: isSetTo
-  variants:
-    - function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  device_guard: False
-  return: bool
-  arguments:
-    - THTensor* self
-    - THTensor* tensor
-]]
-[[
   name: _th_masked_fill_
   cpu_bool: True
   cuda_bool: True
