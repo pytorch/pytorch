@@ -13,6 +13,10 @@ using namespace torch::test;
 
 struct SequentialTest : torch::test::SeedingFixture {};
 
+TEST_F(SequentialTest, CanContainThings) {
+  Sequential sequential(Linear(3, 4), ReLU(), BatchNorm(3));
+}
+
 TEST_F(SequentialTest, ConstructsFromSharedPointer) {
   struct M : torch::nn::Module {
     explicit M(int value_) : value(value_) {}
@@ -389,7 +393,7 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
   ASSERT_EQ(
       c10::str(sequential),
       "torch::nn::Sequential(\n"
-      "  (0): torch::nn::Linear(in=10, out=3, with_bias=true)\n"
+      "  (0): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
       "  (1): torch::nn::Conv2d(input_channels=1, output_channels=2, kernel_size=[3, 3], stride=[1, 1])\n"
       "  (2): torch::nn::Dropout(rate=0.5)\n"
       "  (3): torch::nn::BatchNorm(features=5, eps=1e-05, momentum=0.1, affine=true, stateful=true)\n"
@@ -408,7 +412,7 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
   ASSERT_EQ(
       c10::str(sequential_named),
       "torch::nn::Sequential(\n"
-      "  (linear): torch::nn::Linear(in=10, out=3, with_bias=true)\n"
+      "  (linear): torch::nn::Linear(in_features=10, out_features=3, bias=true)\n"
       "  (conv2d): torch::nn::Conv2d(input_channels=1, output_channels=2, kernel_size=[3, 3], stride=[1, 1])\n"
       "  (dropout): torch::nn::Dropout(rate=0.5)\n"
       "  (batchnorm): torch::nn::BatchNorm(features=5, eps=1e-05, momentum=0.1, affine=true, stateful=true)\n"
