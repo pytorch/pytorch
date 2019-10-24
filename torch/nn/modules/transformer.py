@@ -254,7 +254,6 @@ class TransformerEncoderLayer(Module):
         >>> src = torch.rand(10, 32, 512)
         >>> out = encoder_layer(src)
     """
-    __constants__ = ['activation']
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu"):
         super(TransformerEncoderLayer, self).__init__()
@@ -314,7 +313,6 @@ class TransformerDecoderLayer(Module):
         >>> tgt = torch.rand(20, 32, 512)
         >>> out = decoder_layer(tgt, memory)
     """
-    __constants__ = ['activation']
 
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation="relu"):
         super(TransformerDecoderLayer, self).__init__()
