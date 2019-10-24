@@ -41,9 +41,9 @@ torch.nn.ReplicationPad1d|Yes|No
 torch.nn.ReplicationPad2d|Yes|No
 torch.nn.ReplicationPad3d|Yes|No
 torch.nn.ZeroPad2d|Yes|No
-torch.nn.ConstantPad1d|No|No
-torch.nn.ConstantPad2d|No|No
-torch.nn.ConstantPad3d|No|No
+torch.nn.ConstantPad1d|Yes|No
+torch.nn.ConstantPad2d|Yes|No
+torch.nn.ConstantPad3d|Yes|No
 torch.nn.ELU|Yes|No
 torch.nn.Hardshrink|Yes|No
 torch.nn.Hardtanh|Yes|No

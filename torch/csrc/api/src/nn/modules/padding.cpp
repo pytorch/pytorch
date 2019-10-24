@@ -68,5 +68,30 @@ Tensor ZeroPad2dImpl::forward(const Tensor& input) {
   return F::pad(input, PadOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kConstant).value(0));
 }
 
+// ============================================================================
+
+template <size_t D, typename Derived>
+ConstantPadImpl<D, Derived>::ConstantPadImpl(const ConstantPadOptions<D>& options_)
+    : options(options_) {}
+
+template <size_t D, typename Derived>
+void ConstantPadImpl<D, Derived>::reset() {}
+
+template <size_t D, typename Derived>
+Tensor ConstantPadImpl<D, Derived>::forward(const Tensor& input) {
+  return F::pad(input, PadOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kConstant).value(options.value()));
+}
+
+template <size_t D, typename Derived>
+void ConstantPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::ConstantPad" << D << "d"
+         << "(padding=" << options.padding()
+         << ", value=" << options.value() << ")";
+}
+
+template class ConstantPadImpl<1, ConstantPad1dImpl>;
+template class ConstantPadImpl<2, ConstantPad2dImpl>;
+template class ConstantPadImpl<3, ConstantPad3dImpl>;
+
 } // namespace nn
 } // namespace torch
