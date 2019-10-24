@@ -48,6 +48,7 @@ blacklist = [
     '__init_subclass__',
     '__new__',
     '__subclasshook__',
+    'cdist',
     'clamp',
     'clamp_',
     'device',
@@ -283,8 +284,10 @@ def generate_type_hints(fname, decls, is_tensor=False):
 
         if len(python_returns) > 1:
             python_returns_s = 'Tuple[' + ', '.join(python_returns) + ']'
-        else:
+        elif len(python_returns) == 1:
             python_returns_s = python_returns[0]
+        else:
+            python_returns_s = 'None'
 
         type_hint = "def {}({}) -> {}: ...".format(fname, python_args_s, python_returns_s)
         numargs = len(decl['arguments'])

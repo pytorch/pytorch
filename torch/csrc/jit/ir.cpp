@@ -1339,13 +1339,7 @@ Value* Graph::insert(
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<SourceRange>& range) {
   return script::emitBuiltinCall(
-      range.value_or(fakeRange()),
-      *this,
-      opname,
-      c10::nullopt,
-      args,
-      kwargs,
-      /*required=*/true);
+      range.value_or(fakeRange()), *this, opname, args, kwargs);
 }
 
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
@@ -1390,15 +1384,16 @@ Node* Graph::createWithSubgraph(Symbol kind) {
   return n;
 }
 
-Node* Graph::createTuple(
-    at::ArrayRef<Value*> values,
-    c10::optional<c10::QualifiedName> qualname,
-    std::shared_ptr<FunctionSchema> schema) {
-  auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(
-      std::move(types), std::move(qualname), std::move(schema));
+Node* Graph::createTuple(at::ArrayRef<Value*> values, TupleTypePtr tuple_type) {
+  TORCH_INTERNAL_ASSERT(
+      !tuple_type || tuple_type->schema(),
+      "only pass tuple_type when creating a named tuple");
+  if (!tuple_type) {
+    auto types = fmap(values, [](Value* v) { return v->type(); });
+    tuple_type = TupleType::create(std::move(types));
+  }
   auto n = create(prim::TupleConstruct, values);
-  n->output()->setType(tt);
+  n->output()->setType(tuple_type);
   return n;
 }
 
@@ -1545,6 +1540,11 @@ Node* Graph::createIsInstance(
   n->tys_(attr::types, types.vec());
   n->output()->setType(BoolType::get());
   return n;
+}
+Value* Graph::insertUncheckedCast(Value* v, TypePtr type) {
+  Node* n = insertNode(create(prim::unchecked_cast, {v}));
+  n->output()->setType(std::move(type));
+  return n->output();
 }
 
 Value* Graph::insertFunctionCall(

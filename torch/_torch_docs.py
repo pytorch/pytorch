@@ -489,7 +489,7 @@ Args:
 Example::
 
     >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
-    tensor([ 135.,  135,  325])
+    tensor([ 135.,  135,  -45])
 """.format(**common_args))
 
 add_docstr(torch.as_strided,
@@ -910,43 +910,6 @@ Example::
              -1.0969, -0.4614],
             [-0.1034, -0.5790,  0.1497, -0.1034, -0.5790,  0.1497, -0.1034,
              -0.5790,  0.1497]])
-""".format(**common_args))
-
-add_docstr(torch.cdist,
-           r"""
-cdist(x1, x2, p=2) -> Tensor
-
-Computes the p-norm distance between each pair of the two collections of row vectors.
-
-If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the
-output will have shape :math:`P \times R`.
-
-This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)`
-if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to
-`scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest
-scipy function is `scipy.spatial.distance.cdist(xn, lambda x, y: np.abs(x - y).max())`.
-
-Args:
-    x1 (Tensor): input tensor of shape :math:`P \times M`.
-    x2 (Tensor): input tensor of shape :math:`R \times M`.
-    p: p value for the p-norm distance to calculate between each vector pair
-        :math:`\in [0, \infty]`.
-
-Example::
-
-    >>> a = torch.tensor([[0.9041,  0.0196], [-0.3108, -2.4423], [-0.4821,  1.059]])
-    >>> a
-    tensor([[ 0.9041,  0.0196],
-            [-0.3108, -2.4423],
-            [-0.4821,  1.0590]])
-    >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986,  1.3702]])
-    >>> b
-    tensor([[-2.1763, -0.4713],
-            [-0.6986,  1.3702]])
-    >>> torch.cdist(a, b, p=2)
-    tensor([[3.1193, 2.0959],
-            [2.7138, 3.8322],
-            [2.2830, 0.3791]])
 """.format(**common_args))
 
 add_docstr(torch.ceil,
@@ -2731,7 +2694,8 @@ add_docstr(torch.logical_xor,
            r"""
 logical_xor(input, other, out=None) -> Tensor
 
-Computes the element-wise logical XOR of the given input tensors. Both input tensors must have the bool dtype.
+Computes the element-wise logical XOR of the given input tensors. Zeros are treated as ``False`` and nonzeros are
+treated as ``True``.
 
 Args:
     {input}
@@ -2742,6 +2706,16 @@ Example::
 
     >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
     tensor([ False, False,  True])
+    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
+    >>> torch.logical_xor(a, b)
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a.double(), b.double())
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a.double(), b)
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a, b, out=torch.empty(4, dtype=torch.bool))
+    tensor([ True,  True, False, False])
 """.format(**common_args))
 
 add_docstr(torch.logspace,
@@ -2964,7 +2938,7 @@ Example::
 
 add_docstr(torch.matrix_rank,
            r"""
-matrix_rank(input, tol=None, bool symmetric=False) -> Tensor
+matrix_rank(input, tol=None, symmetric=False) -> Tensor
 
 Returns the numerical rank of a 2-D tensor. The method to compute the
 matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
@@ -3988,6 +3962,30 @@ Args:
     https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
 
 """)
+
+add_docstr(torch.polygamma,
+           r"""
+polygamma(n, input, out=None) -> Tensor
+
+Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
+:math:`n \geq 0` is called the order of the polygamma function.
+
+.. math::
+    \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
+
+.. note::
+    This function is not implemented for :math:`n \geq 2`.
+""" + """
+Args:
+    n (int): the order of the polygamma function
+    {input}
+    {out}
+
+Example::
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.polygamma(1, a)
+    tensor([1.64493, 4.9348])
+""".format(**common_args))
 
 add_docstr(torch.pow,
            r"""
@@ -5259,7 +5257,7 @@ Returns:
 
         - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`. The eigenvalues in ascending order.
         - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
-          If ``eigenvectors=False``, it's a tensor filled with zeros.
+          If ``eigenvectors=False``, it's an empty tensor.
           Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
 Examples::
@@ -7049,7 +7047,7 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 
 add_docstr(torch.quantize_per_tensor,
            r"""
-quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+quantize_per_tensor(input, scale, zero_point, dtype) -> Tensor
 
 Converts a float tensor to quantized tensor with given scale and zero point.
 
@@ -7074,7 +7072,7 @@ Example::
 
 add_docstr(torch.quantize_per_channel,
            r"""
-quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
+quantize_per_channel(input, scales, zero_points, axis, dtype) -> Tensor
 
 Converts a float tensor to per-channel quantized tensor with given scales and zero points.
 

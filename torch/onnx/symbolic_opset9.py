@@ -257,14 +257,14 @@ def cumsum(g, input, dim, dtype):
 
 
 def _sample_dirichlet(g, self, generator):
-    if not generator.node().mustBeNone():
+    if not sym_help._is_none(generator):
         return _unimplemented('_sample_dirichlet',
                               'We are not able to export generator')
     return g.op("ATen", self, operator_s="_sample_dirichlet")
 
 
 def _standard_gamma(g, self, generator):
-    if not generator.node().mustBeNone():
+    if not sym_help._is_none(generator):
         return _unimplemented('_standard_gamma',
                               'We are not able to export generator')
     return g.op("ATen", self, operator_s="_standard_gamma")
@@ -299,7 +299,7 @@ def embedding_bag(g,
                   mode,
                   sparse,
                   per_sample_weights):
-    if not per_sample_weights.node().mustBeNone():
+    if not sym_help._is_none(per_sample_weights):
         raise RuntimeError('Unsupported: ONNX export of embedding_bag '
                            'with per_sample_weights')
     return g.op("ATen",
@@ -400,13 +400,13 @@ def unbind(g, self, dim=0):
 
 @parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
-    if dim > 1:
-        # TODO: this is a temporary hack because of the implementation details
-        # of Gather in caffe2. We need to change this as soon as possible.
-        # TODO: this breaks if index == -1
-        index_val = _parse_arg(index, 'i')
-        slice_node = sym_help._slice_helper(g, self, axes=[dim],
-                                            starts=[index_val], ends=[index_val + 1])
+    index = sym_help._maybe_get_scalar(index)
+    if (not sym_help._is_value(index)) and (index < 0):
+        if index == -1:
+            end_index = 9223372036854775807
+        else:
+            end_index = index + 1
+        slice_node = sym_help._slice_helper(g, self, axes=[dim], starts=[index], ends=[end_index])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
@@ -741,6 +741,12 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
+def __interpolate(g, input, size, scale_factor, mode , align_corners):
+    scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
+                                                             mode , align_corners)
+    return g.op("Upsample", input, scales, mode_s=mode)
+
+
 def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         def wrap_with_cast(g, input, other):
@@ -835,7 +841,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     args = [input, weight]
     # ONNX only supports 1D bias
-    if not bias.node().mustBeNone() and bias.type().dim() == 1:
+    if not sym_help._is_none(bias) and bias.type().dim() == 1:
         args.append(bias)
 
     kwargs = {"kernel_shape_i": weight_size[2:],
@@ -856,7 +862,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
-    if not bias.node().mustBeNone() and bias.type().dim() != 1:
+    if not sym_help._is_none(bias) and bias.type().dim() != 1:
         return g.op("Add", n, bias)
     else:
         return n
@@ -869,12 +875,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
         input = g.op("Unsqueeze", input, axes_i=[2])
 
-    if weight is None or weight.node().mustBeNone():
+    if weight is None or sym_help._is_none(weight):
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().mustBeNone():
+    if bias is None or sym_help._is_none(bias):
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -917,9 +923,9 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 
     layer_norm = div(g, numerator, denominator)
 
-    if not (weight is None or weight.node().mustBeNone()):
+    if not (weight is None or sym_help._is_none(weight)):
         layer_norm = mul(g, layer_norm, weight)
-    if not (bias is None or bias.node().mustBeNone()):
+    if not (bias is None or sym_help._is_none(bias)):
         layer_norm = add(g, layer_norm, bias)
 
     return layer_norm
@@ -928,12 +934,12 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
     input_sizes = input.type().sizes()
-    if weight is None or weight.node().mustBeNone():
+    if weight is None or sym_help._is_none(weight):
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().mustBeNone():
+    if bias is None or sym_help._is_none(bias):
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -1064,9 +1070,9 @@ def pow(g, self, exponent):
 def clamp(g, self, min, max):
     # min or max may be None that we need to dispatch to
     # Clip separately, as ONNX does not have None syntax
-    if min.node().mustBeNone():
+    if sym_help._is_none(min):
         return clamp_max(g, self, max)
-    elif max.node().mustBeNone():
+    elif sym_help._is_none(max):
         return clamp_min(g, self, min)
     else:
         min = _parse_arg(min, 'f')
@@ -1260,10 +1266,15 @@ def slice(g, self, dim, start, end, step):
         _unimplemented("slice", "step!=1 is currently not supported")
     if start.node().kind() != 'onnx::Constant' or \
             end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
-        start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
-        end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
-        dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
-        return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
+        if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+            raise RuntimeError('Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice '
+                               'is a deprecated experimental op. Please use statically allocated '
+                               'variables or export to a higher opset version.')
+        else:
+            start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
+            end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
+            dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
+            return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
     else:
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
@@ -1319,27 +1330,29 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 def to(g, self, *args):
     # ONNX doesn't have a concept of a device, so we ignore device casts
-    if len(args) == 3:
+    if len(args) == 4:
         if args[0].type().isSubtypeOf(ListType.ofInts()):
-            # aten::to(Tensor, Device, bool, bool)
+            # aten::to(Tensor, Device, bool, bool, memory_format)
             return self
         else:
-            # aten::to(Tensor, ScalarType, bool, bool)
+            # aten::to(Tensor, ScalarType, bool, bool, memory_format)
             dtype = sym_help._get_const(args[0], 'i', 'dtype')
+            # memory_format is ignored
             return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
-    elif len(args) == 4:
-        # aten::to(Tensor, Device, ScalarType, bool, bool)
-        dtype = sym_help._get_const(args[1], 'i', 'dtype')
-        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 5:
-        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
-        dtype = sym_help._get_const(args[0], 'i', 'dtype')
-        # Layout and device are ignored
+        # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
+        dtype = sym_help._get_const(args[1], 'i', 'dtype')
+        # memory_format is ignored
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 6:
-        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, memory_format) -> Tensor
         dtype = sym_help._get_const(args[0], 'i', 'dtype')
-        # Layout and device are ignored
+        # Layout, device and memory_format are ignored
+        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 7:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool, memory_format) -> Tensor
+        dtype = sym_help._get_const(args[0], 'i', 'dtype')
+        # Layout, device and memory_format are ignored
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     else:
         raise NotImplementedError("Unknown aten::to signature")
@@ -1370,12 +1383,6 @@ def pixel_shuffle(g, self, upscale_factor):
     return view(g, after_transpose,
                 [-1, output_channel, dims[2] * upscale_factor, dims[3] *
                  upscale_factor])
-
-
-@parse_args('v', 'i', 'v', 'v', 'f', 'i')
-def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
-    return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
-                eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
@@ -1687,7 +1694,7 @@ def narrow(g, input, dim, start, length):
 
 
 def argmax(g, input, dim, keepdim):
-    if dim.node().mustBeNone():
+    if sym_help._is_none(dim):
         flattened = reshape(g, input, (-1,))
         return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False)
     else:
@@ -1697,7 +1704,7 @@ def argmax(g, input, dim, keepdim):
 
 
 def argmin(g, input, dim, keepdim):
-    if dim.node().mustBeNone():
+    if sym_help._is_none(dim):
         flattened = reshape(g, input, (-1,))
         return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False)
     else:
@@ -1842,7 +1849,7 @@ def index(g, self, index):
         indices = [index]
 
     def try_mask_to_index(index):
-        if not index.node().mustBeNone() and index.type().scalarType() == "Byte":
+        if not sym_help._is_none(index) and index.type().scalarType() == "Byte":
             warnings.warn("Exporting aten::index operator with indices of type Byte. "
                           "Only 1-D indices are supported. In any other case, "
                           "this will produce an incorrect ONNX graph.")
@@ -1871,7 +1878,7 @@ def index(g, self, index):
         #       t: [x_1 * x_2 * ... * x_m, y_1 * y_2 * ... * y_n]
         #       tensor index = \sum_{i=1}^m (ind_i * \prod_{j=i+1}^m (x_j))
         # After gather, reshape and transpose back.
-        adv_idx_indices = [i for i, idx in enumerate(indices) if not idx.node().mustBeNone()]
+        adv_idx_indices = [i for i, idx in enumerate(indices) if not sym_help._is_none(idx)]
 
         if len(adv_idx_indices) == 0:
             return self
@@ -1951,7 +1958,7 @@ def frobenius_norm(g, self, dim=None, keepdim=False):
 
 @parse_args('v', 'i', 'b', 'v')
 def multinomial(g, input, num_samples, replacement=False, generator=None):
-    if generator is not None and not generator.node().mustBeNone():
+    if generator is not None and not sym_help._is_none(generator):
         _unimplemented("Multinomial", "generator is not supported for multinomial")
     if not replacement and num_samples > 1:
         _unimplemented("Multinomial", "replacement=False when num_samples > 1 is not supported for multinomial")
@@ -1961,12 +1968,14 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
 
+
 def baddbmm(g, self, batch1, batch2, beta, alpha):
     dtype = self.type().scalarType()
     batch_mul = matmul(g, batch1, batch2)
     mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     mul_b = mul(g, self, g.op("Cast", beta, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     return add(g, mul_a, mul_b)
+
 
 def remainder(g, input, other):
     div = g.op("Div", input, other)
@@ -1981,3 +1990,40 @@ def gelu(g, self):
     erf = g.op('Erf', div(g, self, torch.tensor(_sqrt2)))
     erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
     return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
+
+
+@parse_args('v', 'i', 'v', 'v', 'f', 'i')
+def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
+                    eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
+
+    input_sizes = input.type().sizes()
+    assert input_sizes[1] % num_groups == 0
+    # 0 in the shape list keeps dimension value unchanged.
+    shape = [0, num_groups, -1]
+    input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(shape)))
+
+    # C is always divisible by num_groups
+    # Due to shape difference. we need to apply weight and bias after
+    # instance norm computation and reshape
+    weight_ = g.op("Constant", value_t=torch.tensor([1.] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
+    bias_ = g.op("Constant", value_t=torch.tensor([0.] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
+
+    norm_reshaped = g.op("InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps)
+    norm = g.op('Reshape', norm_reshaped, g.op("Shape", input))
+
+    if weight is None or weight.node().mustBeNone():
+        weight_value = torch.tensor([1.]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or bias.node().mustBeNone():
+        bias_value = torch.tensor([0.]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        bias = g.op("Constant", value_t=bias_value)
+
+    # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
+    axes = [i for i in range(1, len(input_sizes) - 1)]
+    return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))

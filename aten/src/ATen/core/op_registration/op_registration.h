@@ -307,8 +307,7 @@ public:
         return std::move(*this).kernel(
           std::move(dispatch_key),
           KernelFunction::makeFromUnboxedOnlyFunction<FuncType, kernel_func>(),
-          // TODO Do schema inference without relying on WrapKernelFunction
-          detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+          nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
         );
       }
     }
@@ -329,8 +328,7 @@ public:
         return std::move(*this).kernel(
           c10::nullopt,
           KernelFunction::makeFromUnboxedOnlyFunction<FuncType, kernel_func>(),
-          // TODO Do schema inference without relying on WrapKernelFunction
-          detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+          nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
         );
       }
     }
@@ -345,8 +343,7 @@ public:
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
-        // TODO Do schema inference without relying on WrapKernelFunction
-        detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+        nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
       );
     }
 
@@ -360,8 +357,7 @@ public:
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
-        // TODO Do schema inference without relying on WrapKernelFunction
-        detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+        nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
       );
     }
 
@@ -497,9 +493,8 @@ public:
     }
 
     static bool op_is_still_on_aten_dispatcher_(const char* schema_string) {
-      // TODO Remove this function once all aten ops are on c10
-      const auto op_name = parse_operator_name_(schema_string);
-      return at::aten_op_is_not_moved_to_c10_yet(op_name);
+      // TODO Remove this function
+      return false;
     }
 
     Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction&& func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
