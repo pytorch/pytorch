@@ -29,7 +29,12 @@ TEST(EnumTest, AllEnums) {
     torch::enumtype::kConstant,
     torch::enumtype::kReflect,
     torch::enumtype::kReplicate,
-    torch::enumtype::kCircular
+    torch::enumtype::kCircular,
+    torch::enumtype::kNearest,
+    torch::enumtype::kBilinear,
+    torch::enumtype::kBicubic,
+    torch::enumtype::kTrilinear,
+    torch::enumtype::kArea
   > v;
 
   TORCH_ENUM_PRETTY_PRINT_TEST(Linear)
@@ -49,4 +54,9 @@ TEST(EnumTest, AllEnums) {
   TORCH_ENUM_PRETTY_PRINT_TEST(Reflect)
   TORCH_ENUM_PRETTY_PRINT_TEST(Replicate)
   TORCH_ENUM_PRETTY_PRINT_TEST(Circular)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Nearest)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Bilinear)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Bicubic)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Trilinear)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Area)
 }
