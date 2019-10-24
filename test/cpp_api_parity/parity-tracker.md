@@ -120,7 +120,7 @@ torch.nn.CosineEmbeddingLoss|Yes|No
 torch.nn.MultiMarginLoss|Yes|No
 torch.nn.TripletMarginLoss|Yes|No
 torch.nn.PixelShuffle|No|No
-torch.nn.Upsample|No|No
+torch.nn.Upsample|Yes|No
 torch.nn.UpsamplingNearest2d|No|No
 torch.nn.UpsamplingBilinear2d|No|No
 torch.nn.DataParallel|No|No
