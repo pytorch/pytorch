@@ -29,9 +29,7 @@ Tensor UpsampleImpl::forward(const Tensor& input) {
           .size(options.size())
           .scale_factor(options.scale_factor())
           .mode(decltype(InterpolateOptions().mode())(options.mode()))
-          .align_corners(
-              options.align_corners().has_value() ? options.align_corners()
-                                                  : c10::nullopt));
+          .align_corners(options.align_corners()));
 }
 
 } // namespace nn
