@@ -2,6 +2,7 @@
 
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
+#include <ATen/core/Variadic.h>
 #include <c10/util/Exception.h>
 #include <mutex>
 #include <list>
@@ -31,7 +32,7 @@ static inline TensorTypeId dispatchTypeId(TensorTypeSet ts) {
 }
 
 namespace detail {
-  struct MultiDispatchTensorTypeSet : IterArgs<MultiDispatchTensorTypeSet> {
+  struct MultiDispatchTensorTypeSet : at::IterArgs<MultiDispatchTensorTypeSet> {
     TensorTypeSet ts;
     void operator()(const at::Tensor& x) {
       ts = ts | x.type_set();
