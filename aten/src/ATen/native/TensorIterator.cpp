@@ -49,7 +49,7 @@ void TensorIterator::reorder_dimensions() {
       } else if (stride0 <= stride1) {
         return -1;
       } else {
-        ret = 1;
+        return 1;
       }
     }
     return ret;
