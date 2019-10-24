@@ -123,9 +123,7 @@ class DistAutogradTest(object):
 
     @property
     def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(
-            file_name=self.file_name, rank=self.rank, world_size=self.world_size
-        )
+        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
 
     @dist_init
     def test_autograd_context(self):

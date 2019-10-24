@@ -1385,12 +1385,6 @@ def pixel_shuffle(g, self, upscale_factor):
                  upscale_factor])
 
 
-@parse_args('v', 'i', 'v', 'v', 'f', 'i')
-def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
-    return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
-                eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
-
-
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                  num_layers, dropout, train, bidirectional, batch_first=None, batch_sizes=None):
 
@@ -1974,12 +1968,14 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
 
+
 def baddbmm(g, self, batch1, batch2, beta, alpha):
     dtype = self.type().scalarType()
     batch_mul = matmul(g, batch1, batch2)
     mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     mul_b = mul(g, self, g.op("Cast", beta, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     return add(g, mul_a, mul_b)
+
 
 def remainder(g, input, other):
     div = g.op("Div", input, other)
@@ -1994,3 +1990,40 @@ def gelu(g, self):
     erf = g.op('Erf', div(g, self, torch.tensor(_sqrt2)))
     erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
     return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
+
+
+@parse_args('v', 'i', 'v', 'v', 'f', 'i')
+def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
+                    eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
+
+    input_sizes = input.type().sizes()
+    assert input_sizes[1] % num_groups == 0
+    # 0 in the shape list keeps dimension value unchanged.
+    shape = [0, num_groups, -1]
+    input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(shape)))
+
+    # C is always divisible by num_groups
+    # Due to shape difference. we need to apply weight and bias after
+    # instance norm computation and reshape
+    weight_ = g.op("Constant", value_t=torch.tensor([1.] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
+    bias_ = g.op("Constant", value_t=torch.tensor([0.] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
+
+    norm_reshaped = g.op("InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps)
+    norm = g.op('Reshape', norm_reshaped, g.op("Shape", input))
+
+    if weight is None or weight.node().mustBeNone():
+        weight_value = torch.tensor([1.]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or bias.node().mustBeNone():
+        bias_value = torch.tensor([0.]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        bias = g.op("Constant", value_t=bias_value)
+
+    # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
+    axes = [i for i in range(1, len(input_sizes) - 1)]
+    return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
