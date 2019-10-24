@@ -19,7 +19,7 @@ class TORCH_API ELUImpl : public torch::nn::Cloneable<ELUImpl> {
  public:
   explicit ELUImpl(const ELUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -41,7 +41,7 @@ class TORCH_API SELUImpl : public torch::nn::Cloneable<SELUImpl> {
  public:
   explicit SELUImpl(const SELUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -85,7 +85,7 @@ class TORCH_API HardtanhImpl : public torch::nn::Cloneable<HardtanhImpl> {
  public:
   explicit HardtanhImpl(const HardtanhOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -107,7 +107,7 @@ class TORCH_API LeakyReLUImpl : public torch::nn::Cloneable<LeakyReLUImpl> {
  public:
   explicit LeakyReLUImpl(const LeakyReLUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -254,7 +254,7 @@ class TORCH_API ReLUImpl : public torch::nn::Cloneable<ReLUImpl> {
  public:
   explicit ReLUImpl(const ReLUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -276,7 +276,7 @@ class TORCH_API ReLU6Impl : public torch::nn::Cloneable<ReLU6Impl> {
  public:
   explicit ReLU6Impl(const ReLU6Options& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -298,7 +298,7 @@ class TORCH_API RReLUImpl : public torch::nn::Cloneable<RReLUImpl> {
  public:
   explicit RReLUImpl(const RReLUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -320,7 +320,7 @@ class TORCH_API CELUImpl : public torch::nn::Cloneable<CELUImpl> {
  public:
   explicit CELUImpl(const CELUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -456,7 +456,7 @@ class TORCH_API ThresholdImpl : public torch::nn::Cloneable<ThresholdImpl> {
     : ThresholdImpl(ThresholdOptions(threshold, value)) {}
   explicit ThresholdImpl(const ThresholdOptions& options_);
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
