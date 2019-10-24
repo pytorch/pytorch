@@ -2,6 +2,7 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/options/embedding.h>
+#include <torch/nn/functional/embedding.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
