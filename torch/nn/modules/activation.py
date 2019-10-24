@@ -696,6 +696,7 @@ class MultiheadAttention(Module):
             self.q_proj_weight = Parameter(torch.Tensor(embed_dim, embed_dim))
             self.k_proj_weight = Parameter(torch.Tensor(embed_dim, self.kdim))
             self.v_proj_weight = Parameter(torch.Tensor(embed_dim, self.vdim))
+            self.register_parameter('in_proj_weight', None)
         else:
             self.in_proj_weight = Parameter(torch.empty(3 * embed_dim, embed_dim))
             self.register_parameter('q_proj_weight', None)
