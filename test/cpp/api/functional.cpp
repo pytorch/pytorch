@@ -1132,7 +1132,7 @@ TEST_F(FunctionalTest, Interpolate) {
     // 1D interpolation
     auto input = torch::ones({1, 1, 2});
     auto options = InterpolateOptions()
-                       .size(std::vector<int64_t>{4})
+                       .size({4})
                        .mode(torch::kNearest);
     auto output = F::interpolate(input, options);
     auto expected = torch::ones({1, 1, 4});
