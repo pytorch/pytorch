@@ -102,6 +102,25 @@ static auto registry = torch::RegisterOperators()
         .kernel<MyKernel2>(CPUTensorId()));
 ```
 
+## Multiple Backends
+
+You can register different kernels for the same operator for different backends.
+
+```
+namespace {
+Tensor my_kernel_cpu(const Tensor& a, const Tensor& b) {...}
+Tensor my_kernel_cuda(const Tensor& a, const Tensor& b) {...}
+}
+
+static auto registry = torch::RegisterOperators()
+   .op("my_namespace::my_op",  torch::RegisterOperators::options()
+       .kernel<decltype(my_kernel_cpu), &my_kernel_cpu>(CPUTensorId()))
+   .op("my_namespace::my_op",  torch::RegisterOperators::options()
+       .kernel<decltype(my_kernel_cuda), &my_kernel_cuda>(CUDATensorId()));
+```
+
+Note that here, the CPU and CUDA kernel were registered directly next to each other, but that's not necessary. You could even put them into different shared libraries if you want and as long as both are loaded into your process, things will work as you expect.
+
 ## The operator schema
 
 ### Explicitly defining the schema
