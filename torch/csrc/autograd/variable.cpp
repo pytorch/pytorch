@@ -189,4 +189,16 @@ void Variable::remove_hook(unsigned pos) {
   (*list)[pos] = nullptr;
 }
 
+namespace {
+
+struct ConcreteAutogradMetaFactory : public AutogradMetaFactory {
+  std::unique_ptr<AutogradMetaInterface> make() const override {
+    return c10::guts::make_unique<AutogradMeta>();
+  }
+};
+
+static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_factory);
+
+}
+
 }} // namespace torch::autograd
