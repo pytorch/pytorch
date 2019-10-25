@@ -1,7 +1,6 @@
 import torch
 import numpy as np
 import unittest
-import six
 import inspect
 import pprint
 import functools
@@ -13,8 +12,8 @@ HANDLED_FUNCTIONS_SUB = {}
 HANDLED_FUNCTIONS_SUB_DIAGONAL = {}
 HANDLED_FUNCTIONS_TENSOR_LIKE = {}
 
-def implements(torch_function):
-    "Register an implementation of a torch function for a Tensor-like object."
+def implements_diagonal(torch_function):
+    "Register an implementation of a torch function for DiagonalTensor."
     @functools.wraps(torch_function)
     def decorator(func):
         HANDLED_FUNCTIONS_DIAGONAL[torch_function.__name__] = func
@@ -45,15 +44,6 @@ def implements_tensor_like(torch_function):
         return func
     return decorator
 
-class ImplementationMeta(type):
-    def __new__(mcs, names, bases, attrs, **kwargs):
-        impls = attrs.get('TORCH_IMPLEMENTATIONS', ())
-        decorator = attrs.get('IMPLEMENTS_DECORATOR', None)
-        for impl in impls:
-            decorator(impl[0])(impl[1])
-        return super(ImplementationMeta, mcs).__new__(mcs, names, bases, attrs, **kwargs)
-
-@six.add_metaclass(ImplementationMeta)
 class DiagonalTensor(object):
     """A class with __torch_function__ and a specific diagonal representation
 
@@ -89,12 +79,6 @@ class DiagonalTensor(object):
     .. _DiagonalArray example:
         https://numpy.org/devdocs/user/basics.dispatch.html
     """
-    TORCH_IMPLEMENTATIONS = (
-        (torch.unique, lambda mat: torch.Tensor([0, mat._i])),
-        (torch.mean, lambda mat: float(mat._i) / mat._N),
-        (torch.mm, lambda mat1, mat2: 0),
-    )
-    IMPLEMENTS_DECORATOR = implements
     # HANDLED_FUNCTIONS_DIAGONAL is a dispatch table that __torch_function__
     # uses to determine which function to call for a given torch API function.
     # The keys of the dictionary are function names and the values are function
@@ -138,7 +122,19 @@ class DiagonalTensor(object):
         else:
             return False
 
-@six.add_metaclass(ImplementationMeta)
+@implements_diagonal(torch.unique)
+def unique(mat):
+    return torch.Tensor([0, mat._i])
+
+@implements_diagonal(torch.mean)
+def mean(mat):
+    return float(mat._i) / mat._N
+
+@implements_diagonal(torch.mm)
+def diagonal_mm(mat1, mat2):
+    return 0
+
+
 class SubTensor(torch.Tensor):
     """A subclass of torch.Tensor use for testing __torch_function__ dispatch
 
@@ -160,11 +156,6 @@ class SubTensor(torch.Tensor):
     functions are working correctly
 
     """
-    TORCH_IMPLEMENTATIONS = (
-        (torch.mm, lambda mat1, mat2: 0),
-    )
-    IMPLEMENTS_DECORATOR = implements_sub
-
     def __torch_function__(self, func, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
@@ -175,52 +166,35 @@ class SubTensor(torch.Tensor):
         # __torch_function__ to handle DiagonalTensor objects.
         return HANDLED_FUNCTIONS_SUB[func](*args, **kwargs)
 
-@six.add_metaclass(ImplementationMeta)
+
+@implements_sub(torch.mm)
+def sub_mm(mat1, mat2):
+    return 0
+
 class SubDiagonalTensor(DiagonalTensor):
     """A subclass of ``DiagonalTensor`` to test custom dispatch
 
     This class tests semantics for defining ``__torch_function__`` on a
-    subclass of another class that defines ``__torch_function__``. This
-    class provides custom implementations of ``mean`` and ``mm``,
-    scaling the mean by a factor of 10 and returning 1 from ``mm``
-    instead of 0 as ``DiagonalTensor`` does.
+    subclass of another class that defines ``__torch_function__``. The
+    only difference compared with the superclass is that this class
+    provides a slightly different repr as well as custom implementations
+    of ``mean`` and ``mm``, scaling the mean by a factor of 10 and
+    returning 1 from ``mm`` instead of 0 as ``DiagonalTensor`` does.
     """
-    TORCH_IMPLEMENTATIONS = (
-        (torch.mean, lambda mat: 10 * float(mat._i) / mat._N),
-        (torch.mm, lambda mat1, mat2: 1),
-    )
-    IMPLEMENTS_DECORATOR = implements_sub_diagonal
-
-    def __init__(self, N, value):
-        self._N = N
-        self._i = value
+    handled_functions = HANDLED_FUNCTIONS_SUB_DIAGONAL
 
     def __repr__(self):
         return "SubDiagonalTensor(N={}, value={})".format(self._N, self._i)
 
-    def __array__(self):
-        return self._i * np.eye(self._N)
 
-    def tensor(self):
-        return self._i * torch.eye(self._N)
+@implements_sub_diagonal(torch.mean)
+def sub_diagonal_mean(mat):
+    return 10 * float(mat._i) / mat._N
 
-    def __torch_function__(self, func, args=(), kwargs=None):
-        if(kwargs is None):
-            kwargs = {}
+@implements_sub_diagonal(torch.mm)
+def sub_diagonal_mm(mat1, mat2):
+    return 1
 
-        if func not in HANDLED_FUNCTIONS_SUB_DIAGONAL:
-            return NotImplemented
-        # In this case _torch_function_ should override DiagonalTensor objects
-        return HANDLED_FUNCTIONS_SUB_DIAGONAL[func](*args, **kwargs)
-
-    def __eq__(self, other):
-        if type(other) is type(self):
-            if self._N == other._N and self._i == other._i:
-                return True
-            else:
-                return False
-        else:
-            return False
 
 class TestOverride(TestCase):
 
@@ -720,18 +694,18 @@ def generate_tensor_like_torch_implementations():
         "IGNORED_TORCH_FUNCTIONS.\n\n{}"
     )
     assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
-    return TENSOR_LIKE_TORCH_IMPLEMENTATIONS
+    for func, override in TENSOR_LIKE_TORCH_IMPLEMENTATIONS:
+        # decorate the overrides with implements_tensor_like
+        implements_tensor_like(func)(override)
 
-@six.add_metaclass(ImplementationMeta)
+generate_tensor_like_torch_implementations()
+
 class TensorLike(object):
-    """A class that emulate the full tensor API
+    """A class that overrides the full torch API
 
     This class is used to explicitly test that the full torch.tensor API
     can be overriden with a class that defines __torch_function__.
     """
-    TORCH_IMPLEMENTATIONS = generate_tensor_like_torch_implementations()
-    IMPLEMENTS_DECORATOR = implements_tensor_like
-
     def __torch_function__(self, func, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
@@ -742,10 +716,7 @@ class TensorLike(object):
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
 
 class TestApis(TestCase):
-    def run(self, result=None):
-        """ Stop after first error """
-        if not result.errors:
-            super(TestApis, self).run(result)
+    pass
 
 def test_generator(func, override):
     args = inspect.getfullargspec(override)
