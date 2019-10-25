@@ -145,11 +145,7 @@ struct PythonResolver : public Resolver {
           std::tuple<std::string, decltype(fields), decltype(annotations)>>(
           props);
 
-      auto tt = TupleType::create(
-          annotations,
-          qualifiedName,
-          TupleType::namedTupleSchemaFromNamesAndTypes(
-              qualifiedName, fields, annotations));
+      auto tt = TupleType::createNamed(qualifiedName, fields, annotations);
       if (auto type = get_python_cu()->get_type(qualifiedName)) {
         TORCH_CHECK(
             type->isSubtypeOf(tt),
@@ -984,6 +980,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("get_module_names", &ConcreteModuleType::getModuleNamesPy)
       .def("add_constant", &ConcreteModuleType::addConstant)
       .def("add_attribute", &ConcreteModuleType::addAttribute)
+      .def("add_function_attribute", &ConcreteModuleType::addFunctionAttribute)
       .def("add_module", &ConcreteModuleType::addModule)
       .def("add_pyclass", &ConcreteModuleType::addPyClass)
       .def("add_overload", &ConcreteModuleType::addOverload)
