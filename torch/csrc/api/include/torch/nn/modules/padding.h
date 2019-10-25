@@ -60,5 +60,171 @@ class TORCH_API ReflectionPad2dImpl : public ReflectionPadImpl<2, ReflectionPad2
 /// module storage semantics.
 TORCH_MODULE(ReflectionPad2d);
 
+// ============================================================================
+
+/// Base class for all (dimension-specialized) ReplicationPad modules.
+template <size_t D, typename Derived>
+class TORCH_API ReplicationPadImpl : public torch::nn::Cloneable<Derived> {
+ public:
+  ReplicationPadImpl(ExpandingArray<D*2> padding)
+      : ReplicationPadImpl(ReplicationPadOptions<D>(padding)) {}
+  explicit ReplicationPadImpl(const ReplicationPadOptions<D>& options_);
+
+  void reset() override;
+
+  Tensor forward(const Tensor& input);
+
+  /// Pretty prints the `ReplicationPad{1,2}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ReplicationPadOptions<D> options;
+};
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReplicationPad1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies ReplicationPad over a 1-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReplicationPad1d to learn
+/// about the exact behavior of this module.
+class TORCH_API ReplicationPad1dImpl : public ReplicationPadImpl<1, ReplicationPad1dImpl> {
+ public:
+  using ReplicationPadImpl<1, ReplicationPad1dImpl>::ReplicationPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ReplicationPad1dImpl`.
+/// See the documentation for `ReplicationPad1dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ReplicationPad1d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReplicationPad2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies ReplicationPad over a 2-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReplicationPad2d to learn
+/// about the exact behavior of this module.
+class TORCH_API ReplicationPad2dImpl : public ReplicationPadImpl<2, ReplicationPad2dImpl> {
+ public:
+  using ReplicationPadImpl<2, ReplicationPad2dImpl>::ReplicationPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ReplicationPad2dImpl`.
+/// See the documentation for `ReplicationPad2dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ReplicationPad2d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReplicationPad3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies ReplicationPad over a 3-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReplicationPad3d to learn
+/// about the exact behavior of this module.
+class TORCH_API ReplicationPad3dImpl : public ReplicationPadImpl<3, ReplicationPad3dImpl> {
+ public:
+  using ReplicationPadImpl<3, ReplicationPad3dImpl>::ReplicationPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ReplicationPad3dImpl`.
+/// See the documentation for `ReplicationPad3dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ReplicationPad3d);
+
+// ============================================================================
+
+/// Applies ZeroPad over a 2-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ZeroPad2d to learn
+/// about the exact behavior of this module.
+class TORCH_API ZeroPad2dImpl : public Cloneable<ZeroPad2dImpl> {
+ public:
+  ZeroPad2dImpl(ExpandingArray<4> padding)
+      : ZeroPad2dImpl(ZeroPad2dOptions(padding)) {}
+  explicit ZeroPad2dImpl(const ZeroPad2dOptions& options_);
+
+  void reset() override;
+
+  /// Pretty prints the `ZeroPad2d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input);
+
+  /// The options with which this `Module` was constructed.
+  ZeroPad2dOptions options;
+};
+
+/// A `ModuleHolder` subclass for `ZeroPad2dImpl`.
+/// See the documentation for `ZeroPad2dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ZeroPad2d);
+
+// ============================================================================
+
+/// Base class for all (dimension-specialized) ConstantPad modules.
+template <size_t D, typename Derived>
+class TORCH_API ConstantPadImpl : public torch::nn::Cloneable<Derived> {
+ public:
+  ConstantPadImpl(ExpandingArray<D*2> padding, double value)
+      : ConstantPadImpl(ConstantPadOptions<D>(padding, value)) {}
+  explicit ConstantPadImpl(const ConstantPadOptions<D>& options_);
+
+  void reset() override;
+
+  Tensor forward(const Tensor& input);
+
+  /// Pretty prints the `ConstantPad{1,2}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  ConstantPadOptions<D> options;
+};
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ConstantPad1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies ConstantPad over a 1-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConstantPad1d to learn
+/// about the exact behavior of this module.
+class TORCH_API ConstantPad1dImpl : public ConstantPadImpl<1, ConstantPad1dImpl> {
+ public:
+  using ConstantPadImpl<1, ConstantPad1dImpl>::ConstantPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ConstantPad1dImpl`.
+/// See the documentation for `ConstantPad1dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ConstantPad1d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ConstantPad2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies ConstantPad over a 2-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConstantPad2d to learn
+/// about the exact behavior of this module.
+class TORCH_API ConstantPad2dImpl : public ConstantPadImpl<2, ConstantPad2dImpl> {
+ public:
+  using ConstantPadImpl<2, ConstantPad2dImpl>::ConstantPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ConstantPad2dImpl`.
+/// See the documentation for `ConstantPad2dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ConstantPad2d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ConstantPad3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies ConstantPad over a 3-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ConstantPad3d to learn
+/// about the exact behavior of this module.
+class TORCH_API ConstantPad3dImpl : public ConstantPadImpl<3, ConstantPad3dImpl> {
+ public:
+  using ConstantPadImpl<3, ConstantPad3dImpl>::ConstantPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ConstantPad3dImpl`.
+/// See the documentation for `ConstantPad3dImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ConstantPad3d);
+
 } // namespace nn
 } // namespace torch
