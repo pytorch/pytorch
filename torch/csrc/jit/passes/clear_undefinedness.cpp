@@ -26,7 +26,7 @@ void clearUndefinedness(Block* block) {
   }
 }
 
-void clearUndefinedness(const std::shared_ptr<Graph>& graph) {
+void ClearUndefinedness(const std::shared_ptr<Graph>& graph) {
     for (auto i : graph->inputs()) {
       clearUndefinedness(i);
     }
