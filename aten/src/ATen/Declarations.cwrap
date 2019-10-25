@@ -36,24 +36,6 @@
         - IntArrayRef stride
 ]]
 [[
-  name: _th_fill_
-  return: self
-  cname: fill
-  variants: function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  options:
-    - arguments:
-      - THTensor* self
-      - real value
-    - zero_dim_tensor_only: True
-      arguments:
-      - THTensor* self
-      - THTensor* value
-]]
-[[
   name: _th_masked_fill_
   cpu_bool: True
   cuda_bool: True
@@ -67,12 +49,6 @@
         broadcast: mask inplace fallback types:Byte
       - THByteTensor* mask
       - real value
-    - zero_dim_tensor_only: True
-      arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Byte
-      - THByteTensor* mask
-      - THTensor* value
 ]]
 [[
   name: _th_masked_fill_bool_
@@ -88,12 +64,6 @@
         broadcast: mask inplace fallback types:Bool
       - THBoolTensor* mask
       - real value
-    - zero_dim_tensor_only: True
-      arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Bool
-      - THBoolTensor* mask
-      - THTensor* value
 ]]
 [[
   name: _th_masked_scatter_
@@ -286,33 +256,6 @@
         wrap_dim: self
       - THIndexTensor* index
       - real value
-    - zero_dim_tensor_only: True
-      arguments:
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - THIndexTensor* index
-        - THTensor* value
-]]
-[[
-  name: _th_unfold
-  cname: unfold
-  variants:
-    - function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  device_guard: False
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - arg: long dimension
-      wrap_dim: self
-    - long size
-    - long step
 ]]
 [[
   name: _th_scatter_

@@ -41,12 +41,15 @@ void PythonEngine::thread_init(int device) {
   Engine::thread_init(device);
 }
 
-void PythonEngine::thread_on_exception(NodeTask& task, std::exception& e) {
+void PythonEngine::thread_on_exception(
+    std::shared_ptr<GraphTask>& graph_task,
+    const std::shared_ptr<Node>& fn,
+    std::exception& e) {
   auto python_err = dynamic_cast<python_error*>(&e);
   if (python_err) {
     python_err->persist();
   }
-  Engine::thread_on_exception(task, e);
+  Engine::thread_on_exception(graph_task, fn, e);
 }
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
