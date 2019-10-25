@@ -138,11 +138,14 @@ std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
   auto future = std::make_shared<ivalue::Future>(nullptr);
   auto agent = RpcAgent::getDefaultRpcAgent();
 
+  // ScriptRRefFetchCall message always carries autograd context id even if
+  // the message itself does not contain any tensor, because the response would
+  // potentially contain tensors.
   auto futureResponse = autograd::sendMessageWithAutograd(
       *agent,
       agent->getWorkerInfo(ownerId_),
       ScriptRRefFetchCall(ownerId_, rrefId()).toMessage(),
-      true /* forceAutograd */);
+      false /* checkRequiresGrad */);
 
   futureResponse->addCallback([future](const Message& message) {
     RRefContext::handleException(message);

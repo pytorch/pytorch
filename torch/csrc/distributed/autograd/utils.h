@@ -34,13 +34,15 @@ TORCH_API DistAutogradContext* addRecvRpcBackward(
 
 // This method is a wrapper utility used internally to wrap autograd info
 // and attach autograd function for each type of rpc call if it has valid
-// context and forceAutograd is true or tensors require grads, in this case,
-// return RpcWithAutograd message; otherwise return original rpc message.
+// context and tensors require grads or checkRequiresGrad is false, in this
+// case, return RpcWithAutograd message; otherwise return original rpc message.
+// NB: checkRequiresGrad is useful when the request does not contain any tensor
+// but the corresponding response does.
 TORCH_API rpc::Message getMessageWithAutograd(
     const rpc::worker_id_t dstId,
     rpc::Message&& wrappedRpcMsg,
     rpc::MessageType msgType,
-    bool forceAutograd = false);
+    bool checkRequiresGrad = true);
 
 // Send message after autograd checking
 TORCH_API std::shared_ptr<torch::distributed::rpc::FutureMessage>
@@ -48,7 +50,7 @@ sendMessageWithAutograd(
     rpc::RpcAgent& agent,
     const rpc::WorkerInfo& dst,
     rpc::Message&& wrappedRpcMsg,
-    bool forceAutograd = false);
+    bool checkRequiresGrad = true);
 
 } // namespace autograd
 } // namespace distributed

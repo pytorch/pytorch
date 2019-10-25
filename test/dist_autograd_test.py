@@ -263,12 +263,21 @@ class DistAutogradTest(object):
             "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
         )
 
-    def _test_graph(self, fn):
+    def _test_graph(self, fn, exec_mode):
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = rpc.rpc_sync("worker{}".format(dst_rank), fn, args=(t1, t2))
+            if ExecMode.RPC_SYNC == exec_mode:
+                ret = rpc.rpc_sync(
+                    "worker{}".format(dst_rank), fn, args=(t1, t2))
+            elif ExecMode.REMOTE == exec_mode:
+                ret = rpc.remote(
+                    "worker{}".format(dst_rank), fn, args=(t1, t2)
+                ).to_here().wait()
+            else:
+                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             rpc.rpc_sync("worker{}".format(dst_rank),
                          _set_rpc_done, args=(context_id, 1))
 
@@ -304,65 +313,15 @@ class DistAutogradTest(object):
 
     @dist_init(setup_model_parallel=True)
     def test_graph_for_builtin_call(self):
-        self._test_graph(torch.add)
+        self._test_graph(torch.add, ExecMode.RPC_SYNC)
 
     @dist_init(setup_model_parallel=True)
     def test_graph_for_python_call(self):
-        self._test_graph(my_py_add)
-
-    def _test_graph_remote(self, fn):
-        dst_rank = (self.rank + 1) % self.world_size
-        with dist_autograd.context() as context_id:
-            #if self.rank == 0:
-            t1 = torch.ones(3, 3, requires_grad=True)
-            t2 = torch.zeros(3, 3, requires_grad=True)
-            rref = rpc.remote("worker{}".format(dst_rank), fn, args=(t1, t2))
-            ret = rref.to_here().wait()
-            rpc.rpc_sync("worker{}".format(dst_rank),
-                         _set_rpc_done, args=(context_id, 1))
-
-            # Verify graph for current context id.
-            ctx = dist_autograd._current_context()
-            self.assertEqual(context_id, ctx._context_id())
-            send_functions = ctx._send_functions()
-            self.assertEqual(1, len(send_functions))
-
-            recv_functions = ctx._recv_functions()
-            self.assertEqual(1, len(recv_functions))
-
-            next_funcs = list(send_functions.values())[0].next_functions
-            self.assertEqual(2, len(next_funcs))
-
-            # We should now hit t1 and t2 in the autograd graph.
-            self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[0][0].name())
-            self.assertEqual(t1, next_funcs[0][0].variable)
-            self.assertEqual(0, next_funcs[0][1])
-            self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[1][0].name())
-            self.assertEqual(t2, next_funcs[1][0].variable)
-            self.assertEqual(0, next_funcs[1][1])
-
-            # Wait for the prev rank to be done with rpc.
-            self._check_rpc_done(1)
-            # Verify graph for previous context id.
-            ctx = dist_autograd._retrieve_context(ctx_ids[1])
-            send_functions = ctx._send_functions()
-            self.assertEqual(1, len(send_functions))
-            self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
-            # this barrier is needed so one worker does not clean up their
-            # autograd context before another worker tries to access it.
-            dist.barrier()
-
-        # autograd context should be cleaned up by now.
-        with self.assertRaises(RuntimeError):
-            ctx = dist_autograd._retrieve_context(context_id)
-
-        # No autograd context available.
-        with self.assertRaises(RuntimeError):
-            ctx = dist_autograd._current_context()
+        self._test_graph(my_py_add, ExecMode.RPC_SYNC)
 
     @dist_init(setup_model_parallel=True)
     def test_graph_for_builtin_remote_call(self):
-        self._test_graph_remote(torch.add)
+        self._test_graph(torch.add, ExecMode.REMOTE)
 
     # 3-layer nested calls
     @dist_init(setup_model_parallel=True)
@@ -649,6 +608,7 @@ class DistAutogradTest(object):
                 loss = val.sum()
 
                 ret = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2, t2, t3, t4)
+                print("=== done mode ", exec_mode)
                 local_grads = ret if ret else local_grads
 
     @dist_init(setup_model_parallel=True)
