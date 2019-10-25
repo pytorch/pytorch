@@ -518,9 +518,6 @@ inline Variable make_variable(
     at::Tensor data,
     bool requires_grad = false,
     bool allow_tensor_metadata_change = true) {
-  TORCH_CHECK(
-      !data.is_variable(),
-      "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.getIntrusivePtr();
@@ -555,9 +552,6 @@ inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
     bool allow_tensor_metadata_change = true) {
-  TORCH_CHECK(
-      !data.is_variable(),
-      "Must not create a new variable from a variable, use its .tensor_data()");
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
@@ -572,22 +566,13 @@ inline Variable make_variable(
 // Tensor Conversion
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/// Downcasts the `Tensor` reference to a `Variable` reference. If compiling
-/// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
-/// throws a `std::invalid_argument` exception.
+// In the old days, these casts were checked, but now that every Tensor
+// is a Variable this cast is always valid
 inline Variable& as_variable_ref(at::Tensor& tensor) {
-  TORCH_CHECK(
-      tensor.is_variable(),
-      "Attempted to cast a Tensor to a Variable, but "
-      "the dynamic type of the value is not Variable.");
   return static_cast<Variable&>(tensor);
 }
 
 inline const Variable& as_variable_ref(const at::Tensor& tensor) {
-  TORCH_CHECK(
-      tensor.is_variable(),
-      "Attempted to cast a Tensor to a Variable, but "
-      "the dynamic type of the value is not Variable.");
   return static_cast<const Variable&>(tensor);
 }
 
