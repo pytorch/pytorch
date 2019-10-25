@@ -926,6 +926,7 @@ class RpcTest(object):
         self.assertEqual(rref_c.to_here().wait(), torch.ones(n, n) + 4)
 
     @dist_init(setup_model_parallel=True)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_get_rpc_timeout(self):
         timeout = rpc.get_rpc_timeout()
         self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
