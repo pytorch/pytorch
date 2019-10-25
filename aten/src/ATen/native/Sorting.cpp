@@ -120,7 +120,7 @@ static std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     indices.zero_();
     return std::forward_as_tuple(values, indices);
   }
-  auto tmp_values = self.clone();
+  auto tmp_values = self.clone(at::MemoryFormat::Contiguous);
   auto tmp_indices = at::empty(self.sizes(), self.options().dtype(kLong));
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "kthvalue_cpu", [&] {
     dim_apply(
@@ -290,9 +290,9 @@ Tensor median_cpu(const Tensor& self) {
 #endif
   TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
   if (self.dim() == 0 && self.numel() == 1) {
-    return self.clone();
+    return self.clone(at::MemoryFormat::Contiguous);
   }
-  auto tmp_values = self.clone().view(-1);
+  auto tmp_values = self.clone(at::MemoryFormat::Contiguous).view(-1);
   auto result = at::empty({1}, self.options());
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "median", [&] {
     // note, quick_select is 0 based while kthvalue is not
