@@ -144,12 +144,12 @@ std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
       *agent,
       agent->getWorkerInfo(ownerId_),
       ScriptRRefFetchCall(ownerId_, rrefId()).toMessage(),
-      false /* checkRequiresGrad */);
+      true /* forceGradRecording */);
 
   futureResponse->addCallback([future](const Message& message) {
     RRefContext::handleException(message);
+    auto response = deserializeResponse(message);
     if (message.type() == MessageType::FORWARD_AUTOGRAD_RESP) {
-      auto response = deserializeResponse(message);
       auto& rpcWithAutograd =
           static_cast<autograd::RpcWithAutograd&>(*response);
 
@@ -163,8 +163,8 @@ std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
       auto& rfr = static_cast<ScriptRRefFetchRet&>(wrappedRpc);
       future->markCompleted(rfr.values().front());
     } else {
-      auto rfr = ScriptRRefFetchRet::fromMessage(message);
-      future->markCompleted(rfr->values().front());
+      auto& rfr = static_cast<ScriptRRefFetchRet&>(*response);
+      future->markCompleted(rfr.values().front());
     }
   });
   return future;
