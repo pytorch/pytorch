@@ -2083,15 +2083,13 @@
 
 - func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
-- func: randint_like(Tensor self, int high) -> Tensor
-  use_c10_dispatcher: full
+- func: randint_like(Tensor self, int high, *, MemoryFormat? memory_format=None) -> Tensor
 
-- func: randint_like.low(Tensor self, int low, int high) -> Tensor
-  use_c10_dispatcher: full
+- func: randint_like.low(Tensor self, int low, int high, *, MemoryFormat? memory_format=None) -> Tensor
 
-- func: randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
 
-- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
