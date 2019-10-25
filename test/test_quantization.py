@@ -19,6 +19,7 @@ from torch.quantization._quantize_script import quantize_script
 from common_utils import run_tests
 from common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
+    AnnotatedConvModel, ConvModel, \
     AnnotatedConvBnModel, ConvBnModel, \
     SkipQuantModel, QuantStubModel, \
     ModelForFusion, ModelWithSequentialFusion, ManualLinearQATModel, ManualConvLinearQATModel, \
@@ -699,6 +700,31 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         self.assertEqual(result_eager, result_script)
 
     @_tmp_donotuse_dont_inline_everything
+    def test_conv(self):
+        r"""Compare the result of quantizing conv layer in
+        eager mode and graph mode
+        """
+        # eager mode
+        conv_model = AnnotatedConvModel().eval()
+        conv_model_to_script = ConvModel().eval()
+        # copy the weight from eager mode so that we can
+        # compare the result of the two quantized models later
+        conv_model_to_script.conv.weight = torch.nn.Parameter(conv_model.conv.weight.detach())
+        model_eager = quantize(conv_model, default_eval_fn,
+                               self.img_data)
+        qconfig_dict = {
+            '': default_qconfig
+        }
+        model_script = quantize_script(
+            torch.jit.script(conv_model_to_script),
+            qconfig_dict,
+            default_eval_fn,
+            [self.img_data],
+            inplace=False)
+        result_eager = model_eager(self.img_data[0][0])
+        result_script = model_script(self.img_data[0][0])
+        self.assertEqual(result_eager, result_script)
+
     @unittest.skip("This doesn't work right now, re-enable after fold_convbn is fixed")
     def test_conv_bn(self):
         r"""Compare the result of quantizing conv + bn layer in

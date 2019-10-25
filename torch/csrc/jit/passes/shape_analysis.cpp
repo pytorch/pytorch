@@ -608,10 +608,10 @@ class ShapePropagator {
         // We refresh the tuple type, because the input types could have been
         // refined.
         auto orig_type = node->output()->type()->expect<TupleType>();
-        node->output()->setType(TupleType::create(
-            fmap(node->inputs(), [](Value* v) { return v->type(); }),
-            orig_type->name(),
-            orig_type->schema()));
+        auto new_types =
+            fmap(node->inputs(), [](Value* v) { return v->type(); });
+        node->output()->setType(
+            orig_type->createWithContained(std::move(new_types)));
         return;
       }
       case prim::TupleUnpack: {
@@ -856,14 +856,14 @@ class ShapePropagator {
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
             "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
-            "aten::empty_like(Tensor self) -> Tensor",
-            "aten::full_like(Tensor self, Scalar fill_value) -> Tensor",
-            "aten::ones_like(Tensor self) -> Tensor",
-            "aten::rand_like(Tensor self) -> Tensor",
-            "aten::randint_like(Tensor self, int high) -> Tensor",
-            "aten::randint_like(Tensor self, int low, int high) -> Tensor",
-            "aten::randn_like(Tensor self) -> Tensor",
-            "aten::zeros_like(Tensor self) -> Tensor",
+            "aten::empty_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::full_like(Tensor self, Scalar fill_value, *, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::ones_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::rand_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like(Tensor self, int high, *, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like(Tensor self, int low, int high, *, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randn_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::zeros_like(Tensor self, *, MemoryFormat? memory_format=contiguous_format) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           auto input_type = node->input(0)->type()->cast<TensorType>();
@@ -1412,13 +1412,13 @@ class ShapePropagator {
     static const register_formula_for like_factories_with_options{
         {
             "aten::empty_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
-            "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-            "aten::ones_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-            "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-            "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-            "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-            "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-            "aten::zeros_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
+            "aten::ones_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
+            "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
+            "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
+            "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
+            "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::zeros_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto type =
