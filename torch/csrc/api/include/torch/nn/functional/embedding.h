@@ -84,8 +84,8 @@ inline Tensor embedding_bag(
   TORCH_CHECK(
     !per_sample_weights_.defined() || c10::get_if<enumtype::kMean>(&options.mode()),
     "embedding_bag: per_sample_weights was not null. ",
-    "per_sample_weights is only supported for mode='sum' (got mode='",
-    options.mode(), "').Please open a feature request on GitHub.");
+    "per_sample_weights is only supported for mode='kSum' (got mode='",
+    c10::visit(torch::enumtype::enum_name{}, options.mode()), "').Please open a feature request on GitHub.");
 
   return std::get<0>(
     torch::embedding_bag(
