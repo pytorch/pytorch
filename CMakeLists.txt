@@ -15,10 +15,6 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.15.0)
   cmake_policy(SET CMP0092 NEW)
 endif()
 
-if(NOT CMAKE_VERSION VERSION_LESS 3.10)
-  set(FIND_CUDA_MODULE_DEPRECATED ON)
-endif()
-
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
