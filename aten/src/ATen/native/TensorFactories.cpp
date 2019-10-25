@@ -323,12 +323,21 @@ Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
   return result.fill_(fill_value);
 }
 
-Tensor full_like(const Tensor& self, Scalar fill_value) {
-  return native::full_like(self, fill_value, self.options());
+Tensor full_like(
+    const Tensor& self,
+    Scalar fill_value,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::full_like(
+      self, fill_value, self.options(), optional_memory_format);
 }
 
-Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
-  return native::full(self.sizes(), fill_value, options);
+Tensor full_like(
+    const Tensor& self,
+    Scalar fill_value,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.fill_(fill_value);
 }
 
 Tensor new_full(
