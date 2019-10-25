@@ -90,18 +90,13 @@ public:
      */
     Options&& schema(const std::string& schemaOrName) {
       TORCH_CHECK(!schemaOrName_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
-      TORCH_CHECK(!legacyATenSchema_.has_value(), "Tried to register operator ", schemaOrName," but specified schema multiple times. You can only specify the schema once per operator registration.");
 
-      if (Options::op_is_still_on_aten_dispatcher_(schemaOrName.c_str())) {
-        TORCH_CHECK(kernels.size() == 0, "For legacy aten ops, the schema() call must happen before any kernel() calls. Operator was ", schemaOrName);
-        legacyATenSchema_ = schemaOrName;
-      } else {
-        #if defined(CAFFE2_IS_XPLAT_BUILD)
-          throw std::logic_error("Tried to register operator " + schemaOrName + ". We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
-        #else
-          schemaOrName_ = torch::jit::parseSchemaOrName(schemaOrName);
-        #endif
-      }
+      #if defined(CAFFE2_IS_XPLAT_BUILD)
+        throw std::logic_error("Tried to register operator " + schemaOrName + ". We don't support registering c10 ops on mobile yet because the function schema parser isn't present in the mobile build.");
+      #else
+        schemaOrName_ = torch::jit::parseSchemaOrName(schemaOrName);
+      #endif
+
       return std::move(*this);
     }
 
@@ -298,18 +293,11 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      if (legacyATenSchema_.has_value()) {
-        // TODO Remove this once all ops are moved to c10.
-        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
-        at::globalATenDispatch().registerOp<FuncType>(dispatch_key, legacyATenSchema_->c_str(), kernel_func);
-        return std::move(*this);
-      } else {
-        return std::move(*this).kernel(
-          std::move(dispatch_key),
-          KernelFunction::makeFromUnboxedOnlyFunction<FuncType, kernel_func>(),
-          nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
-        );
-      }
+      return std::move(*this).kernel(
+        std::move(dispatch_key),
+        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
+        nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
+      );
     }
 
     // TODO Remove impl_unboxedOnlyCatchAllKernel once all of aten can generate boxed kernels
@@ -319,68 +307,11 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      if (legacyATenSchema_.has_value()) {
-        // TODO Remove this once all ops are moved to c10.
-        TORCH_INTERNAL_ASSERT(!schemaOrName_.has_value());
-        at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::UndefinedTensorId, legacyATenSchema_->c_str(), kernel_func);
-        return std::move(*this);
-      } else {
-        return std::move(*this).kernel(
-          c10::nullopt,
-          KernelFunction::makeFromUnboxedOnlyFunction<FuncType, kernel_func>(),
-          nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
-        );
-      }
-    }
-
-    // TODO Remove impl_unboxedOnlyC10Kernel once all of aten can generate boxed kernels
-    template<class FuncType, FuncType* kernel_func>
-    // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyC10Kernel(TensorTypeId dispatch_key) && {
-      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
-      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
-
-      return std::move(*this).kernel(
-        std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
-        nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
-      );
-    }
-
-    // TODO Remove impl_unboxedOnlyC10CatchAllKernel once all of aten can generate boxed kernels
-    template<class FuncType, FuncType* kernel_func>
-    // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyC10CatchAllKernel() && {
-      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
-      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
-
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
         nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
       );
-    }
-
-    // TODO Remove impl_unboxedOnlyATenKernel once all of aten can generate boxed kernels
-    template<class FuncType, FuncType* kernel_func>
-    // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyATenKernel(TensorTypeId dispatch_key) && {
-      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
-      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
-
-      at::globalATenDispatch().registerOp<FuncType>(dispatch_key, legacyATenSchema_->c_str(), kernel_func);
-      return std::move(*this);
-    }
-
-    // TODO Remove impl_unboxedOnlyATenCatchAllKernel once all of aten can generate boxed kernels
-    template<class FuncType, FuncType* kernel_func>
-    // enable_if: only enable it if FuncType is actually a function
-    guts::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyATenCatchAllKernel() && {
-      static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
-      static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
-
-      at::globalATenDispatch().registerOp<FuncType>(TensorTypeId::UndefinedTensorId, legacyATenSchema_->c_str(), kernel_func);
-      return std::move(*this);
     }
 
     /**
@@ -470,33 +401,6 @@ public:
     }
 
   private:
-    static c10::OperatorName parse_operator_name_(const char* schema) {
-      // TODO Remove this function once all aten ops are on c10
-      // We can't depend on the jit function schema parser here, but parsing
-      // the op name is trivial. Let's just do it by hand.
-      std::string schema_str(schema);
-      size_t name_end_pos = schema_str.find_first_of(".(");
-      if (name_end_pos == std::string::npos) {
-        name_end_pos = schema_str.size();
-      }
-      size_t overload_name_end_pos = name_end_pos + 1;
-      if (schema_str[name_end_pos] == '.') {
-        overload_name_end_pos = schema_str.find_first_of('(', name_end_pos);
-        if (overload_name_end_pos == std::string::npos) {
-          overload_name_end_pos = name_end_pos + 1;
-        }
-      }
-      return c10::OperatorName{
-        schema_str.substr(0, name_end_pos),
-        (overload_name_end_pos > name_end_pos + 1) ? schema_str.substr(name_end_pos + 1, overload_name_end_pos - name_end_pos - 1) : ""
-      };
-    }
-
-    static bool op_is_still_on_aten_dispatcher_(const char* schema_string) {
-      // TODO Remove this function
-      return false;
-    }
-
     Options&& kernel(c10::optional<TensorTypeId>&& dispatch_key, KernelFunction&& func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
@@ -508,7 +412,6 @@ public:
 
     Options()
     : schemaOrName_(c10::nullopt)
-    , legacyATenSchema_(c10::nullopt)
     , kernels()
     , aliasAnalysisKind_(c10::nullopt)
     {}
@@ -527,13 +430,7 @@ public:
       std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
-    // For all modern ops, schemaOrName_ is set.
-    // For legacy ATen ops (i.e. ops on globalATenDispatch()), legacyATenSchema_
-    // is set. We never set both.
-    // TODO This is just a hack to forward some registrations to globalATenDispatch().
-    // We should remove legacyATenSchema_ once all ops are on the c10 dispatcher.
     c10::optional<c10::either<OperatorName, FunctionSchema>> schemaOrName_;
-    c10::optional<std::string> legacyATenSchema_;
 
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
