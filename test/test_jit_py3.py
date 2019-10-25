@@ -409,6 +409,5 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "does not compatible with the type"):
             scripted_mod.proxy_mod = torch.jit.script(NewModuleWrong())
 
-
 if __name__ == '__main__':
     run_tests()
