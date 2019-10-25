@@ -23,23 +23,22 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
 
 @implementation Benchmark
 
-+ (BOOL)setup: (NSDictionary* )config {
-    NSString* modelPath = [[NSBundle mainBundle] pathForResource:@"model" ofType:@"pt"];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:modelPath]) {
-        NSLog(@"model.pt doesn't exist!");
-        return NO;
-    }
-    FLAGS_model = std::string(modelPath.UTF8String);
-    FLAGS_input_dims = std::string(((NSString* )config[@"input_dims"]).UTF8String);
-    FLAGS_input_type = std::string(((NSString* )config[@"input_type"]).UTF8String);
-    FLAGS_warmup = ((NSNumber* )config[@"warmup"]).intValue;
-    FLAGS_iter   = ((NSNumber* )config[@"iter"]).intValue;
-    FLAGS_print_output = ((NSNumber* )config[@"print_output"]).boolValue;
-    return YES;
++ (BOOL)setup:(NSDictionary*)config {
+  NSString* modelPath = [[NSBundle mainBundle] pathForResource:@"model" ofType:@"pt"];
+  if (![[NSFileManager defaultManager] fileExistsAtPath:modelPath]) {
+    NSLog(@"model.pt doesn't exist!");
+    return NO;
+  }
+  FLAGS_model = std::string(modelPath.UTF8String);
+  FLAGS_input_dims = std::string(((NSString*)config[@"input_dims"]).UTF8String);
+  FLAGS_input_type = std::string(((NSString*)config[@"input_type"]).UTF8String);
+  FLAGS_warmup = ((NSNumber*)config[@"warmup"]).intValue;
+  FLAGS_iter = ((NSNumber*)config[@"iter"]).intValue;
+  FLAGS_print_output = ((NSNumber*)config[@"print_output"]).boolValue;
+  return YES;
 }
 
-+ (NSString* )run {
-  
++ (NSString*)run {
   std::vector<std::string> logs;
 #define UI_LOG(fmt, ...)                                          \
   {                                                               \
@@ -47,7 +46,7 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
     NSLog(@"%@", log);                                            \
     logs.push_back(log.UTF8String);                               \
   }
-  
+
   CAFFE_ENFORCE_GE(FLAGS_input_dims.size(), 0, "Input dims must be specified.");
   CAFFE_ENFORCE_GE(FLAGS_input_type.size(), 0, "Input type must be specified.");
 
