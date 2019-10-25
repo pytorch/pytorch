@@ -155,7 +155,6 @@ Message RequestCallbackImpl::processRpc(
 
       // Process the original RPC.
       auto wrappedMessageType = rpcWithAutograd.wrappedMessageType();
-
       auto wrappedRpcResponse =
           processRpc(rpcWithAutograd.wrappedRpc(), wrappedMessageType);
 

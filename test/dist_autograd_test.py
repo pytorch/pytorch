@@ -437,16 +437,29 @@ class DistAutogradTest(object):
             with self.assertRaises(RuntimeError):
                 ctx = dist_autograd._retrieve_context(ctx_ids[1])
 
-    @dist_init(setup_model_parallel=True)
-    def test_rpc_complex_args(self):
+
+    def _test_rpc_complex_args(self, exec_mode):
         with dist_autograd.context() as context_id:
             num_tensors = 10
             tensors = []
             for i in range(num_tensors):
                 tensors.append(torch.ones(3, 3, requires_grad=(i % 2 == 0)))
-            ret = rpc.rpc_sync(
-                "worker{}".format(self._next_rank()), torch.stack, args=(tensors,)
-            )
+
+            if ExecMode.RPC_SYNC == exec_mode:
+                ret = rpc.rpc_sync(
+                    "worker{}".format(self._next_rank()),
+                    torch.stack,
+                    args=(tensors,)
+                )
+            elif ExecMode.REMOTE == exec_mode:
+                ret = rpc.remote(
+                    "worker{}".format(self._next_rank()),
+                    torch.stack,
+                    args=(tensors,)
+                ).to_here().wait()
+            else:
+                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             self.assertEqual(torch.stack(tensors), ret)
 
             # Verify appropriate tensors have been attached the autograd graph.
@@ -470,6 +483,13 @@ class DistAutogradTest(object):
             dst_rank = (self.rank + 1) % self.world_size
             self.assertEqual(worker_ids[0], dst_rank)
 
+    @dist_init(setup_model_parallel=True)
+    def test_rpc_complex_args(self):
+        self._test_rpc_complex_args(ExecMode.RPC_SYNC)
+
+    @dist_init(setup_model_parallel=True)
+    def test_remote_complex_args(self):
+        self._test_rpc_complex_args(ExecMode.REMOTE)
 
     @dist_init(setup_model_parallel=True)
     def test_context_cleanup_many_workers(self):
