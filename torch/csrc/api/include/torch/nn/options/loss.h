@@ -153,5 +153,19 @@ struct TORCH_API TripletMarginLossOptions {
   TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
+// ============================================================================
+
+/// Options for The Connectionist Temporal Classification loss functional and module.
+struct TORCH_API CTCLossOptions {
+  /// blank label. Default `0`.
+  TORCH_ARG(int64_t, blank) = 0;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  /// Whether to zero infinite losses and the associated gradients.
+  /// Default: `false`. Infinite losses mainly occur when the inputs are
+  /// too short to be aligned to the targets.
+  TORCH_ARG(bool, zero_infinity) = false;
+};
+
 } // namespace nn
 } // namespace torch
