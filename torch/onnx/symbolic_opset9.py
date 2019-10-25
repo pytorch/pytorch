@@ -2029,10 +2029,10 @@ def _weight_norm(g, weight_v, weight_g, dim):
     rank = weight_v.type().dim()
     if rank:
         # W = g * ((v) / ||v||)
-        # Compute norm_except_dim for l2 norm
-        # dim = -1 torch behavior is to calculate norm over all dims
-        # TODO: This conflicts with negative axes logic. Might need
-        # to be fixed in torch.nn.utils.group_norm
+        # Compute norm_except_dim for l2 norm. dim = None means over all dims
+        # torch's weight_norm module sets dim = -1 if it's None.
+        # This conflicts the logic for negative axes to access dims backwards 
+        # TODO: Might need a fix in torch group_norm module
         axes = list(range(rank))
         if dim:
             if dim < -1:
