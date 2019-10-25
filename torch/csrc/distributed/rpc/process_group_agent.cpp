@@ -295,7 +295,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
         futureTimeouts_[futureStartTime] = std::vector<int64_t>{requestId};
       }
     }
-
     message.setId(requestId);
   } else {
     future->markCompleted();
