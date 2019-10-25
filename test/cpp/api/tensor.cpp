@@ -500,6 +500,33 @@ TEST(TensorTest, PrettyPrintTensorDataContainer) {
   }
 }
 
+TEST(TensorTest, TensorDataContainerCallingAccessorOfWrongType) {
+  {
+    ASSERT_THROWS_WITH(
+      torch::detail::TensorDataContainer<1>(1.1).init_list(),
+      "Can only call `init_list()` on a TensorDataContainer that has `is_init_list() == true`");
+    ASSERT_THROWS_WITH(
+      torch::detail::TensorDataContainer<1>(1.1).tensor(),
+      "Can only call `tensor()` on a TensorDataContainer that has `is_tensor() == true`");
+  }
+  {
+    ASSERT_THROWS_WITH(
+      torch::detail::TensorDataContainer<1>({1.1, 2.2}).scalar(),
+      "Can only call `scalar()` on a TensorDataContainer that has `is_scalar() == true`");
+    ASSERT_THROWS_WITH(
+      torch::detail::TensorDataContainer<1>({1.1, 2.2}).tensor(),
+      "Can only call `tensor()` on a TensorDataContainer that has `is_tensor() == true`");
+  }
+  {
+    ASSERT_THROWS_WITH(
+      torch::detail::TensorDataContainer<1>(at::ArrayRef<double>({1.1, 2.2})).scalar(),
+      "Can only call `scalar()` on a TensorDataContainer that has `is_scalar() == true`");
+    ASSERT_THROWS_WITH(
+      torch::detail::TensorDataContainer<1>(at::ArrayRef<double>({1.1, 2.2})).init_list(),
+      "Can only call `init_list()` on a TensorDataContainer that has `is_init_list() == true`");
+  }
+}
+
 TEST(TensorTest, ContainsCorrectValuesWhenConstructedFromVector) {
   std::vector<int> v = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
   auto tensor = at::tensor(v);
