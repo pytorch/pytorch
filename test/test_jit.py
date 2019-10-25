@@ -14718,7 +14718,6 @@ a")
                     x = mod(x)
                 return x
 
-        print(MyMod())
         traced = torch.jit.trace(MyMod(), (torch.rand(3, 4),))
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")

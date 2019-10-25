@@ -139,6 +139,10 @@ void convertReturnsToTuples(Block* b) {
           n->output(0)->replaceAllUsesWith(tup_unpack->output(i));
           n->eraseOutput(0);
         }
+      } else if (sub_block->outputs().size() == 0) {
+        WithInsertPoint guard(sub_block->return_node());
+        sub_block->registerOutput(g->insertNode(g->createNone())->output());
+        n->addOutput()->setType(NoneType::get());
       }
     }
   }
