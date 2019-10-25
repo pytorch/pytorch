@@ -22,19 +22,18 @@ ctx_ids = [-1, -1, -1, -1]
 
 known_context_ids = []
 
-# we don't need a lock here since the GIL is held while executing remote
-# python UDFs, so access to known_context_ids is serialized across several workers.
-def _store_context_id(context_id):
-    global known_context_ids
-    known_context_ids.append(context_id)
 
 # Send rpc done info and context_id to
 # dst_rank = (self.rank + rank_distance) % self.world_size
+# we don't need a lock here since the GIL is held while executing remote
+# python UDFs, so access is serialized across several workers.
 def _set_rpc_done(ctx_id, rank_distance):
     global rpc_done
     global ctx_ids
+    global known_context_ids
     rpc_done[rank_distance] = True
     ctx_ids[rank_distance] = ctx_id
+    known_context_ids.append(ctx_id)
 
 
 def my_py_add(t1, t2):
@@ -52,7 +51,7 @@ def my_py_nested_call(t1, t2, dst, world_size, hops):
 # after dist autograd context is cleaned up, it should be cleaned up on other
 # nodes. This helper allows timeout_seconds for those RPCs to be completed, and
 # ensures that all the contexts have been cleaned up in that timeframe.any
-def _all_contexts_cleaned_up(num_contexts, timeout_seconds=10):
+def _all_contexts_cleaned_up(timeout_seconds=10):
     global known_context_ids
     start = time.time()
     context_id_to_raised = {}
@@ -62,10 +61,10 @@ def _all_contexts_cleaned_up(num_contexts, timeout_seconds=10):
                 dist_autograd._retrieve_context(context_id)
             except RuntimeError:
                 context_id_to_raised[context_id] = True
-        if len(context_id_to_raised) == num_contexts:
+        if len(context_id_to_raised) == len(known_context_ids):
             break
     # all contexts have been cleaned up if trying to retrieve any context resulted in a RuntimeError.
-    success = len(context_id_to_raised) == num_contexts and all(context_id_to_raised.values())
+    success = len(context_id_to_raised) == len(known_context_ids) and all(context_id_to_raised.values())
     return success
 
 
@@ -453,19 +452,35 @@ class DistAutogradTest(object):
 
     @dist_init(setup_model_parallel=True)
     def test_context_cleanup_many_workers(self):
-        global known_context_ids
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
             for dst_rank in dst_ranks:
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
-                rpc.rpc_sync("worker{}".format(dst_rank), _store_context_id, args=(context_id,))
+                rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1))
         # the thread's context id should be cleaned up
         with self.assertRaises(RuntimeError):
             dist_autograd._retrieve_context(context_id)
         # check that all contexts have been cleaned up.
-        success = _all_contexts_cleaned_up(num_contexts=len(dst_ranks))
+        success = _all_contexts_cleaned_up()
+        self.assertTrue(success)
+
+    @dist_init(setup_model_parallel=True)
+    def test_context_cleanup_nested_rpc(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        nested_dst_rank = (dst_rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=True)
+            t2 = torch.zeros(3, 3, requires_grad=True)
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         my_py_nested_call, args=(t1, t2, dst_rank, self.world_size, 0))
+            # tell next worker and nested next worker to store this context id
+            # so we can verify that it has been cleaned up
+            rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1))
+            rpc.rpc_sync("worker{}".format(nested_dst_rank), _set_rpc_done, args=(context_id, 2))
+        dist.barrier()  # let all nodes finish sending their RPCs
+        success = _all_contexts_cleaned_up()
         self.assertTrue(success)
 
     @dist_init(setup_model_parallel=True)
@@ -477,7 +492,7 @@ class DistAutogradTest(object):
             t1 = torch.ones(3, 3, requires_grad=False)
             t2 = torch.zeros(3, 3, requires_grad=False)
             for dst_rank in dst_ranks:
-                ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+                rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
                 rpc.rpc_sync(
                     "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
