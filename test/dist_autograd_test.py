@@ -323,6 +323,10 @@ class DistAutogradTest(object):
     def test_graph_for_builtin_remote_call(self):
         self._test_graph(torch.add, ExecMode.REMOTE)
 
+    @dist_init(setup_model_parallel=True)
+    def test_graph_for_python_remote_call(self):
+        self._test_graph(my_py_add, ExecMode.REMOTE)
+
     # 3-layer nested calls
     @dist_init(setup_model_parallel=True)
     def test_graph_for_py_nested_call(self):

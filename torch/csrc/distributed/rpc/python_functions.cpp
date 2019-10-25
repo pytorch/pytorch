@@ -178,13 +178,14 @@ PyRRef pyRemotePythonUdf(
       ctx.getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
   auto userRRef = ctx.createUserRRef<py::object>(dst.id_);
-  auto fm = agent.send(
-      dst,
-      PythonRemoteCall(
-          SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors)),
-          userRRef->rrefId().toIValue(),
-          userRRef->forkId().toIValue())
-          .toMessage());
+
+  auto pythonRemoteCall = c10::guts::make_unique<PythonRemoteCall>(
+      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors)),
+      userRRef->rrefId().toIValue(),
+      userRRef->forkId().toIValue());
+
+  auto fm = sendMessageWithAutograd(
+      agent, dst, std::move(*pythonRemoteCall).toMessage());
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);

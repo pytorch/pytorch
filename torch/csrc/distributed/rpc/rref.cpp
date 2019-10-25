@@ -174,14 +174,36 @@ template <>
 std::shared_ptr<ivalue::Future> UserRRef<py::object>::toHere() {
   auto future = std::make_shared<ivalue::Future>(nullptr);
   auto agent = RpcAgent::getDefaultRpcAgent();
-  auto futureResponse = agent->send(
+
+  // PythonRRefFetchCall message always carries autograd context id even if
+  // the message itself does not contain any tensor, because the response would
+  // potentially contain tensors.
+  auto futureResponse = autograd::sendMessageWithAutograd(
+      *agent,
       agent->getWorkerInfo(ownerId_),
-      PythonRRefFetchCall(rrefId()).toMessage());
+      PythonRRefFetchCall(ownerId_, rrefId()).toMessage(),
+      false /* checkRequiresGrad */);
 
   futureResponse->addCallback([future](const Message& message) {
     RRefContext::handleException(message);
-    auto rfr = PythonRRefFetchRet::fromMessage(message);
-    future->markCompleted(c10::ivalue::Tuple::create(rfr->values()));
+    if (message.type() == MessageType::FORWARD_AUTOGRAD_RESP) {
+      auto response = deserializeResponse(message);
+      auto& rpcWithAutograd =
+          static_cast<autograd::RpcWithAutograd&>(*response);
+
+      // Attach 'recv' autograd function.
+      addRecvRpcBackward(
+          rpcWithAutograd.autogradMetadata(),
+          rpcWithAutograd.tensors(),
+          rpcWithAutograd.fromWorkerId());
+
+      auto& wrappedRpc = rpcWithAutograd.wrappedRpc();
+      auto& rfr = static_cast<PythonRRefFetchRet&>(wrappedRpc);
+      future->markCompleted(c10::ivalue::Tuple::create(rfr.values()));
+    } else {
+      auto rfr = PythonRRefFetchRet::fromMessage(message);
+      future->markCompleted(c10::ivalue::Tuple::create(rfr->values()));
+    }
   });
   return future;
 }
