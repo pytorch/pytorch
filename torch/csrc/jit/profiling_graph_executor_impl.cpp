@@ -98,7 +98,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
 
   specializeAutogradZero(*copy);
   if (!getProfilingMode()) {
-    ClearUndefinedness(graph);
+    ClearUndefinedness(copy);
   }
   
   runRequiredPasses(copy);  

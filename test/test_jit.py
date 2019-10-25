@@ -16410,7 +16410,6 @@ def the_method({}):
 
 script_method_template = '''
 def forward({}):
-    print("script_method_template")
     return {}
 '''
 
