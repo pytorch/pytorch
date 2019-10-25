@@ -183,22 +183,6 @@ TH_API void THNN_(MSECriterion_updateGradInput)(
           THTensor *gradInput,
           int64_t reduction);
 
-TH_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *output,
-          THTensor *isTarget,
-          int64_t reduction);
-TH_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *isTarget,
-          int64_t reduction);
-
 TH_API void THNN_(RReLU_updateOutput)(
           THNNState *state,
           THTensor *input,
