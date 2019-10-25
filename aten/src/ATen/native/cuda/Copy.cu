@@ -58,7 +58,10 @@ static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         cudaMemcpyDeviceToDevice,
         copy_stream));
   } else {
+    // this is done intentionally done after build because copy has a "promotion"
+    // rule that always "promote" to target dtype.
     iter.set_common_dtype(iter.dtype());
+    iter.promote_common_dtype();
     AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(0), "copy_", [&] {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t x) { return x; });
     });

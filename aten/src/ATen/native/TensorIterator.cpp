@@ -189,7 +189,7 @@ void TensorIterator::compute_types() {
     auto operands = compute_common_dtype_only_for_inputs ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
     auto common_type = compute_common_type_(operands);
     auto common_device = std::get<0>(common_type);
-    bool common_device_is_cuda = common_device.is_cuda();
+    common_device_is_cuda = common_device.is_cuda();
     common_dtype_ = std::get<1>(common_type);
     may_have_differing_types_ = !std::get<2>(common_type);
     bool has_cpu_scalar = false;
