@@ -4,7 +4,6 @@ import concurrent.futures
 import sys
 import unittest
 from collections import namedtuple
-import time
 from unittest import mock
 
 import torch
@@ -647,7 +646,7 @@ class RpcTest(object):
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
     def _stress_test_rpc(self, f, repeat=1000, args=()):
-
+        import time
         n = self.rank + 1
         dst_rank = n % self.world_size
         futs = []
