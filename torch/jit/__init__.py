@@ -32,8 +32,8 @@ import warnings
 from collections import OrderedDict
 
 # These are imported so users can access them from the `torch.jit` module
-from torch._jit_internal import Final, _overload, _overload_method  # noqa: F401
-from torch._jit_internal import ignore, export, unused  # noqa: F401
+from torch._jit_internal import Final, _overload, _overload_method
+from torch._jit_internal import ignore, export, unused
 
 if sys.version_info[0] > 2:
     import pathlib
@@ -1249,10 +1249,10 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. "
-                               "Please inherit from 'object'")
+                               "Please inherit from 'object'.")
         if len(obj.mro()) > 2:
-            raise RuntimeError("TorchScript classes does not support inheritance or any polymorphism strategy yet. "
-                               "Please directly inherit from 'object'. File a issue if you want this. ")
+            raise RuntimeError("TorchScript classes does not support inheritance yet. "
+                               "Please directly inherit from 'object'.")
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
