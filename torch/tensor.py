@@ -28,7 +28,7 @@ class Tensor(torch._C._TensorBase):
             return memo[id(self)]
         with torch.no_grad():
             if self.is_sparse or self.device.type == 'xla':
-                new_tensor = self.clone()
+                new_tensor = self.clone(memory_format=torch.contiguous_format)
             else:
                 new_storage = self.storage().__deepcopy__(memo)
                 new_tensor = self.new()
