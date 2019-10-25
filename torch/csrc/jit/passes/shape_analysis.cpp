@@ -858,7 +858,7 @@ class ShapePropagator {
             "aten::alias(Tensor self) -> Tensor",
             "aten::empty_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
             "aten::full_like(Tensor self, Scalar fill_value, *, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::ones_like(Tensor self) -> Tensor",
+            "aten::ones_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
             "aten::rand_like(Tensor self) -> Tensor",
             "aten::randint_like(Tensor self, int high) -> Tensor",
             "aten::randint_like(Tensor self, int low, int high) -> Tensor",
@@ -1413,7 +1413,7 @@ class ShapePropagator {
         {
             "aten::empty_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
             "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
-            "aten::ones_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::ones_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
             "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
             "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
             "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
