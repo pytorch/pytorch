@@ -52,6 +52,10 @@ def set_termination_signal():
 
 
 def dist_init(setup_model_parallel=True):
+    assert isinstance(setup_model_parallel, bool), (
+        "setup_model_parallel must be a bool value"
+    )
+
     def decorator(old_test_method):
         """
         We use this decorator for setting up and tearing down state since
@@ -87,7 +91,7 @@ def dist_init(setup_model_parallel=True):
                     num_send_recv_threads=16,
                 )
 
-            old_test_method(self, *arg, **kwargs)
+            ret = old_test_method(self, *arg, **kwargs)
 
             if setup_model_parallel:
                 # Follower reports done.
@@ -118,6 +122,8 @@ def dist_init(setup_model_parallel=True):
 
                 # Close RPC.
                 rpc.join_rpc()
+
+            return ret
 
         return new_test_method
 
