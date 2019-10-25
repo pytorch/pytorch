@@ -680,7 +680,6 @@ class RpcTest(object):
             torch.add,
             args=(torch.ones(n, n), torch.ones(n, n)),
         )
-        print("123")
         self.assertEqual(rref.to_here().wait(), torch.ones(n, n) * 2)
 
     @dist_init(setup_model_parallel=True)
