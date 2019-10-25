@@ -11,7 +11,7 @@
 #include <qnnpack/q8dwconv.h>
 #include <requantization/runtime-neon.h>
 
-void q8dwconv_ukernel_up8x9__neon(
+void pytorch_q8dwconv_ukernel_up8x9__neon(
     size_t channels,
     size_t output_width,
     const uint8_t** input,

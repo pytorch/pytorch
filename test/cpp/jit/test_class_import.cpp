@@ -12,7 +12,6 @@ namespace jit {
 using namespace torch::jit::script;
 
 static const auto classSrcs1 = R"JIT(
-op_version_set = 1
 class FooNestedTest:
     def __init__(self, y):
         self.y = y
@@ -30,11 +29,25 @@ class FooTest:
 )JIT";
 
 static const auto classSrcs2 = R"JIT(
-op_version_set = 1
 class FooTest:
     def __init__(self, x):
       self.dx = x
 )JIT";
+
+static void import_libs(
+    std::shared_ptr<CompilationUnit> cu,
+    const std::string& class_name,
+    const std::shared_ptr<Source>& src,
+    const std::vector<at::Tensor>& tensor_table) {
+  SourceImporter si(
+      cu,
+      &tensor_table,
+      [&](const std::string& name) -> std::shared_ptr<Source> {
+        return src;
+      },
+      /*version=*/2);
+  si.loadNamedType(QualifiedName(class_name));
+}
 
 void testClassImport() {
   auto cu1 = std::make_shared<CompilationUnit>();
@@ -43,16 +56,14 @@ void testClassImport() {
   // Import different versions of FooTest into two namespaces.
   import_libs(
       cu1,
-      "__torch__",
+      "__torch__.FooTest",
       std::make_shared<Source>(classSrcs1),
-      constantTable,
-      nullptr);
+      constantTable);
   import_libs(
       cu2,
-      "__torch__",
+      "__torch__.FooTest",
       std::make_shared<Source>(classSrcs2),
-      constantTable,
-      nullptr);
+      constantTable);
 
   // We should get the correct version of `FooTest` for whichever namespace we
   // are referencing
@@ -79,16 +90,14 @@ void testScriptObject() {
   std::vector<at::Tensor> constantTable;
   import_libs(
       m1.class_compilation_unit(),
-      "__torch__",
+      "__torch__.FooTest",
       std::make_shared<Source>(classSrcs1),
-      constantTable,
-      nullptr);
+      constantTable);
   import_libs(
       m2.class_compilation_unit(),
-      "__torch__",
+      "__torch__.FooTest",
       std::make_shared<Source>(classSrcs2),
-      constantTable,
-      nullptr);
+      constantTable);
 
   // Incorrect arguments for constructor should throw
   c10::QualifiedName base("__torch__");
@@ -116,7 +125,6 @@ void testClassDerive() {
   auto methods = cu->define("foo.bar", methodSrc, nativeResolver(), &self);
   auto method = methods[0];
   cls->addAttribute("attr", TensorType::get());
-  cls->addMethod(method);
   ASSERT_TRUE(cls->getMethod(method->name()));
 
   // Refining a new class should retain attributes and methods

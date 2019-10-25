@@ -81,7 +81,7 @@ class RequantizationTester {
    * produces exactly i, provided that ((i - zero point) * 2**s) does not
    * overflow.
    */
-  void testExactDivideByPO2(requantization_function requantize) const {
+  void testExactDivideByPO2(pytorch_requantization_function requantize) const {
     ASSERT_GE(zeroPoint(), 0);
     ASSERT_LE(zeroPoint(), 255);
 
@@ -125,7 +125,7 @@ class RequantizationTester {
    * produces exactly i, provided that ((i - zero point) * 2**s) does not
    * overflow.
    */
-  void testDivideByPO2WithRoundingUp(requantization_function requantize) {
+  void testDivideByPO2WithRoundingUp(pytorch_requantization_function requantize) {
     ASSERT_GE(zeroPoint(), 0);
     ASSERT_LE(zeroPoint(), 255);
 
@@ -170,7 +170,7 @@ class RequantizationTester {
    * produces exactly i, provided that ((i - zero point) * 2**s) does not
    * overflow.
    */
-  void testDivideByPO2WithRoundingDown(requantization_function requantize) {
+  void testDivideByPO2WithRoundingDown(pytorch_requantization_function requantize) {
     ASSERT_GE(zeroPoint(), 0);
     ASSERT_LE(zeroPoint(), 255);
 
@@ -206,7 +206,7 @@ class RequantizationTester {
     }
   }
 
-  void testDivideByPO2WithRoundingAway(requantization_function requantize) {
+  void testDivideByPO2WithRoundingAway(pytorch_requantization_function requantize) {
     ASSERT_GE(zeroPoint(), 0);
     ASSERT_LE(zeroPoint(), 255);
 
@@ -248,7 +248,7 @@ class RequantizationTester {
     }
   }
 
-  void testSpecialCases(requantization_function requantize) {
+  void testSpecialCases(pytorch_requantization_function requantize) {
     std::vector<int32_t> inputs(256);
     std::vector<uint8_t> outputs(inputs.size());
 
@@ -283,7 +283,7 @@ class RequantizationTester {
     }
   }
 
-  void testRandomCasesPrecise(requantization_function requantize) {
+  void testRandomCasesPrecise(pytorch_requantization_function requantize) {
     std::random_device randomDevice;
     std::mt19937 mtRng(randomDevice());
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
@@ -319,7 +319,7 @@ class RequantizationTester {
           *std::min_element(outputs.cbegin(), outputs.cend()));
 
       for (size_t i = 0; i < inputs.size(); i++) {
-        const uint8_t referenceOutput = scalar_requantize_precise(
+        const uint8_t referenceOutput = pytorch_scalar_requantize_precise(
             inputs[i],
             scale,
             zeroPoint,
@@ -330,7 +330,7 @@ class RequantizationTester {
     }
   }
 
-  void testRandomCasesApproximate(requantization_function requantize) {
+  void testRandomCasesApproximate(pytorch_requantization_function requantize) {
     std::random_device randomDevice;
     std::mt19937 mtRng(randomDevice());
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
@@ -381,8 +381,8 @@ class RequantizationTester {
   }
 
   void testRandomCasesAgainstReference(
-      requantization_function requantize,
-      requantization_function requantizeReference) {
+      pytorch_requantization_function requantize,
+      pytorch_requantization_function requantizeReference) {
     std::random_device randomDevice;
     std::mt19937 mtRng(randomDevice());
     for (size_t iteration = 0; iteration < iterations(); iteration++) {

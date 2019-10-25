@@ -52,6 +52,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/ir.h>
+#include <ATen/core/EnableNamedTensor.h>
 #ifdef BUILD_NAMEDTENSOR
 #include <torch/csrc/python_dimname.h>
 #endif

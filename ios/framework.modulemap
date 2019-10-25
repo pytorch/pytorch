@@ -1,4 +1,0 @@
-framework module LibTorch {
-    umbrella header "LibTorch.h"
-    export *
-}

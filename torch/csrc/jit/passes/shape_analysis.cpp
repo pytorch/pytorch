@@ -608,10 +608,10 @@ class ShapePropagator {
         // We refresh the tuple type, because the input types could have been
         // refined.
         auto orig_type = node->output()->type()->expect<TupleType>();
-        node->output()->setType(TupleType::create(
-            fmap(node->inputs(), [](Value* v) { return v->type(); }),
-            orig_type->name(),
-            orig_type->schema()));
+        auto new_types =
+            fmap(node->inputs(), [](Value* v) { return v->type(); });
+        node->output()->setType(
+            orig_type->createWithContained(std::move(new_types)));
         return;
       }
       case prim::TupleUnpack: {
@@ -791,7 +791,7 @@ class ShapePropagator {
             "aten::asin(Tensor self) -> Tensor",
             "aten::atan(Tensor self) -> Tensor",
             "aten::ceil(Tensor self) -> Tensor",
-            "aten::clone(Tensor self) -> Tensor",
+            "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
             "aten::contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor",
             "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
             "aten::celu(Tensor self, Scalar alpha) -> Tensor",
@@ -1990,7 +1990,9 @@ class ShapePropagator {
       if (inferred) {
         SHAPE_ASSERT(size_product != 0);
         size_t numel = 1;
-        for (int64_t s : tensor_types.at(0)->sizes().concrete_sizes().value())
+        auto concrete_sizes =
+            tensor_types.at(0)->sizes().concrete_sizes().value();
+        for (int64_t s : concrete_sizes)
           numel *= s;
         int64_t inferred_size = numel / size_product;
         sizes[inferred_idx] = inferred_size;

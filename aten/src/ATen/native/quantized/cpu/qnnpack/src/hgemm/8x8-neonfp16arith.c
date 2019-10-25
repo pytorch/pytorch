@@ -10,7 +10,7 @@
 
 #include <qnnpack/hgemm.h>
 
-void hgemm_ukernel_8x8__neonfp16arith(
+void pytorch_hgemm_ukernel_8x8__neonfp16arith(
     size_t mr,
     size_t nr,
     size_t k,

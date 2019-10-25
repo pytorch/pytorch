@@ -103,6 +103,13 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream getStream(Device) const noexcept = 0;
 
   /**
+   * Get the default stream for a given device.
+   */
+  virtual Stream getDefaultStream(Device) const {
+    TORCH_CHECK(false, "Backend doesn't support acquiring a default stream.")
+  }
+
+  /**
    * Set a stream to be the thread local current stream for its device.
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.

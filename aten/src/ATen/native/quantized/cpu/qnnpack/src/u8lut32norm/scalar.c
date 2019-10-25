@@ -26,7 +26,7 @@ static inline uint32_t compute_sum(
   return vsum;
 }
 
-void u8lut32norm_ukernel__scalar(
+void pytorch_u8lut32norm_ukernel__scalar(
     size_t n,
     const uint8_t* x,
     const uint32_t* t,
