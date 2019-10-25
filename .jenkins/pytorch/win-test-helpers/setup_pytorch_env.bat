@@ -3,7 +3,7 @@ if exist "%TMP_DIR%/ci_scripts/pytorch_env_restore.bat" (
     exit /b 0
 )
 
-set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;%PATH%
+set PATH=C:\Program Files\CMake\bin;C:\Program Files\7-Zip;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Amazon\AWSCLI;C:\Program Files\Amazon\AWSCLI\bin;%PATH%
 
 :: Install Miniconda3
 if "%BUILD_ENVIRONMENT%"=="" (
