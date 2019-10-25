@@ -337,12 +337,13 @@ PyObject *THPVariable_get_names(THPVariable *self, void *unused)
   for (size_t i = 0; i < size; ++i) {
     PyObject* str;
     if (dimnames[i].type() == at::NameType::WILDCARD) {
-      // Py_None is a special Python singleton; when we return it as a dimname
-      // we need to increment the refcount because this is a *new* reference.
-      // See https://docs.python.org/3/extending/extending.html#back-to-the-example
-      // and https://docs.python.org/3/c-api/none.html#c.Py_RETURN_NONE
-      // Note that we cannot use Py_RETURN_NONE directly because we return a list
-      // of names, of which some can be None.
+      // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
+      // deallocated, it'll decrement the refcount on Py_None, which is bad.
+      // To avoid this, we "create" a new reference to Py_None by increasing
+      // the refcount.
+      // Sources:
+      // - https://docs.python.org/3/c-api/tuple.html#c.PyTuple_SetItem
+      // - https://stackoverflow.com/questions/16400600/how-to-return-a-tuple-containing-a-none-value-from-the-c-api
       Py_INCREF(Py_None);
       str = Py_None;
     } else {
