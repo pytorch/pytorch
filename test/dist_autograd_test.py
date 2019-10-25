@@ -259,6 +259,9 @@ class DistAutogradTest(object):
     def _test_graph(self, fn):
         dst_rank = (self.rank + 1) % self.world_size
 
+        # This is for the below `dist.barrier`,
+        # for RpcAgent other than ProcessGroupAgent,
+        # no process_group is initialized, so do it here.
         if not dist.is_initialized():
             dist.init_process_group(
                 backend="gloo",
@@ -317,6 +320,9 @@ class DistAutogradTest(object):
     def test_graph_for_py_nested_call(self):
         dst_rank = (self.rank + 1) % self.world_size
 
+        # This is for the below `dist.barrier`,
+        # for RpcAgent other than ProcessGroupAgent,
+        # no process_group is initialized, so do it here.
         if not dist.is_initialized():
             dist.init_process_group(
                 backend="gloo",
@@ -380,6 +386,9 @@ class DistAutogradTest(object):
     def test_graph_for_py_nested_call_itself(self):
         dst_rank = (self.rank + 1) % self.world_size
 
+        # This is for the below `dist.barrier`,
+        # for RpcAgent other than ProcessGroupAgent,
+        # no process_group is initialized, so do it here.
         if not dist.is_initialized():
             dist.init_process_group(
                 backend="gloo",

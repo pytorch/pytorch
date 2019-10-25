@@ -13,10 +13,6 @@ BackendValue = collections.namedtuple("BackendValue", ["init_backend_handler"])
 BackendType = enum.Enum(value="BackendType", names={})
 
 
-def _is_backend_name_registered(backend_name):
-    return backend_name in BackendType.__members__.keys()
-
-
 def register_backend(backend_name, init_backend_handler):
     """Registers a new RPC backend.
 
@@ -26,10 +22,10 @@ def register_backend(backend_name, init_backend_handler):
             `_init_rpc()` function is called with a backend.
              This returns the agent.
     """
-    if _is_backend_name_registered(backend_name):
+    global BackendType
+    if backend_name in BackendType.__members__.keys():
         raise RuntimeError("RPC backend {}: already registered".format(backend_name))
     # Create a new enum type, `BackendType`, with extended members.
-    global BackendType
     existing_enum_dict = {member.name: member.value for member in BackendType}
     extended_enum_dict = dict(
         {backend_name: BackendValue(init_backend_handler=init_backend_handler)},
