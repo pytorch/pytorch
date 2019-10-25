@@ -100,6 +100,7 @@ class CAFFE2_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
   explicit PyTorchStreamReader(std::istream* in);
+  explicit PyTorchStreamReader(std::function<size_t(char*, size_t)> in);
   explicit PyTorchStreamReader(std::unique_ptr<ReadAdapterInterface> in);
 
   // return dataptr, size

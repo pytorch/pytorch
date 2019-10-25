@@ -8,7 +8,6 @@ import torch
 import tarfile
 import tempfile
 import warnings
-import zipfile
 import copyreg
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
@@ -201,8 +200,8 @@ class _open_file_like(object):
 
     def is_path(self):
         return isinstance(self.f, str) or \
-                (sys.version_info[0] == 2 and isinstance(self.f, unicode)) or \
-                (sys.version_info[0] == 3 and isinstance(self.f, pathlib.Path))
+            (sys.version_info[0] == 2 and isinstance(self.f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(self.f, pathlib.Path))
 
     def __enter__(self):
         if self.is_path():
@@ -216,7 +215,7 @@ class _open_file_like(object):
             self.fd.close()
 
 
-class _open_zipfile_like(_open_file_like):
+class _open_zipfile_writer(_open_file_like):
     def open_path(self):
         return torch._C.PyTorchFileWriter(self.f)
 
@@ -232,6 +231,24 @@ class _open_zipfile_like(_open_file_like):
         self.fd.write_end_of_file()
         if not self.is_path():
             self.f.flush()
+
+
+class _open_zipfile_reader(_open_file_like):
+    def open_path(self):
+        print("opening from path")
+        return torch._C.PyTorchFileReader(self.f)
+
+    def open_handle(self):
+        def reader(capsule, size):
+            print("READING", size)
+            # self.f.write(torch._C.make_bytes(capsule, size))
+            return size
+
+        self.fd = torch._C.PyTorchFileReader(reader)
+        return self.fd
+
+    def __exit__(self, *args):
+        pass
 
 
 def _is_compressed_file(f):
@@ -311,7 +328,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
                    'Please use something like io.BytesIO for torch.save instead.')
             raise RuntimeError(msg)
 
-    with _open_zipfile_like(f=f, mode='w') as opened_file:
+    with _open_zipfile_writer(f=f, mode='w') as opened_file:
         return _save(obj, opened_file, pickle_module, pickle_protocol)
 
 
@@ -451,23 +468,24 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
     """
-    with _open_file_like(f=f, mode='rb') as f:
-        _check_seekable(f)
-        if _is_zipfile(f):
-            with zipfile.ZipFile(f, 'r') as zip_file:
+    with _open_file_like(f=f, mode='rb') as opened_file:
+        _check_seekable(opened_file)
+
+        if _is_zipfile(opened_file):
+            with _open_zipfile_reader(f=f, mode='rb') as zip_file:
                 return _load(zip_file, map_location, pickle_module, **pickle_load_args)
 
-        f_should_read_directly = _should_read_directly(f)
+        f_should_read_directly = _should_read_directly(opened_file)
 
         # The file wasn't a zip, so dispatch to a legacy loader
-        if f_should_read_directly and f.tell() == 0:
-            # _legacy_tar_load requires that f has fileno()
+        if f_should_read_directly and opened_file.tell() == 0:
+            # _legacy_tar_load requires that opened_file has fileno()
             # only if offset is zero we can attempt the legacy tar file loader
             try:
-                return _legacy_tar_load(f, map_location, pickle_module, **pickle_load_args)
+                return _legacy_tar_load(opened_file, map_location, pickle_module, **pickle_load_args)
             except tarfile.TarError:
-                if _is_legacy_picklefile(f):
-                    return _legacy_pickle_load(f, map_location, pickle_module, **pickle_load_args)
+                if _is_legacy_picklefile(opened_file):
+                    return _legacy_pickle_load(opened_file, map_location, pickle_module, **pickle_load_args)
         raise RuntimeError("Unknown file type (expected a legacy tar file, legacy pickle file, or zip file)")
 
 
@@ -681,45 +699,43 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
     loaded_storages = {}
 
+    def load_tensor(obj, size, key, location):
+        loaded_storages[key] = restore_location(obj, location)
+        name = 'tensors/{}'.format(key)
+        size_long = struct.pack("<Q", size)
+        tensor_file = io.BytesIO(size_long + zip_file.get_record(name))
+        offset = None
+        is_real_file = False
+        loaded_storages[key]._set_from_file(tensor_file, offset, is_real_file)
+
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)
         typename = _maybe_decode_ascii(saved_id[0])
         data = saved_id[1:]
 
-        if typename != 'storage':
-            raise RuntimeError("Unknown typename for persistent_load, expected"
-                               " 'storage', but got: {}".format(typename))
+        assert typename == 'storage', \
+            "Unknown typename for persistent_load, expected 'storage' but got '{}'".format(typename)
 
-        data_type, key, location, size, view_metadata = data
-        location = _maybe_decode_ascii(location)
+        data_type, key, location, size = data
         if key not in loaded_storages:
-            obj = data_type(size)
-            loaded_storages[key] = restore_location(obj, location)
-            with zip_file.open('tensors/{}'.format(key), 'r') as tensor_file:
-                offset = None
-                is_real_file = False
-                loaded_storages[key]._set_from_file(tensor_file, offset, is_real_file)
+            load_tensor(data_type(size), size, key, _maybe_decode_ascii(location))
         storage = loaded_storages[key]
-        if view_metadata is not None:
-            view_key, offset, view_size = view_metadata
-            if view_key not in loaded_storages:
-                loaded_storages[view_key] = storage[offset:offset + view_size]
-            return loaded_storages[view_key]
-        else:
-            return storage
+        return storage
 
-    with zip_file.open('metadata.pkl', 'r') as metadata_file:
-        metadata = pickle_module.load(metadata_file, **pickle_load_args)
+    # Load metadata and verify it is a torch.save'd file
+    metadata_file = io.BytesIO(zip_file.get_record('metadata.pkl'))
+    metadata = pickle_module.load(metadata_file, **pickle_load_args)
 
-        if metadata["magic_number"] != MAGIC_NUMBER:
-            raise RuntimeError("Invalid magic number; corrupt file?")
-        if metadata["protocol_version"] != PROTOCOL_VERSION:
-            msg = "Invalid protocol version: {}, expected {}".format(metadata["protocol_version"], PROTOCOL_VERSION)
-            raise RuntimeError(msg)
+    if metadata["magic_number"] != MAGIC_NUMBER:
+        raise RuntimeError("Invalid magic number; corrupt file?")
+    if metadata["protocol_version"] != PROTOCOL_VERSION:
+        msg = "Invalid protocol version: {}, expected {}".format(metadata["protocol_version"], PROTOCOL_VERSION)
+        raise RuntimeError(msg)
 
-    with zip_file.open('data.pkl', 'r') as data_file:
-        unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
-        unpickler.persistent_load = persistent_load
-        result = unpickler.load()
+    # Load the data (which may in turn use `persistent_load` to load tensors)
+    data_file = io.BytesIO(zip_file.get_record('data.pkl'))
+    unpickler = pickle_module.Unpickler(data_file, **pickle_load_args)
+    unpickler.persistent_load = persistent_load
+    result = unpickler.load()
 
     return result

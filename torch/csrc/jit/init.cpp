@@ -420,6 +420,7 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
+      .def(py::init<std::function<size_t(char*, size_t)>>())
       .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
         at::DataPtr data;
         size_t size;
