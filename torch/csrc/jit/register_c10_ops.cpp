@@ -184,7 +184,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
 class RegistrationListener final : public c10::OpRegistrationListener {
 public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
-    if(at::aten_op_is_already_moved_to_c10(op.schema().operator_name())) {
+    if(at::is_aten_op(op.schema().operator_name())) {
       // Ignore ATen ops for now because they have their own code
       // to expose them to JIT in register_aten_ops.cpp
       // TODO Remove register_aten_ops.cpp and also use this registration here

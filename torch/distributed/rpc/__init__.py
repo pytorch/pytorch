@@ -59,5 +59,6 @@ if sys.version_info >= (3, 0):
             worker_name_to_id,
             num_send_recv_threads,
         )
+
         # Initialize Autograd.
         torch.distributed.autograd._init(api._agent.get_worker_info().id)
