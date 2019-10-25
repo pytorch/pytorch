@@ -440,7 +440,7 @@ jobs:
           name: Install packages
           command : |
             cd c:/
-            choco install -y 7zip curl awscli
+            choco install -y 7zip curl
             choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
             curl -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
             7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
@@ -451,7 +451,7 @@ jobs:
           command: |
             set -e
             set +x
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
             .jenkins/pytorch/win-build.sh
@@ -470,10 +470,10 @@ jobs:
           command: |
             set -e
             set +x
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
             export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
             set -x
-            choco install -y 7zip curl awscli
+            choco install -y 7zip curl
             .jenkins/pytorch/win-test.sh
   caffe2_linux_build:
     <<: *caffe2_params
