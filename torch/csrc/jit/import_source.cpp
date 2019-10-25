@@ -78,7 +78,7 @@ struct ConstantTableValue : public SugaredValue {
       const std::string& field) override {
     const char* field_s = field.c_str();
     char* end;
-    int64_t offset = std::strtoll(field_s + 1, &end, 10);
+    int64_t offset = strtoll(field_s + 1, &end, 10);
     if (field.size() < 2 || *end != 0)
       throw ErrorReport(loc) << "invalid constant specifier: " << field;
     if (offset < 0 || size_t(offset) >= constants_->size()) {

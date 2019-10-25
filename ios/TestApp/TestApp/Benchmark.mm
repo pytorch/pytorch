@@ -23,7 +23,23 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
 
 @implementation Benchmark
 
-+ (NSString*)benchmarkWithModel:(NSString*)modelPath {
++ (BOOL)setup: (NSDictionary* )config {
+    NSString* modelPath = [[NSBundle mainBundle] pathForResource:@"model" ofType:@"pt"];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:modelPath]) {
+        NSLog(@"model.pt doesn't exist!");
+        return NO;
+    }
+    FLAGS_model = std::string(modelPath.UTF8String);
+    FLAGS_input_dims = std::string(((NSString* )config[@"input_dims"]).UTF8String);
+    FLAGS_input_type = std::string(((NSString* )config[@"input_type"]).UTF8String);
+    FLAGS_warmup = ((NSNumber* )config[@"warmup"]).intValue;
+    FLAGS_iter   = ((NSNumber* )config[@"iter"]).intValue;
+    FLAGS_print_output = ((NSNumber* )config[@"print_output"]).boolValue;
+    return YES;
+}
+
++ (NSString* )run {
+  
   std::vector<std::string> logs;
 #define UI_LOG(fmt, ...)                                          \
   {                                                               \
@@ -31,8 +47,7 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
     NSLog(@"%@", log);                                            \
     logs.push_back(log.UTF8String);                               \
   }
-
-  FLAGS_model = std::string(modelPath.UTF8String);
+  
   CAFFE_ENFORCE_GE(FLAGS_input_dims.size(), 0, "Input dims must be specified.");
   CAFFE_ENFORCE_GE(FLAGS_input_type.size(), 0, "Input type must be specified.");
 
@@ -70,7 +85,7 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
     std::cout << module.forward(inputs) << std::endl;
   }
   UI_LOG(@"Start benchmarking...", nil);
-  UI_LOG(@"Running warmup runs", nil)
+  UI_LOG(@"Running warmup runs", nil);
   CAFFE_ENFORCE(FLAGS_warmup >= 0, "Number of warm up runs should be non negative, provided ",
                 FLAGS_warmup, ".");
   for (int i = 0; i < FLAGS_warmup; ++i) {
