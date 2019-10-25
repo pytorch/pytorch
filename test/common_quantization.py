@@ -89,7 +89,8 @@ class QuantizationTestCase(TestCase):
         r"""Checks the module or module's leaf descendants
             have observers in preperation for quantization
         """
-        if hasattr(module, 'qconfig') and module.qconfig is not None and len(module._modules) == 0:
+        if hasattr(module, 'qconfig') and module.qconfig is not None and \
+           len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential):
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
         for child in module.children():
@@ -464,6 +465,7 @@ class ModelWithSequentialFusion(nn.Module):
         self.features = nn.Sequential(*layers)
         head = [nn.Linear(300, 10), nn.ReLU(inplace=False)]
         self.classifier = nn.Sequential(*head)
+        self.seq = nn.Sequential()
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
 
@@ -474,6 +476,7 @@ class ModelWithSequentialFusion(nn.Module):
         x = self.features(x)
         x = torch.reshape(x, (-1, 3 * 10 * 10))
         x = self.classifier(x)
+        x = self.seq(x)
         x = self.dequant(x)
         return x
 

@@ -74,7 +74,7 @@ are sorted by the corresponding KEY.
         "empty ranges or mismatched ranges is alarming.")
     .Arg(
         "max_empty_ratio",
-        "An error is raised when ratio of empty ranges exceeds this.")
+        "An crital log is triggered when ratio of empty ranges exceeds this.")
     .Arg(
         "max_mismatched_ratio",
         "An error is raised when ratio of mismatched ranges exceeds this.")
