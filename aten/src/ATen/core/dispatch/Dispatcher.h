@@ -2,7 +2,6 @@
 
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
-#include <ATen/core/Variadic.h>
 #include <c10/util/Exception.h>
 #include <mutex>
 #include <list>
