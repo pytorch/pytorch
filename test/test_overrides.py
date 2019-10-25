@@ -4,6 +4,7 @@ import unittest
 import six
 import inspect
 import pprint
+import functools
 
 from common_utils import TestCase
 
@@ -14,6 +15,7 @@ HANDLED_FUNCTIONS_TENSOR_LIKE = {}
 
 def implements(torch_function):
     "Register an implementation of a torch function for a Tensor-like object."
+    @functools.wraps(torch_function)
     def decorator(func):
         HANDLED_FUNCTIONS[torch_function.__name__] = func
         return func
@@ -21,6 +23,7 @@ def implements(torch_function):
 
 def implements_sub(torch_function):
     "Register an implementation of a torch function for a Tensor-like object."
+    @functools.wraps(torch_function)
     def decorator(func):
         HANDLED_FUNCTIONS_SUB[torch_function.__name__] = func
         return func
@@ -28,6 +31,7 @@ def implements_sub(torch_function):
 
 def implements_sub_diagonal(torch_function):
     "Register an implementation of a torch function for a Tensor-like object."
+    @functools.wraps(torch_function)
     def decorator(func):
         HANDLED_FUNCTIONS_SUB_DIAGONAL[torch_function.__name__] = func
         return func
@@ -35,6 +39,7 @@ def implements_sub_diagonal(torch_function):
 
 def implements_tensor_like(torch_function):
     "Register an implementation of a torch function for a Tensor-like object."
+    @functools.wraps(torch_function)
     def decorator(func):
         HANDLED_FUNCTIONS_TENSOR_LIKE[torch_function.__name__] = func
         return func
