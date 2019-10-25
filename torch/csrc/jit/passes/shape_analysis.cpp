@@ -857,7 +857,7 @@ class ShapePropagator {
             "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
             "aten::empty_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::full_like(Tensor self, Scalar fill_value) -> Tensor",
+            "aten::full_like(Tensor self, Scalar fill_value, *, MemoryFormat? memory_format=None) -> Tensor",
             "aten::ones_like(Tensor self) -> Tensor",
             "aten::rand_like(Tensor self) -> Tensor",
             "aten::randint_like(Tensor self, int high) -> Tensor",
@@ -1412,7 +1412,7 @@ class ShapePropagator {
     static const register_formula_for like_factories_with_options{
         {
             "aten::empty_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
-            "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+            "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
             "aten::ones_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
             "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
             "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
