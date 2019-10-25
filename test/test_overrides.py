@@ -198,40 +198,6 @@ def sub_diagonal_mm(mat1, mat2):
     return 1
 
 
-class TestOverride(TestCase):
-
-    def test_mean(self):
-        t1 = DiagonalTensor(5, 2)
-        t2 = torch.eye(5) * 2
-        self.assertEqual(t1.tensor(), t2)
-        self.assertEqual(torch.mean(t1), torch.mean(t2))
-
-class TestOverrideSubTensor(TestCase):
-
-    def test_mm(self):
-        t = SubTensor([[1, 2], [1, 2]])
-        self.assertEqual(torch.mm(t, t), 0)
-
-
-class TestOverrideSubDiagonalTensor(TestCase):
-
-    def test_mean(self):
-        t1 = SubDiagonalTensor(5, 2)
-        t2 = 10 * torch.eye(5) * 2
-        self.assertEqual(t1.tensor() * 10, t2)
-        self.assertEqual(torch.mean(t1), torch.mean(t2))
-
-    def test_mm(self):
-        t1 = DiagonalTensor(5, 2)
-        t2 = SubDiagonalTensor(5, 2)
-        t3 = torch.eye(5) * 2
-        self.assertEqual(torch.mm(t1, t2), 1)
-        self.assertEqual(torch.mm(t2, t1), 1)
-        self.assertEqual(torch.mm(t3, t1), 0)
-        self.assertEqual(torch.mm(t1, t3), 0)
-        self.assertEqual(torch.mm(t3, t2), 1)
-        self.assertEqual(torch.mm(t2, t3), 1)
-
 # The dispatch table for SubDiagonalTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_TENSOR_LIKE = {}
 
@@ -728,8 +694,33 @@ class TensorLike(object):
         # In this case _torch_function_ should override TensorLike objects
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
 
-class TestApis(TestCase):
-    pass
+class TestTorchFunctionOverride(TestCase):
+    def test_diagonal_mean(self):
+        t1 = DiagonalTensor(5, 2)
+        t2 = torch.eye(5) * 2
+        self.assertEqual(t1.tensor(), t2)
+        self.assertEqual(torch.mean(t1), torch.mean(t2))
+
+    def test_subtensor_mm(self):
+        t = SubTensor([[1, 2], [1, 2]])
+        self.assertEqual(torch.mm(t, t), 0)
+
+    def test_subdiagonal_mean(self):
+        t1 = SubDiagonalTensor(5, 2)
+        t2 = 10 * torch.eye(5) * 2
+        self.assertEqual(t1.tensor() * 10, t2)
+        self.assertEqual(torch.mean(t1), torch.mean(t2))
+
+    def test_subdiagonal_mm(self):
+        t1 = DiagonalTensor(5, 2)
+        t2 = SubDiagonalTensor(5, 2)
+        t3 = torch.eye(5) * 2
+        self.assertEqual(torch.mm(t1, t2), 1)
+        self.assertEqual(torch.mm(t2, t1), 1)
+        self.assertEqual(torch.mm(t3, t1), 0)
+        self.assertEqual(torch.mm(t1, t3), 0)
+        self.assertEqual(torch.mm(t3, t2), 1)
+        self.assertEqual(torch.mm(t2, t3), 1)
 
 def test_generator(func, override):
     args = inspect.getfullargspec(override)
@@ -752,5 +743,5 @@ if __name__ == '__main__':
         test_method = test_generator(func, override)
         name = 'test_{}'.format(func.__name__)
         test_method.__name__ = name
-        setattr(TestApis, name, test_method)
+        setattr(TestTorchFunctionOverride, name, test_method)
     unittest.main()
