@@ -154,7 +154,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
+        op, c10::impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -165,7 +165,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
+        op, c10::impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -186,7 +186,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op, c10::impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -198,7 +198,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op, c10::impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -216,7 +216,7 @@ ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
+switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:
         AT_ERROR("${api_name} not implemented for ", at::toString(${type_set}));
@@ -243,7 +243,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op, c10::impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -256,7 +256,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op, c10::impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -1177,7 +1177,7 @@ def create_generic(top_env, declarations):
                     return '*this'
                 else:
                     return t
-            option['inferred_type_set'] = 'at::detail::multi_dispatch_tensor_type_set({})'.format(
+            option['inferred_type_set'] = 'c10::detail::multi_dispatch_tensor_type_set({})'.format(
                 ', '.join(swizzle_self(t) for t in multidispatch_tensors)
             )
 
@@ -1224,7 +1224,7 @@ def create_generic(top_env, declarations):
         def gen_namespace_function(option, multidispatch_tensors):
             # type: (Any, List[str]) -> FunctionCode
             option['inferred_type_set'] = (
-                'at::detail::multi_dispatch_tensor_type_set({})'.format(', '.join(multidispatch_tensors)))
+                'c10::detail::multi_dispatch_tensor_type_set({})'.format(', '.join(multidispatch_tensors)))
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
