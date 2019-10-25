@@ -328,15 +328,27 @@ class DistAutogradTest(object):
         self._test_graph(my_py_add, ExecMode.REMOTE)
 
     # 3-layer nested calls
-    @dist_init(setup_model_parallel=True)
-    def test_graph_for_py_nested_call(self):
+    def _test_graph_for_py_nested_call(self, exec_mode):
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
             nest_dst_rank = (dst_rank + 1) % self.world_size
-            ret = rpc.rpc_sync("worker{}".format(dst_rank),
-                               my_py_nested_call, args=(t1, t2, dst_rank, self.world_size, 1))
+            if ExecMode.RPC_SYNC == exec_mode:
+                ret = rpc.rpc_sync(
+                    "worker{}".format(dst_rank),
+                    my_py_nested_call,
+                    args=(t1, t2, dst_rank, self.world_size, 1)
+                )
+            elif ExecMode.REMOTE == exec_mode:
+                ret = rpc.remote(
+                    "worker{}".format(dst_rank),
+                    my_py_nested_call,
+                    args=(t1, t2, dst_rank, self.world_size, 1)
+                ).to_here().wait()
+            else:
+                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             for rd in [1, 2, 3]:
                 rpc.rpc_sync("worker{}".format((self.rank + rd) % self.world_size),
                              _set_rpc_done, args=(context_id, rd))
@@ -381,16 +393,47 @@ class DistAutogradTest(object):
             # autograd context before another worker tries to access it.
             dist.barrier()
 
-    # Rank0->Rank1->Rank0
     @dist_init(setup_model_parallel=True)
-    def test_graph_for_py_nested_call_itself(self):
+    def test_graph_for_py_nested_call(self):
+        self._test_graph_for_py_nested_call(ExecMode.RPC_SYNC)
+
+    @dist_init(setup_model_parallel=True)
+    def test_graph_for_py_nested_remote_call(self):
+        self._test_graph_for_py_nested_call(ExecMode.REMOTE)
+
+    # Rank0->Rank1->Rank0
+    def _test_graph_for_py_nested_call_itself(self, exec_mode):
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = rpc.rpc_sync("worker{}".format(dst_rank),
-                               my_py_nested_call,
-                               args=(t1, t2, (self.rank - 1 + self.world_size) % self.world_size, self.world_size, 0))
+            if ExecMode.RPC_SYNC == exec_mode:
+                ret = rpc.rpc_sync(
+                    "worker{}".format(dst_rank),
+                    my_py_nested_call,
+                    args=(
+                        t1,
+                        t2,
+                        (self.rank - 1 + self.world_size) % self.world_size,
+                        self.world_size,
+                        0
+                    )
+                )
+            elif ExecMode.REMOTE == exec_mode:
+                ret = rpc.remote(
+                    "worker{}".format(dst_rank),
+                    my_py_nested_call,
+                    args=(
+                        t1,
+                        t2,
+                        (self.rank - 1 + self.world_size) % self.world_size,
+                        self.world_size,
+                        0
+                    )
+                ).to_here().wait()
+            else:
+                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             rpc.rpc_sync("worker{}".format((self.rank + 1) % self.world_size),
                          _set_rpc_done, args=(context_id, 1))
 
@@ -420,12 +463,33 @@ class DistAutogradTest(object):
             dist.barrier()
 
     @dist_init(setup_model_parallel=True)
-    def test_no_graph_with_tensors_not_require_grad(self):
+    def test_graph_for_py_nested_call_itself(self):
+        self._test_graph_for_py_nested_call_itself(ExecMode.RPC_SYNC)
+
+    @dist_init(setup_model_parallel=True)
+    def test_graph_for_py_nested_remote_call_itself(self):
+        self._test_graph_for_py_nested_call_itself(ExecMode.REMOTE)
+
+    def _test_no_graph_with_tensors_not_require_grad(self, exec_mode):
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=False)
             t2 = torch.zeros(3, 3, requires_grad=False)
-            ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+            if ExecMode.RPC_SYNC == exec_mode:
+                ret = rpc.rpc_sync(
+                    "worker{}".format(dst_rank),
+                    torch.add,
+                    args=(t1, t2)
+                )
+            elif ExecMode.REMOTE == exec_mode:
+                ret = rpc.remote(
+                    "worker{}".format(dst_rank),
+                    torch.add,
+                    args=(t1, t2)
+                ).to_here().wait()
+            else:
+                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+
             rpc.rpc_sync("worker{}".format(dst_rank),
                          _set_rpc_done, args=(context_id, 1))
 
@@ -437,10 +501,24 @@ class DistAutogradTest(object):
 
             # Wait for the prev rank to be done with rpc.
             self._check_rpc_done(1)
-            # prev context id is not passed over as tensors do not require grads
-            with self.assertRaises(RuntimeError):
-                ctx = dist_autograd._retrieve_context(ctx_ids[1])
+            if ExecMode.RPC_SYNC == exec_mode:
+                # prev context id is not passed over as tensors do not require
+                # grads
+                with self.assertRaises(RuntimeError):
+                    ctx = dist_autograd._retrieve_context(ctx_ids[1])
+            elif ExecMode.REMOTE == exec_mode:
+                # NB: RRef.to_here() always passes the autograd context to the
+                # the callee, as the caller does not know whether the return
+                # value would contain a requires_grad tensor or not.
+                pass
 
+    @dist_init(setup_model_parallel=True)
+    def test_no_graph_with_tensors_not_require_grad(self):
+        self._test_no_graph_with_tensors_not_require_grad(ExecMode.RPC_SYNC)
+
+    @dist_init(setup_model_parallel=True)
+    def test_no_graph_with_tensors_not_require_grad_remote(self):
+        self._test_no_graph_with_tensors_not_require_grad(ExecMode.REMOTE)
 
     def _test_rpc_complex_args(self, exec_mode):
         with dist_autograd.context() as context_id:
