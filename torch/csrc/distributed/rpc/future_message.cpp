@@ -4,10 +4,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-FutureMessage::FutureMessage() {
-  startTimer();
-}
-
 const Message& FutureMessage::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
   finished_cv_.wait(lock, [this] { return completed_.load(); });
@@ -58,24 +54,6 @@ void FutureMessage::fireCallbacks() {
     callback(message_);
   }
   callbacks_.clear();
-}
-
-void FutureMessage::startTimer() {
-  futureStartTime_ = std::chrono::high_resolution_clock::now();
-}
-
-bool FutureMessage::checkTimeElapsed(
-    const std::chrono::seconds& timeoutSeconds) {
-  std::unique_lock<std::mutex> lock(mutex_);
-
-  if (completed_) {
-    return false;
-  }
-  const auto now = std::chrono::high_resolution_clock::now();
-  const auto elapsed = now - futureStartTime_;
-  const auto elapsedSeconds =
-      std::chrono::duration_cast<std::chrono::seconds>(elapsed);
-  return elapsedSeconds > timeoutSeconds;
 }
 
 } // namespace rpc

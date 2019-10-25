@@ -118,7 +118,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
     std::shared_ptr<c10d::ProcessGroup> pg,
     int numSendRecvThreads,
-    std::chrono::seconds futureTimeout)
+    std::chrono::seconds rpcTimeout)
     : RpcAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
           c10::guts::make_unique<RequestCallbackImpl>()),
@@ -128,7 +128,7 @@ ProcessGroupAgent::ProcessGroupAgent(
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads),
-      futureTimeout_(futureTimeout) {
+      rpcTimeout_(rpcTimeout) {
   collectNames();
   TORCH_CHECK(
       nameMap_.size() > 1,
@@ -175,7 +175,7 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
 }
 
 const std::chrono::seconds& ProcessGroupAgent::getRpcTimeout() {
-  return futureTimeout_;
+  return rpcTimeout_;
 }
 
 void ProcessGroupAgent::join() {

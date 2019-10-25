@@ -1,7 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import concurrent.futures
-from datetime import timedelta
 import sys
 import unittest
 from collections import namedtuple
@@ -107,10 +106,6 @@ def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
         res += v
     complex_tensors = tensor_class_input.tensors
     return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
-
-def timeout_function(timeout):
-    time.sleep(timeout)
-
 
 def my_rref_function(rref_a, rref_b):
     return rref_a.to_here().wait() + rref_b.to_here().wait()

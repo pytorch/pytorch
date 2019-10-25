@@ -137,7 +137,7 @@ class ProcessGroupAgent : public RpcAgent {
   std::unordered_map<int64_t, std::shared_ptr<FutureMessage>> futures_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
-  std::chrono::seconds futureTimeout_;
+  std::chrono::seconds rpcTimeout_;
 };
 
 } // namespace rpc

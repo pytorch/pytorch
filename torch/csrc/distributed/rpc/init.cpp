@@ -87,11 +87,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "wait",
               [&](FutureMessage& fut) { return toPyObj(fut.wait()); },
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "check_time_elapsed",
-              [&](FutureMessage& fut, const std::chrono::seconds& timeout)
-                  -> bool { return fut.checkTimeElapsed(timeout); },
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
@@ -104,7 +99,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           py::arg("name"),
           py::arg("process_group"),
           py::arg("num_send_recv_threads") = 4,
-          py::arg("future_timeout") = std::chrono::seconds(100))
+          py::arg("rpc_timeout") = std::chrono::seconds(100))
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
