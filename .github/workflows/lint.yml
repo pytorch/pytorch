@@ -208,12 +208,8 @@ jobs:
       - name: Run clang-tidy
         run: |
           set -eux
-          BASE_BRANCH=master
-          if [[ $PR_TARGET ]]; then
-            git remote add upstream https://github.com/pytorch/pytorch
-            git fetch upstream "$PR_TARGET"
-            BASE_BRANCH="upstream/$PR_TARGET"
-          fi
+          git remote add upstream https://github.com/pytorch/pytorch
+          git fetch upstream "${{ github.base_ref}}"
 
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
@@ -243,15 +239,13 @@ jobs:
           # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
           python tools/clang_tidy.py                  \
             --paths torch/csrc/                       \
-            --diff "$BASE_BRANCH"                     \
+            --diff "${{ github.event.pull_request.base.sha}}" \
             -g"-torch/csrc/jit/export.cpp"            \
             -g"-torch/csrc/jit/import.cpp"            \
             -g"-torch/csrc/jit/netdef_converter.cpp"  \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
-        env:
-          PR_TARGET: ${{ github.base_ref }}
       - name: Add annotations
         uses: suo/add-annotations-github-action@master
         with:
