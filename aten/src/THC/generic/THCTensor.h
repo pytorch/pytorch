@@ -99,7 +99,6 @@ THC_API void THCTensor_(setStorage4d)(THCState *state, THCTensor *self, THCStora
 THC_API void THCTensor_(narrow)(THCState *state, THCTensor *self, THCTensor *src, int dimension_, int64_t firstIndex_, int64_t size_);
 THC_API void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int dimension_, int64_t sliceIndex_);
 THC_API void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int dimension1_, int dimension2_);
-THC_API void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int dimension_, int64_t size_, int64_t step_);
 
 THC_API void THCTensor_(squeeze1d)(THCState *state, THCTensor *self, THCTensor *src, int dimension_);
 THC_API void THCTensor_(unsqueeze1d)(THCState *state, THCTensor *self, THCTensor *src, int dimension_);
