@@ -4991,8 +4991,8 @@
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_unfold
-    CUDA: legacy::cuda::_th_unfold
+    CPU: unfold
+    CUDA: unfold
 
 - func: equal(Tensor self, Tensor other) -> bool
   use_c10_dispatcher: full
