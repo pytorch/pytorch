@@ -377,10 +377,6 @@ Tensor ones_like(const Tensor& self, const TensorOptions& options) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
-  // Avoid tracing/profiling the fill_ operation here.  The fact that we
-  // have to toggle this using no grad mode is an abuse, but there's
-  // no way around it as long as profiling is part of Variable.
-  at::AutoNonVariableTypeMode guard_;
   return at::empty({}, options).fill_(s);
 }
 

@@ -276,7 +276,11 @@ Tensor internal_new_from_data(
 
   auto sizes = compute_sizes(data);
   ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
-  auto tensor = autograd::make_variable(at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory)), /*requires_grad=*/false);
+  // This exists to prevent us from tracing the call to empty().  The actual
+  // autograd code doesn't really matter, because requires_grad is always false
+  // here.
+  at::AutoNonVariableTypeMode guard;
+  auto tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       inferred_scalar_type, tensor.dtype().itemsize(), data);
