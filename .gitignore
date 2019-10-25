@@ -40,6 +40,7 @@ test/data/*.pt
 test/backward_compatibility/new_schemas.txt
 dropout_model.pt
 test/generated_type_hints_smoketest.py
+test/generated_tutorial_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
 third_party/build/

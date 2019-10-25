@@ -1,16 +1,19 @@
 from __future__ import print_function
-import unittest
-from common_utils import TestCase, run_tests
-import tempfile
-import torch
-import re
-import os
-import sys
-import subprocess
+
 import inspect
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+
+import torch
+from common_utils import TestCase, run_tests
 
 try:
     import mypy  # noqa: F401
+
     HAVE_MYPY = True
 except ImportError:
     HAVE_MYPY = False
@@ -29,7 +32,7 @@ def get_examples_from_docstring(docstr):
     # and continue to add lines until we have a compileable Python statement.
     exampleline_re = re.compile(r"^\s+(?:>>>|\.\.\.) (.*)$")
     beginning = ""
-    for l in docstr.split('\n'):
+    for l in docstr.split("\n"):
         if beginning:
             m = exampleline_re.match(l)
             if m:
@@ -48,11 +51,29 @@ def get_examples_from_docstring(docstr):
                 complete = False
             if complete:
                 # found one
-                example_file_lines += beginning.split('\n')
+                example_file_lines += beginning.split("\n")
                 beginning = ""
             else:
                 beginning += "\n"
-    return ['    ' + l for l in example_file_lines]
+    return ["    " + l for l in example_file_lines]
+
+
+def get_artificial_file_prelude():
+    return [
+        "import torch",
+        "import torch.nn.functional as F",
+        "import math  # type: ignore",  # mypy complains about floats where SupportFloat is expected
+        "import numpy  # type: ignore",
+        "import io  # type: ignore",
+        "import itertools  # type: ignore",
+        "",
+        # for requires_grad_ example
+        # NB: We are parsing this file as Python 2, so we must use
+        # Python 2 type annotation syntax
+        "def preprocess(inp):",
+        "    # type: (torch.Tensor) -> torch.Tensor",
+        "    return inp",
+    ]
 
 
 def get_all_examples():
@@ -70,23 +91,8 @@ def get_all_examples():
         "align_to",
         "unflatten",
     }
-    allexamples = ""
 
-    example_file_lines = [
-        "import torch",
-        "import torch.nn.functional as F",
-        "import math  # type: ignore",  # mypy complains about floats where SupportFloat is expected
-        "import numpy  # type: ignore",
-        "import io  # type: ignore",
-        "import itertools  # type: ignore",
-        "",
-        # for requires_grad_ example
-        # NB: We are parsing this file as Python 2, so we must use
-        # Python 2 type annotation syntax
-        "def preprocess(inp):",
-        "    # type: (torch.Tensor) -> torch.Tensor",
-        "    return inp",
-    ]
+    example_file_lines = get_artificial_file_prelude()
 
     for fname in dir(torch):
         fn = getattr(torch, fname)
@@ -103,22 +109,76 @@ def get_all_examples():
         if docstr and fname not in blacklist:
             e = get_examples_from_docstring(docstr)
             if e:
-                example_file_lines.append("\n\ndef example_torch_tensor_{}():".format(fname))
+                example_file_lines.append(
+                    "\n\ndef example_torch_tensor_{}():".format(fname)
+                )
                 example_file_lines += e
 
     return "\n".join(example_file_lines)
 
 
+# These are tutorial files that don't currently typecheck.
+# Cut this down to produce more coverage!
+BLACKLISTED_TUTORIALS = {
+    "beginner_source": [
+        "audio_preprocessing_tutorial.py",
+        "aws_distributed_training_tutorial.py",
+        "blitz/autograd_tutorial.py",
+        "blitz/cifar10_tutorial.py",
+        "blitz/data_parallel_tutorial.py",
+        "blitz/neural_networks_tutorial.py",
+        "blitz/tensor_tutorial.py",
+        "chatbot_tutorial.py",
+        "data_loading_tutorial.py",
+        "dcgan_faces_tutorial.py",
+        "deploy_seq2seq_hybrid_frontend_tutorial.py",
+        "examples_autograd/tf_two_layer_net.py",
+        "examples_autograd/two_layer_net_autograd.py",
+        "examples_autograd/two_layer_net_custom_function.py",
+        "examples_nn/two_layer_net_nn.py",
+        "fgsm_tutorial.py",
+        "former_torchies/autograd_tutorial_old.py",
+        "former_torchies/nnft_tutorial.py",
+        "former_torchies/parallelism_tutorial.py",
+        "former_torchies/tensor_tutorial_old.py",
+        "hybrid_frontend/learning_hybrid_frontend_through_example_tutorial.py",
+        "Intro_to_TorchScript_tutorial.py",
+        "nlp/advanced_tutorial.py",
+        "nlp/deep_learning_tutorial.py",
+        "nlp/pytorch_tutorial.py",
+        "nlp/sequence_models_tutorial.py",
+        "nlp/word_embeddings_tutorial.py",
+        "nn_tutorial.py",
+        "text_sentiment_ngrams_tutorial.py",
+        "torchtext_translation_tutorial.py",
+        "transfer_learning_tutorial.py",
+        "transformer_tutorial.py",
+    ],
+    "intermediate_source": [
+        "char_rnn_classification_tutorial.py",
+        "char_rnn_generation_tutorial.py",
+        "flask_rest_api_tutorial.py",
+        "model_parallel_tutorial.py",
+        "named_tensor_tutorial.py",
+        "reinforcement_q_learning.py",
+        "seq2seq_translation_tutorial.py",
+        "spatial_transformer_tutorial.py",
+    ],
+    "advanced_source": [
+        "dynamic_quantization_tutorial.py",
+        "neural_style_tutorial.py",
+        "numpy_extensions_tutorial.py",
+        "static_quantization_tutorial.py",
+        "super_resolution_with_onnxruntime.py",
+    ],
+}
+
+
 class TestTypeHints(TestCase):
-    @unittest.skipIf(sys.version_info[0] == 2, "no type hints for Python 2")
-    @unittest.skipIf(not HAVE_MYPY, "need mypy")
-    def test_doc_examples(self):
-        """
-        Run documentation examples through mypy.
-        """
-        fn = os.path.join(os.path.dirname(__file__), 'generated_type_hints_smoketest.py')
+    def typecheck_artificial_file(self, smoketest_filename, text):
+        fn = os.path.join(os.path.dirname(__file__), smoketest_filename)
         with open(fn, "w") as f:
-            print(get_all_examples(), file=f)
+            print(text, file=f)
 
         # OK, so here's the deal.  mypy treats installed packages
         # and local modules differently: if a package is installed,
@@ -153,23 +213,72 @@ class TestTypeHints(TestCase):
             try:
                 os.symlink(
                     os.path.dirname(torch.__file__),
-                    os.path.join(tmp_dir, 'torch'),
-                    target_is_directory=True
+                    os.path.join(tmp_dir, "torch"),
+                    target_is_directory=True,
                 )
             except OSError:
-                raise unittest.SkipTest('cannot symlink')
+                raise unittest.SkipTest("cannot symlink")
             try:
-                subprocess.run([
-                    sys.executable,
-                    '-mmypy',
-                    '--follow-imports', 'silent',
-                    '--check-untyped-defs',
-                    os.path.abspath(fn)],
+                subprocess.run(
+                    [
+                        sys.executable,
+                        "-mmypy",
+                        "--follow-imports",
+                        "silent",
+                        "--check-untyped-defs",
+                        os.path.abspath(fn),
+                    ],
                     cwd=tmp_dir,
-                    check=True)
-            except subprocess.CalledProcessError as e:
-                raise AssertionError("mypy failed.  Look above this error for mypy's output.")
+                    check=True,
+                )
+            except subprocess.CalledProcessError:
+                raise AssertionError(
+                    "mypy failed.  Look below this error for mypy's output."
+                )
+
+    @unittest.skipIf(sys.version_info[0] == 2, "no type hints for Python 2")
+    @unittest.skipIf(not HAVE_MYPY, "need mypy")
+    def test_doc_examples(self):
+        """
+        Run documentation examples through mypy.
+        """
+        self.typecheck_artificial_file(
+            "generated_type_hints_smoketest.py", get_all_examples()
+        )
+
+    @unittest.skipIf(sys.version_info[0] == 2, "no type hints for Python 2")
+    @unittest.skipIf(not HAVE_MYPY, "need mypy")
+    def test_tutorials(self):
+        """
+        Run code from the tutorials through mypy.
+        """
+        prelude = "\n".join(get_artificial_file_prelude()) + "\n"
+        tutorials_directory = "third_party/tutorials"
+
+        for tutorial_subdirectory in [
+            "beginner_source",
+            "intermediate_source",
+            "advanced_source",
+        ]:
+            blacklisted_tutorial_paths = set(
+                os.path.join(tutorials_directory, tutorial_subdirectory, subpath)
+                for subpath in BLACKLISTED_TUTORIALS.get(tutorial_subdirectory, [])
+            )
+
+            def should_include_file(path):
+                return path.endswith(".py") and path not in blacklisted_tutorial_paths
+
+            path = os.path.join(tutorials_directory, tutorial_subdirectory)
+            for root, dirs, files in os.walk(path):
+                for fname in files:
+                    filepath = os.path.join(root, fname)
+                    if should_include_file(filepath):
+                        with open(filepath, "r") as contents:
+                            source = prelude + contents.read()
+                        self.typecheck_artificial_file(
+                            "generated_tutorial_type_hints_smoketest.py", source
+                        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
