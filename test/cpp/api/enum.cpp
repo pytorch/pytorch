@@ -36,7 +36,7 @@ TEST(EnumTest, AllEnums) {
     torch::enumtype::kBilinear,
     torch::enumtype::kBicubic,
     torch::enumtype::kTrilinear,
-    torch::enumtype::kArea
+    torch::enumtype::kArea,
     torch::enumtype::kSum,
     torch::enumtype::kMean,
     torch::enumtype::kMax

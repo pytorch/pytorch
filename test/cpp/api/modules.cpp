@@ -2133,10 +2133,10 @@ TEST_F(ModulesTest, PrettyPrintConv) {
 TEST_F(ModulesTest, PrettyPrintUpsample) {
   ASSERT_EQ(
       c10::str(Upsample(UpsampleOptions().size({2, 4, 4}))),
-      "torch::nn::Upsample(size=[2, 4, 4], mode=Nearest)");
+      "torch::nn::Upsample(size=[2, 4, 4], mode=kNearest)");
   ASSERT_EQ(
       c10::str(Upsample(UpsampleOptions().scale_factor({0.5, 1.5}).mode(torch::kBilinear))),
-      "torch::nn::Upsample(scale_factor=[0.5, 1.5], mode=Bilinear)");
+      "torch::nn::Upsample(scale_factor=[0.5, 1.5], mode=kBilinear)");
 }
 
 TEST_F(ModulesTest, PrettyPrintUnfold) {
