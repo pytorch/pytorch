@@ -337,7 +337,7 @@ PyObject *THPVariable_get_names(THPVariable *self, void *unused)
   for (size_t i = 0; i < size; ++i) {
     PyObject* str;
     if (dimnames[i].type() == at::NameType::WILDCARD) {
-      // Py_None is a special Python singleton; when we returning it as a dimname
+      // Py_None is a special Python singleton; when we return it as a dimname
       // we need to increment the refcount because this is a *new* reference.
       // See https://docs.python.org/3/extending/extending.html#back-to-the-example
       // and https://docs.python.org/3/c-api/none.html#c.Py_RETURN_NONE

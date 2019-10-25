@@ -148,10 +148,10 @@ class TestNamedTensor(TestCase):
             unnamed = torch.empty(2, 3)
             unnamed.names  # materialize [None, None]
 
-        none_refcnt = sys.getrefcount(None)
+        prev_none_refcnt = sys.getrefcount(None)
         scope()
-        self.assertEqual(sys.getrefcount(None), none_refcnt,
-                         message='Calling tensor.names should not decrement '
+        self.assertEqual(sys.getrefcount(None), prev_none_refcnt,
+                         message='Calling tensor.names should not change '
                                  'the refcount of Py_None')
 
     def test_has_names(self):
