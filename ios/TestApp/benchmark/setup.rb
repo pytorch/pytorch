@@ -42,11 +42,11 @@ end
 puts "Installing the testing model..."
 model_path = File.expand_path("./model.pt")
 if not File.exist?(model_path)
-   raise "model.pt can be found!"
+   raise "model.pt can't be found!"
 end
 config_path = File.expand_path("./config.json")
 if not File.exist?(config_path)
-    raise "config.json can be found!"
+    raise "config.json can't be found!"
  end
 group = project.main_group.find_subpath(File.join('TestApp'),true)
 group.set_source_tree('SOURCE_ROOT')
