@@ -501,36 +501,11 @@ class Module(object):
         return handle
 
 
-    def _push_module(self, tracing_state):
-        if not hasattr(tracing_state, '_traced_module_stack'):
-            tracing_state._traced_module_stack = []
-
-        tracing_state._traced_module_stack.append(self)
-
-        if len(tracing_state._traced_module_stack) == 1:
-            return '__module'
-        else:
-            parent_mod = tracing_state._traced_module_stack[-2]
-            found = False
-            for name, mod in parent_mod.named_children():
-                if mod is self:
-                    found = True
-                    break
-            # We can return None here if, for example, someone is
-            # invoking a Module's method via an explicit attr,
-            # rather than via the __call__ path.
-            #
-            # TODO: see if we can capture these cases
-            return name if found else None
-
-    def _pop_module(self, tracing_state):
-        tracing_state._traced_module_stack.pop()
-
     def _slow_forward(self, *input, **kwargs):
         tracing_state = torch._C._get_tracing_state()
         if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
             return self.forward(*input, **kwargs)
-        name = self._push_module(tracing_state)
+        name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
         if name:
             tracing_state.push_scope(name)
         try:
@@ -538,7 +513,6 @@ class Module(object):
         finally:
             if name:
                 tracing_state.pop_scope()
-            self._pop_module(tracing_state)
         return result
 
     def __call__(self, *input, **kwargs):

@@ -173,45 +173,80 @@ void lambdaLiftBlocksAndConvertToGraph(Block* b) {
   }
 }
 
-void createMethodCalls(const std::shared_ptr<Graph>& g, script::Module* self) {
-  // Add `self` as an input on subblocks
-  Value* self_val;
-  if (g->inputs().size() == 0 || !g->inputs()[0]->type()->cast<ClassType>() ||
-      g->inputs()[0]->type() != self->type()) {
-    self_val = g->insertInput(0)->setType(self->type())->setDebugName("self");
-  } else {
-    self_val = g->inputs()[0];
+namespace {
+
+std::vector<std::string> splitModuleQualname(const std::string& s) {
+  std::vector<std::string> retval;
+  size_t start = 0;
+  size_t end = s.find('.');
+  while (end != std::string::npos) {
+    retval.push_back(s.substr(start, end - start));
+    start = end + 1;
+    end = s.find('.', start);
   }
 
-  for (auto itr = g->nodes().begin(); itr != g->nodes().end();) {
-    Node* n = *itr++;
+  retval.push_back(s.substr(start, end));
+  return retval;
+}
+
+} // namespace
+
+void createMethodCalls(
+    const std::shared_ptr<Graph>& g,
+    script::Module this_level_self,
+    std::vector<std::string> prefix) {
+  Value* self;
+  if (g->inputs().size() == 0 ||
+      g->inputs()[0]->type() != this_level_self.type()) {
+    self = g->insertInput(0)->setType(this_level_self.type());
+  } else {
+    self = g->inputs()[0];
+  }
+  for (auto node_itr = g->nodes().begin(); node_itr != g->nodes().end();) {
+    Node* n = *node_itr++;
     if (n->kind() == prim::FakeScopeBlock) {
-      auto submod_name = n->s(attr::scope);
-      auto submod = self->get_module(submod_name);
-      createMethodCalls(n->g(attr::Subgraph), &submod);
+      // First, figure out what module we need to get in scope to call
+      // the method
+      auto sub_atoms = splitModuleQualname(n->s(attr::scope));
+      TORCH_INTERNAL_ASSERT(sub_atoms.size() > prefix.size());
 
       WithInsertPoint ip(n);
-      Value* submod_val = g->insertGetAttr(self_val, submod_name);
+
+      Value* callee_val = self;
+      script::Module callee_mod = this_level_self;
+      for (size_t i = 0; i < sub_atoms.size(); ++i) {
+        if (i < prefix.size()) {
+          TORCH_INTERNAL_ASSERT(sub_atoms[i] == prefix[i]);
+        } else {
+          callee_val = g->insertGetAttr(callee_val, sub_atoms[i]);
+          callee_mod = callee_mod.get_module(sub_atoms[i]);
+        }
+      }
+
+      createMethodCalls(n->g(attr::Subgraph), callee_mod, sub_atoms);
+
       Function* f = nullptr;
 
+      // Find a unique name to add this method as
+      // We try forward, forward1, forward2, ...
       for (size_t method_idx = 0;; method_idx++) {
         std::string method_name = "forward";
         if (method_idx != 0) {
           method_name += std::to_string(method_idx);
         }
-        if (submod.find_method(method_name)) {
+        if (callee_mod.find_method(method_name)) {
           continue;
         } else {
-          auto qualname = c10::QualifiedName(submod.name(), method_name);
-          f = submod.class_compilation_unit()->create_function(
+          auto qualname = c10::QualifiedName(callee_mod.name(), method_name);
+          f = callee_mod.class_compilation_unit()->create_function(
               qualname, n->g(attr::Subgraph));
-          submod.type()->addMethod(f);
+          callee_mod.type()->addMethod(f);
           break;
         }
       }
       TORCH_INTERNAL_ASSERT(f);
       std::vector<NamedValue> nvs = {
-          NamedValue(submod_val->node()->sourceRange(), submod_val)};
+          NamedValue(callee_val->node()->sourceRange(), callee_val)};
       for (Value* i : n->inputs()) {
         nvs.emplace_back(i->node()->sourceRange(), i);
       }
@@ -299,7 +334,7 @@ void FixupTraceScopeBlocks(
     // class compilation unit and register that Function as a method
     // on the corresponding Module in the Module hierarchy. Note that we
     // unique the methods by naming them forward, forward1, forward2...
-    createMethodCalls(graph, self);
+    createMethodCalls(graph, *self, {"__module"});
     runCleanupPasses(self);
     // `graph` isn't referenced in `self` yet, so we need to run
     // this separately

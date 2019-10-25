@@ -14696,6 +14696,31 @@ a")
                                                                   model.mod.out_proj.bias)[0]
         self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
 
+    def test_trace_modulelist(self):
+        class MySubmod(torch.nn.Module):
+            def __init__(self):
+                super(MySubmod, self).__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x)
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.ml = torch.nn.ModuleList([
+                    MySubmod(),
+                    MySubmod()
+                ])
+
+            def forward(self, x):
+                for mod in self.ml:
+                    x = mod(x)
+                return x
+
+        print(MyMod())
+        traced = torch.jit.trace(MyMod(), (torch.rand(3, 4),))
+
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_scriptmodule_transformer_cuda(self):
 

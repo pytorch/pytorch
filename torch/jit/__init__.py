@@ -269,7 +269,10 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    torch.jit._trace_module_map = {}
+    outs = ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    torch.jit._trace_module_map = None
+    return outs
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -863,6 +866,7 @@ def trace(func,
         warnings.warn('The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.')
         return func
 
+
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
@@ -870,7 +874,6 @@ def trace(func,
 
     if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module) and
             func.__name__ == 'forward'):
-
         return trace_module(func.__self__, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
@@ -889,9 +892,11 @@ def trace(func,
                              "Please use trace_module")
 
     name = _qualified_name(func)
+    torch.jit._trace_module_map = {}
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
                                                   _force_outplace)
+    torch.jit._trace_module_map = None
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
@@ -999,6 +1004,16 @@ def trace_module(mod,
     if not isinstance(inputs, dict):
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
+    torch.jit._trace_module_map = {}
+
+    def register_submods(mod, prefix):
+        for name, child in mod.named_children():
+            submod_qualname = prefix + '.' + name
+            torch.jit._trace_module_map[child] = submod_qualname
+            register_submods(child, submod_qualname)
+
+    torch.jit._trace_module_map['__module'] = mod
+    register_submods(mod, '__module')
 
     module = make_module(mod, _module_class, _compilation_unit)
 
@@ -1017,6 +1032,8 @@ def trace_module(mod,
             else:
                 _check_trace([inputs], func, check_trace_method,
                              check_tolerance, _force_outplace, True, _module_class)
+
+    torch.jit._trace_module_map = None
 
     return module
 

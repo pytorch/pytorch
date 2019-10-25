@@ -312,9 +312,9 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     bool force_outplace,
     script::Module* self) {
   try {
-// Start tracing, treating 'inputs' as inputs to the trace, which can be
-// varied on subsequent invocations of the trace.  Any other variables
-// will be treated as constants.
+    // Start tracing, treating 'inputs' as inputs to the trace, which can be
+    // varied on subsequent invocations of the trace.  Any other variables
+    // will be treated as constants.
     if (isTracing()) {
       AT_ERROR("Tracing can't be nested");
     }
