@@ -266,7 +266,7 @@ private:
     template<class... Args>
     TensorTypeId get_dispatch_key_unboxed(const Args&... args) const {
       AT_ASSERT(sizeof...(args) == num_args_, "Wrong number of arguments. Schema says ", num_args_, " but was called with ", sizeof...(args));
-      return at::impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(args...));
+      return impl::dispatchTypeId(detail::multi_dispatch_tensor_type_set(args...));
     }
   };
 

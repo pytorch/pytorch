@@ -932,3 +932,17 @@ class RpcTest(object):
 
         if TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP:
             self.assertEqual(test_func(), "expected result")
+
+    def test_dist_init_decorator(self):
+        @dist_init(setup_model_parallel=False)
+        def test_func(self):
+            return "expected result"
+
+        self.assertEqual(test_func(self), "expected result")
+
+        with self.assertRaisesRegex(
+            AssertionError, "setup_model_parallel must be a bool value"
+        ):
+            @dist_init
+            def test_func(self):
+                return "expected result"
