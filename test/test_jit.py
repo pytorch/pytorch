@@ -143,7 +143,6 @@ meth_call = torch._C.ScriptMethod.__call__
 def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
         with enable_profiling_mode(ProfilingMode.FULL):
-            #print ("removing profile")
             del kwargs['profile_and_replay']
             callable(*args, **kwargs)
             return callable(*args, **kwargs)
@@ -2035,6 +2034,7 @@ graph(%Ra, %Rb):
 
         inputs = {'x': torch.rand(3, 4), 'y': torch.rand(3, 4)}
         module = torch.jit.trace(Test(), inputs)
+
         FileCheck().check('aten::values').check('prim::ListUnpack').run(str(module.graph))
 
     def test_input_dict_flattens_recursive(self):
@@ -16393,6 +16393,9 @@ def partial_apply_nontensors(fn, args, **kwargs):
 def create_traced_fn(self, fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
+        # `check_trace` is set to False because check_trace is run with @no_grad
+        # Also, `check_against_reference` already does all the checks 
+        # against python function
         traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
         self.assertExportImport(traced.graph, inputs_tensors)
         output = traced(*inputs_tensors)
@@ -16530,13 +16533,11 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
         grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                     allow_unused=allow_unused)
-
         outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
         grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
                                         allow_unused=allow_unused)
         self.assertEqual(outputs, outputs_test)
         self.assertEqual(grads, grads_test)
-
         # test the grad grad case
         if self._testMethodName in nn_functional_single_grad:
             return

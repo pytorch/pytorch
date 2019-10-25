@@ -221,6 +221,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
     input_instructions_.unpack(std::move(inputs), stack);
     captures_.unpack(stack, shared_from_this());
+    GRAPH_DEBUG("Running DifferentiableGraphBackward for ", &executor);
     executor.run(stack);
     unpackReturnTuple(stack);
 
@@ -692,7 +693,6 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
   }
 
   if (getProfilingMode()) {
-    std::cout << "getProfilingMode is true \n";
     for (const Value *input : graph->inputs()) {
       for (const auto &use : input->uses()) {
         if (use.user->kind() == prim::BailOut) {

@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -24,6 +25,24 @@ static std::atomic<bool> executor_mode{false};
 std::atomic<bool> &getProfilingMode() { return profiling_mode; }
 std::atomic<bool> &getExecutorMode() { return executor_mode; }
 
+static bool needsGradientInProfilingMode(Block* b) {
+  for (auto n : b->nodes()) {
+      if (n->kind() == prim::BailOut) {
+        auto ptt = n->output()->type()->expect<TensorType>();
+        if (ptt->requiresGrad() && *ptt->requiresGrad()) {
+          return true;
+        }
+      }
+
+    for (auto ib : n->blocks()) {
+      if (needsGradientInProfilingMode(ib)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
     const std::shared_ptr<Graph>& graph,
     Stack& stack) {
@@ -36,7 +55,7 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     : GraphExecutorImplBase(graph), arg_spec_creator_(*this->graph) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
-
+  GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
   if (optimized_plan_) {
     return *optimized_plan_;
   }
@@ -71,23 +90,24 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
 
   InsertGuards(copy);
   LowerGradOf(*copy);
-  // constant fold into ConstantChunk
-  // this optimization doesn't use any profiling information
-  CanonicalizeOps(copy);
-  EliminateRedundantGuards(copy);
-  
   if (getProfilingMode()) {
+    EliminateRedundantGuards(copy);
     InsertBailOuts(copy);
     GRAPH_DUMP("After InsertBailOuts: ", copy);
   }
 
   specializeAutogradZero(*copy);
+  if (!getProfilingMode()) {
+    ClearUndefinedness(graph);
+  }
+  
   runRequiredPasses(copy);  
   ConstantPropagation(copy);
   runOptimization(copy);
 
   // TODO: insert grad propagation
-  if (needsGradient(copy)) {
+  bool needs_gradient = getProfilingMode() ? needsGradientInProfilingMode(copy->block()) : needsGradient(copy);
+  if (needs_gradient) {
     auto diff_nodes = CreateAutodiffSubgraphs(
     copy,
     getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
