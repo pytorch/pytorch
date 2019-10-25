@@ -8,7 +8,7 @@ import functools
 
 from common_utils import TestCase
 
-HANDLED_FUNCTIONS = {}
+HANDLED_FUNCTIONS_DIAGONAL = {}
 HANDLED_FUNCTIONS_SUB = {}
 HANDLED_FUNCTIONS_SUB_DIAGONAL = {}
 HANDLED_FUNCTIONS_TENSOR_LIKE = {}
@@ -17,7 +17,7 @@ def implements(torch_function):
     "Register an implementation of a torch function for a Tensor-like object."
     @functools.wraps(torch_function)
     def decorator(func):
-        HANDLED_FUNCTIONS[torch_function.__name__] = func
+        HANDLED_FUNCTIONS_DIAGONAL[torch_function.__name__] = func
         return func
     return decorator
 
@@ -95,6 +95,17 @@ class DiagonalTensor(object):
         (torch.mm, lambda mat1, mat2: 0),
     )
     IMPLEMENTS_DECORATOR = implements
+    # HANDLED_FUNCTIONS_DIAGONAL is a dispatch table that __torch_function__
+    # uses to determine which function to call for a given torch API function.
+    # The keys of the dictionary are function names and the values are function
+    # implementations. Implementations are added to HANDLED_FUNCTION_DIAGONAL
+    # by decorating a python function with implements_diagonal. See the overrides
+    # immediately below this class for examples.
+
+    # This is defined as a class attribute so that SubDiagonalTensor
+    # below which subclasses DiagonalTensor can re-use DiagonalTensor's
+    # __torch_function__ implementation.
+    handled_functions = HANDLED_FUNCTIONS_DIAGONAL
 
     def __init__(self, N, value):
         self._N = N
@@ -112,11 +123,11 @@ class DiagonalTensor(object):
     def __torch_function__(self, func, args=(), kwargs=None):
         if(kwargs is None):
             kwargs = {}
-        if func not in HANDLED_FUNCTIONS:
+        if func not in self.handled_functions:
             return NotImplemented
         # Note: this allows subclasses that don't override
         # __torch_function__ to handle DiagonalTensor objects.
-        return HANDLED_FUNCTIONS[func](*args, **kwargs)
+        return self.handled_functions[func](*args, **kwargs)
 
     def __eq__(self, other):
         if type(other) is type(self):
