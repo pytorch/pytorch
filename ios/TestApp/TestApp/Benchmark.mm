@@ -1,7 +1,6 @@
 #import "Benchmark.h"
 #include <string>
 #include <vector>
-
 #include "ATen/ATen.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
@@ -9,17 +8,12 @@
 #include "torch/csrc/jit/import.h"
 #include "torch/script.h"
 
-C10_DEFINE_string(model, "", "The given torch script model to benchmark.");
-C10_DEFINE_string(input_dims, "1,3,224,224",
-                  "Alternate to input_files, if all inputs are simple "
-                  "float TensorCPUs, specify the dimension using comma "
-                  "separated numbers. If multiple input needed, use "
-                  "semicolon to separate the dimension of different "
-                  "tensors.");
-C10_DEFINE_string(input_type, "float", "Input type (uint8_t/float)");
-C10_DEFINE_bool(print_output, false, "Whether to print output with all one input tensor.");
-C10_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
-C10_DEFINE_int(iter, 10, "The number of iterations to run.");
+static std::string model = "model.pt";
+static std::string input_dims = "1,3,224,224";
+static std::string input_type = "float";
+static BOOL print_output = false;
+static int warmup = 10;
+static int iter = 10;
 
 @implementation Benchmark
 
@@ -29,12 +23,12 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
     NSLog(@"model.pt doesn't exist!");
     return NO;
   }
-  FLAGS_model = std::string(modelPath.UTF8String);
-  FLAGS_input_dims = std::string(((NSString*)config[@"input_dims"]).UTF8String);
-  FLAGS_input_type = std::string(((NSString*)config[@"input_type"]).UTF8String);
-  FLAGS_warmup = ((NSNumber*)config[@"warmup"]).intValue;
-  FLAGS_iter = ((NSNumber*)config[@"iter"]).intValue;
-  FLAGS_print_output = ((NSNumber*)config[@"print_output"]).boolValue;
+  model = std::string(modelPath.UTF8String);
+  input_dims = std::string(((NSString*)config[@"input_dims"]).UTF8String);
+  input_type = std::string(((NSString*)config[@"input_type"]).UTF8String);
+  warmup = ((NSNumber*)config[@"warmup"]).intValue;
+  iter = ((NSNumber*)config[@"iter"]).intValue;
+  print_output = ((NSNumber*)config[@"print_output"]).boolValue;
   return YES;
 }
 
@@ -47,11 +41,11 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
     logs.push_back(log.UTF8String);                               \
   }
 
-  CAFFE_ENFORCE_GE(FLAGS_input_dims.size(), 0, "Input dims must be specified.");
-  CAFFE_ENFORCE_GE(FLAGS_input_type.size(), 0, "Input type must be specified.");
+  CAFFE_ENFORCE_GE(input_dims.size(), 0, "Input dims must be specified.");
+  CAFFE_ENFORCE_GE(input_type.size(), 0, "Input type must be specified.");
 
-  std::vector<std::string> input_dims_list = caffe2::split(';', FLAGS_input_dims);
-  std::vector<std::string> input_type_list = caffe2::split(';', FLAGS_input_type);
+  std::vector<std::string> input_dims_list = caffe2::split(';', input_dims);
+  std::vector<std::string> input_type_list = caffe2::split(';', input_type);
   CAFFE_ENFORCE_EQ(input_dims_list.size(), input_type_list.size(),
                    "Input dims and type should have the same number of items.");
 
@@ -76,31 +70,30 @@ C10_DEFINE_int(iter, 10, "The number of iterations to run.");
     at::globalContext().setQEngine(at::QEngine::QNNPACK);
   }
   torch::autograd::AutoGradMode guard(false);
-  auto module = torch::jit::load(FLAGS_model);
+  auto module = torch::jit::load(model);
 
   at::AutoNonVariableTypeMode non_var_type_mode(true);
   module.eval();
-  if (FLAGS_print_output) {
+  if (print_output) {
     std::cout << module.forward(inputs) << std::endl;
   }
   UI_LOG(@"Start benchmarking...", nil);
   UI_LOG(@"Running warmup runs", nil);
-  CAFFE_ENFORCE(FLAGS_warmup >= 0, "Number of warm up runs should be non negative, provided ",
-                FLAGS_warmup, ".");
-  for (int i = 0; i < FLAGS_warmup; ++i) {
+  CAFFE_ENFORCE(warmup >= 0, "Number of warm up runs should be non negative, provided ", warmup,
+                ".");
+  for (int i = 0; i < warmup; ++i) {
     module.forward(inputs);
   }
   UI_LOG(@"Main runs", nil);
-  CAFFE_ENFORCE(FLAGS_iter >= 0, "Number of main runs should be non negative, provided ",
-                FLAGS_iter, ".");
+  CAFFE_ENFORCE(iter >= 0, "Number of main runs should be non negative, provided ", iter, ".");
   caffe2::Timer timer;
   auto millis = timer.MilliSeconds();
-  for (int i = 0; i < FLAGS_iter; ++i) {
+  for (int i = 0; i < iter; ++i) {
     module.forward(inputs);
   }
   millis = timer.MilliSeconds();
-  UI_LOG(@"Main run finished. Milliseconds per iter: %.3f", millis / FLAGS_iter, nil);
-  UI_LOG(@"Iters per second: : %.3f", 1000.0 * FLAGS_iter / millis, nil);
+  UI_LOG(@"Main run finished. Milliseconds per iter: %.3f", millis / iter, nil);
+  UI_LOG(@"Iters per second: : %.3f", 1000.0 * iter / millis, nil);
   UI_LOG(@"Done.", nil);
 
   NSString* results = @"";
