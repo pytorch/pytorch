@@ -106,7 +106,6 @@ struct PythonPrintImpl {
   class TaggedStringStream {
    public:
     TaggedStringStream(const SourceRangeStack* srs) : srs_(srs) {}
-    TaggedStringStream(TaggedStringStream&& rhs) = default;
 
     TaggedStringStream& operator<<(const std::string& s) {
       // This prevents having redundant entries at the same offset,
@@ -334,7 +333,7 @@ struct PythonPrintImpl {
       std::unordered_set<std::string>& used) {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
-      name = candidate + std::to_string(next_id[name]++);
+      name = candidate + c10::to_string(next_id[name]++);
     }
     used.insert(name);
     return name;
@@ -1281,7 +1280,11 @@ struct PythonPrintImpl {
       }
     } else if (auto interfaceType = type->cast<InterfaceType>()) {
       body_ << "class " << interfaceType->name()->name();
-      body_ << "(Interface):\n";
+      if (interfaceType->is_module()) {
+        body_ << "(ModuleInterface):\n";
+      } else {
+        body_ << "(Interface):\n";
+      }
       {
         auto guard = WithIndented();
         for (const FunctionSchema& method : interfaceType->methods()) {

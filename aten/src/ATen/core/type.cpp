@@ -389,6 +389,15 @@ bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   return false;
 }
 
+bool Type::is_module() const {
+  if (auto cls_type = this->cast<ClassType>()) {
+    return cls_type->is_module();
+  } else if (auto interface_type = this->cast<InterfaceType>()) {
+    return interface_type->is_module();
+  }
+  return false;
+}
+
 std::string TensorType::str() const {
   return "Tensor";
 }
@@ -572,7 +581,7 @@ bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) con
     if (!is_module() && iface->is_module()) {
       if (why_not) {
         *why_not << "Interface '" << python_str() << "' is not a subtype of "
-                  << "the module interface '" << rhs->python_str() << ".\n";
+                  << "the module interface '" << rhs->python_str() << "'.\n";
       }
       return false;
     }

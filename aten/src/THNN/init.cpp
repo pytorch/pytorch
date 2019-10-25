@@ -103,9 +103,6 @@
 #include <THNN/generic/Sigmoid.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/SmoothL1Criterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SoftPlus.c>
 #include <TH/THGenerateFloatTypes.h>
 

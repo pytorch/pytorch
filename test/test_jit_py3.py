@@ -355,6 +355,5 @@ class TestScriptPy3(JitTestCase):
             as_module_interface(scripted_wrong_mod)
 
 
-
 if __name__ == '__main__':
     run_tests()
