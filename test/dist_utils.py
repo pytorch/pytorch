@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from functools import wraps
+from functools import wraps, partial
 import threading
 from os import getenv
 
@@ -15,7 +15,7 @@ if not dist.is_available():
 
 
 class TestConfig:
-    __slots__ = ['rpc_backend']
+    __slots__ = ["rpc_backend"]
 
     def __init__(self, *args, **kwargs):
         assert len(args) == 0, "TestConfig only takes kwargs."
@@ -24,7 +24,7 @@ class TestConfig:
 
 
 TEST_CONFIG = TestConfig(rpc_backend=getenv("RPC_BACKEND", RpcBackend.PROCESS_GROUP))
-INIT_METHOD_TEMPLATE = "file://{file_name}?rank={rank}&world_size={world_size}"
+INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
 MASTER_RANK = 0
@@ -47,13 +47,11 @@ def on_master_follower_report_done(worker_name):
 
 
 def set_termination_signal():
-    assert (
-        not _TERMINATION_SIGNAL.is_set()
-    ), "Termination signal got set twice."
+    assert not _TERMINATION_SIGNAL.is_set(), "Termination signal got set twice."
     _TERMINATION_SIGNAL.set()
 
 
-def dist_init(clean_shutdown=True):
+def dist_init(test_method=None, setup_model_parallel=True, clean_shutdown=True):
     """
     We use this decorator for setting up and tearing down state since
     MultiProcessTestCase runs each `test*` method in a separate process and
@@ -61,31 +59,49 @@ def dist_init(clean_shutdown=True):
     'setUp' and 'tearDown' methods of unittest.
     """
 
-    def decorator(test_method):
-        @wraps(test_method)
-        def wrapper(self, *arg, **kwargs):
-            self.worker_id = self.rank
-            global _ALL_NODE_NAMES
-            _ALL_NODE_NAMES = {"worker{}".format(rank) for rank in range(self.world_size)}
+    # If we use dist_init without arguments (ex: @dist_init), test_method is
+    # appropriately set and we return the wrapper appropriately. On the other
+    # hand if dist_init has arguments (ex: @dist_init(clean_shutdown=False)),
+    # test_method is None and we return a functools.partial which is the real
+    # decorator that is used and as a result we recursively call dist_init with
+    # test_method and the rest of the arguments appropriately set.
+    if test_method is None:
+        return partial(dist_init, setup_model_parallel=setup_model_parallel, clean_shutdown=clean_shutdown)
 
-            # Initialize RPC.
-            dist.init_process_group(backend="gloo", init_method=self.init_method)
+    @wraps(test_method)
+    def wrapper(self, *arg, **kwargs):
+        self.worker_id = self.rank
+        self.worker_name_to_id = {
+            "worker{}".format(rank): rank for rank in range(self.world_size)
+        }
+
+        if setup_model_parallel:
+            global _ALL_NODE_NAMES
+            _ALL_NODE_NAMES = self.worker_name_to_id.keys()
+
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
             # Use enough 'num_send_recv_threads' until we fix https://github.com/pytorch/pytorch/issues/26359
             rpc.init_model_parallel(
                 self_name="worker%d" % self.rank,
                 backend=TEST_CONFIG.rpc_backend,
-                self_rank=self.rank,
                 init_method=self.init_method,
-                num_send_recv_threads=16
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
+                num_send_recv_threads=16,
             )
-            test_method(self, *arg, **kwargs)
 
+        test_method(self, *arg, **kwargs)
+
+        if setup_model_parallel:
             if clean_shutdown:
                 # Follower reports done.
                 if self.rank == MASTER_RANK:
-                    on_master_follower_report_done(
-                        "worker{}".format(MASTER_RANK)
-                    )
+                    on_master_follower_report_done("worker{}".format(MASTER_RANK))
                 else:
                     rpc.rpc_async(
                         "worker{}".format(MASTER_RANK),
@@ -104,17 +120,11 @@ def dist_init(clean_shutdown=True):
                         if dst_rank == MASTER_RANK:
                             continue
                         dst_name = "worker{}".format(dst_rank)
-                        fut = rpc.rpc_async(
-                            dst_name,
-                            set_termination_signal,
-                            args=(),
-                        )
+                        fut = rpc.rpc_async(dst_name, set_termination_signal, args=())
                         futs.append(fut)
                     for fut in futs:
                         assert fut.wait() is None, "Sending termination signal failed."
 
             # Close RPC.
             rpc.join_rpc()
-
-        return wrapper
-    return decorator
+    return wrapper

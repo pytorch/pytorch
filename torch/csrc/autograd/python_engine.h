@@ -13,7 +13,7 @@ struct PythonEngine : public Engine {
   void thread_init(int device) override;
   void thread_on_exception(
       std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> fn,
+      const std::shared_ptr<Node>& fn,
       std::exception& e) override;
   variable_list execute(
       const edge_list& roots,

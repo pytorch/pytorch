@@ -274,6 +274,70 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, GridSample) {
+  auto input = torch::arange(9, torch::kFloat).view(std::vector<int64_t>({1, 1, 3, 3}));
+  auto grid = torch::tensor({{
+      {{-2., -1.}, {-1., -1.}, {0., -1.}},
+      {{-1., 0.}, {0., 0.}, {1., 0.}},
+      {{0., 1.}, {1., 1.}, {2., 1.}}
+  }}, torch::kFloat);
+
+  // bilinear, zeros, true
+  auto options = GridSampleOptions()
+                    .mode("bilinear")
+                    .padding_mode("zeros")
+                    .align_corners(true);
+  auto output = F::grid_sample(input, grid, options);
+  auto expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, zeros, false
+  options = GridSampleOptions()
+                .mode("bilinear")
+                .padding_mode("zeros")
+                .align_corners(false);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{0., 0., 0.5}, {1.5, 4., 2.5}, {3.5, 2., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // default options (bilinear, zeros, false) same result as above
+  output = F::grid_sample(input, grid);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // nearest, zeros, true
+  options = GridSampleOptions()
+                .mode("nearest")
+                .padding_mode("zeros")
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, border, true
+  options = GridSampleOptions()
+                .mode("bilinear")
+                .padding_mode("border")
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 8.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, reflection, true
+  options = GridSampleOptions()
+                .mode("bilinear")
+                .padding_mode("reflection")
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{1., 0., 1.}, {3., 4., 5.}, {7., 8., 7.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+}
+
 TEST_F(FunctionalTest, AffineGrid) {
   {
     // 2D affine.
@@ -793,6 +857,50 @@ TEST_F(FunctionalTest, LayerNorm) {
   auto y = F::layer_norm(input, LayerNormOptions({2, 2}).eps(2e-5));
   auto y_exp = torch::layer_norm(input, {2, 2}, torch::Tensor(), torch::Tensor(), 2e-5);
   ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
+TEST_F(FunctionalTest, Linear) {
+  {
+    const auto x = torch::arange(100, 118).resize_({3, 3, 2});
+    const auto w = torch::arange(200, 206).resize_({3, 2});
+    const auto b = torch::arange(300, 303);
+    const auto y = F::linear(x, w, b);
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 3}));
+    const auto y_exp = torch::tensor(
+      {{{40601, 41004, 41407},
+        {41403, 41814, 42225},
+        {42205, 42624, 43043}},
+      {{43007, 43434, 43861},
+        {43809, 44244, 44679},
+        {44611, 45054, 45497}},
+      {{45413, 45864, 46315},
+        {46215, 46674, 47133},
+        {47017, 47484, 47951}}},
+      torch::kFloat
+    );
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+  {
+    const auto x = torch::arange(100, 118).resize_({3, 3, 2});
+    const auto w = torch::arange(200, 206).resize_({3, 2});
+    const auto y = F::linear(x, w);
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 3}));
+    const auto y_exp = torch::tensor(
+      {{{40301, 40703, 41105},
+        {41103, 41513, 41923},
+        {41905, 42323, 42741}},
+       {{42707, 43133, 43559},
+        {43509, 43943, 44377},
+        {44311, 44753, 45195}},
+       {{45113, 45563, 46013},
+        {45915, 46373, 46831},
+        {46717, 47183, 47649}}},
+      torch::kFloat
+    );
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
 }
 
 TEST_F(FunctionalTest, Bilinear) {

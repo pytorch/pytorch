@@ -96,7 +96,7 @@ struct GraphTask {
 
   // Set an appropriate exception on this graph_task which was encountered while
   // running the provided function.
-  void set_exception(std::exception_ptr eptr, std::shared_ptr<Node> fn);
+  void set_exception(std::exception_ptr eptr, const std::shared_ptr<Node>& fn);
 
   // Whether or not to stop execution for this GraphTask when an error is
   // encountered. When set to true, this would cause Engine::execute() to throw
@@ -203,13 +203,13 @@ protected:
   virtual void thread_init(int device);
   virtual void thread_on_exception(
       std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> fn,
+      const std::shared_ptr<Node>& fn,
       std::exception& e);
   virtual void thread_main(
-      std::shared_ptr<GraphTask> task,
+      const std::shared_ptr<GraphTask>& task,
       bool reentrant_thread);
   void reentrant_thread_init();
-  void add_thread_pool_task(std::weak_ptr<GraphTask> graph_task);
+  void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
   void set_device(int device);
 
   // Ensures ready_queues_ are initialized only once

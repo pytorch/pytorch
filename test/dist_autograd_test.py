@@ -124,11 +124,9 @@ class DistAutogradTest(object):
 
     @property
     def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(
-            file_name=self.file_name, rank=self.rank, world_size=self.world_size
-        )
+        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_autograd_context(self):
         # Verify max possible id.
         max_auto_increment = 281474976710655
@@ -154,7 +152,7 @@ class DistAutogradTest(object):
             ):
                 dist_autograd._retrieve_context(context_id)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_nested_context(self):
         with dist_autograd.context() as context_id:
             # Nested contexts not supported.
@@ -298,16 +296,16 @@ class DistAutogradTest(object):
         with self.assertRaises(RuntimeError):
             ctx = dist_autograd._current_context()
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_graph_for_builtin_call(self):
         self._test_graph(torch.add)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_graph_for_python_call(self):
         self._test_graph(my_py_add)
 
     # 3-layer nested calls
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_graph_for_py_nested_call(self):
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
@@ -361,7 +359,7 @@ class DistAutogradTest(object):
             dist.barrier()
 
     # Rank0->Rank1->Rank0
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_graph_for_py_nested_call_itself(self):
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
@@ -398,7 +396,7 @@ class DistAutogradTest(object):
             # autograd context before another worker tries to access it.
             dist.barrier()
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_no_graph_with_tensors_not_require_grad(self):
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
@@ -420,7 +418,7 @@ class DistAutogradTest(object):
             with self.assertRaises(RuntimeError):
                 ctx = dist_autograd._retrieve_context(ctx_ids[1])
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_rpc_complex_args(self):
         with dist_autograd.context() as context_id:
             num_tensors = 10
@@ -454,7 +452,7 @@ class DistAutogradTest(object):
             self.assertEqual(worker_ids[0], dst_rank)
 
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_context_cleanup_many_workers(self):
         global known_context_ids
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
@@ -471,7 +469,7 @@ class DistAutogradTest(object):
         success = _all_contexts_cleaned_up(num_contexts=len(dst_ranks))
         self.assertTrue(success)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_worker_ids_recorded(self):
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
@@ -502,7 +500,7 @@ class DistAutogradTest(object):
             self.assertEqual(len(worker_ids), len(dst_ranks))
             self.assertEqual(set(worker_ids), dst_ranks)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_error_in_context(self):
         with dist_autograd.context() as context_id:
             t1 = torch.rand(3, 3, requires_grad=True)
@@ -539,7 +537,7 @@ class DistAutogradTest(object):
         self.assertEqual(ngrads, len(grads))
 
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_simple(self):
         # Run the same code locally and with dist autograd and verify gradients
         # are same.
@@ -552,7 +550,7 @@ class DistAutogradTest(object):
                 loss = ret.sum()
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_multiple_round_trips(self):
         local_grads = None
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -574,7 +572,7 @@ class DistAutogradTest(object):
 
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2, t3, t4, t5)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_different_tensor_dims(self):
         local_grads = None
         t1 = torch.rand((4, 6), requires_grad=True)
@@ -590,7 +588,7 @@ class DistAutogradTest(object):
 
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2, t2, t3, t4)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_unused_tensors(self):
         local_grads = None
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -604,7 +602,7 @@ class DistAutogradTest(object):
                 loss = val.sum()
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2, t3)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_multiple_output_tensors(self):
         local_grads = None
         t = torch.rand((10, 2), requires_grad=True)
@@ -636,7 +634,7 @@ class DistAutogradTest(object):
             dist_autograd.backward([val.sum()])
 
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_unused_send_function(self):
         # Run the test in a thread which would never finish.
         t = threading.Thread(target=self._run_test_backward_unused_send_function_in_thread)
@@ -647,7 +645,7 @@ class DistAutogradTest(object):
         # Verify thread is still alive (indicating backward hasn't completed yet).
         self.assertTrue(t.is_alive())
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_autograd_engine_error(self):
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
@@ -698,7 +696,7 @@ class DistAutogradTest(object):
                 # Exit all other nodes.
                 pass
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_without_context(self):
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
@@ -708,7 +706,7 @@ class DistAutogradTest(object):
                                args=(t1, t2))
             dist_autograd.backward([res.sum()])
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_without_rpc(self):
         dst_rank = self.rank
         with dist_autograd.context() as context_id:
@@ -724,7 +722,7 @@ class DistAutogradTest(object):
             self.assertEqual(torch.ones(3, 3), grads[t1])
             self.assertEqual(torch.ones(3, 3), grads[t2])
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_invalid_args(self):
         with dist_autograd.context() as context_id:
 
@@ -746,7 +744,7 @@ class DistAutogradTest(object):
                 t = torch.rand(1, requires_grad=True)
                 dist_autograd.backward([t])
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_multiple_roots(self):
         local_grads = None
         t1 = torch.rand((3, 3), requires_grad=True)

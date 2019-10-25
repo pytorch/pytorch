@@ -152,9 +152,8 @@ struct ReadyQueue {
 // the historic behavior.
 
 int NodeTask::getReentrantDepth() const {
-  std::shared_ptr<GraphTask> graph_task;
-  TORCH_INTERNAL_ASSERT(
-      graph_task = base_.lock(), "GraphTask is no longer valid!")
+  std::shared_ptr<GraphTask> graph_task = base_.lock();
+  TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!")
   return graph_task->reentrant_depth_;
 }
 
@@ -162,10 +161,9 @@ auto ReadyQueue::push(NodeTask item, bool incrementOutstandingTasks) -> void {
   {
     // Lock mutex for writing to heap_
     std::lock_guard<std::mutex> lock(mutex_);
-    std::shared_ptr<GraphTask> graph_task;
-    TORCH_INTERNAL_ASSERT(
-        graph_task = item.base_.lock(), "GraphTask is no longer valid!")
     if (incrementOutstandingTasks) {
+      std::shared_ptr<GraphTask> graph_task = item.base_.lock();
+      TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!");
       ++graph_task->outstanding_tasks_;
     }
     heap_.push(std::move(item));
@@ -250,7 +248,8 @@ auto Engine::thread_init(int device) -> void {
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
   set_device(device);
-  thread_main(nullptr, false);
+  std::shared_ptr<GraphTask> graph_task = nullptr;
+  thread_main(graph_task, /* reentrant_thread */ false);
 }
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
@@ -268,7 +267,7 @@ auto Engine::thread_init(int device) -> void {
 // It's all ok and is handled right now, but it should be accounted for
 // in case this code is to be changed.
 auto Engine::thread_main(
-    std::shared_ptr<GraphTask> graph_task,
+    const std::shared_ptr<GraphTask>& graph_task,
     bool reentrant_thread) -> void {
   // Either reentrant_thread should be false or we should pass in a non-null
   // graph_task.
@@ -373,7 +372,7 @@ void Engine::reentrant_thread_init() {
 
 void Engine::thread_on_exception(
     std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> fn,
+    const std::shared_ptr<Node>& fn,
     std::exception& e) {
   // Use std::current_exception() instead of passed in exception to get the
   // appropriate exception_ptr.
@@ -382,14 +381,14 @@ void Engine::thread_on_exception(
 
 void GraphTask::set_exception(
     std::exception_ptr eptr,
-    std::shared_ptr<Node> fn) {
+    const std::shared_ptr<Node>& fn) {
   // Lock mutex for writing to exception_
   std::lock_guard<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
       fn->metadata()->print_stack();
     }
-    exception_ = eptr;
+    exception_ = std::move(eptr);
     has_error_ = true;
     if (exit_on_error_) {
       // Notify other threads if we are supposed to exit on errors.
@@ -872,7 +871,7 @@ auto Engine::start_threads() -> void {
   }
 }
 
-void Engine::add_thread_pool_task(std::weak_ptr<GraphTask> graph_task) {
+void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   std::unique_lock<std::mutex> lck(thread_pool_shared_->mutex_);
   // There may already be some items on the graphtasks_queue_ added by other
   // threads but not enough workers to get to the the new task that will be
