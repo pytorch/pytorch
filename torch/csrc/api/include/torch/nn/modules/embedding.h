@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/enum.h>
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
@@ -49,7 +50,8 @@ struct TORCH_API EmbeddingBagOptions {
   TORCH_ARG(bool, scale_grad_by_freq) = false;
   /// ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag. ``"sum"`` computes the weighted sum, taking `per_sample_weights`
   /// into consideration. ``"mean"`` computes the average of the values in the bag, ``"max"`` computes the max value over each bag.
-  TORCH_ARG(string, mode) = "mean";
+  typedef c10::variant<enumtype::kSum, enumtype::kMean, enumtype::kMax> mode_t;
+  TORCH_ARG(mode_t, mode) = torch::kMean;
   /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
   /// Note: this option is not supported when ``mode="max"``.
   TORCH_ARG(bool, sparse) = false;
