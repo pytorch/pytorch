@@ -75,76 +75,8 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
             return builder.build_cuda_engine(network)
 
     def _test_model(self, model_name, input_shape = (3, 224, 224), normalization_hint = 0):
-        if model_name == "resnet18":
-            model = models.resnet.resnet18(pretrained=True)
-        elif model_name == "resnet34":
-            model = models.resnet.resnet34(pretrained=True)
-        elif model_name == "resnet50":
-            model = models.resnet.resnet50(pretrained=True)
-        elif model_name == "resnet101":
-            model = models.resnet.resnet101(pretrained=True)
-        elif model_name == "resnet152":
-            model = models.resnet.resnet152(pretrained=True)
 
-        elif model_name == "resnet50_2":
-            model = models.resnet.wide_resnet50_2(pretrained=True)
-        elif model_name == "resnet101_2":
-            model = models.resnet.wide_resnet101_2(pretrained=True)
-
-        elif model_name == "googlenet":
-            model = models.googlenet(pretrained=True)
-
-        elif model_name == "squezenet1_0":
-            model = models.squeezenet1_0(pretrained=True)
-        elif model_name == "squezenet1_1":
-            model = models.squeezenet1_1(pretrained=True)
-
-        elif model_name == "inception_v3":
-            model = models.inception_v3(pretrained=True)
-
-        elif model_name == "mnasnet0_5":
-            model = models.mnasnet0_5(pretrained=True)
-        elif model_name == "mnasnet1_0":
-            model = models.mnasnet1_0(pretrained=True)
-
-        elif model_name == "mobilenet_v2":
-            model = models.mobilenet_v2(pretrained=True)
-
-        elif model_name == "shufflenet_v2_x0_5":
-            model = models.shufflenet_v2_x0_5(pretrained=True)
-        elif model_name == "shufflenet_v2_x1_0":
-            model = models.shufflenet_v2_x1_0(pretrained=True)
-
-        elif model_name == "vgg11":
-            model = models.vgg11(pretrained=True)
-        elif model_name == "vgg11_bn":
-            model = models.vgg11_bn(pretrained=True)
-        elif model_name == "vgg13":
-            model = models.vgg13(pretrained=True)
-        elif model_name == "vgg13_bn":
-            model = models.vgg13_bn(pretrained=True)
-        elif model_name == "vgg16":
-            model = models.vgg16(pretrained=True)
-        elif model_name == "vgg16_bn":
-            model = models.vgg16_bn(pretrained=True)
-        elif model_name == "vgg19":
-            model = models.vgg19(pretrained=True)
-        elif model_name == "vgg19_bn":
-            model = models.vgg19_bn(pretrained=True)
-
-        elif model_name == "densenet121":
-            model = models.densenet121(pretrained=True)
-        elif model_name == "densenet161":
-            model = models.densenet161(pretrained=True)
-        elif model_name == "densenet169":
-            model = models.densenet169(pretrained=True)
-        elif model_name == "densenet201":
-            model = models.densenet201(pretrained=True)
-
-        elif model_name == "alexnet":
-            model = models.alexnet(pretrained=True)
-        else:
-            self.fail("Model {} is not yet supported".format(model_name))
+        model = getattr(models, model_name)(pretrained=True)
 
         shape = (1,) + input_shape
         dummy_input  = (torch.randn(shape),)
@@ -196,15 +128,15 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
         self._test_model("resnet152")
 
     def test_resnet50_2(self):
-        self._test_model("resnet50_2")
+        self._test_model("wide_resnet50_2")
     @unittest.skip("Takes 2m")
     def test_resnet101_2(self):
-        self._test_model("resnet101_2")
+        self._test_model("wide_resnet101_2")
 
-    def test_squezenet1_0(self):
-        self._test_model("squezenet1_0")
-    def test_squezenet1_1(self):
-        self._test_model("squezenet1_1")
+    def test_squeezenet1_0(self):
+        self._test_model("squeezenet1_0")
+    def test_squeezenet1_1(self):
+        self._test_model("squeezenet1_1")
 
     def test_googlenet(self):
         self._test_model("googlenet")
