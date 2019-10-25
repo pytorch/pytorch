@@ -13,6 +13,7 @@ on an NVIDIA GPU with compute capability >= 3.0.
 import os
 import sys
 import platform
+import ctypes
 from ._utils import _import_dotted_name
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment
 from .version import __version__
@@ -36,7 +37,7 @@ __all__ = [
 if platform.system() == 'Windows':
     NVTOOLSEXT_PATH = os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
 
-    if os.path.exists(NVTOOLEXT_HOME):
+    if os.path.exists(NVTOOLSEXT_PATH):
         nvtoolsext_lib_path = os.path.join(NVTOOLSEXT_PATH, 'bin', 'x64')
     else:
         nvtoolsext_lib_path = ''
@@ -48,6 +49,22 @@ if platform.system() == 'Windows':
 
     # then add the path to env
     os.environ['PATH'] = ';'.join(dll_paths)
+
+
+# See Note [Global dependencies]
+def _load_global_deps():
+    if platform.system() == 'Windows':
+        return
+
+    lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
+    here = os.path.abspath(__file__)
+    lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
+
+    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+
+
+# See Note [Global dependencies]
+_load_global_deps()
 
 from torch._C import *
 
