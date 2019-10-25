@@ -18,14 +18,14 @@ from common_utils import TestCase
 HANDLED_FUNCTIONS_DIAGONAL = {}
 
 def implements_diagonal(torch_function):
-    """Register an implementation of a torch function for DiagonalTensor.
+    """Register a torch function override for DiagonalTensor.
 
     This decorator takes a function in the torch API as a
-    parameter. Applying this decorator to a function adds the function
-    as the registered override for a torch function. See
-    DiagonalTensor.__torch_function__ to see how the dispatch works at
-    runtime and the decorated functions immediately below DiagonalTensor
-    for usage examples.
+    parameter. Applying this decorator to a function adds that function
+    as the registered override for the torch function passed as a
+    parameter to the decorator. See DiagonalTensor.__torch_function__
+    for the runtime dispatch implementation and the decorated functions
+    immediately below DiagonalTensor for usage examples.
     """
     @functools.wraps(torch_function)
     def decorator(func):
@@ -116,11 +116,11 @@ def mean(mat):
 def diagonal_mm(mat1, mat2):
     return 0
 
-
+# The dispatch table for SubTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_SUB = {}
 
 def implements_sub(torch_function):
-    "Register an implementation of a torch function for a Tensor-like object."
+    "Register a torch function override for SubTensor"
     @functools.wraps(torch_function)
     def decorator(func):
         HANDLED_FUNCTIONS_SUB[torch_function.__name__] = func
@@ -145,8 +145,7 @@ class SubTensor(torch.Tensor):
             [2, 2]])
 
     This is useful for testing that the semantics for overriding torch
-    functions are working correctly
-
+    functions are working correctly.
     """
     def __torch_function__(self, func, args=(), kwargs=None):
         if(kwargs is None):
@@ -163,10 +162,11 @@ class SubTensor(torch.Tensor):
 def sub_mm(mat1, mat2):
     return 0
 
+# The dispatch table for SubDiagonalTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_SUB_DIAGONAL = {}
 
 def implements_sub_diagonal(torch_function):
-    "Register an implementation of a torch function for a Tensor-like object."
+    "Register a torch function override for SubDiagonalTensor"
     @functools.wraps(torch_function)
     def decorator(func):
         HANDLED_FUNCTIONS_SUB_DIAGONAL[torch_function.__name__] = func
@@ -232,10 +232,11 @@ class TestOverrideSubDiagonalTensor(TestCase):
         self.assertEqual(torch.mm(t3, t2), 1)
         self.assertEqual(torch.mm(t2, t3), 1)
 
+# The dispatch table for SubDiagonalTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_TENSOR_LIKE = {}
 
 def implements_tensor_like(torch_function):
-    "Register an implementation of a torch function for a Tensor-like object."
+    "Register a torch function override for TensorLike"
     @functools.wraps(torch_function)
     def decorator(func):
         HANDLED_FUNCTIONS_TENSOR_LIKE[torch_function.__name__] = func
