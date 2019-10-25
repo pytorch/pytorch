@@ -268,13 +268,6 @@
         wrap_dim: self
       - THIndexTensor* index
       - real value
-    - zero_dim_tensor_only: True
-      arguments:
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - THIndexTensor* index
-        - THTensor* value
 ]]
 [[
   name: _th_scatter_
