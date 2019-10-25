@@ -1409,10 +1409,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       }
       case MemoryFormat::Preserve:
         TORCH_CHECK(false, "unsupported memory format ", memory_format);
-        break;
+        // Cleaning warning messages, no need to break as TORCH_CHECK(false)
+        // terminates flow.
+        // break;
     }
     // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
-    // exclusive: #24090
+    // exclusive see #24090
     refresh_contiguous();
   }
 
