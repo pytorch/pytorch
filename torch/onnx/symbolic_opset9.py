@@ -2030,8 +2030,15 @@ def _weight_norm(g, weight_v, weight_g, dim):
     if rank:
         # W = g * ((v) / ||v||)
         # Compute norm_except_dim for l2 norm
+        # dim = -1 torch behavior is to calculate norm over all dims
+        # TODO: This conflicts with negative axes logic. Might need
+        # to be fixed in torch.nn.utils.group_norm
         axes = list(range(rank))
-        axes.remove(dim)
+        if dim:
+            if dim < -1:
+                dim += rank
+            if dim != -1:
+                axes.remove(dim)
         norm_v = norm(g, weight_v, 2, axes, 1)
         div = g.op("Div", weight_v, norm_v)
         return g.op("Mul", div, weight_g)

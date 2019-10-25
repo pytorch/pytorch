@@ -34,6 +34,7 @@ def ort_test_with_input(ort_sess, input, output, rtol, atol):
     inputs = list(map(to_numpy, input))
     outputs = list(map(to_numpy, output))
 
+
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
 
@@ -1121,13 +1122,23 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ViewModel(), x)
 
     def test_weight_norm(self):
-        model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=0)
+        model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(model, x)
 
         model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3))
         x = torch.randn(1, 1, 5, requires_grad=True)
         self.run_test(model, x)
+
+        model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3), dim=-2)
+        x = torch.randn(1, 1, 5, requires_grad=True)
+        self.run_test(model, x)
+
+    def test_weight_norm_nodim(self):
+            model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
+            x = torch.randn(3, 4, 5, requires_grad=True)
+            self.run_test(model, x)
+
 
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
