@@ -243,7 +243,19 @@ private:
               "Available functions are ", listAllDispatchKeys())
       }
 
-      const std::string dispatch_key_str = dispatch_key.has_value() ? toString(*dispatch_key) : "None";
+      if (dispatch_key.value() == TensorTypeId::QuantizedCPUTensorId) {
+        // If the input is quantized, but the quantization is not supported.
+        TORCH_CHECK(false, "Tried runninig '", operator_name_, "', but it",
+                    " doesn't support quantization. Please, check the",
+                    " documentation for supported kernels.");
+      }
+      // If the input is not quantized, but the kernel is.
+      TORCH_CHECK(!kernels_.lookup(TensorTypeId::QuantizedCPUTensorId), "Tried",
+                  " running '", operator_name_, "' but the input is not",
+                  " quantized. Please ensure you have QuantStub during model"
+                  " conversion, or you manually quantize the input tensor.");
+
+      const std::string dispatch_key_str = toString(*dispatch_key);
       TORCH_CHECK(false, "Didn't find kernel to dispatch to for operator '", operator_name_,
                "'. Tried to look up kernel for dispatch key '", dispatch_key_str,
                "'. Registered dispatch keys are: ", listAllDispatchKeys());
