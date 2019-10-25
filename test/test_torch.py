@@ -12600,7 +12600,9 @@ class TestTorchDeviceType(TestCase):
 
         transformation_fns = [
             lambda t, **kwargs: torch.zeros_like(t, **kwargs),
-            lambda t, **kwargs: torch.ones_like(t, **kwargs)]
+            lambda t, **kwargs: torch.ones_like(t, **kwargs),
+            lambda t, **kwargs: torch.randint_like(t, 10, 100, **kwargs),
+            lambda t, **kwargs: torch.randint_like(t, 100, **kwargs)]
 
         for transformation_fn in transformation_fns:
             self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
