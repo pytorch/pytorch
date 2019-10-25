@@ -104,7 +104,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       // `N` is the number of the elements in the tensor).
       at::Tensor tensor = ([&]() {
         at::AutoNonVariableTypeMode non_var_type_mode(true);
-        return at::empty(sizes_, at::TensorOptions(options).device(at::kCPU).is_variable(false));
+        return at::empty(sizes_, at::TensorOptions(options).device(at::kCPU));
       })();
       fill_tensor(tensor);
       return tensor.to(options.device());
@@ -158,7 +158,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       at::ArrayRef<T> values, const at::TensorOptions& options) {          \
     at::Tensor result = ([&]() {                                           \
       at::AutoNonVariableTypeMode non_var_type_mode(true);                 \
-      return at::tensor(values, at::TensorOptions(options).is_variable(false)); \
+      return at::tensor(values, at::TensorOptions(options));               \
     })();                                                                  \
     return autograd::make_variable(result, options.requires_grad());       \
   }                                                                        \
@@ -234,7 +234,7 @@ inline at::Tensor from_blob(
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::from_blob(data, sizes, strides, deleter, options.is_variable(false));
+    return at::from_blob(data, sizes, strides, deleter, options);
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
@@ -270,7 +270,7 @@ inline at::Tensor from_blob(
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::from_blob(data, sizes, deleter, options.is_variable(false));
+    return at::from_blob(data, sizes, deleter, options);
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }

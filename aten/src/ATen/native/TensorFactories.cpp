@@ -88,6 +88,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   AT_ASSERT(options.device().type() == DeviceType::CPU);
+  TORCH_INTERNAL_ASSERT(impl::variable_is_excluded());
   check_size_nonnegative(size);
 
   c10::Allocator* allocator;

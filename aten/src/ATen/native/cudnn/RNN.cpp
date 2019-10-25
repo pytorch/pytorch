@@ -1153,14 +1153,12 @@ struct DropoutState {
 
 DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions options) {
   // Each state is slightly over 2MB and initialized lazily, so it's fine to cache them.
-  static std::vector<DropoutState> ten_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
-  static std::vector<DropoutState> var_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
+  static std::vector<DropoutState> dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
   static std::mutex state_cache_mut;
 
   int device = cuda::current_device();
   std::unique_lock<std::mutex> lock {state_cache_mut};
-  auto& state = options.is_variable() ? var_dropout_state_cache.at(device)
-                                      : ten_dropout_state_cache.at(device);
+  auto& state = dropout_state_cache.at(device);
   if (train && dropout_p > 0 && !state.buffer.defined()) {
     std::unique_lock<std::mutex> lock {state.mutex};
     int64_t seed = at::empty({}, at::kLong).random_().item<int64_t>();

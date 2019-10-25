@@ -13,7 +13,7 @@ VariableInfo::VariableInfo(const Variable& var)
 
 Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   return at::zeros(size,
-    at::TensorOptions(scalar_type).device(device).layout(layout).is_variable(true));
+    at::TensorOptions(scalar_type).device(device).layout(layout));
 }
 
 variable_list _wrap_outputs(const variable_list &input_vars,

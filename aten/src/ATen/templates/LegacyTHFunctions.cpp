@@ -28,8 +28,7 @@ namespace {
   TensorOptions options(ScalarType s) {
     return TensorOptions().dtype(s)
                           .device(DeviceType::${DeviceType})
-                          .layout(kStrided)
-                          .is_variable(false);
+                          .layout(kStrided);
   }
 
   Allocator* allocator() {

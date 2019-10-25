@@ -66,8 +66,7 @@ Backend backendToBackendOfDeviceType(Backend b, DeviceType d) {
 TensorOptions options(c10::TensorTypeId type_id, at::ScalarType scalar_type, const c10::optional<Device>& device=c10::nullopt) {
   auto options = TensorOptions(scalar_type)
       .device(computeDeviceType(type_id))
-      .layout(layout_from_backend(tensorTypeIdToBackend(type_id)))
-      .is_variable(true);
+      .layout(layout_from_backend(tensorTypeIdToBackend(type_id)));
   if (device.has_value()) {
     return options.device(device);
   }
