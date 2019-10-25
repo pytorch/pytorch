@@ -1348,64 +1348,6 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 // does not appear in `type_env`
 CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
-<<<<<<< HEAD
-=======
-struct InterfaceType;
-using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
-using ::torch::jit::script::CompilationUnit;
-using ::torch::jit::Function;
-
-// Interfaces are a list of abstract methods that a class might meet.
-// If a class provides those methods, it implicitly meets the interface.
-//
-// Subtype relations for Interface with ClassType:
-// lhs (ClassType or InterfaceType) is a subtype of rhs if:
-// 1. lhs methods are a superset of rhs methods
-// 2. if rhs is module interface, the lhs must be module interface or module itself
-struct CAFFE2_API InterfaceType : public NamedType {
-  static InterfaceTypePtr create(
-      QualifiedName qualifiedName, bool is_module=false);
-
-  bool operator==(const Type& rhs) const override {
-    if (auto user_rhs = rhs.cast<InterfaceType>()) {
-      return name() == user_rhs->name();
-    }
-    return false;
-  }
-
-  std::string str() const override {
-    return std::string("InterfaceType<") + name()->name() + ">";
-  }
-
-  std::string python_str() const override {
-    return name()->qualifiedName();
-  }
-
-  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
-
-  // try to find a method of this interface,
-  // returns nullptr if not found.
-  const FunctionSchema* getMethod(const std::string& name) const;
-  void addMethod(FunctionSchema schema);
-  const std::vector<FunctionSchema>& methods() {
-    return *methods_;
-  }
-
-  bool is_module() const override{
-    return is_module_;
-  }
-  static const TypeKind Kind = TypeKind::InterfaceType;
-  ~InterfaceType() override;
- private:
-  InterfaceType(QualifiedName name, bool is_module);
-
-  // shared_ptr so that this header does not have to depend on
-  // FunctionSchema.h
-  std::shared_ptr<std::vector<FunctionSchema>> methods_;
-  // flag to distinguish if it's an interface type from a module or not
-  bool is_module_;
-};
->>>>>>> 108bfdbdc0... [jit] submodule swapping via module interface
 
 
 /**
@@ -1661,7 +1603,6 @@ struct CAFFE2_API InterfaceType : public NamedType {
     return *methods_;
   }
 
-<<<<<<< HEAD
   bool is_module() const override{
     return is_module_;
   }
@@ -1677,6 +1618,4 @@ struct CAFFE2_API InterfaceType : public NamedType {
   bool is_module_;
 };
 
-=======
->>>>>>> 108bfdbdc0... [jit] submodule swapping via module interface
 } // namespace c10
