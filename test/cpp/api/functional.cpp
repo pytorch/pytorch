@@ -1162,8 +1162,16 @@ TEST_F(FunctionalTest, SoftplusDefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, Fold) {
+  auto input = torch::randn({1, 3 * 2 * 2, 12});
+  auto output = F::fold(input, FoldOptions({4, 5}, {2, 2}));
+  auto expected_sizes = std::vector<int64_t>({1, 3, 4, 5});
+
+  ASSERT_EQ(output.sizes(), expected_sizes);
+}
+
 TEST_F(FunctionalTest, Unfold) {
-  auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
+  auto input = torch::randn({2, 2, 4, 4});
   auto output = F::unfold(input, UnfoldOptions({2, 4}).padding(1).stride(2));
   auto expected_sizes = std::vector<int64_t>({2, 16, 6});
 

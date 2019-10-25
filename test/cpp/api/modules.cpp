@@ -803,18 +803,27 @@ TEST_F(ModulesTest, Bilinear) {
 }
 
 TEST_F(ModulesTest, Fold) {
-  Fold model(FoldOptions({4, 5}, {2, 2}));
-  auto x = torch::randn({1, 3 * 2 * 2, 12}, torch::requires_grad());
-  auto y = model(x);
-  torch::Tensor s = y.sum();
+  {
+    Fold model(FoldOptions({4, 5}, {2, 2}));
+    auto x = torch::randn({1, 3 * 2 * 2, 12}, torch::requires_grad());
+    auto y = model(x);
+    torch::Tensor s = y.sum();
 
-  s.backward();
-  ASSERT_EQ(y.ndimension(), 4);
-  ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.size(0), 1);
-  ASSERT_EQ(y.size(1), 3);
-  ASSERT_EQ(y.size(2), 4);
-  ASSERT_EQ(y.size(3), 5);
+    s.backward();
+    ASSERT_EQ(y.ndimension(), 4);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(y.size(0), 1);
+    ASSERT_EQ(y.size(1), 3);
+    ASSERT_EQ(y.size(2), 4);
+    ASSERT_EQ(y.size(3), 5);
+  }
+  {
+    // input wrong dimension
+    Fold model(FoldOptions({8, 8}, {3, 3}));
+    ASSERT_THROWS_WITH(
+        model(torch::randn({1, 3, 16, 16})),
+        "Input Error: Only 3D input Tensors are supported (got 4D)");
+  }
 }
 
 TEST_F(ModulesTest, Unfold) {
@@ -1981,6 +1990,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintFold) {
+  ASSERT_EQ(
+      c10::str(Fold(FoldOptions({2, 2}, {5, 5}))),
+      "torch::nn::Fold(output_size=[2, 2], kernel_size=[5, 5], dilation=[1, 1], padding=[0, 0], stride=[1, 1])");
+  ASSERT_EQ(
+      c10::str(Fold(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2, 1}).stride(2))),
+      "torch::nn::Fold(output_size=[8, 8], kernel_size=[3, 3], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
 }
 
 TEST_F(ModulesTest, PrettyPrintUnfold) {
