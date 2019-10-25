@@ -31,9 +31,10 @@ class ReLU(torch.nn.ReLU):
     """
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(inplace)
+        self.inplace = inplace
 
     def forward(self, input):
-        return torch.nn.quantized.functional.relu(input)
+        return torch.nn.quantized.functional.relu(input, inplace=self.inplace)
 
     def _get_name(self):
         return 'QuantizedReLU'
