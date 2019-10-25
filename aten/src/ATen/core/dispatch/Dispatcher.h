@@ -229,7 +229,7 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 
 template<class Return, class... Args>
 inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
-  unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
 
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
@@ -243,7 +243,7 @@ inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) co
 
 template<class Return, class... Args>
 inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
-  unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
 
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
