@@ -8,39 +8,12 @@ import functools
 from common_utils import TestCase
 
 HANDLED_FUNCTIONS_DIAGONAL = {}
-HANDLED_FUNCTIONS_SUB = {}
-HANDLED_FUNCTIONS_SUB_DIAGONAL = {}
-HANDLED_FUNCTIONS_TENSOR_LIKE = {}
 
 def implements_diagonal(torch_function):
     "Register an implementation of a torch function for DiagonalTensor."
     @functools.wraps(torch_function)
     def decorator(func):
         HANDLED_FUNCTIONS_DIAGONAL[torch_function.__name__] = func
-        return func
-    return decorator
-
-def implements_sub(torch_function):
-    "Register an implementation of a torch function for a Tensor-like object."
-    @functools.wraps(torch_function)
-    def decorator(func):
-        HANDLED_FUNCTIONS_SUB[torch_function.__name__] = func
-        return func
-    return decorator
-
-def implements_sub_diagonal(torch_function):
-    "Register an implementation of a torch function for a Tensor-like object."
-    @functools.wraps(torch_function)
-    def decorator(func):
-        HANDLED_FUNCTIONS_SUB_DIAGONAL[torch_function.__name__] = func
-        return func
-    return decorator
-
-def implements_tensor_like(torch_function):
-    "Register an implementation of a torch function for a Tensor-like object."
-    @functools.wraps(torch_function)
-    def decorator(func):
-        HANDLED_FUNCTIONS_TENSOR_LIKE[torch_function.__name__] = func
         return func
     return decorator
 
@@ -135,6 +108,16 @@ def diagonal_mm(mat1, mat2):
     return 0
 
 
+HANDLED_FUNCTIONS_SUB = {}
+
+def implements_sub(torch_function):
+    "Register an implementation of a torch function for a Tensor-like object."
+    @functools.wraps(torch_function)
+    def decorator(func):
+        HANDLED_FUNCTIONS_SUB[torch_function.__name__] = func
+        return func
+    return decorator
+
 class SubTensor(torch.Tensor):
     """A subclass of torch.Tensor use for testing __torch_function__ dispatch
 
@@ -170,6 +153,16 @@ class SubTensor(torch.Tensor):
 @implements_sub(torch.mm)
 def sub_mm(mat1, mat2):
     return 0
+
+HANDLED_FUNCTIONS_SUB_DIAGONAL = {}
+
+def implements_sub_diagonal(torch_function):
+    "Register an implementation of a torch function for a Tensor-like object."
+    @functools.wraps(torch_function)
+    def decorator(func):
+        HANDLED_FUNCTIONS_SUB_DIAGONAL[torch_function.__name__] = func
+        return func
+    return decorator
 
 class SubDiagonalTensor(DiagonalTensor):
     """A subclass of ``DiagonalTensor`` to test custom dispatch
@@ -229,6 +222,16 @@ class TestOverrideSubDiagonalTensor(TestCase):
         self.assertEqual(torch.mm(t1, t3), 0)
         self.assertEqual(torch.mm(t3, t2), 1)
         self.assertEqual(torch.mm(t2, t3), 1)
+
+HANDLED_FUNCTIONS_TENSOR_LIKE = {}
+
+def implements_tensor_like(torch_function):
+    "Register an implementation of a torch function for a Tensor-like object."
+    @functools.wraps(torch_function)
+    def decorator(func):
+        HANDLED_FUNCTIONS_TENSOR_LIKE[torch_function.__name__] = func
+        return func
+    return decorator
 
 IGNORED_TORCH_FUNCTIONS = (
     # unique_dim isn't actually in the torch namespace but is a low-level
