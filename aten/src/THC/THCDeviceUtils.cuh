@@ -119,7 +119,9 @@ __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int wid
 template <>
 __device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, unsigned int delta, int width, unsigned int mask)
 {
-#if CUDA_VERSION >= 9000
+#ifdef __HIP_PLATFORM_HCC__
+    return __shfl_down(float(value), delta, width);
+#elif CUDA_VERSION >= 9000
     return __shfl_down_sync(mask, __half(value), delta, width);
 #else
     return __shfl_down(__half(value), delta, width);
