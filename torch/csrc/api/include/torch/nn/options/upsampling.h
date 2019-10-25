@@ -14,6 +14,14 @@ namespace nn {
 
 /// Options for a `D`-dimensional interpolate functional.
 struct TORCH_API InterpolateOptions {
+  typedef c10::variant<
+      enumtype::kNearest,
+      enumtype::kLinear,
+      enumtype::kBilinear,
+      enumtype::kBicubic,
+      enumtype::kTrilinear,
+      enumtype::kArea> mode_t;
+
   /// output spatial sizes.
   TORCH_ARG(std::vector<int64_t>, size) = {};
 
@@ -22,13 +30,6 @@ struct TORCH_API InterpolateOptions {
 
   /// the upsampling algorithm: one of "nearest", "linear", "bilinear",
   /// "bicubic", "trilinear", and "area". Default: "nearest"
-  typedef c10::variant<
-      enumtype::kNearest,
-      enumtype::kLinear,
-      enumtype::kBilinear,
-      enumtype::kBicubic,
-      enumtype::kTrilinear,
-      enumtype::kArea> mode_t;
   TORCH_ARG(mode_t, mode) = torch::kNearest;
 
   /// Geometrically, we consider the pixels of the input and output as squares
