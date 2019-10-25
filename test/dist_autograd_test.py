@@ -258,6 +258,15 @@ class DistAutogradTest(object):
 
     def _test_graph(self, fn):
         dst_rank = (self.rank + 1) % self.world_size
+
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
@@ -307,6 +316,15 @@ class DistAutogradTest(object):
     @dist_init(setup_model_parallel=True)
     def test_graph_for_py_nested_call(self):
         dst_rank = (self.rank + 1) % self.world_size
+
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
@@ -361,6 +379,15 @@ class DistAutogradTest(object):
     @dist_init(setup_model_parallel=True)
     def test_graph_for_py_nested_call_itself(self):
         dst_rank = (self.rank + 1) % self.world_size
+
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
