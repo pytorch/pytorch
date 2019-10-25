@@ -47,5 +47,6 @@ std::pair<at::Tensor, at::Tensor> lstm(
     at::Tensor cx,
     at::Tensor w_ih,
     at::Tensor w_hh);
+
 } // namespace jit
 } // namespace torch
