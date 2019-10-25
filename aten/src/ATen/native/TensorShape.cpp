@@ -1183,4 +1183,32 @@ Tensor alias(const Tensor& self) {
   return self_;
 }
 
+Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
+  // some special handling to deal with allow dimension == 0 when self.dim() == 0
+  dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
+  int64_t max_size = self.dim() == 0 ? 1 : self.size(dimension);
+  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
+                                " is ", max_size, " but size is ", size);
+  TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
+
+  std::vector<int64_t> new_size(self.dim() + 1);
+  std::vector<int64_t> new_stride(self.dim() + 1);
+
+  new_size[self.dim()] = size;
+  new_stride[self.dim()] = self.dim() == 0 ? 1 : self.stride(dimension);
+  for(int64_t d = 0; d < self.dim(); d++) {
+    auto self_size = self.size(d);
+    auto self_stride = self.stride(d);
+    if(d == dimension) {
+      new_size[d] = (self_size - size) / step + 1;
+      new_stride[d] = step*self_stride;
+    } else {
+      new_size[d] = self_size;
+      new_stride[d] = self_stride;
+    }
+  }
+
+  return self.as_strided(new_size, new_stride);
+}
+
 }} // at::native
