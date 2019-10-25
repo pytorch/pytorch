@@ -71,7 +71,7 @@ Message getMessageWithAutograd(
     const rpc::worker_id_t dstId,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
     MessageType msgType,
-    bool checkRequiresGrad) {
+    bool forceGradRecording) {
   auto& autogradContainer = DistAutogradContainer::getInstance();
 
   // If there is no valid context and no tensor requires grads, send original
@@ -80,7 +80,7 @@ Message getMessageWithAutograd(
   auto tensorsRequireGrad =
       torch::autograd::compute_requires_grad(wrappedRpcMsg.tensors());
   if (!autogradContainer.hasValidContext() ||
-      (checkRequiresGrad && !tensorsRequireGrad)) {
+      (!forceGradRecording && !tensorsRequireGrad)) {
     return std::move(wrappedRpcMsg);
   }
 
@@ -109,12 +109,12 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
-    bool checkRequiresGrad) {
+    bool forceGradRecording) {
   auto msg = getMessageWithAutograd(
       dst.id_,
       std::move(wrappedRpcMsg),
       MessageType::FORWARD_AUTOGRAD_REQ,
-      checkRequiresGrad);
+      forceGradRecording);
 
   return agent.send(dst, std::move(msg));
 }
