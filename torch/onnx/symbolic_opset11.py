@@ -47,22 +47,16 @@ def pixel_shuffle(g, self, upscale_factor):
 
 def _interpolate(name, dim, interpolate_mode, g, input, output_size, scales, align_corners=None):
     align_corners = sym_help._maybe_get_scalar(align_corners)
-
     coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \
         else "align_corners" if align_corners else "pytorch_half_pixel"
     empty_tensor = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
     if scales is None:
-        input_size = input.type().sizes()
+        input_size = g.op("Shape", input)
+        input_size_beg = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
+        output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
+        output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
         scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-        output_size = sym_help._maybe_get_const(output_size, 'is')
-        if sym_help._is_value(output_size):
-            input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
-            output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
-            output_size = g.op("Concat", input_size, output_size, axis_i=0)
-        else:
-            output_size = [input_size[i] if i < 2 else output_size[-(dim - i)] for i in range(0, dim)]
-            output_size = g.op("Constant", value_t=torch.tensor(output_size))
         return g.op("Resize",
                     input,
                     empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
@@ -116,10 +110,12 @@ upsample_trilinear3d = _interpolate3d('upsample_trilinear3d', 5, "linear")
 upsample_bicubic2d = _interpolate2d('upsample_bicubic2d', 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners):
+def __interpolate(g, input, size, scale_factor, mode, align_corners):
     mode = sym_help._maybe_get_const(mode, 's')
     if 'linear' in mode:
         mode = 'linear'
+    if 'cubic' in mode:
+        mode = 'cubic'
     align_corners = sym_help._maybe_get_const(align_corners, 'b')
     align_corners = False if sym_help._is_none(align_corners) else align_corners
     coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
@@ -128,10 +124,14 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners):
     roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
     if not sym_help._is_none(size) :
-        input_size = input.type().sizes()
-        input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
-        size = g.op("Cast", size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
-        size = g.op("Concat", input_size, size, axis_i=0)
+        input_size = g.op("Shape", input)
+        input_size_beg = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
+        is_scalar = ((sym_help._maybe_get_const(size, 't').dim() == 0))
+        if is_scalar:
+            size = unsqueeze(g, size, 0)
+            size = [size for i in range(input.type().dim() - 2)]
+            size = g.op("Concat", *size, axis_i=0)
+        size = g.op("Concat", input_size_beg, size, axis_i=0)
         scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
         return g.op("Resize",
                     input,
@@ -141,9 +141,9 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners):
                     coordinate_transformation_mode_s=coordinate_transformation_mode,
                     cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
                     mode_s=mode,  # nearest, linear, or cubic
-                    nearest_mode_s="floor")  # only valid when mode="nearest"
+                    nearest_mode_s="floor")
     else:  # if not sym_help._is_none(scales)
-        scales = sym_help._interpolate_get_scales(g, scale_factor, 4)
+        scales = sym_help._interpolate_get_scales(g, scale_factor, input.type().dim())
         return g.op("Resize",
                     input,
                     roi,

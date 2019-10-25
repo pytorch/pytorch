@@ -735,6 +735,15 @@ RegisterOperators reg(
          },
          aliasAnalysisConservative()),
      Operator(
+         "aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)",
+         [](Stack& stack) {
+           bool _requires_grad = pop(stack).toBool();
+           at::Tensor self = pop(stack).toTensor();
+           self.requires_grad_(_requires_grad);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
          "prim::AutogradZero() -> Tensor",
          [](Stack& stack) {
            stack.emplace_back(at::Tensor());
