@@ -722,26 +722,30 @@ class TestTorchFunctionOverride(TestCase):
         self.assertEqual(torch.mm(t3, t2), 1)
         self.assertEqual(torch.mm(t2, t3), 1)
 
-def test_generator(func, override):
-    args = inspect.getfullargspec(override)
-    nargs = len(args.args)
-    if args.defaults is not None:
-        nargs -= len(args.defaults)
-    func_args = [TensorLike() for _ in range(nargs)]
-    if args.varargs is not None:
-        func_args += [TensorLike(), TensorLike()]
+def generate_tensor_like_override_tests(cls):
+    def test_generator(func, override):
+        args = inspect.getfullargspec(override)
+        nargs = len(args.args)
+        if args.defaults is not None:
+            nargs -= len(args.defaults)
+        func_args = [TensorLike() for _ in range(nargs)]
+        if args.varargs is not None:
+            func_args += [TensorLike(), TensorLike()]
 
-    msg = "torch.{} is not currently overridable".format(func.__name__)
-    @unittest.skipIf(func in TENSOR_LIKE_SKIP_TESTS, msg)
-    def test(self):
-        self.assertEqual(func(*func_args), -1)
+        msg = "torch.{} is not currently overridable".format(func.__name__)
+        @unittest.skipIf(func in TENSOR_LIKE_SKIP_TESTS, msg)
+        def test(self):
+            self.assertEqual(func(*func_args), -1)
 
-    return test
+        return test
 
-if __name__ == '__main__':
     for func, override in TENSOR_LIKE_TORCH_IMPLEMENTATIONS:
         test_method = test_generator(func, override)
         name = 'test_{}'.format(func.__name__)
         test_method.__name__ = name
-        setattr(TestTorchFunctionOverride, name, test_method)
+        setattr(cls, name, test_method)
+
+generate_tensor_like_override_tests(TestTorchFunctionOverride)
+
+if __name__ == '__main__':
     unittest.main()
