@@ -9,6 +9,7 @@
 #include <type_traits>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Complex.h>
+#include <c10/util/Half.h>
 #include <c10/macros/Macros.h>
 
 namespace at {
@@ -40,6 +41,10 @@ inline bool _isnan(T val) {
 }
 
 inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
+  return at::_isnan(float(val));
+}
+
+inline C10_HOST_DEVICE bool _isnan(c10::Half val) {
   return at::_isnan(float(val));
 }
 

@@ -8269,6 +8269,7 @@ class TestTorchDeviceType(TestCase):
 
         types = [torch.double,
                  torch.float,
+                 torch.half,
                  torch.int64,
                  torch.int32,
                  torch.int16]

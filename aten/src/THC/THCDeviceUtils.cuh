@@ -2,6 +2,7 @@
 #define THC_DEVICE_UTILS_INC
 
 #include <cuda.h>
+#include <c10/util/Half.h>
 /* The largest consecutive integer representable in float32 (2^24) */
 #define FLOAT32_MAX_CONSECUTIVE_INT 16777216.0f
 
@@ -113,6 +114,15 @@ __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int wid
     return __shfl_down_sync(mask, value, delta, width);
 #else
     return __shfl_down(value, delta, width);
+#endif
+}
+template <>
+__device__ __forceinline__ c10::Half WARP_SHFL_DOWN<c10::Half>(c10::Half value, unsigned int delta, int width, unsigned int mask)
+{
+#if CUDA_VERSION >= 9000
+    return __shfl_down_sync(mask, __half(value), delta, width);
+#else
+    return __shfl_down(__half(value), delta, width);
 #endif
 }
 

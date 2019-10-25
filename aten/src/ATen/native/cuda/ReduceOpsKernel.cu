@@ -170,7 +170,7 @@ void min_values_kernel_cuda(TensorIterator& iter) {
 }
 
 void argmax_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmax_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(1), "argmax_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, int64_t>(
       iter,
       ArgMaxOps<scalar_t>{},
@@ -179,7 +179,7 @@ void argmax_kernel_cuda(TensorIterator& iter) {
 }
 
 void argmin_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmin_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, iter.dtype(1), "argmin_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, int64_t>(
       iter,
       ArgMinOps<scalar_t>{},
