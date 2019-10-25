@@ -2,7 +2,6 @@
 
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>

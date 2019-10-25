@@ -44,7 +44,6 @@ void DistAutogradContext::addRecvFunction(
   TORCH_INTERNAL_ASSERT(
       recvAutogradFunctions_.find(autograd_message_id) ==
       recvAutogradFunctions_.end());
-
   recvAutogradFunctions_.emplace(autograd_message_id, func);
 }
 

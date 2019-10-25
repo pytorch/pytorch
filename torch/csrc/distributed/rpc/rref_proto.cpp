@@ -92,6 +92,7 @@ std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
       values.size() == 2, "ScriptRRefFetchCall expects 2 IValues from message");
   auto id = values[1].toInt();
   TORCH_INTERNAL_ASSERT(
+      id >= std::numeric_limits<worker_id_t>::min() &&
       id <= std::numeric_limits<worker_id_t>::max(),
       "ScriptRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
   return c10::guts::make_unique<ScriptRRefFetchCall>(

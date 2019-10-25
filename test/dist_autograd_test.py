@@ -608,7 +608,6 @@ class DistAutogradTest(object):
                 loss = val.sum()
 
                 ret = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2, t2, t3, t4)
-                print("=== done mode ", exec_mode)
                 local_grads = ret if ret else local_grads
 
     @dist_init(setup_model_parallel=True)
