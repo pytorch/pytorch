@@ -34,7 +34,6 @@ def ort_test_with_input(ort_sess, input, output, rtol, atol):
     inputs = list(map(to_numpy, input))
     outputs = list(map(to_numpy, output))
 
-
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
 
