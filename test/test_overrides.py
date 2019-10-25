@@ -7,10 +7,26 @@ import functools
 
 from common_utils import TestCase
 
+# HANDLED_FUNCTIONS_DIAGONAL is a dispatch table that
+# DiagonalTensor.__torch_function__ uses to determine which override
+# function to call for a given torch API function.  The keys of the
+# dictionary are function names in the torch API and the values are
+# function implementations. Implementations are added to
+# HANDLED_FUNCTION_DIAGONAL by decorating a python function with
+# implements_diagonal. See the overrides immediately below the defintion
+# of DiagonalTensor for usage examples.
 HANDLED_FUNCTIONS_DIAGONAL = {}
 
 def implements_diagonal(torch_function):
-    "Register an implementation of a torch function for DiagonalTensor."
+    """Register an implementation of a torch function for DiagonalTensor.
+
+    This decorator takes a function in the torch API as a
+    parameter. Applying this decorator to a function adds the function
+    as the registered override for a torch function. See
+    DiagonalTensor.__torch_function__ to see how the dispatch works at
+    runtime and the decorated functions immediately below DiagonalTensor
+    for usage examples.
+    """
     @functools.wraps(torch_function)
     def decorator(func):
         HANDLED_FUNCTIONS_DIAGONAL[torch_function.__name__] = func
@@ -52,13 +68,6 @@ class DiagonalTensor(object):
     .. _DiagonalArray example:
         https://numpy.org/devdocs/user/basics.dispatch.html
     """
-    # HANDLED_FUNCTIONS_DIAGONAL is a dispatch table that __torch_function__
-    # uses to determine which function to call for a given torch API function.
-    # The keys of the dictionary are function names and the values are function
-    # implementations. Implementations are added to HANDLED_FUNCTION_DIAGONAL
-    # by decorating a python function with implements_diagonal. See the overrides
-    # immediately below this class for examples.
-
     # This is defined as a class attribute so that SubDiagonalTensor
     # below which subclasses DiagonalTensor can re-use DiagonalTensor's
     # __torch_function__ implementation.
