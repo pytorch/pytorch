@@ -624,9 +624,9 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
     : pImpl(
           getExecutorMode() ? dynamic_cast<GraphExecutorImplBase*>(
-                                   new ProfilingGraphExecutorImpl(graph))
-                             : dynamic_cast<GraphExecutorImplBase*>(
-                                   new GraphExecutorImpl(graph))) {}
+                                  new ProfilingGraphExecutorImpl(graph))
+                            : dynamic_cast<GraphExecutorImplBase*>(
+                                  new GraphExecutorImpl(graph))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
@@ -682,7 +682,6 @@ static bool mayIntroduceGradient(const Block* b) {
 }
 
 bool needsGradient(const std::shared_ptr<const Graph>& graph) {
-
   if (!autograd::GradMode::is_enabled()) {
     return false;
   }
@@ -692,8 +691,8 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
   }
 
   if (getProfilingMode()) {
-    for (const Value *input : graph->inputs()) {
-      for (const auto &use : input->uses()) {
+    for (const Value* input : graph->inputs()) {
+      for (const auto& use : input->uses()) {
         if (use.user->kind() == prim::BailOut) {
           auto ptt = use.user->output()->type()->expect<TensorType>();
           if (ptt->requiresGrad() && *ptt->requiresGrad()) {
@@ -703,7 +702,7 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
       }
     }
   } else {
-    for (const Value *input : graph->inputs()) {
+    for (const Value* input : graph->inputs()) {
       if (input->type()->requires_grad()) {
         return true;
       }

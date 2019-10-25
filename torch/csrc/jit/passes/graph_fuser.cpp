@@ -21,8 +21,7 @@ namespace jit {
 namespace {
 
 static bool hasMaybeUndefinedInputs(Node* node) {
-
-  auto maybe_undefined = [](Value* v) { 
+  auto maybe_undefined = [](Value* v) {
     auto tt = v->type()->cast<TensorType>();
     if (!tt) {
       return false;
@@ -30,7 +29,8 @@ static bool hasMaybeUndefinedInputs(Node* node) {
     return !tt->undefined().has_value() || *tt->undefined();
   };
 
-  return std::any_of(node->inputs().begin(), node->inputs().end(), maybe_undefined);
+  return std::any_of(
+      node->inputs().begin(), node->inputs().end(), maybe_undefined);
 }
 
 // What is a simple mappable operator?  It:
@@ -358,11 +358,12 @@ struct GraphFuser {
           inputs_map[input] = in_group;
           group->insertInput(tensor_insert_idx, input);
           tensor_insert_idx++;
-        } else if ((input->type()->isSubtypeOf(FloatType::get()) &&
-                    input->node()->kind() != prim::Constant) ||
-                   (n->kind() == aten::_grad_sum_to_size &&
-                    input->type()->isSubtypeOf(
-                        OptionalType::create(ListType::ofInts())))) {
+        } else if (
+            (input->type()->isSubtypeOf(FloatType::get()) &&
+             input->node()->kind() != prim::Constant) ||
+            (n->kind() == aten::_grad_sum_to_size &&
+             input->type()->isSubtypeOf(
+                 OptionalType::create(ListType::ofInts())))) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;

@@ -938,10 +938,10 @@ RegisterOperators reg(
              bool result = false;
              for (const IValue& v : last(stack, num_inputs)) {
                if (v.isTensor()) {
-                if (v.toTensor().defined()) {
-                  result = true;
-                  break;
-                }
+                 if (v.toTensor().defined()) {
+                   result = true;
+                   break;
+                 }
                } else if (v.isTensorList()) {
                  for (const at::Tensor& t : v.toTensorListRef()) {
                    result = true;
@@ -952,13 +952,13 @@ RegisterOperators reg(
                } else {
                  TORCH_INTERNAL_ASSERT(false);
                }
-
              }
              drop(stack, num_inputs);
              stack.emplace_back(result);
              return 0;
            };
-         }, aliasAnalysisFromSchema()),
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          prim::AutogradAdd,
          [](Stack& stack) {

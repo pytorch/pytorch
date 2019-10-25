@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
@@ -11,10 +13,8 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/profiling_graph_executor_impl.h>
-#include <torch/csrc/jit/passes/graph_fuser.h>
 
 namespace torch {
 namespace jit {
@@ -22,17 +22,21 @@ namespace jit {
 static std::atomic<bool> profiling_mode{false};
 static std::atomic<bool> executor_mode{false};
 
-std::atomic<bool> &getProfilingMode() { return profiling_mode; }
-std::atomic<bool> &getExecutorMode() { return executor_mode; }
+std::atomic<bool>& getProfilingMode() {
+  return profiling_mode;
+}
+std::atomic<bool>& getExecutorMode() {
+  return executor_mode;
+}
 
 static bool needsGradientInProfilingMode(Block* b) {
   for (auto n : b->nodes()) {
-      if (n->kind() == prim::BailOut) {
-        auto ptt = n->output()->type()->expect<TensorType>();
-        if (ptt->requiresGrad() && *ptt->requiresGrad()) {
-          return true;
-        }
+    if (n->kind() == prim::BailOut) {
+      auto ptt = n->output()->type()->expect<TensorType>();
+      if (ptt->requiresGrad() && *ptt->requiresGrad()) {
+        return true;
       }
+    }
 
     for (auto ib : n->blocks()) {
       if (needsGradientInProfilingMode(ib)) {
@@ -68,7 +72,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
       LowerGradOf(*copy);
       specializeAutogradZero(*copy);
       runRequiredPasses(copy);
-      GRAPH_DUMP("Profiled Graph: ", copy);      
+      GRAPH_DUMP("Profiled Graph: ", copy);
       profiling_plan_ = ExecutionPlan(copy);
       // fall-through
     }
@@ -100,17 +104,19 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
   if (!getProfilingMode()) {
     ClearUndefinedness(copy);
   }
-  
-  runRequiredPasses(copy);  
+
+  runRequiredPasses(copy);
   ConstantPropagation(copy);
   runOptimization(copy);
 
   // TODO: insert grad propagation
-  bool needs_gradient = getProfilingMode() ? needsGradientInProfilingMode(copy->block()) : needsGradient(copy);
+  bool needs_gradient = getProfilingMode()
+      ? needsGradientInProfilingMode(copy->block())
+      : needsGradient(copy);
   if (needs_gradient) {
     auto diff_nodes = CreateAutodiffSubgraphs(
-    copy,
-    getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
+        copy,
+        getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     for (Node *dnode : diff_nodes) {
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);

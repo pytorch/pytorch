@@ -1,10 +1,10 @@
-#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <memory>
 #include <unordered_set>
 
@@ -143,7 +143,6 @@ struct BailOutGraphBuilderForNode {
   }
 
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
-
     // add graph inputs for guard's input
     // and loop counts for loops `n` is contained in
     // to make sure we can line bailout grap's inputs up properly
@@ -172,8 +171,7 @@ struct BailOutGraphBuilderForNode {
 // version of an original graph from a particular point
 struct BailOutInserter {
   explicit BailOutInserter(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)),
-      bailout_index_(0) {}
+      : graph_(std::move(graph)), bailout_index_(0) {}
 
   void run() {
     liveness_sets_ = BuildLivenessSets(graph_);
@@ -301,8 +299,8 @@ void InsertBailOuts(std::shared_ptr<Graph> graph) {
 // index matches the given `index`
 static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
   for (auto n : b->nodes()) {
-    if ((n->kind() == prim::BailOut || n->kind() == prim::Guard) && n->hasAttribute(attr::index) &&
-        n->i(attr::index) == index) {
+    if ((n->kind() == prim::BailOut || n->kind() == prim::Guard) &&
+        n->hasAttribute(attr::index) && n->i(attr::index) == index) {
       return n;
     }
     for (auto ib : n->blocks()) {
@@ -336,7 +334,6 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
     int64_t bailout_index,
     const std::shared_ptr<Graph>& orig,
     const std::shared_ptr<Graph>& target) {
-
   auto orig_bailout_node =
       locateBailOutNodeInUnoptimizedGraph(orig->block(), bailout_index);
 
@@ -346,8 +343,9 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
       orig_bailout_node->inputs().at(0)->type()->cast<FunctionType>() ==
       nullptr);
   TORCH_INTERNAL_ASSERT(
-      orig_bailout_node && (orig_bailout_node->kind() == prim::BailOut || 
-      orig_bailout_node->kind() == prim::Guard) &&
+      orig_bailout_node &&
+      (orig_bailout_node->kind() == prim::BailOut ||
+       orig_bailout_node->kind() == prim::Guard) &&
       bailout_index == orig_bailout_node->i(attr::index));
   BailOutGraphBuilderForNode bg(orig, target);
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);

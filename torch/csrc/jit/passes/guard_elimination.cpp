@@ -16,9 +16,9 @@ struct GuardElimination {
         aliasDb_(c10::guts::make_unique<AliasDb>(graph_)) {}
 
   void run() {
-
     size_t attempts = 5;
-    while (attempts-- && moveGuardsToDefs(graph_->block())) {}
+    while (attempts-- && moveGuardsToDefs(graph_->block())) {
+    }
     GRAPH_DUMP("After moveGuardsToDefs", graph_);
     coalesceGuards(graph_->block());
     GRAPH_DUMP("After coalesceGuards", graph_);
@@ -35,7 +35,6 @@ struct GuardElimination {
   }
 
   bool moveGuardsToDefs(Block* b) {
-
     bool changed = false;
     for (auto it = b->nodes().begin(); it != b->nodes().end();) {
       auto n = *it;
@@ -67,8 +66,9 @@ struct GuardElimination {
       }
     }
 
-    if (b->owningNode() && isLoweredGradOf(b->owningNode()) /*b->owningNode()->kind() == prim::If*/) {
-
+    if (b->owningNode() &&
+        isLoweredGradOf(
+            b->owningNode()) /*b->owningNode()->kind() == prim::If*/) {
       for (auto it = b->nodes().begin(); it != b->nodes().end();) {
         auto block_node = *it++;
         if (block_node->kind() != prim::Guard) {
@@ -279,8 +279,7 @@ private:
       return false;
 
     // this is checked by one of the tests in test_jit_fuser.py
-    case prim::ListUnpack: 
-    {
+    case prim::ListUnpack: {
       // check if the input is a constant chunk
       // used for LSTM fusions
       auto chunk = n->input(0)->node();
@@ -290,8 +289,7 @@ private:
       return checkInputs(chunk, no_exceptions);
     }
     // this is checked by one of the tests in test_jit_fuser.py
-    case aten::broadcast_tensors:
-    {
+    case aten::broadcast_tensors: {
       auto list_construct = n->input(0)->node();
       if (list_construct->kind() != prim::ListConstruct) {
         return false;

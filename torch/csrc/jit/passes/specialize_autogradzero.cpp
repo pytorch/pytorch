@@ -17,15 +17,13 @@ void specializeAutogradZero(Graph &g) {
   for (Value* input : g.inputs()) {
     const auto& tp = input->type();
     if (auto tt = tp->cast<TensorType>()) {
-      if (tt->undefined()) 
-      {
-        if(*tt->undefined()) {
+      if (tt->undefined()) {
+        if (*tt->undefined()) {
           state[input] = State::Zero;
         } else {
           state[input] = State::Nonzero;
         }
-      }
-      else {
+      } else {
         state[input] = State::Unknown;
       }
     } else if (
@@ -105,18 +103,17 @@ void specializeAutogradZero(Graph &g) {
       } break;
       // Lowered GradOf block
       case prim::If: {
-        auto if_input = n->input(0)->node();  
-        if (if_input->kind() == prim::AutogradAnyNonZero)
-        {
-          auto all_zeros =
-              std::all_of(if_input->inputs().begin(), if_input->inputs().end(), [&](Value* v) {
-                return state[v] == State::Zero;
-              });
+        auto if_input = n->input(0)->node();
+        if (if_input->kind() == prim::AutogradAnyNonZero) {
+          auto all_zeros = std::all_of(
+              if_input->inputs().begin(),
+              if_input->inputs().end(),
+              [&](Value* v) { return state[v] == State::Zero; });
 
-          auto all_nonzeros =
-              std::all_of(if_input->inputs().begin(), if_input->inputs().end(), [&](Value* v) {
-                return state[v] == State::Nonzero;
-              });
+          auto all_nonzeros = std::all_of(
+              if_input->inputs().begin(),
+              if_input->inputs().end(),
+              [&](Value* v) { return state[v] == State::Nonzero; });
           // Property 1: if all the gradInputs to the GradOf are Zero
           // then the gradOutputs are also zero and will be represented as
           // AutogradZero nodes
@@ -129,7 +126,7 @@ void specializeAutogradZero(Graph &g) {
             it.destroyCurrent();
             break;
           }
-          
+
           if (all_nonzeros) {
             auto body = n->blocks().at(0);
             // hoist the nodes in the GradOf body to be before the linear block
@@ -146,8 +143,8 @@ void specializeAutogradZero(Graph &g) {
             break;
           }
         }
-        //fallthrough
-      } 
+        // fallthrough
+      }
       default:
         for (auto o : n->outputs()) {
           state[o] = State::Unknown;
