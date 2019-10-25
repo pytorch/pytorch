@@ -274,6 +274,70 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, GridSample) {
+  auto input = torch::arange(9, torch::kFloat).view(std::vector<int64_t>({1, 1, 3, 3}));
+  auto grid = torch::tensor({{
+      {{-2., -1.}, {-1., -1.}, {0., -1.}},
+      {{-1., 0.}, {0., 0.}, {1., 0.}},
+      {{0., 1.}, {1., 1.}, {2., 1.}}
+  }}, torch::kFloat);
+
+  // bilinear, zeros, true
+  auto options = GridSampleOptions()
+                    .mode("bilinear")
+                    .padding_mode("zeros")
+                    .align_corners(true);
+  auto output = F::grid_sample(input, grid, options);
+  auto expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, zeros, false
+  options = GridSampleOptions()
+                .mode("bilinear")
+                .padding_mode("zeros")
+                .align_corners(false);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{0., 0., 0.5}, {1.5, 4., 2.5}, {3.5, 2., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // default options (bilinear, zeros, false) same result as above
+  output = F::grid_sample(input, grid);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // nearest, zeros, true
+  options = GridSampleOptions()
+                .mode("nearest")
+                .padding_mode("zeros")
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, border, true
+  options = GridSampleOptions()
+                .mode("bilinear")
+                .padding_mode("border")
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 8.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, reflection, true
+  options = GridSampleOptions()
+                .mode("bilinear")
+                .padding_mode("reflection")
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{1., 0., 1.}, {3., 4., 5.}, {7., 8., 7.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+}
+
 TEST_F(FunctionalTest, AffineGrid) {
   {
     // 2D affine.
