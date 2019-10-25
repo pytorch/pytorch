@@ -514,6 +514,8 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
  private:
   // Friend classes.
 
+  friend class ModuleDictImpl;
+
   template <typename Derived>
   friend class Cloneable;
 

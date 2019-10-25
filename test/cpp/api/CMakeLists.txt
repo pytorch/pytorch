@@ -13,6 +13,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/memory.cpp
   ${TORCH_API_TEST_DIR}/misc.cpp
   ${TORCH_API_TEST_DIR}/module.cpp
+  ${TORCH_API_TEST_DIR}/moduledict.cpp
   ${TORCH_API_TEST_DIR}/modulelist.cpp
   ${TORCH_API_TEST_DIR}/modules.cpp
   ${TORCH_API_TEST_DIR}/nn_utils.cpp
