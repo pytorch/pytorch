@@ -16,6 +16,7 @@
 #undef Real
 #undef RealUnderlying
 #undef TH_REAL_IS_BYTE
+#undef THQINT8
 #undef THQUANTIZED
 
 #ifndef THGenerateManyTypes
