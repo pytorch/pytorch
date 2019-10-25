@@ -297,8 +297,9 @@ private:
                     " quantized tensor but '" operator_name_, "' expects a",
                     " non-quantized input.");
       }
+
       // If the input is not quantized, but the kernel is.
-      if (!kernels_.lookup(TensorTypeId::QuantizedCPUTensorId)) {
+      if (kernels_.lookup(TensorTypeId::QuantizedCPUTensorId)) {
         TORCH_CHECK(false, "Tried running '", operator_name_, "' but the input",
                     " is not quantized. Please ensure you have QuantStub",
                     " during model conversion, or you manually quantize the",
