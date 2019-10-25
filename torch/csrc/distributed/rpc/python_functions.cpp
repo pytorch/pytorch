@@ -143,11 +143,12 @@ PyRRef pyRemoteBuiltin(
       ctx.getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
   auto userRRef = ctx.createUserRRef<IValue>(dst.id_);
-  auto fm = agent.send(
-      dst,
-      ScriptRemoteCall(
-          op, std::move(stack), userRRef->rrefId(), userRRef->forkId())
-          .toMessage());
+
+  auto scriptRemoteCall = c10::guts::make_unique<ScriptRemoteCall>(
+      op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
+
+  auto fm = sendMessageWithAutograd(
+      agent, dst, std::move(*scriptRemoteCall).toMessage());
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);

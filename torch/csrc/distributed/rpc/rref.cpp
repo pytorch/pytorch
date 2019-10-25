@@ -1,7 +1,11 @@
 #include <torch/csrc/distributed/rpc/rref.h>
 
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
@@ -133,14 +137,33 @@ template <>
 std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
   auto future = std::make_shared<ivalue::Future>(nullptr);
   auto agent = RpcAgent::getDefaultRpcAgent();
-  auto futureResponse = agent->send(
+
+  auto futureResponse = autograd::sendMessageWithAutograd(
+      *agent,
       agent->getWorkerInfo(ownerId_),
-      ScriptRRefFetchCall(rrefId()).toMessage());
+      ScriptRRefFetchCall(ownerId_, rrefId()).toMessage(),
+      true /* forceAutograd */);
 
   futureResponse->addCallback([future](const Message& message) {
     RRefContext::handleException(message);
-    auto rfr = ScriptRRefFetchRet::fromMessage(message);
-    future->markCompleted(rfr->values().front());
+    if (message.type() == MessageType::FORWARD_AUTOGRAD_RESP) {
+      auto response = deserializeResponse(message);
+      auto& rpcWithAutograd =
+          static_cast<autograd::RpcWithAutograd&>(*response);
+
+      // Attach 'recv' autograd function.
+      addRecvRpcBackward(
+          rpcWithAutograd.autogradMetadata(),
+          rpcWithAutograd.tensors(),
+          rpcWithAutograd.fromWorkerId());
+
+      auto& wrappedRpc = rpcWithAutograd.wrappedRpc();
+      auto& rfr = static_cast<ScriptRRefFetchRet&>(wrappedRpc);
+      future->markCompleted(rfr.values().front());
+    } else {
+      auto rfr = ScriptRRefFetchRet::fromMessage(message);
+      future->markCompleted(rfr->values().front());
+    }
   });
   return future;
 }

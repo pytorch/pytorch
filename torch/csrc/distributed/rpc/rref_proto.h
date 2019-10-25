@@ -51,11 +51,20 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
 // UserRRef uses this message to fetch the remote RRef value from the owner.
 class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
  public:
-  explicit ScriptRRefFetchCall(const RRefId& rrefId)
-      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL) {}
+  ScriptRRefFetchCall(worker_id_t fromWorkerId, const RRefId& rrefId)
+      : RRefMessageBase(rrefId, MessageType::SCRIPT_RREF_FETCH_CALL),
+        fromWorkerId_(fromWorkerId) {}
 
+  inline worker_id_t fromWorkerId() const {
+    return fromWorkerId_;
+  }
+
+  Message toMessage() && override;
   static std::unique_ptr<ScriptRRefFetchCall> fromMessage(
       const Message& message);
+
+ private:
+  const worker_id_t fromWorkerId_;
 };
 
 class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
