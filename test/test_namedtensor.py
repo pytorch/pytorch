@@ -143,6 +143,17 @@ class TestNamedTensor(TestCase):
             names65 = ['A' * i for i in range(1, 66)]
             x = factory([1] * 65, names=names64, device=device)
 
+    def test_none_names_refcount(self):
+        def scope():
+            unnamed = torch.empty(2, 3)
+            unnamed.names  # materialize [None, None]
+
+        none_refcnt = sys.getrefcount(None)
+        scope()
+        self.assertEqual(sys.getrefcount(None), none_refcnt,
+                         message='Calling tensor.names should not decrement '
+                                 'the refcount of Py_None')
+
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
         none_named = torch.empty(2, 3, names=(None, None))

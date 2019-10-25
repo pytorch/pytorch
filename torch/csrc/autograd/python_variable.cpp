@@ -335,8 +335,17 @@ PyObject *THPVariable_get_names(THPVariable *self, void *unused)
 
   const auto dimnames = self->cdata.names();
   for (size_t i = 0; i < size; ++i) {
-    PyObject* str = Py_None;
-    if (dimnames[i].type() != at::NameType::WILDCARD) {
+    PyObject* str;
+    if (dimnames[i].type() == at::NameType::WILDCARD) {
+      // Py_None is a special Python singleton; when we returning it as a dimname
+      // we need to increment the refcount because this is a *new* reference.
+      // See https://docs.python.org/3/extending/extending.html#back-to-the-example
+      // and https://docs.python.org/3/c-api/none.html#c.Py_RETURN_NONE
+      // Note that we cannot use Py_RETURN_NONE directly because we return a list
+      // of names, of which some can be None.
+      Py_INCREF(Py_None);
+      str = Py_None;
+    } else {
       str = THPUtils_packString(dimnames[i].symbol().toUnqualString());
       if (!str) throw python_error();
     }
