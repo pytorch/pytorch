@@ -8,7 +8,7 @@
 #include <c10/core/TensorTypeId.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
-#include <ATen/core/ATenDispatch.h>
+#include <ATen/core/Variadic.h>
 
 #include <array>
 #include <atomic>
@@ -20,6 +20,54 @@
 #include <functional>
 
 namespace c10 {
+
+namespace impl {
+
+// Take a TensorTypeSet for a Tensor, and combine it with the current thread
+// local valid (implemented) and enabled (not implemented) TensorTypeSets
+// to determine what the actual dispatch TensorTypeId should be.  Unlike
+// Tensor::type_set(), the value of this on a tensor can change depending
+// on TLS.
+//
+// NB: I didn't make this take a Tensor to avoid header include shenanigans.
+//
+// TODO: I'm not sure if this should live in this header or not; the operant
+// question is whether or not we have access to all the relevant TLS at this
+// point.
+static inline TensorTypeId dispatchTypeId(TensorTypeSet ts) {
+  c10::impl::LocalTensorTypeSet local = c10::impl::tls_local_tensor_type_set();
+  return ((ts | local.included_) - local.excluded_).highestPriorityTypeId();
+}
+
+}
+
+namespace detail {
+  struct MultiDispatchTensorTypeSet : at::IterArgs<MultiDispatchTensorTypeSet> {
+    TensorTypeSet ts;
+    void operator()(const at::Tensor& x) {
+      ts = ts | x.type_set();
+    }
+    void operator()(TensorOptions x) {
+      ts = ts | x.type_set();
+    }
+    void operator()(at::ArrayRef<at::Tensor> xs) {
+      for (const auto& x : xs) {
+        ts = ts | x.type_set();
+      }
+    }
+    template <typename T>
+    void operator()(const T& x) {
+      // do nothing
+    }
+  };
+
+  // NB: take by const reference (Don't do universal forwarding here! You
+  // don't want to move into this function!)
+  template <typename... Args>
+  TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
+    return MultiDispatchTensorTypeSet().apply(args...).ts;
+  }
+}
 
 namespace detail {
 
