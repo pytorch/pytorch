@@ -20,6 +20,8 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/EnableNamedTensor.h>
 
+#include <ATen/core/grad_mode.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -86,7 +88,6 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   AT_ASSERT(options.device().type() == DeviceType::CPU);
-  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
   check_size_nonnegative(size);
 
   c10::Allocator* allocator;
@@ -375,6 +376,10 @@ Tensor ones_like(const Tensor& self, const TensorOptions& options) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
+  // Avoid tracing/profiling the fill_ operation here.  The fact that we
+  // have to toggle this using no grad mode is an abuse, but there's
+  // no way around it as long as profiling is part of Variable.
+  at::AutoNonVariableTypeMode guard_;
   return at::empty({}, options).fill_(s);
 }
 
