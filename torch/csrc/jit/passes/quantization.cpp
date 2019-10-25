@@ -146,7 +146,7 @@ class InsertObserversHelper {
   // will be propagated through the function call hierarchy
   std::unordered_set<Value*> bias_values_;
   // Unique id generator for observer module
-  int uid_;
+  int uid_ = 0;
 };
 
 // Clone observer module and add it to the original module,
@@ -225,20 +225,20 @@ graph(%self, %input, %inplace):
     %conv = match::module[name="Conv2d"](%self)
     %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
     %r = prim::CallFunction(%relu, %intermediate_val, %inplace)
-    return (%r))";
+    return (%r) )";
   std::string conv_relu_module = R"(
 graph(%self, %input):
     %conv = match::module[name="Conv2d"](%self)
     %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
     %relu = match::module[name="ReLU"](%self)
     %r = prim::CallMethod[name="forward"](%relu, %intermediate_val)
-    return (%r))";
+    return (%r) )";
   std::string matmul_add = R"(
 graph(%input, %weight, %bias, %4):
      %weight_t = aten::t(%weight)
      %intermediate_val = aten::matmul(%input, %weight_t)
      %res = aten::add_(%intermediate_val, %bias, %4)
-     return (%res))";
+     return (%res) )";
   std::vector<std::string> patterns = {
       conv_functional_relu, conv_relu_module, matmul_add};
 
@@ -628,7 +628,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %w_dequant = aten::dequantize(%w_quant)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        return (%r))";
+        return (%r) )";
 
   std::string conv_with_quant_prepack = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
@@ -637,7 +637,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        return (%r))";
+        return (%r) )";
 
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(conv_with_quant, conv_with_quant_prepack);
@@ -870,7 +870,7 @@ void FoldQuantizeCallIntoBuffer(
 graph(%self, %scale, %zero_point, %dtype):
    %weight = prim::GetAttr[name="weight"](%self)
    %weight_quant = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
-   return (%weight_quant))";
+   return (%weight_quant) )";
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   script::parseIR(pattern, &pattern_graph, vmap);
@@ -907,7 +907,7 @@ graph(%self, %scale, %zero_point, %dtype):
   std::string replacement = R"(
 graph(%self, %scale, %zero_point, %dtype):
     %weight_quant = prim::GetAttr[name="_quantized_weight"](%self)
-    return (%weight_quant))";
+    return (%weight_quant) )";
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(pattern, replacement);
   rewriter.runOnGraph(graph, filter);
@@ -919,7 +919,7 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %w_dequant = aten::dequantize(%w_quant)
         %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        return (%r))";
+        return (%r) )";
 
   std::string linear_with_quant_prepack = R"(
 graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
@@ -928,7 +928,7 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        return (%r))";
+        return (%r) )";
 
   // Filter to match linear CallFunction
   auto filter = [](const Match& match,
@@ -965,15 +965,14 @@ void FoldPrepackedWeightIntoModule(
     script::Module& module,
     const std::string& method_name,
     const script::Module& linear_params_module,
-    const script::Module& conv_params_module,
-    int& uid) {
+    const script::Module& conv_params_module) {
   auto method = module.get_method(method_name);
   auto graph = method.graph();
   std::string linear_prepack = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %packed_params = quantized::linear_prepack(%w_quant, %b)
-        return (%packed_params))";
+        return (%packed_params) )";
 
   std::string conv2d_prepack = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
@@ -1034,6 +1033,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       }
       auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
       // unique name for the module based on %w_quant
+      int uid = 0;
       auto module_name = module_name_prefix + std::to_string(uid++);
       while (module.find_module(module_name)) {
         module_name_prefix + std::to_string(uid++);
@@ -1071,10 +1071,9 @@ void FoldPrepackedWeightIntoModule(
     script::Module& module,
     const script::Module& linear_params_module,
     const script::Module& conv_params_module) {
-  int uid = 0;
   for (auto& method : module.get_methods()) {
     FoldPrepackedWeightIntoModule(
-        module, method.name(), linear_params_module, conv_params_module, uid);
+        module, method.name(), linear_params_module, conv_params_module);
     for (script::NameModule m : module.get_modules()) {
       FoldPrepackedWeightIntoModule(
           m.module, linear_params_module, conv_params_module);
