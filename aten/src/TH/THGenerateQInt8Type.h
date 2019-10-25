@@ -7,6 +7,7 @@
 #define Real QInt8
 #define RealUnderlying Char
 #define THQUANTIZED
+#define THQINT8
 #define TH_REAL_IS_BYTE
 #line 1 TH_GENERIC_FILE
 #include TH_GENERIC_FILE

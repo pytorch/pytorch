@@ -7,6 +7,7 @@
 #define Real QInt32
 #define RealUnderlying Int
 #define THQUANTIZED
+#define THQINT32
 #define TH_REAL_IS_BYTE
 #line 1 TH_GENERIC_FILE
 #include TH_GENERIC_FILE
