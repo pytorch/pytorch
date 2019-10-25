@@ -495,7 +495,6 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   }
 
   ExecutionPlan getPlanFor(Stack& stack) override {
-    TORCH_INTERNAL_ASSERT(false);
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }

@@ -17191,7 +17191,6 @@ def add_autograd_test(
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
                                 fusible_nodes = []
 
-                            print(traced_fn.last_graph)
                             if (doAutodiffCheck(test_name)):
                                 self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
