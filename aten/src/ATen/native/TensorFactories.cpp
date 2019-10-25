@@ -878,7 +878,7 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
 
 Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Preserve);
+      optional_memory_format.value_or(MemoryFormat::Contiguous);
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
       // Copy all strides
