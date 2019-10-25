@@ -93,7 +93,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -133,7 +133,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       # This workspace also carries binaries from the build job
@@ -156,7 +156,7 @@
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
     macos:
-      xcode: "9.0"
+      xcode: "9.4.1"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -381,7 +381,7 @@
           name: cert install
           no_output_timeout: "1h"
           command: |
-            set -e 
+            set -e
             PROJ_ROOT=/Users/distiller/project
             cd ${PROJ_ROOT}/ios/TestApp
             # install fastlane
@@ -442,7 +442,7 @@
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
               exit 1
-            fi 
+            fi
             echo ${IOS_DEV_TEAM_ID}
             ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
             if ! [ "$?" -eq "0" ]; then
