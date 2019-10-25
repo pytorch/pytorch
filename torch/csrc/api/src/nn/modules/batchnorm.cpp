@@ -79,8 +79,13 @@ Tensor BatchNormImpl::pure_forward(
 }
 
 template <size_t D, typename Derived>
-BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormBaseOptions<D>& options_)
+BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormBaseOptions& options_)
     : options(options_) {
+  reset();
+}
+
+template <size_t D, typename Derived>
+void BatchNormImplBase<D, Derived>::reset() {
   if (options.affine()) {
     weight = this->register_parameter("weight", torch::ones({options.num_features()}));
     bias = this->register_parameter("bias", torch::zeros({options.num_features()}));
@@ -97,37 +102,12 @@ BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormBaseOptions<D>& 
     running_var = this->register_buffer("running_var", Tensor());
     num_batches_tracked = this->register_buffer("num_batches_tracked", Tensor());
   }
-  reset();
-}
-
-template <size_t D, typename Derived>
-void BatchNormImplBase<D, Derived>::reset_parameters() {
-  reset_running_stats();
-  if (options.affine()) {
-    torch::nn::init::ones_(weight);
-    torch::nn::init::zeros_(bias);
-  }
-}
-
-template <size_t D, typename Derived>
-void BatchNormImplBase<D, Derived>::reset_running_stats() {
-  if (options.track_running_stats()) {
-    torch::nn::init::zeros_(running_mean);
-    torch::nn::init::ones_(running_var);
-    torch::nn::init::zeros_(num_batches_tracked);
-  }
-}
-
-template <size_t D, typename Derived>
-void BatchNormImplBase<D, Derived>::reset() {
-  reset_parameters();
 }
 
 template <size_t D, typename Derived>
 void BatchNormImplBase<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
          << "torch::nn::BatchNorm" << D << "d("
-         << "num_features=" << options.num_features() << ", "
          << "eps=" << options.eps() << ", "
          << "momentum=" << options.momentum().value() << ", "
          << "affine=" << options.affine() << ", "
@@ -169,8 +149,8 @@ Tensor BatchNormImplBase<D, Derived>::forward(const Tensor& input) {
 
 void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
   TORCH_CHECK(
-      input.dim() != 2 && input.dim() !=3,
-      "expected 2D or 3D input (got %dD input)", input.dim());
+      input.dim() == 2 || input.dim() == 3,
+      "expected 2D or 3D input (got ", input.dim(), "D input)");
 }
 
 template class BatchNormImplBase<1, BatchNorm1dImpl>;

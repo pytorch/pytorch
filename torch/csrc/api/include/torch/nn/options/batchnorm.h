@@ -30,7 +30,6 @@ struct TORCH_API BatchNormOptions {
   TORCH_ARG(double, momentum) = 0.1;
 };
 
-template <size_t D>
 struct BatchNormBaseOptions {
   BatchNormBaseOptions(int64_t num_features) : num_features_(num_features) {}
 
@@ -57,7 +56,7 @@ struct BatchNormBaseOptions {
   TORCH_ARG(bool, track_running_stats) = true;
 };
 
-using BatchNorm1dOptions = BatchNormBaseOptions<1>;
+using BatchNorm1dOptions = BatchNormBaseOptions;
 
 } // namespace nn
 } // namespace torch
