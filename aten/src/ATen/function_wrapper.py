@@ -243,7 +243,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op, c10::impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -256,7 +256,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, c10::impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op${native_actuals_with_comma_prefix});
 #endif
 }
 """)

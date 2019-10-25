@@ -4,6 +4,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
 #include <c10/core/TensorTypeSet.h>
+#include <ATen/core/Variadic.h>
 
 namespace c10 {
 
@@ -109,7 +110,7 @@ public:
       return c10::nullopt;
     }
 
-    return impl::dispatchTypeId(at::detail::multi_dispatch_tensor_type_set(args...));
+    return impl::dispatchTypeId(detail::multi_dispatch_tensor_type_set(args...));
   }
 
 private:
