@@ -246,7 +246,7 @@ private:
       if (dispatch_key.value() == TensorTypeId::QuantizedCPUTensorId) {
         // If the input is quantized, but the quantization is not supported.
         TORCH_CHECK(false, "Tried runninig '", operator_name_, "', but it",
-                    " doesn't support quantization. Please, check the",
+                    " expects non-quantized input. Please, check the",
                     " documentation for supported kernels.");
       }
       // If the input is not quantized, but the kernel is.
