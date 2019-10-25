@@ -1036,7 +1036,7 @@ def _build_extension_module(name, build_directory, verbose):
     except subprocess.CalledProcessError:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
-        # error.output contains the stdout and stderr of the build attempt.
+        # error.output contains the stdout and stderr of the build attempt
         message = "Error building extension '{}'".format(name)
         if hasattr(error, 'output') and error.output:
             message += ": {}".format(error.output.decode('ascii', 'ignore'))
