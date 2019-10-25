@@ -65,7 +65,7 @@ void EmbeddingImpl::pretty_print(std::ostream& stream) const {
 }
 
 torch::Tensor EmbeddingImpl::forward(const Tensor& input) {
-  F::embedding(input, weight, options);
+  return F::embedding(input, weight, options);
 }
 
 EmbeddingBagImpl::EmbeddingBagImpl(const EmbeddingBagOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
@@ -89,7 +89,7 @@ torch::Tensor EmbeddingBagImpl::forward(
     const torch::Tensor& input,
     const torch::Tensor& offsets,
     const torch::Tensor& per_sample_weights) {
-  F::embedding_bag(input, weight, offsets, options, per_sample_weights);
+  return F::embedding_bag(input, weight, offsets, options, per_sample_weights);
 }
 
 void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
