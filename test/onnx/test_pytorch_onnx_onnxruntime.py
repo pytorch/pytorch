@@ -556,6 +556,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModel(mode, use_size, is_upsample)
         self.run_test(model, x)
 
+    # TODO: Enable bicubic, linear1d and linear3d when implemented in ORT
     def _interpolate_tests(self, is_upsample):
         # - cubic mode is not supported for opsets below 11;
         # - linear mode does not match for opsets below 11;
@@ -566,7 +567,7 @@ class TestONNXRuntime(unittest.TestCase):
         # in round_prefer_floor ONNX). (The below tests
         # do not  show this error for nearest mode for
         # all opsets)
-        modes = ["nearest", "linear", "cubic"]
+        modes = ["nearest", "linear"]  # TODO : add "bicubic" when enabled in ORT
         if self.opset_version < 11:
             modes = ["nearest"]
         x = [torch.randn(1, 2, 4, requires_grad=True),
@@ -576,13 +577,18 @@ class TestONNXRuntime(unittest.TestCase):
         for mode in modes:
             for xi in x:
                 mode_i = mode
-                if mode == "cubic" and xi.dim() != 4:
+                if mode == "bicubic" and xi.dim() != 4:
                     continue
                 elif mode == "linear":
-                    if xi.dim() == 4:
+                    if xi.dim() == 3:
+                        # TODO : enable when linear mode is implemented for 1d inputs in ORT
+                        continue
+                    elif xi.dim() == 4:
                         mode_i = "bilinear"
                     elif xi.dim() == 5:
+                        # TODO : enable when linear mode is implemented for 3d inputs in ORT
                         mode_i = "trilinear"
+                        continue
                 self._interpolate(xi, mode_i, True, is_upsample)
                 # the following cases, require dynamic sizes/scales,
                 # which which is not supported for opset_version < 9
@@ -591,14 +597,10 @@ class TestONNXRuntime(unittest.TestCase):
                     self._interpolate(xi, mode_i, False, is_upsample)
                     self._interpolate_script(xi, mode_i, False, is_upsample)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
 
-    # enable when supported in ORT for opset 11
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
 
