@@ -12,6 +12,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+constexpr int kDefaultNumSendRecvThreads = 4;
+constexpr std::chrono::milliseconds kDefaultRpcTimeout =
+    std::chrono::seconds(10);
+
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
 struct SendWork {
@@ -38,8 +42,8 @@ class ProcessGroupAgent : public RpcAgent {
   ProcessGroupAgent(
       std::string workerName,
       std::shared_ptr<c10d::ProcessGroup> pg,
-      int numSendRecvThreads = 4,
-      std::chrono::seconds futureTimeout = std::chrono::seconds(100));
+      int numSendRecvThreads = kDefaultNumSendRecvThreads,
+      std::chrono::milliseconds rpcTimeout = kDefaultRpcTimeout);
 
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
@@ -52,7 +56,7 @@ class ProcessGroupAgent : public RpcAgent {
   void start() override;
 
   // retrieves the timeout for all RPCs
-  const std::chrono::seconds& getRpcTimeout();
+  const std::chrono::milliseconds& getRpcTimeout();
 
  protected:
   // This method wraps the destination information and the message into a
@@ -137,7 +141,7 @@ class ProcessGroupAgent : public RpcAgent {
   std::unordered_map<int64_t, std::shared_ptr<FutureMessage>> futures_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
-  std::chrono::seconds rpcTimeout_;
+  std::chrono::milliseconds rpcTimeout_;
 };
 
 } // namespace rpc

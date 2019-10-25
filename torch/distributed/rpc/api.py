@@ -5,12 +5,12 @@ from torch.distributed import _destroy_rref_context, _cleanup_python_rpc_handler
 from torch.distributed import ProcessGroupAgent
 from torch.distributed import WorkerInfo
 from .backend_registry import is_backend_registered, init_backend
+from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 from .internal import _internal_rpc_pickler, PythonUDF
 
 import functools
 import sys
 import torch
-from datetime import timedelta
 from enum import Enum
 
 
@@ -70,8 +70,8 @@ def _init_rpc(
     self_name=None,
     self_rank=-1,
     worker_name_to_id=None,
-    num_send_recv_threads=4,
-    rpc_timeout=100
+    num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
+    rpc_timeout=DEFAULT_RPC_TIMEOUT
 ):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
@@ -92,7 +92,7 @@ def _init_rpc(
             raise RuntimeError("worker_name_to_id argument {} doesn't match pg size {}".format(
                                worker_name_to_id, group.size()))
         # TODO: add try-except and destroy _agent in all processes if any fails.
-        _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads, timedelta(seconds=rpc_timeout))
+        _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads, rpc_timeout)
     elif is_backend_registered(backend):
         # Rendezvous.
         world_size = len(worker_name_to_id)

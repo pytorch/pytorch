@@ -107,6 +107,7 @@ def my_complex_tensor_function(list_input, tensor_class_input, dict_input):
     complex_tensors = tensor_class_input.tensors
     return (res, complex_tensors[0], complex_tensors[1], complex_tensors[2])
 
+
 def my_rref_function(rref_a, rref_b):
     return rref_a.to_here().wait() + rref_b.to_here().wait()
 
@@ -923,6 +924,11 @@ class RpcTest(object):
             "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here().wait(), torch.ones(n, n) + 4)
+
+    @dist_init(setup_model_parallel=True)
+    def test_get_rpc_timeout(self):
+        timeout = rpc.get_rpc_timeout()
+        self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
 
     def test_requires_process_group_agent_decorator(self):
         @requires_process_group_agent("test_func did not run")

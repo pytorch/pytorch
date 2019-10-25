@@ -118,7 +118,7 @@ ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
     std::shared_ptr<c10d::ProcessGroup> pg,
     int numSendRecvThreads,
-    std::chrono::seconds rpcTimeout)
+    std::chrono::milliseconds rpcTimeout)
     : RpcAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
           c10::guts::make_unique<RequestCallbackImpl>()),
@@ -174,7 +174,7 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   return allWorkerInfo_[id];
 }
 
-const std::chrono::seconds& ProcessGroupAgent::getRpcTimeout() {
+const std::chrono::milliseconds& ProcessGroupAgent::getRpcTimeout() {
   return rpcTimeout_;
 }
 
