@@ -824,6 +824,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.allreduce_coalesced([t3, t3.clone()], opts)
 
     @skip_if_lt_x_gpu(1)
+    @skip_if_rocm  # flaky on CI
     def test_allreduce_coalesced_checks_cuda(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
@@ -3192,6 +3193,7 @@ class CommTest(MultiProcessTestCase):
 
     @requires_gloo()
     @skip_if_not_multigpu
+    @skip_if_rocm  # flaky on CI
     def test_broadcast_coalesced_gloo_cuda(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         options = c10d.ProcessGroupGloo.Options()
