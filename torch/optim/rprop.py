@@ -67,7 +67,7 @@ class Rprop(Optimizer):
 
                 # for dir<0, dfdx=0
                 # for dir>=0 dfdx=dfdx
-                grad = grad.clone()
+                grad = grad.clone(memory_format=torch.preserve_format)
                 grad[sign.eq(etaminus)] = 0
 
                 # update parameters
