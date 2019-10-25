@@ -288,15 +288,7 @@ struct CAFFE2_API TensorIterator {
   bool is_final_output() const { return final_output_; }
 
   bool has_promotion() const {
-    if (common_dtype_ == ScalarType::Undefined) {
-      return false;
-    }
-    for (auto& op : operands_) {
-      if (op.tensor.scalar_type() != common_dtype_) {
-        return true;
-      }
-    }
-    return false;
+    return may_have_differing_types_ && common_dtype_strategy_ != CommonDTypeStrategy::NONE;
   }
 
   void set_check_mem_overlap(bool check_mem_overlap) {
@@ -374,6 +366,7 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
+  bool may_have_differing_types_ = true;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

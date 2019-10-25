@@ -143,6 +143,8 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
       if (sizes_[a] < 2) {
         return false;
+      } else if (sizes_[b] < 2) {
+        return true;
       }
       return strides_[a] < strides_[b];
   });
