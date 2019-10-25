@@ -287,7 +287,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
             source_file = source = None
             try:
                 source_lines, _, source_file = get_source_lines_and_file(obj)
-                source = ''.join(obj)
+                source = ''.join(source_file)
             except Exception:  # saving the source is optional, so we can ignore any errors
                 warnings.warn("Couldn't retrieve source code for container of "
                               "type " + obj.__name__ + ". It won't be checked "
