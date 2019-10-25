@@ -159,14 +159,6 @@ static void maybe_copy_casting_to_common_dtype(OperandInfo& op, ScalarType commo
       op.tensor =
           at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype));
     }
-    auto original_element_size = op.original_tensor.element_size();
-    auto new_element_size = op.tensor.element_size();
-
-    // stride size (in bytes) can change if we change the dtype.
-    for( size_t i=0; i < op.stride_bytes.size(); i++ ) {
-      auto stride = op.stride_bytes[i] / original_element_size;
-      op.stride_bytes[i] = stride * new_element_size;
-    }
   }
 }
 
@@ -190,16 +182,16 @@ void TensorIterator::compute_types() {
   bool compute_common_dtype = (common_dtype_strategy_ != CommonDTypeStrategy::NONE);
   bool compute_common_dtype_only_for_inputs = (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE_INPUTS);
 
-  bool may_have_differing_types = true;
+  may_have_differing_types_ = true;
   bool common_device_is_cuda = false;
 
   if (missing_dtypes || compute_common_dtype) {
     auto operands = compute_common_dtype_only_for_inputs ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
     auto common_type = compute_common_type_(operands);
     auto common_device = std::get<0>(common_type);
-    common_device_is_cuda = common_device.is_cuda();
+    bool common_device_is_cuda = common_device.is_cuda();
     common_dtype_ = std::get<1>(common_type);
-    may_have_differing_types = !std::get<2>(common_type);
+    may_have_differing_types_ = !std::get<2>(common_type);
     bool has_cpu_scalar = false;
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
@@ -235,7 +227,7 @@ void TensorIterator::compute_types() {
   }
 
   for (auto &op : operands_) {
-    if (may_have_differing_types) {
+    if (may_have_differing_types_) {
       validate_dtype(op, common_dtype_, common_dtype_strategy_);
       bool cast_by_copy = compute_common_dtype && !common_device_is_cuda && (!compute_common_dtype_only_for_inputs || !op.is_output);
       if (cast_by_copy) {
@@ -866,12 +858,12 @@ void TensorIterator::build() {
 #endif
   // compute the broadcasted shape
   compute_shape();
+  // compute the result dtype and device
+  compute_types();
   // compute each tensor's stride after broadcasting
   compute_strides();
   // re-order dimensions to improve coalescing
   reorder_dimensions();
-  // compute the result dtype and device
-  compute_types();
   // allocate the output tensor if it's not provided
   allocate_outputs();
 #ifdef BUILD_NAMEDTENSOR
