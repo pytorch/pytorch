@@ -101,3 +101,41 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
     ASSERT_TRUE(torch::allclose(p1.grad(), p2.grad()));
   }
 }
+TEST_F(NNUtilsTest, ClipGradValue) {
+  auto linear_layer = Linear(10, 10);
+  float clip_value = 2.5;
+
+  torch::Tensor grad_w = torch::arange(-50., 50).view({10, 10}).div_(5);
+  torch::Tensor grad_b = torch::ones(10).mul_(2);
+  std::vector<std::vector<torch::Tensor>> grad_lists = {
+      {grad_w, grad_b}, {grad_w, torch::Tensor()}};
+  for (auto grad_list : grad_lists) {
+    for (int i = 0; i < grad_list.size(); i++) {
+      linear_layer->parameters()[i].grad() = grad_list[i].defined()
+          ? grad_list[i].clone().view_as(linear_layer->parameters()[i].data())
+          : grad_list[i];
+    }
+
+    auto layer_params = linear_layer->parameters();
+    utils::clip_grad_value_(layer_params, clip_value);
+    for (int i = 0; i < layer_params.size(); i++) {
+      if (layer_params[i].grad().defined()) {
+        ASSERT_LE(
+            layer_params[i].grad().data().max().item().toFloat(), clip_value);
+        ASSERT_GE(
+            layer_params[i].grad().data().min().item().toFloat(), -clip_value);
+      }
+    }
+  }
+
+  // Should accept a single Tensor as input
+  auto p1 = torch::randn({10, 10});
+  auto p2 = torch::randn({10, 10});
+  auto g = torch::arange(-50., 50).view({10, 10}).div_(5);
+  p1.grad() = g.clone();
+  p2.grad() = g.clone();
+  utils::clip_grad_value_(p1, clip_value);
+  std::vector<torch::Tensor> params = {p2};
+  utils::clip_grad_value_(params, clip_value);
+  ASSERT_TRUE(torch::allclose(p1.grad(), p2.grad()));
+}
