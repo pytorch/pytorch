@@ -2083,13 +2083,15 @@
 
 - func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
-- func: randint_like(Tensor self, int high, *, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like(Tensor self, int high) -> Tensor
+  use_c10_dispatcher: full
 
-- func: randint_like.low(Tensor self, int low, int high, *, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like.low(Tensor self, int low, int high) -> Tensor
+  use_c10_dispatcher: full
 
-- func: randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
-- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2105,9 +2107,10 @@
 
 - func: randn.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
-- func: randn_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+- func: randn_like(Tensor self) -> Tensor
+  use_c10_dispatcher: full
 
-- func: randn_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: randn_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2852,9 +2855,10 @@
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: zeros_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+- func: zeros_like(Tensor self) -> Tensor
+  use_c10_dispatcher: full
 
-- func: zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   use_c10_dispatcher: full
