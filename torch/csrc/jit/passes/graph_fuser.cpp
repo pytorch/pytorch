@@ -20,19 +20,6 @@ namespace jit {
 
 namespace {
 
-static bool hasMaybeUndefinedInputs(Node* node) {
-  auto maybe_undefined = [](Value* v) {
-    auto tt = v->type()->cast<TensorType>();
-    if (!tt) {
-      return false;
-    }
-    return !tt->undefined().has_value() || *tt->undefined();
-  };
-
-  return std::any_of(
-      node->inputs().begin(), node->inputs().end(), maybe_undefined);
-}
-
 // What is a simple mappable operator?  It:
 //    - Has a single tensor output
 //    - Output and all tensor inputs have the same shape
@@ -183,7 +170,7 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    return callback_(node) && !hasMaybeUndefinedInputs(node);
+    return callback_(node);
   }
 
   bool isFusableDevice(Value *v) {
@@ -201,6 +188,7 @@ struct GraphFuser {
     }
     throw std::runtime_error("Unknown device");
   }
+
 
   // Default fusability check - used when the user doesn't pass in
   // a callback.
@@ -233,11 +221,6 @@ struct GraphFuser {
         subgraph_arg_limit_) {
       return false;
     }
-
-    if (hasMaybeUndefinedInputs(tensors_node)) {
-      return false;
-    }
-
     if (tensors_node->kind() != prim::ListConstruct)
       return false;
     // NB: Note that technically other uses of the list aren't a big problem for
@@ -362,8 +345,7 @@ struct GraphFuser {
             (input->type()->isSubtypeOf(FloatType::get()) &&
              input->node()->kind() != prim::Constant) ||
             (n->kind() == aten::_grad_sum_to_size &&
-             input->type()->isSubtypeOf(
-                 OptionalType::create(ListType::ofInts())))) {
+             input->type()->isSubtypeOf(ListType::ofInts()))) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;

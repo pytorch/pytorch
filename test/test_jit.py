@@ -105,13 +105,14 @@ def LSTMCellF(input, hx, cx, *params):
 IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR = True
 
 def doAutodiffCheck(testname):
-    try:
-        if not IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
-            return True
-    except NameError:
+
+    if not IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
         return True
 
 
+    # these tests are disabled because BailOut nodes
+    # inserted by ProfilingExecutor interfere with
+    # subgraph slicing of Differentiable Graphs
     test_exceptions = [
         # functional
         'test_nn_dropout',

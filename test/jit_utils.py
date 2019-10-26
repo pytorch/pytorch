@@ -461,6 +461,7 @@ class JitTestCase(TestCase):
         if verbose:
             print(ge.graph)
 
+        # test no gradients case
         outputs = func(*nograd_inputs)
         outputs_ge = ge(*nograd_inputs)
         self.assertEqual(outputs, outputs_ge)

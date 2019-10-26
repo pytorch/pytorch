@@ -964,13 +964,19 @@ RegisterOperators reg(
          [](Stack& stack) {
            at::Tensor a, b;
            pop(stack, a, b);
-           TORCH_INTERNAL_ASSERT(a.defined() || b.defined());
-           if (!a.defined())
-             stack.emplace_back(b);
-           else if (!b.defined())
+           if (!a.defined() && !b.defined()) {
+             // undef + undef == undef
              stack.emplace_back(a);
-           else
+           }
+           else if (!a.defined()) {
+             stack.emplace_back(b);
+           }
+           else if (!b.defined()) {
+             stack.emplace_back(a);
+           }
+           else {
              stack.emplace_back(a + b);
+           }
            return 0;
          },
          aliasAnalysisSpecialCase()),
