@@ -9,6 +9,20 @@ namespace native {
 
 namespace {
 
+// Returns a contiguous tensor if the source tensor
+// is defined. Otherwise returns the undefined
+// source tensor unmodified.
+inline Tensor optional_contiguous(const Tensor& source) {
+  return source.defined() ? source.contiguous() : source;
+}
+
+// Returns the address of the first element of a tensor
+// or nullptr if the tensor is undefined.
+template<typename scalar_t>
+inline scalar_t* optional_data(const Tensor& source) {
+  return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
+}
+
 template <typename scalar_t>
 static void nll_loss_out_frame(
     Tensor& output,
@@ -24,9 +38,8 @@ static void nll_loss_out_frame(
   scalar_t* total_weight_data = total_weight.data_ptr<scalar_t>();
   *total_weight_data = 0;
 
-  auto weight_contiguous = weight.contiguous();
-  const scalar_t* weight_data =
-      weight.defined() ? weight_contiguous.data_ptr<scalar_t>() : nullptr;
+  auto weight_contiguous = optional_contiguous(weight);
+  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
 
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = input.size(0);
@@ -177,9 +190,8 @@ static void nll_loss_backward_out_frame(
 
   auto target_acc = target.accessor<int64_t, 1>();
 
-  auto weight_contiguous = weight.contiguous();
-  const scalar_t* weight_data =
-      weight.defined() ? weight_contiguous.data_ptr<scalar_t>() : nullptr;
+  auto weight_contiguous = optional_contiguous(weight);
+  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
 
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = input.size(0);
