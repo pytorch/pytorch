@@ -1395,7 +1395,7 @@ TEST_F(FunctionalTest, CTCLoss) {
     ASSERT_THROWS_WITH(
       torch::nn::functional::ctc_loss(
         log_probs, targets, _input_lengths, target_lengths),
-        "input_lenghts must be integral");
+        "input_lengths must be integral");
 
     const auto target_lengths_ = target_lengths.to(torch::kFloat);
     ASSERT_THROWS_WITH(
