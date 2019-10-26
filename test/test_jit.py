@@ -128,14 +128,11 @@ def doAutodiffCheck(testname):
         # AutogradJitGenerated
         'test___rdiv___constant',
         'test___rdiv___scalar_constant',
-        
     ]
 
     if testname in test_exceptions:
-        return False
-    
+        return False    
     return True
-
 
 func_call = torch._C.ScriptFunction.__call__
 meth_call = torch._C.ScriptMethod.__call__
@@ -263,7 +260,7 @@ def get_execution_plan(graph_executor_state):
     return execution_plans[0]
 
 
-def get_grad_executor(plan_state, diff_graph_idx=None, skip_check = False):
+def get_grad_executor(plan_state, diff_graph_idx=None, skip_check=False):
     if diff_graph_idx is None:
         nodes = list(plan_state.graph.nodes())
 
@@ -286,10 +283,10 @@ def all_backward_graphs(script_module, diff_graph_idx=None):
     return [p.graph.copy() for p in bwd_plans]
 
 
-def backward_graph(script_module, diff_graph_idx=None, skip_check = False):
+def backward_graph(script_module, diff_graph_idx=None, skip_check=False):
     ge_state = script_module.get_debug_state()
     fwd_plan = get_execution_plan(ge_state)
-    grad_executor_state = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx, skip_check = skip_check)
+    grad_executor_state = get_grad_executor(fwd_plan, diff_graph_idx=diff_graph_idx, skip_check=skip_check)
     bwd_plan = get_execution_plan(grad_executor_state)
     # Running JIT passes requires that we own the graph (with a shared_ptr).
     # The debug state struct does not own its graph so we make a copy of it.
@@ -566,7 +563,7 @@ class TestJit(JitTestCase):
         def test_input(func, input, result):
             # if result == 2 we will trigger a bailout and 
             # the unprofiled graph should return the correct result
-            self.assertEqual(func(input, profile_and_replay = True), result)
+            self.assertEqual(func(input, profile_and_replay=True), result)
             gre = func.graph_for(input)
             FileCheck().check("prim::Constant").check_next("prim::BailoutTemplate").run(gre)
 
@@ -2363,10 +2360,9 @@ graph(%Ra, %Rb):
                     t = t.cuda()
                 return t
             self.checkTrace(lambda a, b: a * b + b,
-                           [rand(1), rand(1)], [rand(2, 3), rand(2, 3)])
+                            [rand(1), rand(1)], [rand(2, 3), rand(2, 3)])
             # trivial identity
-            self.checkTrace(lambda a, b: (
-               b, a), [rand(1), rand(1)])
+            self.checkTrace(lambda a, b: (b, a), [rand(1), rand(1)])
 
             def foo(a):
                 t = a * a
@@ -5460,7 +5456,7 @@ a")
         # and the output of the node conservatively setting grad to true
 
         inps = (torch.tensor(1.0, requires_grad=True), torch.tensor(1), 10)
-        test(*inps, profile_and_replay = True)
+        test(*inps, profile_and_replay=True)
 
         graph = test.graph_for(*inps)
         loop = graph.findNode("prim::Loop")
@@ -6873,7 +6869,7 @@ a")
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
             return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
 
-        g = test_dtype.graph_for(5, profile_and_replay = True)
+        g = test_dtype.graph_for(5, profile_and_replay=True)
         # both should have completed shapes
         FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut").check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
 
@@ -6882,7 +6878,7 @@ a")
             a = torch.as_tensor(input, dtype=input.dtype)
             return a, torch.as_tensor(input, dtype=torch.float)
 
-        g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile_and_replay = True)
+        g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile_and_replay=True)
         FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
 
 
@@ -6980,7 +6976,7 @@ a")
             code = template.format(to_str=to_str, device=device, non_blocking=non_blocking, cuda=cuda)
             scope = {}
             cu = torch.jit.CompilationUnit(code)
-            return cu.func(t, profile_and_replay = True)
+            return cu.func(t, profile_and_replay=True)
 
         def test_copy_behavior(t, non_blocking=False):
             self.assertIs(t, s(t, 't.to(t, non_blocking=non_blocking)', non_blocking))
@@ -10878,12 +10874,12 @@ a")
         self.assertEqual(out.dtype, torch.double)
         # Testing shape analysis correctly setting type
         FileCheck().check("Double(3, 4)").check_not("Float(3, 4)").run(fn.graph_for())
-        
+
         @torch.jit.script
         def randint():
             return torch.randint(0, 5, [1, 2])
-        
-        out = randint(profile_and_replay = True)
+
+        out = randint(profile_and_replay=True)
         self.assertEqual(out.dtype, torch.double)
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
@@ -16534,7 +16530,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
                                     allow_unused=allow_unused)
         outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
         grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
-                                        allow_unused=allow_unused)
+                                         allow_unused=allow_unused)
         self.assertEqual(outputs, outputs_test)
         self.assertEqual(grads, grads_test)
         # test the grad grad case
@@ -17281,7 +17277,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
         f_args_variable = (self_variable,) + args_variable
         f_args_tensor = (self_tensor,) + args_tensor
         should_autodiff_node, autodiff_nodes, fusible_nodes = normalize_check_ad(check_ad, name)
-        
+
         if test_name not in EXCLUDE_SCRIPT:
             def run_test():
                 # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),

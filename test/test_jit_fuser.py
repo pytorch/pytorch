@@ -21,9 +21,11 @@ from jit_utils import enable_profiling_mode, ProfilingMode
 torch._C._jit_set_profiling_executor(True)
 torch._C._jit_set_profiling_mode(True)
 
+
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
+
 
 def warmup_backward(f, *args):
     profiling_count = 2
@@ -37,12 +39,14 @@ def warmup_backward(f, *args):
 
     return results
 
+
 def warmup_forward(f, *args):
     profiling_count = 2
     for i in range(profiling_count):
-       results = f(*args)
+        results = f(*args)
 
     return results
+
 
 class TestFuser(JitTestCase):
     def assertAllFused(self, graph, except_for=()):
@@ -52,7 +56,8 @@ class TestFuser(JitTestCase):
             self.assertEqual(len(diff_graphs), 1)
             graph = diff_graphs[0].g('Subgraph')
 
-        allowed_nodes = {'prim::Constant', 'prim::FusionGroup', 'prim::BailoutTemplate', 'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
+        allowed_nodes = {'prim::Constant', 'prim::FusionGroup', 'prim::BailoutTemplate',
+                         'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
                         'got {}'.format(graph))
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)
@@ -305,7 +310,6 @@ class TestFuser(JitTestCase):
             graph = backward_graph(s)
             self.assertAllFused(graph, except_for={'aten::Float'})
 
-
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_dropout(self):
         def func(x):
@@ -317,8 +321,8 @@ class TestFuser(JitTestCase):
         c = s(a)
         c = s(a)
         warmup_backward(c.sum())
-        # skip_check to skip extra bailout nodes in between 
-        graph = backward_graph(s, skip_check = True)
+        # skip_check to skip extra bailout nodes in between
+        graph = backward_graph(s, skip_check=True)
         self.assertAllFused(graph, except_for={'aten::div', 'prim::Constant'})
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -540,7 +544,7 @@ class TestFuser(JitTestCase):
         def fn_test_scalar_arg_requires_grad(x, p):
             # type: (Tensor, float) -> Tensor
             return p * (x * x + x)
-        
+
         scripted = torch.jit.script(fn_test_scalar_arg_requires_grad, (x, p))
         out = scripted(x, p)
         self.assertAllFused(scripted.graph_for(x, p), except_for=("aten::size", "prim::BroadcastSizes",
@@ -548,7 +552,6 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     @unittest.skipIf(IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR, "broken with profiling on")
-    
     @enable_cpu_fuser
     def test_fuser_deduplication(self):
         # See that fusion kernel outputs are deduplicated when removing  _grad_sum_to_size in the fuser's compilation
@@ -559,7 +562,8 @@ class TestFuser(JitTestCase):
         b = torch.randn(5, 5, requires_grad=True)
         a = torch.randn(5, 5, requires_grad=True)
         s = self.checkScript(f, (a, b))
-        self.assertAllFused(s.graph_for(a, b), except_for={'aten::size', 'aten::_size_if_not_equal', 'prim::BroadcastSizes'})
+        self.assertAllFused(s.graph_for(a, b), except_for={
+                            'aten::size', 'aten::_size_if_not_equal', 'prim::BroadcastSizes'})
 
         c = s(a, b)
         results = warmup_backward(c.sum(), [a, b])
@@ -917,7 +921,7 @@ class TestFuser(JitTestCase):
         old_plans = set()
         for i in range(3):
             # if we have s2, then the s1 are _grad_sum_to_size'd
-            
+
             args = s2 if i < 1 else s1, s2 if i < 2 else s1, s2
             args = [a.detach_().requires_grad_() for a in args]
             # recompile, so we don't trigger bailouts
