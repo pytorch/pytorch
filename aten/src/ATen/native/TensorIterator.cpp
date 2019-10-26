@@ -182,7 +182,7 @@ void TensorIterator::compute_types() {
   bool compute_common_dtype = (common_dtype_strategy_ != CommonDTypeStrategy::NONE);
   bool compute_common_dtype_only_for_inputs = (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE_INPUTS);
 
-  may_have_differing_types_ = true;
+  bool may_have_differing_types = true;
   bool common_device_is_cuda = false;
 
   if (missing_dtypes || compute_common_dtype) {
@@ -191,7 +191,7 @@ void TensorIterator::compute_types() {
     auto common_device = std::get<0>(common_type);
     common_device_is_cuda = common_device.is_cuda();
     common_dtype_ = std::get<1>(common_type);
-    may_have_differing_types_ = !std::get<2>(common_type);
+    may_have_differing_types = !std::get<2>(common_type);
     bool has_cpu_scalar = false;
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
@@ -227,11 +227,17 @@ void TensorIterator::compute_types() {
   }
 
   for (auto &op : operands_) {
-    if (may_have_differing_types_) {
+    if (may_have_differing_types) {
       validate_dtype(op, common_dtype_, common_dtype_strategy_);
       bool cast_by_copy = compute_common_dtype && !common_device_is_cuda && (!compute_common_dtype_only_for_inputs || !op.is_output);
       if (cast_by_copy) {
         maybe_copy_casting_to_common_dtype(op, common_dtype_);
+      }
+    }
+
+    if (op.tensor.defined()) {
+      if (op.tensor.scalar_type() != common_dtype_) {
+        has_promotion_ = true;
       }
     }
 
