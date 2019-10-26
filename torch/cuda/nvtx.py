@@ -1,12 +1,16 @@
 try:
     from torch._C import _nvtx
 except ImportError:
-    def _fail(*args, **kwargs):
-        raise RuntimeError("NVTX functions not installed. Are you sure you have a CUDA build?")
-    _nvtx = object()
-    _nvtx.rangePushA = _fail
-    _nvtx.rangePop = _fail
-    _nvtx.markA = _fail
+    class _NVTXStub(object):
+        @staticmethod
+        def _fail(*args, **kwargs):
+            raise RuntimeError("NVTX functions not installed. Are you sure you have a CUDA build?")
+
+        rangePushA = _fail
+        rangePop = _fail
+        markA = _fail
+
+    _nvtx = _NVTXStub()
 
 __all__ = ['range_push', 'range_pop', 'mark']
 
