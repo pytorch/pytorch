@@ -235,10 +235,8 @@ void TensorIterator::compute_types() {
       }
     }
 
-    if (op.tensor.defined()) {
-      if (op.tensor.scalar_type() != common_dtype_) {
-        has_promotion_ = true;
-      }
+    if (op.tensor.defined() && op.tensor.scalar_type() != common_dtype_) {
+      have_differing_types_ = true;
     }
 
     if (op.tensor.defined() && op.device != op.tensor.device()) {
