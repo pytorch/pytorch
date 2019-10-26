@@ -8269,10 +8269,11 @@ class TestTorchDeviceType(TestCase):
 
         types = [torch.double,
                  torch.float,
-                 torch.half,
                  torch.int64,
                  torch.int32,
                  torch.int16]
+        if device != 'cpu':
+            types.append(torch.half)
 
         # This won't test for 256bit instructions, since we usually
         # only work on 1 cacheline (1024bit) at a time and these
