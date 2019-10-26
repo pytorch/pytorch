@@ -1,5 +1,11 @@
 import torch.cuda
-from torch._C import _cudnn
+
+try:
+    from torch._C import _cudnn
+except ImportError:
+    # Uses of all the functions below should be guarded by torch.backends.cudnn.is_available(),
+    # so it's safe to not emit any checks here.
+    _cudnn = None
 
 
 def get_cudnn_mode(mode):

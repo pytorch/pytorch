@@ -488,8 +488,23 @@ PyMethodDef* THCPModule_methods() {
 
 namespace torch { namespace cuda {
 
+namespace shared {
+
+void initCudartBindings(PyObject* module);
+void initNvtxBindings(PyObject* module);
+#ifdef USE_CUDNN
+void initCudnnBindings(PyObject* module);
+#endif
+
+} // namespace shared
+
 void initModule(PyObject *module) {
   python::initCommMethods(module);
+  shared::initCudartBindings(module);
+  shared::initNvtxBindings(module);
+#ifdef USE_CUDNN
+  shared::initCudnnBindings(module);
+#endif
 }
 
 }}

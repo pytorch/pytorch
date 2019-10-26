@@ -1,12 +1,12 @@
-import os
-import glob
-import ctypes
-import platform
-
 try:
     from torch._C import _nvtx
 except ImportError:
-    pass
+    def _fail(*args, **kwargs):
+        raise RuntimeError("NVTX functions not installed. Are you sure you have a CUDA build?")
+    _nvtx = object()
+    _nvtx.rangePushA = _fail
+    _nvtx.rangePop = _fail
+    _nvtx.markA = _fail
 
 __all__ = ['range_push', 'range_pop', 'mark']
 

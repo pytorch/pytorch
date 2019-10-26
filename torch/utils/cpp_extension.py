@@ -439,8 +439,6 @@ def CppExtension(name, sources, *args, **kwargs):
     libraries.append('c10')
     libraries.append('torch')
     libraries.append('torch_python')
-    if IS_WINDOWS:
-        libraries.append('_C')
     kwargs['libraries'] = libraries
 
     kwargs['language'] = 'c++'
@@ -485,8 +483,6 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('c10_cuda')
     libraries.append('torch')
     libraries.append('torch_python')
-    if IS_WINDOWS:
-        libraries.append('_C')
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
@@ -908,7 +904,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         extra_ldflags.append('c10.lib')
         extra_ldflags.append('torch.lib')
         extra_ldflags.append('torch_python.lib')
-        extra_ldflags.append('_C.lib')
         extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
         extra_ldflags.append('/LIBPATH:{}'.format(lib_path))
     else:

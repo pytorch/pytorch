@@ -1,12 +1,10 @@
 #include <Python.h>
 
 #if PY_MAJOR_VERSION == 2
-PyMODINIT_FUNC init__global_deps()
-{
-}
+PyMODINIT_FUNC init__global_deps() {}
 #else
-static PyMethodDef global_deps_methods[] = {
-    {NULL, NULL, 0, NULL}
+static std::array<PyMethodDef, 1> global_deps_methods = {
+    {nullptr, nullptr, 0, nullptr}
 };
 
 static struct PyModuleDef global_deps_def = {
@@ -14,7 +12,7 @@ static struct PyModuleDef global_deps_def = {
     "_global_deps",
     "",
     -1,
-    global_deps_methods
+    global_deps_methods.data()
 };
 
 PyMODINIT_FUNC PyInit__global_deps() {

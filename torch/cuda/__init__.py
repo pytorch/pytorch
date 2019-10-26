@@ -9,23 +9,19 @@ It is lazily initialized, so you can always import it, and use
 """
 
 import contextlib
-import platform
-import ctypes
 import os
-import sys
 import torch
 import traceback
 import warnings
 import threading
 from torch._six import raise_from
-from subprocess import Popen, PIPE
 from multiprocessing.util import register_after_fork as _register_after_fork
 from ._utils import _get_device_index
 
 try:
     from torch._C import _cudart
 except ImportError:
-    pass
+    _cudart = None
 
 _initialized = False
 _tls = threading.local()
@@ -127,7 +123,7 @@ def init():
 
 
 def _lazy_init():
-    global _initialized, _cudart, _original_pid, _queued_calls
+    global _initialized, _original_pid, _queued_calls
     if _initialized or hasattr(_tls, 'is_initializing'):
         return
     with _initialization_lock:
@@ -151,6 +147,9 @@ def _lazy_init():
                        "'spawn' start method")
             raise RuntimeError(
                 "Cannot re-initialize CUDA in forked subprocess. " + msg)
+        if _cudart is None:
+            raise RuntimeError(
+                "libcudart functions unavailable. It looks like you have a broken build?")
         _check_driver()
         torch._C._cuda_init()
         _original_pid = os.getpid()

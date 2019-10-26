@@ -1,3 +1,6 @@
+// The clang-tidy job seems to complain that it can't find cudnn.h without this.
+// This file should only be compiled if this condition holds, so it should be safe.
+#ifdef USE_CUDNN
 #include <torch/csrc/utils/pybind.h>
 #include <cudnn.h>
 
@@ -20,4 +23,4 @@ void initCudnnBindings(PyObject* module) {
 } // namespace shared
 } // namespace cuda
 } // namespace torch
-
+#endif
