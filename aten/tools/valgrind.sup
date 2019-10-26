@@ -9,3 +9,9 @@
    fun:handle_ld_preload
    ...
 }
+{
+  <MKL initialization>
+  Memcheck:Cond
+  fun:__intel_sse2_strrchr
+  fun:*init_dl_data
+}
