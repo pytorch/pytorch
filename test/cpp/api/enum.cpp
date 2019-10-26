@@ -8,7 +8,9 @@
 #define TORCH_ENUM_PRETTY_PRINT_TEST(name) \
 { \
   v = torch::k##name; \
-  ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), #name); \
+  std::string pretty_print_name("k"); \
+  pretty_print_name.append(#name); \
+  ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), pretty_print_name); \
 }
 
 TEST(EnumTest, AllEnums) {
@@ -29,7 +31,10 @@ TEST(EnumTest, AllEnums) {
     torch::enumtype::kConstant,
     torch::enumtype::kReflect,
     torch::enumtype::kReplicate,
-    torch::enumtype::kCircular
+    torch::enumtype::kCircular,
+    torch::enumtype::kSum,
+    torch::enumtype::kMean,
+    torch::enumtype::kMax
   > v;
 
   TORCH_ENUM_PRETTY_PRINT_TEST(Linear)
@@ -49,4 +54,7 @@ TEST(EnumTest, AllEnums) {
   TORCH_ENUM_PRETTY_PRINT_TEST(Reflect)
   TORCH_ENUM_PRETTY_PRINT_TEST(Replicate)
   TORCH_ENUM_PRETTY_PRINT_TEST(Circular)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Sum)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Mean)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Max)
 }
