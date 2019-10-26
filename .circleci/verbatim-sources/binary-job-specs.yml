@@ -130,7 +130,7 @@
   smoke_mac_test:
     <<: *binary_linux_test_upload_params
     macos:
-      xcode: "9.0.1"
+      xcode: "10.0"
     steps:
       - attach_workspace:
           at: ~/workspace
@@ -158,7 +158,7 @@
   binary_mac_build:
     <<: *binary_mac_params
     macos:
-      xcode: "9.0.1"
+      xcode: "10.0"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -199,7 +199,7 @@
   binary_mac_upload: &binary_mac_upload
     <<: *binary_mac_params
     macos:
-      xcode: "9.0.1"
+      xcode: "10.0"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job

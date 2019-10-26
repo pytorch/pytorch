@@ -537,7 +537,7 @@ jobs:
   caffe2_macos_build:
     <<: *caffe2_params
     macos:
-      xcode: "9.0.1"
+      xcode: "10.0"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -743,7 +743,7 @@ jobs:
   smoke_mac_test:
     <<: *binary_linux_test_upload_params
     macos:
-      xcode: "9.0.1"
+      xcode: "10.0"
     steps:
       - attach_workspace:
           at: ~/workspace
@@ -771,7 +771,7 @@ jobs:
   binary_mac_build:
     <<: *binary_mac_params
     macos:
-      xcode: "9.0.1"
+      xcode: "10.0"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -812,7 +812,7 @@ jobs:
   binary_mac_upload: &binary_mac_upload
     <<: *binary_mac_params
     macos:
-      xcode: "9.0.1"
+      xcode: "10.0"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - should_run_job
@@ -1007,7 +1007,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
     macos:
-      xcode: "9.0.1"
+      xcode: "10.0"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
@@ -1047,7 +1047,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
     macos:
-      xcode: "9.0.1"
+      xcode: "10.0"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       # This workspace also carries binaries from the build job
@@ -1070,7 +1070,7 @@ jobs:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-cuda9.2-cudnn7-py3-build
     macos:
-      xcode: "9.0.1"
+      xcode: "10.0"
     steps:
       # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
       - should_run_job
