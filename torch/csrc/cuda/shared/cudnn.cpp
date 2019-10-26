@@ -4,6 +4,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <cudnn.h>
 
+#include <array>
+
 namespace torch { namespace cuda { namespace shared {
 
 void initCudnnBindings(PyObject* module) {
