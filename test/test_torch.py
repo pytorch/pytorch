@@ -8272,7 +8272,7 @@ class TestTorchDeviceType(TestCase):
                  torch.int64,
                  torch.int32,
                  torch.int16]
-        if device.startswith('cuda'): # 'cpu' and 'xla' do not support half
+        if device.startswith('cuda'):  # 'cpu' and 'xla' do not support half
             types.append(torch.half)
 
         # This won't test for 256bit instructions, since we usually
