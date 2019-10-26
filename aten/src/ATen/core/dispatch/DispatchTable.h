@@ -36,7 +36,7 @@ class DispatchTable final {
   : kernels_()
   , catchallKernel_(c10::nullopt)
   , dispatchKeyExtractor_(DispatchKeyExtractor::make(schema))
-  , operatorName_(schema.name()) {}
+  , operatorName_(toString(schema.operator_name())) {}
 
   /**
    * Register a kernel in the table at some dispatch key.
