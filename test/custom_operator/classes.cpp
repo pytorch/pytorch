@@ -7,11 +7,7 @@
 #include <list>
 #include <torch/script.h>
 #include <torch/custom_class.h>
-#include <pybind11/pybind11.h>
-
 using namespace std;
-
-namespace py = pybind11;
 
 struct Foo : torch::jit::CustomClassHolder {
   int x, y;
