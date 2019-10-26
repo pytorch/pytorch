@@ -207,13 +207,16 @@ public:
     AT_ERROR("not supported for complex numbers");
   }
   Vec256<std::complex<float>> log() const {
+    // Most trigonomic ops use the log() op to improve complex number performance.
     return map(std::log);
   }
   Vec256<std::complex<float>> log2() const {
-    AT_ERROR("not supported for complex numbers");
+    const __m256 log2_ = _mm256_set1_ps(std::log(2));
+    return _mm256_div_ps(log(), log2_);
   }
   Vec256<std::complex<float>> log10() const {
-    return map(std::log10);
+    const __m256 log10_ = _mm256_set1_ps(std::log(10));
+    return _mm256_div_ps(log(), log10_);
   }
   Vec256<std::complex<float>> log1p() const {
     AT_ERROR("not supported for complex numbers");
