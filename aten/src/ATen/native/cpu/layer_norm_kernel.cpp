@@ -34,12 +34,8 @@ void LayerNormKernelImplInternal(
   const T c = T(1) / static_cast<T>(N);
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
-  int num_tasks = at::get_num_threads();
-  at::parallel_for(0, num_tasks, 1, [&](int64_t start, int64_t end) {
-    const int64_t M_per_thread = (M + num_tasks - 1) / num_tasks;
-    const int64_t M_start = std::min(start * M_per_thread, M);
-    const int64_t M_end = std::min(end * M_per_thread, M);
-    for (int64_t i = M_start; i < M_end; ++i) {
+  at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
+    for (int64_t i = start; i < end; ++i) {
       const T* X_ptr = X_data + i * N;
       T* Y_ptr = Y_data + i * N;
       T mean_val = T(0);

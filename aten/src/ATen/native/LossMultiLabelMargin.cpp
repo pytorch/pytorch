@@ -42,7 +42,58 @@ inline scalar_t multilabel_margin_loss_forward_inner_sum_cpu(
   return sum;
 }
 
-static void multilabel_margin_loss_forward_cpu_template(
+template <typename scalar_t>
+static void multilabel_margin_loss_forward_out_frame(
+    const Tensor& input_contiguous,
+    const Tensor& target_contiguous,
+    Tensor& output,
+    Tensor& is_target,
+    int64_t reduction,
+    int64_t nframe,
+    int64_t dim) {
+  using accscalar_t = at::acc_type<scalar_t, false>;
+  scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
+  int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  scalar_t* is_target_data = is_target.data_ptr<scalar_t>();
+
+  if (reduction != Reduction::None || output.dim() == 0) {
+    scalar_t* output_data = output.data_ptr<scalar_t>();
+
+    accscalar_t sum = 0;
+
+    for (int64_t t = 0; t < nframe; t++) {
+      sum += multilabel_margin_loss_forward_inner_sum_cpu(
+          input_data, target_data, is_target_data, dim);
+
+      input_data += dim;
+      target_data += dim;
+      is_target_data += dim;
+    }
+
+    sum /= dim;
+    if (reduction == Reduction::Mean) {
+      sum /= nframe;
+    }
+
+    *output_data = sum; // write scalar output value
+  } else {
+    auto output_acc = output.accessor<scalar_t, 1>();
+
+    for (int64_t t = 0; t < nframe; t++) {
+      scalar_t sum = multilabel_margin_loss_forward_inner_sum_cpu(
+          input_data, target_data, is_target_data, dim);
+
+      sum /= dim;
+      output_acc[t] = sum;
+
+      input_data += dim;
+      target_data += dim;
+      is_target_data += dim;
+    }
+  }
+}
+
+static void multilabel_margin_loss_forward_out_cpu_template(
     const Tensor& input,
     const Tensor& target,
     Tensor& output,
@@ -100,51 +151,81 @@ static void multilabel_margin_loss_forward_cpu_template(
   }
 
   AT_DISPATCH_FLOATING_TYPES(
-      input.scalar_type(), "multilabel_margin_loss_forward_cpu", [&] {
-        using accscalar_t = at::acc_type<scalar_t, false>;
-        scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-        int64_t* target_data = target_contiguous.data_ptr<int64_t>();
-        scalar_t* is_target_data = is_target.data_ptr<scalar_t>();
-
-        if (reduction != Reduction::None || output.dim() == 0) {
-          auto output_acc = output.data_ptr<scalar_t>();
-
-          accscalar_t sum = 0;
-
-          for (int64_t t = 0; t < nframe; t++) {
-            sum += multilabel_margin_loss_forward_inner_sum_cpu(
-                input_data, target_data, is_target_data, dim);
-
-            input_data += dim;
-            target_data += dim;
-            is_target_data += dim;
-          }
-
-          sum /= dim;
-          if (reduction == Reduction::Mean) {
-            sum /= nframe;
-          }
-
-          output_acc[0] = sum; // write scalar output value
-        } else {
-          auto output_acc = output.accessor<scalar_t, 1>();
-
-          for (int64_t t = 0; t < nframe; t++) {
-            scalar_t sum = multilabel_margin_loss_forward_inner_sum_cpu(
-                input_data, target_data, is_target_data, dim);
-
-            sum /= dim;
-            output_acc[t] = sum;
-
-            input_data += dim;
-            target_data += dim;
-            is_target_data += dim;
-          }
-        }
+      input.scalar_type(), "multilabel_margin_loss_forward_out_frame", [&] {
+        multilabel_margin_loss_forward_out_frame<scalar_t>(
+            input_contiguous, target_contiguous, output, is_target, reduction, nframe, dim);
       });
 }
 
-static void multilabel_margin_loss_backward_cpu_template(
+template <typename scalar_t>
+static void multilabel_margin_loss_backward_out_frame(
+    Tensor& grad_input,
+    const Tensor& grad_output,
+    const Tensor& input_contiguous,
+    const Tensor& target_contiguous,
+    int64_t reduction,
+    const Tensor& is_target_contiguous,
+    int64_t nframe,
+    int64_t dim) {
+  CheckedFrom c = "multilabel_margin_loss_backward_out_frame";
+  auto is_target_arg = TensorArg(is_target_contiguous, "is_target", 5);
+
+  TORCH_CHECK(
+      is_target_contiguous.min().item<scalar_t>() >= 0, is_target_arg, " is out of range");
+  TORCH_CHECK(
+      is_target_contiguous.max().item<scalar_t>() <= 1, is_target_arg, " is out of range");
+
+  scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
+  int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  scalar_t* is_target_data = is_target_contiguous.data_ptr<scalar_t>();
+  scalar_t g = static_cast<scalar_t>(
+      reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
+
+  scalar_t* grad_input_row_data = grad_input.data_ptr<scalar_t>();
+  for (int64_t t = 0; t < nframe; t++) {
+    for (int64_t dt = 0; dt < dim; dt++) {
+      int64_t target_idx = target_data[dt];
+      if (target_idx < 0) {
+        break;
+      }
+
+      scalar_t input_target = input_data[target_idx];
+      for (int64_t d = 0; d < dim; d++) {
+        if (!is_target_data[d]) {
+          scalar_t z = 1 - input_target + input_data[d];
+          if (z > 0) {
+            grad_input_row_data[target_idx] -= g;
+            grad_input_row_data[d] += g;
+          }
+        }
+      }
+    }
+    input_data += dim;
+    target_data += dim;
+    is_target_data += dim;
+    grad_input_row_data += dim;
+  }
+
+  scalar_t* grad_input_data = grad_input.data_ptr<scalar_t>();
+  if (reduction != Reduction::None || grad_output.dim() == 0) {
+    assert(
+        reduction != Reduction::None || grad_output.dim() > 0 || nframe == 1);
+    const auto d = *grad_output.data_ptr<scalar_t>();
+    for (int64_t t = 0; t < nframe * dim; t++) {
+      grad_input_data[t] *= d;
+    }
+  } else {
+    check_dim_size(grad_output, 1, 0, nframe);
+    auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
+    for (int64_t t = 0; t < nframe; t++) {
+      for (int64_t d = 0; d < dim; d++) {
+        grad_input_data[t * dim + d] *= grad_output_acc[t];
+      }
+    }
+  }
+}
+
+static void multilabel_margin_loss_backward_out_cpu_template(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,
@@ -199,65 +280,16 @@ static void multilabel_margin_loss_backward_cpu_template(
   grad_input.zero_();
 
   AT_DISPATCH_FLOATING_TYPES(
-      input.scalar_type(), "multilabel_margin_loss_forward_cpu", [&] {
-        TORCH_CHECK(
-            is_target.min().item<scalar_t>() >= 0,
-            is_target_arg,
-            " is out of range");
-        TORCH_CHECK(
-            is_target.max().item<scalar_t>() <= 1,
-            is_target_arg,
-            " is out of range");
-
-        scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-        int64_t* target_data = target_contiguous.data_ptr<int64_t>();
-        scalar_t* is_target_data = is_target_contiguous.data_ptr<scalar_t>();
-        scalar_t g = static_cast<scalar_t>(
-            reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
-
-        scalar_t* grad_input_row_data = grad_input.data_ptr<scalar_t>();
-        for (int64_t t = 0; t < nframe; t++) {
-          for (int64_t dt = 0; dt < dim; dt++) {
-            int64_t target_idx = target_data[dt];
-            if (target_idx < 0) {
-              break;
-            }
-
-            scalar_t input_target = input_data[target_idx];
-            for (int64_t d = 0; d < dim; d++) {
-              if (!is_target_data[d]) {
-                scalar_t z = 1 - input_target + input_data[d];
-                if (z > 0) {
-                  grad_input_row_data[target_idx] -= g;
-                  grad_input_row_data[d] += g;
-                }
-              }
-            }
-          }
-          input_data += dim;
-          target_data += dim;
-          is_target_data += dim;
-          grad_input_row_data += dim;
-        }
-
-        scalar_t* grad_input_data = grad_input.data_ptr<scalar_t>();
-        if (reduction != Reduction::None || grad_output.dim() == 0) {
-          assert(
-              reduction != Reduction::None || grad_output.dim() > 0 ||
-              nframe == 1);
-          const auto d = *grad_output.data_ptr<scalar_t>();
-          for (int64_t t = 0; t < nframe * dim; t++) {
-            grad_input_data[t] *= d;
-          }
-        } else {
-          check_dim_size(grad_output, 1, 0, nframe);
-          auto grad_output_acc = grad_output.accessor<scalar_t, 1>();
-          for (int64_t t = 0; t < nframe; t++) {
-            for (int64_t d = 0; d < dim; d++) {
-              grad_input_data[t * dim + d] *= grad_output_acc[t];
-            }
-          }
-        }
+      input.scalar_type(), "multilabel_margin_loss_backward_out_frame", [&] {
+        multilabel_margin_loss_backward_out_frame<scalar_t>(
+            grad_input,
+            grad_output,
+            input_contiguous,
+            target_contiguous,
+            reduction,
+            is_target_contiguous,
+            nframe,
+            dim);
       });
 }
 
@@ -269,7 +301,7 @@ std::tuple<Tensor&, Tensor&> multilabel_margin_loss_forward_out_cpu(
     const Tensor& self,
     const Tensor& target,
     int64_t reduction) {
-  multilabel_margin_loss_forward_cpu_template(
+  multilabel_margin_loss_forward_out_cpu_template(
       self, target, output, is_target, reduction);
   return std::tuple<Tensor&, Tensor&>(output, is_target);
 }
@@ -292,7 +324,7 @@ Tensor& multilabel_margin_loss_backward_cpu_out(
     const Tensor& target,
     int64_t reduction,
     const Tensor& is_target) {
-  multilabel_margin_loss_backward_cpu_template(
+  multilabel_margin_loss_backward_out_cpu_template(
       grad_input, grad_output, self, target, reduction, is_target);
   return grad_input;
 }
