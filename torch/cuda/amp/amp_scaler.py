@@ -180,9 +180,9 @@ class AmpScaler(object):
 
     def step(self, optimizer, *args, **kwargs):
         """
-        Carry out a scaling-safe step using ``optimizer``.  "Scaling-safe" means two things:
+        Carry out a scaling-safe ``optimizer.step()`` using ``optimizer``.  "Scaling-safe" means two things:
 
-        1.  If :meth:`unscale` has not yet been invoked, :meth:`step` will make sure to invoke :meth:`unscale`
+        1.  If :meth:`unscale` was not explicitly invoked for ``optimizer``, :meth:`step` will invoke :meth:`unscale`
             internally.
         2.  If inf/NaN gradients are found, :meth:`step` will skip ``optimizer.step()`` to avoid polluting the
             params.
