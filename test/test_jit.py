@@ -765,11 +765,11 @@ class TestJit(JitTestCase):
 
         net = Net()
         t = torch.ones(2, requires_grad=True)
-        trace, outputs, inputs = torch.jit.get_trace_graph(net, (t,), return_inputs=True)
-        self.assertEqual(outputs, self.createFunctionFromGraph(trace)(*inputs))
-        self.assertExportImport(trace, (t,))
-        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
-        FileCheck().check("onnx::LogSoftmax").check("scope: Net").run(str(trace))
+        g, outputs, inputs = torch.jit.get_trace_graph(net, (t,), return_inputs=True)
+        self.assertEqual(outputs, self.createFunctionFromGraph(g)(*inputs))
+        self.assertExportImport(g, (t,))
+        g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
+        FileCheck().check("onnx::LogSoftmax").check("scope: Net").run(str(g))
 
     def test_scopes_identity_node(self):
 
@@ -792,11 +792,11 @@ class TestJit(JitTestCase):
         t = torch.ones(1, 3, 227, 227, requires_grad=True)
 
         with torch.onnx.set_training(model, False):
-            trace, _ = torch.jit.get_trace_graph(model, (t,))
+            g, _ = torch.jit.get_trace_graph(model, (t,))
 
-        self.assertExportImport(trace, (t,) + tuple(model.parameters()))
-        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
-        FileCheck().check("Net/Sequential[features]/Conv2d[0]").check("ReLU").check("MaxPool").run(str(trace))
+        self.assertExportImport(g, (t,) + tuple(model.parameters()))
+        g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
+        FileCheck().check("Net/Sequential[features]/Conv2d[0]").check("ReLU").check("MaxPool").run(str(g))
 
     def test_canonicalize_tensor_iterator(self):
         x = torch.randn(4, 4)
@@ -870,14 +870,14 @@ class TestJit(JitTestCase):
             z = (x + y) * (x + y) * (x + y) + t
             return z
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x, y))
-        self.run_pass('cse', trace)
+        g, _ = torch.jit.get_trace_graph(fn, (x, y))
+        self.run_pass('cse', g)
         do_exactly = True
         FileCheck().check_count("add", 1).check_count("mul", 2, do_exactly) \
             .check_count("tanh", 1, do_exactly).check_count("add", 2, do_exactly).check_next("return")  \
-            .run(str(trace))
+            .run(str(g))
 
-        self.assertExportImport(trace, (x, y))
+        self.assertExportImport(g, (x, y))
 
     def test_cse_not_introduce_aliasing(self):
         @torch.jit.script
@@ -1664,12 +1664,12 @@ graph(%Ra, %Rb):
             y.add_(3)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,))
-        self.run_pass('dce', trace)
+        g, _ = torch.jit.get_trace_graph(fn, (x,))
+        self.run_pass('dce', g)
         FileCheck().check_count("aten::clone", 1, exactly=True) \
             .check_count("aten::add_", 2, exactly=True) \
-            .check_next("return").run(str(trace))
-        self.assertExportImport(trace, (x,))
+            .check_next("return").run(str(g))
+        self.assertExportImport(g, (x,))
 
     def test_inplace_flags(self):
         class InplaceFn(Function):
@@ -1700,9 +1700,9 @@ graph(%Ra, %Rb):
             y = RegularFn.apply(y)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,), _force_outplace=True)
-        self.run_pass('dce', trace)
-        ops = [n for n in trace.graph().nodes()]
+        trace_graph, _ = torch.jit.get_trace_graph(fn, (x,), _force_outplace=True)
+        self.run_pass('dce', trace_graph)
+        ops = [n for n in trace_graph.nodes()]
         for op in ops:
             self.assertTrue(op.hasAttribute('inplace'))
         inplace_flags = [False, True, True, False]
@@ -2091,10 +2091,9 @@ graph(%Ra, %Rb):
         def doit(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        trace, _ = torch.jit.get_trace_graph(doit, (x, y))
-        self.run_pass('dce', trace)
-        self.run_pass('canonicalize', trace)
-        g = trace.graph()
+        g, _ = torch.jit.get_trace_graph(doit, (x, y))
+        self.run_pass('dce', g)
+        self.run_pass('canonicalize', g)
         g2 = torch._C.Graph()
         g_to_g2 = {}
         for node in g.inputs():
@@ -2136,17 +2135,17 @@ graph(%Ra, %Rb):
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
-        trace, outputs, inputs = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x,
-                                                           _force_outplace=True, return_inputs=True)
-        m = self.createFunctionFromGraph(trace)
+        g, outputs, inputs = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x,
+                                                       _force_outplace=True, return_inputs=True)
+        m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
 
     def test_dropout(self):
         x = torch.ones(2, 2)
         with torch.random.fork_rng(devices=[]):
-            trace, outputs, inputs = torch.jit.get_trace_graph(nn.Dropout(0.6), x, return_inputs=True)
+            g, outputs, inputs = torch.jit.get_trace_graph(nn.Dropout(0.6), x, return_inputs=True)
         with torch.random.fork_rng(devices=[]):
-            m = self.createFunctionFromGraph(trace)
+            m = self.createFunctionFromGraph(g)
             self.assertEqual(outputs, m(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
@@ -2172,8 +2171,8 @@ graph(%Ra, %Rb):
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40)
-        trace, outputs, inputs = torch.jit.get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True)
-        m = self.createFunctionFromGraph(trace)
+        g, outputs, inputs = torch.jit.get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True)
+        m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
 
     def test_max_pool(self):
@@ -2212,9 +2211,9 @@ graph(%Ra, %Rb):
         x = torch.ones(1, 3, 224, 224)
         model = torchvision.models.AlexNet()
         with torch.random.fork_rng(devices=[]):
-            trace, outputs, inputs = torch.jit.get_trace_graph(model, x, return_inputs=True)
-        self.run_pass('cse', trace)
-        m = self.createFunctionFromGraph(trace)
+            g, outputs, inputs = torch.jit.get_trace_graph(model, x, return_inputs=True)
+        self.run_pass('cse', g)
+        m = self.createFunctionFromGraph(g)
         with torch.random.fork_rng(devices=[]):
             self.assertEqual(outputs, m(*inputs))
 
@@ -2226,11 +2225,11 @@ graph(%Ra, %Rb):
             out.copy_(x)
             return out
 
-        trace, outputs, inputs = torch.jit.get_trace_graph(f, (x, ), return_inputs=True)
-        self.run_pass('dce', trace)
-        m = self.createFunctionFromGraph(trace)
+        g, outputs, inputs = torch.jit.get_trace_graph(f, (x, ), return_inputs=True)
+        self.run_pass('dce', g)
+        m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
-        self.assertExportImport(trace, (x,))
+        self.assertExportImport(g, (x,))
 
     def test_shared_param(self):
         class MyModule(torch.nn.Module):
@@ -2242,10 +2241,10 @@ graph(%Ra, %Rb):
                 return x * self.a + self.b
 
         m = MyModule()
-        trace, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),))
-        self.run_pass('dce', trace)
-        self.assertEqual(len(list(trace.graph().inputs())), 2)
-        FileCheck().check("mul").check("add").run(str(trace))
+        g, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),))
+        self.run_pass('dce', g)
+        self.assertEqual(len(list(g.inputs())), 2)
+        FileCheck().check("mul").check("add").run(str(g))
 
     def test_trace_c10_ops(self):
         try:
@@ -2281,12 +2280,12 @@ graph(%Ra, %Rb):
 
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
-        trace, outputs, inputs = torch.jit.get_trace_graph(
+        g, outputs, inputs = torch.jit.get_trace_graph(
             lambda x: F.threshold(x, 0, 0, inplace=True), (x, ), return_inputs=True)
-        m = self.createFunctionFromGraph(trace)
+        m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
-        FileCheck().check("threshold_").run(str(trace))
-        self.assertExportImport(trace, (x,))
+        FileCheck().check("threshold_").run(str(g))
+        self.assertExportImport(g, (x,))
 
     def run_ge_tests(self, optimize, use_cuda):
         with torch.jit.optimized_execution(optimize):
