@@ -134,6 +134,27 @@ inline Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets,
     options.blank(), options.reduction(), options.zero_infinity());
 }
 
+inline int get_enum(const at::Reduction::Reduction reduction) {
+  switch (reduction) {
+    case Reduction::None: return 0;
+    case Reduction::Mean: return 1;
+    case Reduction::Sum: return 2;
+    default: return -1;
+  }
+}
+
+inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
+                               const PoissonNLLLossOptions& options = {}) {
+  TORCH_CHECK(
+    options.reduction() == Reduction::None ||
+    options.reduction() == Reduction::Mean ||
+    options.reduction() == Reduction::Sum,
+    options.reduction() + " is not valid"
+  );
+  return torch::poisson_nll_loss(input, target, options.log_input(),
+    options.full(), options.eps(), get_enum(options.reduction()));
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

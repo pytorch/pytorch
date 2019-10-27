@@ -167,5 +167,22 @@ struct TORCH_API CTCLossOptions {
   TORCH_ARG(bool, zero_infinity) = false;
 };
 
+// ============================================================================
+
+/// Options for PoissonNLLLoss functional and module.
+struct TORCH_API PoissonNLLLossOptions {
+  /// if true the loss is computed as `exp(input) - target * input`,
+  /// if false the loss is `input - target * log(input + eps)`.
+  TORCH_ARG(bool, log_input) = true;
+  /// whether to compute full loss, i.e. to add the Stirling approximation term
+  /// target * log(target) - target + 0.5 * log(2 * pi * target).
+  TORCH_ARG(bool, full) = false;
+  /// Small value to avoid evaluation of `log(0)` when `log_input = false`.
+  /// Default: 1e-8
+  TORCH_ARG(double, eps) = 1e-8;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+};
+
 } // namespace nn
 } // namespace torch

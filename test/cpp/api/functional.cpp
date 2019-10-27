@@ -1448,3 +1448,21 @@ TEST_F(FunctionalTest, CTCLoss) {
     }
   }
 }
+
+TEST_F(FunctionalTest, PoissonNLLLoss) {
+  using namespace at::Reduction;
+  const auto input = torch::tensor({0.5, 1.5, 2.5});
+  const auto target = torch::tensor({1., 2., 3.});
+  const auto component_wise_loss = torch::exp(input) - target * input;
+  ASSERT_TRUE(torch::allclose(component_wise_loss,
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(Reduction::None))));
+  ASSERT_TRUE(torch::allclose(torch::sum(component_wise_loss),
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(Reduction::Sum))));
+  ASSERT_TRUE(torch::allclose(torch::mean(component_wise_loss),
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(Reduction::Mean))));
+  ASSERT_THROWS_WITH(F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(Reduction::END)), "not valid");
+}
