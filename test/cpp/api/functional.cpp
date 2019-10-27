@@ -812,7 +812,7 @@ TEST_F(FunctionalTest, LocalResponseNorm) {
       {61.6563, 61.7279}}},
     torch::kFloat
   );
-  ASSERT_TRUE(torch::allclose(y, y_exp));
+  ASSERT_TRUE(torch::allclose(y, y_exp,1e-4, 1e-7));
 }
 
 TEST_F(FunctionalTest, Linear) {
