@@ -1901,22 +1901,22 @@ t2.start()
 """])
 
     def test_grad_scaling_builtins(self, device="cuda", dtype=torch.float):
-        rscale = torch.tensor([0.25], dtype=dtype, device=device)
+        inv_scale = torch.tensor([0.25], dtype=dtype, device=device)
 
         found_inf = torch.tensor([0.0], dtype=dtype, device=device)
         g = torch.tensor([4.0], dtype=dtype, device=device)
-        torch._amp_unscale_inf_check_(g, rscale, found_inf)
+        torch._amp_unscale_inf_check_(g, inv_scale, found_inf)
         self.assertTrue(found_inf.item() == 0.0)
         self.assertTrue(torch.allclose(g, torch.ones(10, dtype=torch.float32, device="cuda"), atol=1e-7))
 
         found_inf.zero_()
         g = torch.tensor([float('inf')], dtype=dtype, device=device)
-        torch._amp_unscale_inf_check_(g, rscale, found_inf)
+        torch._amp_unscale_inf_check_(g, inv_scale, found_inf)
         self.assertTrue(found_inf.item() == 1.0)
 
         found_inf.zero_()
         g = torch.tensor([float('nan')], dtype=dtype, device=device)
-        torch._amp_unscale_inf_check_(g, rscale, found_inf)
+        torch._amp_unscale_inf_check_(g, inv_scale, found_inf)
         self.assertTrue(found_inf.item() == 1.0)
 
         growth_factor = 4.0
@@ -1930,6 +1930,30 @@ t2.start()
         found_inf.fill_(1.0)
         new_scale = torch._amp_update_scale(current_scale, found_inf, growth_factor, backoff_factor)
         self.assertTrue(new_scale.item(), 2.0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_device_as_key(self):
+        # Ensure that different instances of "device" objects that point to the same device
+        # are treated as identical keys by dicts.  AmpScaler relies on this behavior, and may
+        # error otherwise in a way that's difficult to detect (a silent performance hit).
+        d = {}
+        dev0a = torch.device("cuda:0")
+        dev0b = torch.device("cuda:0")
+        dev1a = torch.device("cuda:1")
+        dev1b = torch.device("cuda:1")
+
+        assert hash(dev0a) == hash(dev0b)
+        assert hash(dev1a) == hash(dev1b)
+
+        d[dev0a] = "0a"
+        d[dev0b] = "0b"
+        assert len(d) == 1
+        assert d[dev0a] == "0b"
+
+        d[dev1a] = "1a"
+        d[dev1b] = "1b"
+        assert len(d) == 2
+        assert d[dev1a] == "1b"
 
     def _create_scaling_models_optimizers(self, device="cuda"):
         # Create a module+optimizer that will use scaling, and a control module+optimizer

@@ -12,16 +12,11 @@ Automatic Mixed Precision Examples
 Gradient Scaling
 ^^^^^^^^^^^^^^^^
 
-The following code snippets demonstrate how to use :class:`torch.cuda.amp.AmpScaler` to scale the gradients
-of a mixed precision network.
+Gradient scaling helps ensure convergence when training with mixed precision,
+as explained :ref:`here<gradient-scaling>`.
 
-You can enable/disable gradient scaling globally (everywhere in the network a given :class:`AmpScaler` instance
-is used) by supplying a single ``enabled=True|False`` flag to that instance's constructor call::
-
-    scaler = AmpScaler(enabled=args.use_mixed_precision)
-
-If ``enabled=False``, ``scaler.step(optimizer)`` is equivalent to ``optimizer.step()``, and
-the other methods (``scaler.scale``, ``scaler.update``) become no-ops.
+The following code snippets show how :class:`torch.cuda.amp.AmpScaler` can be used to
+perform dynamic gradient scaling automatically.
 
 Working with a Single Optimizer
 -------------------------------
@@ -56,8 +51,10 @@ used to unscale an optimizer's owned gradients in-place prior to ``scaler.step``
 Gradient clipping
 """""""""""""""""
 
-For example, calling ``scaler.unscale(optimizer)`` before clipping enables you to clip
-unscaled gradients as usual::
+Gradient clipping involves manipulating a set of gradients such that their global norm
+(see :func:`torch.nn.utils.clip_grad_norm_`) or maximum magnitude (see :func:`torch.nn.utils.clip_grad_value_`)
+is :math:`<=` some user-imposed threshold.  Calling ``scaler.unscale(optimizer)`` before clipping enables you
+to clip unscaled gradients as usual::
 
     scaler = AmpScaler()
     ...
@@ -95,10 +92,10 @@ Gradient penalty
 """"""""""""""""
 
 A gradient penalty loss term requires manipulating scaled gradients.
-Gradient penalty demonstrates the following use cases:
+The gradient penalty example below demonstrates
 
-* Creating scaled out-of-place gradients with :func:`torch.autograd.grad`
-* Correct interaction of gradient scaling with double-backward
+* creating scaled out-of-place gradients with :func:`torch.autograd.grad`, and
+* correct interaction of gradient scaling with double-backward.
 
 Here's how that looks for a simple L2 penalty::
 
@@ -157,5 +154,3 @@ optimizers used this iteration have been stepped::
         scaler.step(optimizer0)
         scaler.step(optimizer1)
         scaler.update()
-
-Note that the decision to invoke an explicit ``unscale`` can be made independently for each optimizer.

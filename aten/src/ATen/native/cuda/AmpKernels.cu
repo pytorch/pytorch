@@ -31,6 +31,7 @@ Tensor& _amp_unscale_inf_check_cuda(Tensor& scaled_grad,
   TORCH_CHECK(found_inf.numel() == 1, "found_inf must be a 1-element tensor.");
   TORCH_CHECK(inv_scale.scalar_type() == at::ScalarType::Float, "inv_scale must be a float tensor.");
   TORCH_CHECK(found_inf.scalar_type() == at::ScalarType::Float, "found_inf must be a float tensor.");
+  TORCH_CHECK(scaled_grad.layout() == at::kStrided, "scaled_grad must be a strided (not sparse) Tensor.");
 
   // Act on scaled_grad in place.
   auto iter = TensorIterator::unary_op(scaled_grad, scaled_grad);
