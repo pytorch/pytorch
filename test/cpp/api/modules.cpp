@@ -768,6 +768,39 @@ TEST_F(ModulesTest, Linear) {
   }
 }
 
+TEST_F(ModulesTest, LocalResponseNorm) {
+  {
+    LocalResponseNorm model(LocalResponseNormOptions(2));
+    auto x = torch::randn({32, 5, 24, 24}, torch::requires_grad());
+    auto y = model(x);
+    //auto y_exp = torch::layer_norm(x, {2, 2}, model->weight, model->bias, 2e-5);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(y.ndimension(), 4);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(y.sizes(), x.sizes());
+
+    //ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+  {
+    LocalResponseNorm model(LocalResponseNormOptions(2));
+    auto x = torch::randn({16, 5, 7, 7, 7, 7}, torch::requires_grad());
+    auto y = model(x);
+    //auto y_exp = torch::layer_norm(x, {2, 2}, model->weight, model->bias, 2e-5);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(y.ndimension(), 6);
+    ASSERT_EQ(s.ndimension(), 0);
+    for (auto i = 0; i < 6; i++) {
+      ASSERT_EQ(y.size(i), x.size(i));
+    }
+
+    //ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
 TEST_F(ModulesTest, LayerNorm) {
   LayerNorm model(LayerNormOptions({2, 2}).eps(2e-5));
   auto x = torch::randn({2, 2}, torch::requires_grad());
@@ -1862,6 +1895,15 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
       ASSERT_EQ(
         c10::str(LayerNorm(LayerNormOptions({2, 2}).elementwise_affine(false).eps(2e-5))),
           "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
+  ASSERT_EQ(
+    c10::str(LocalResponseNorm(LocalResponseNormOptions(2))),
+      "torch::nn::LocalResponseNorm(2, alpha=0.0001, beta=0.75, k=1)");
+      ASSERT_EQ(
+        c10::str(LocalResponseNorm(LocalResponseNormOptions(2).alpha(0.0002).beta(0.85).k(2.))),
+          "torch::nn::LocalResponseNorm(2, alpha=0.0002, beta=0.85, k=2)");
 }
 
 TEST_F(ModulesTest, PrettyPrintEmbedding) {

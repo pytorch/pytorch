@@ -53,7 +53,6 @@ inline Tensor local_response_norm(
     return input / div;
 }
 
-
 } // namespace functional
 } // namespace nn
 } // namespace torch

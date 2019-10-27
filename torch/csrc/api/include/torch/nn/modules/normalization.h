@@ -72,7 +72,6 @@ class TORCH_API LocalResponseNormImpl : public Cloneable<LocalResponseNormImpl> 
 
   /// The options with which this `Module` was constructed.
   LocalResponseNormOptions options;
-
 };
 
 TORCH_MODULE(LocalResponseNorm);

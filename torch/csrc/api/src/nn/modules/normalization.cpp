@@ -42,6 +42,8 @@ torch::Tensor LayerNormImpl::forward(const Tensor& input) {
   return F::layer_norm(input, options, weight, bias);
 }
 
+// ============================================================================
+
 LocalResponseNormImpl::LocalResponseNormImpl(const LocalResponseNormOptions& options_)
     : options(options_) {}
 
@@ -53,7 +55,8 @@ void LocalResponseNormImpl::reset() {}
 
 void LocalResponseNormImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
-         << "torch::nn::LocalResponseNormImpl(alpha=" <<  options.alpha()
+         << "torch::nn::LocalResponseNorm(" <<  options.size()
+         << ", alpha=" << options.alpha()
          << ", beta=" << options.beta()
          << ", k=" << options.k()
          << ")";
