@@ -269,7 +269,7 @@ public:
     // complex_t_log2 is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_log2, T>::value, "complex_t_log2 must be T");
     const T log_2 = T(std::log(2.0));
-    return map(std::log)/log_2;
+    return Vec256(map(std::log))/Vec256(log_2);
   }
   Vec256<T> ceil() const {
     return map(at::native::ceil_impl);
