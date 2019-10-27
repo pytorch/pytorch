@@ -216,6 +216,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/activation.cpp",
         "torch/csrc/api/src/nn/modules/batchnorm.cpp",
         "torch/csrc/api/src/nn/modules/normalization.cpp",
+        "torch/csrc/api/src/nn/modules/instancenorm.cpp",
         "torch/csrc/api/src/nn/modules/conv.cpp",
         "torch/csrc/api/src/nn/modules/dropout.cpp",
         "torch/csrc/api/src/nn/modules/distance.cpp",
@@ -232,6 +233,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/options/activation.cpp",
         "torch/csrc/api/src/nn/options/batchnorm.cpp",
         "torch/csrc/api/src/nn/options/normalization.cpp",
+        "torch/csrc/api/src/nn/options/instancenorm.cpp"
         "torch/csrc/api/src/nn/options/conv.cpp",
         "torch/csrc/api/src/nn/options/dropout.cpp",
         "torch/csrc/api/src/nn/options/linear.cpp",
