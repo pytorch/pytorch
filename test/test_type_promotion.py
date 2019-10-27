@@ -362,6 +362,18 @@ class TestTypePromotion(TestCase):
         self.assertRaisesRegex(RuntimeError, 'expected dtype',
                                lambda: f())
 
+        # https://github.com/pytorch/pytorch/issues/27824
+        tmp = torch.ones(9, 9, dtype=torch.float, device=self.device)
+        mask = torch.ones(10, 10, dtype=torch.uint8, device=self.device)
+        result = tmp + mask[1:, 1:]
+        expected = torch.full([9, 9], 2., dtype=torch.float, device=self.device).fill_(2.)
+        self.assertEqual(result, expected)
+
+    def test_transpose(self):
+        # https://github.com/pytorch/pytorch/issues/28502
+        a = torch.tensor([[True, True], [False, True]])
+        self.assertEqual(a.t() == 0, a.t() == False)  # noqa: E712
+
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):
     def setUp(self):
