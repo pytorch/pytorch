@@ -180,14 +180,14 @@ class AmpScaler(object):
 
     def step(self, optimizer, *args, **kwargs):
         """
-        Carry out a scaling-safe ``optimizer.step()`` using ``optimizer``.  "Scaling-safe" means two things:
+        Carry out a scaling-safe ``optimizer.step()``.  "Scaling-safe" means two things:
 
-        1.  If :meth:`unscale` was not explicitly invoked for ``optimizer``, :meth:`step` will invoke :meth:`unscale`
-            internally.
-        2.  If inf/NaN gradients are found, :meth:`step` will skip ``optimizer.step()`` to avoid polluting the
-            params.
+        1.  , :meth:`step` invokes :meth:`unscale` for ``optimizer`` before calling ``optimizer.step()``
+            (unless :meth:`unscale` was explicitly called for ``optimizer`` earlier in the iteration).
+            This ensures ``optimizer.step()`` is carried out using unscaled gradients.
+        2.  If inf/NaN gradients are found, :meth:`step` skips ``optimizer.step()`` to avoid polluting the params.
 
-        ``*args`` and ``**kwargs`` will be forwarded to ``optimizer.step()``.
+        ``*args`` and ``**kwargs`` are forwarded to ``optimizer.step()``.
 
         Arguments:
             optimizer (torch.optim.Optimizer):  Optimizer that applies the gradients.
@@ -234,7 +234,7 @@ class AmpScaler(object):
         Passing ``new_scale`` sets the scale_factor directly.
 
         Arguments:
-            new_scale (float or torch.cuda.FloatTensor, optional, default=None):  New shared scale factor.
+            new_scale (float or :class:`torch.cuda.FloatTensor`, optional, default=None):  New shared scale factor.
 
         .. warning::
             :meth:`update` should only be called at the end of the iteration, after ``scaler.step(optimizer)`` has
@@ -277,7 +277,7 @@ class AmpScaler(object):
     def get_scale(self):
         """
         Returns:
-            The scale factor (a single-element ``torch.cuda.FloatTensor``), or 1.0 if scaling is disabled.
+            The scale factor (a single-element :class:`torch.cuda.FloatTensor`), or 1.0 if scaling is disabled.
 
         .. note::
             :meth:`get_scale` alone does not incur a CPU-GPU sync, but if you wish to print the scale Tensor, or
@@ -319,6 +319,38 @@ class AmpScaler(object):
             A bool indicating whether this instance is enabled.
         """
         return self._enabled
+
+    def state_dict(self):
+        r"""
+        Returns the state of the scaler as a :class:`dict`.  It contains three entries:
+
+        * ``"scale"`` - a :class:`torch.cuda.FloatTensor` containing the current scale
+        * ``"growth_factor"`` - a Python float containing the current growth factor
+        * ``"backoff_factor"`` - a Python float containing the current backoff factor
+
+        If this instance is not enabled, returns an empty dict.
+        """
+        return {"scale": self._scale,
+                "growth_factor": self._growth_factor,
+                "backoff_factor": self._backoff_factor} if self._enabled else {}
+
+    def load_state_dict(self, state_dict):
+        r"""
+        Loads the scaler state.  If this instance is disabled, :meth:`load_state_dict` is a no-op.
+
+        Arguments:
+           state_dict(dict): scaler state.  Should be an object returned from a call to :meth:`state_dict`.
+        """
+        if not self._enabled:
+            return
+
+        if len(state_dict) == 0:
+            raise RuntimeError("The source state dict is empty, possibly because it was saved "
+                               "from a disabled instance of AmpScaler.")
+
+        self._scale.copy_(state_dict["scale"])
+        self._growth_factor = state_dict["growth_factor"]
+        self._backoff_factor = state_dict["backoff_factor"]
 
     def _check_inf_per_device(self, optimizer):
         dummy_inv_scale = torch.full((1,), 1.0, dtype=torch.float32, device="cuda")

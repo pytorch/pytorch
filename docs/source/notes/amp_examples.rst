@@ -153,4 +153,5 @@ optimizers used this iteration have been stepped::
 
         scaler.step(optimizer0)
         scaler.step(optimizer1)
+
         scaler.update()

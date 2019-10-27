@@ -1955,6 +1955,16 @@ t2.start()
         assert len(d) == 2
         assert d[dev1a] == "1b"
 
+    def test_grad_scaling_state_dict(self):
+        s0 = torch.cuda.amp.AmpScaler(init_scale=3., growth_factor=4., backoff_factor=5.)
+        s1 = torch.cuda.amp.AmpScaler(init_scale=6., growth_factor=7., backoff_factor=8.)
+
+        s1.load_state_dict(s0.state_dict())
+
+        self.assertTrue(s1.get_scale() == 3.)
+        self.assertTrue(s1.get_growth_factor() == 4.)
+        self.assertTrue(s1.get_backoff_factor() == 5.)
+
     def _create_scaling_models_optimizers(self, device="cuda"):
         # Create a module+optimizer that will use scaling, and a control module+optimizer
         # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
