@@ -780,8 +780,6 @@ TEST_F(ModulesTest, LocalResponseNorm) {
     ASSERT_EQ(y.ndimension(), 4);
     ASSERT_EQ(s.ndimension(), 0);
     ASSERT_EQ(y.sizes(), x.sizes());
-
-    //ASSERT_TRUE(torch::allclose(y, y_exp));
   }
   {
     LocalResponseNorm model(LocalResponseNormOptions(2));

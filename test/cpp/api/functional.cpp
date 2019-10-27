@@ -796,7 +796,6 @@ TEST_F(FunctionalTest, LayerNorm) {
 }
 
 TEST_F(FunctionalTest, LocalResponseNorm) {
-  
   const auto x = torch::arange(100, 118).resize_({3, 3, 2});
   const auto y = F::local_response_norm(x, LocalResponseNormOptions(2));
   ASSERT_EQ(y.ndimension(), 3);
