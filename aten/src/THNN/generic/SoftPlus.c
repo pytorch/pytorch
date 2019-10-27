@@ -15,7 +15,7 @@ void THNN_(SoftPlus_updateOutput)(
 
   // f(x) = 1/beta * log(1 + exp(beta * x))
   TH_TENSOR_APPLY2(scalar_t, output, scalar_t, input,               \
-    *output_data = (*input_data * beta) > threshold ? *input_data : THLog1p(exp(*input_data * beta)) / beta;
+    *output_data = (*input_data * beta) > threshold ? *input_data : std::log1p(exp(*input_data * beta)) / beta;
   );
 }
 
