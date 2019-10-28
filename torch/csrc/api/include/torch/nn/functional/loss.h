@@ -13,7 +13,7 @@ inline Tensor l1_loss(
   return torch::l1_loss(
     input,
     target,
-          
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor kl_div(
