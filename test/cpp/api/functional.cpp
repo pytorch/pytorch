@@ -445,7 +445,7 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
       y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
-  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   y = F::max_unpool1d(
       x, indices, MaxUnpool1dOptions(3), std::vector<int64_t>({1, 1, 9}));
@@ -455,7 +455,7 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
       y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
-  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3).stride(2).padding(1));
 
