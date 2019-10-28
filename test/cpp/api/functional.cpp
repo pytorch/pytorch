@@ -1,5 +1,3 @@
-#pragma GCC diagnostic ignored "-Wbraced-scalar-init"
-
 #include <gtest/gtest.h>
 
 #include <torch/torch.h>
@@ -76,11 +74,11 @@ TEST_F(FunctionalTest, CosineSimilarity) {
 }
 
 TEST_F(FunctionalTest, SmoothL1LossDefaultOptions) {
-  auto input = torch::tensor({{0.1}, {1.2}, {4.7}}, torch::requires_grad());
-  auto target = torch::tensor({{0.}, {1.}, {5.}}, torch::kFloat);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::requires_grad());
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output =
       F::smooth_l1_loss(input, target);
-  auto expected = torch::tensor({0.0233335}, torch::kFloat);
+  auto expected = torch::tensor(0.0233335, torch::kFloat);
   auto s = output.sum();
   s.backward();
   ASSERT_TRUE(output.allclose(expected));
@@ -88,11 +86,11 @@ TEST_F(FunctionalTest, SmoothL1LossDefaultOptions) {
 }
 
 TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
-  auto input = torch::tensor({{0.1}, {1.2}, {4.7}}, torch::requires_grad());
-  auto target = torch::tensor({{0.}, {1.}, {5.}}, torch::kFloat);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::requires_grad());
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output =
       F::smooth_l1_loss(input, target, /*reduction=*/torch::Reduction::None);
-  auto expected = torch::tensor({{0.005}, {0.02}, {0.045}}, torch::kFloat);
+  auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
   auto s = output.sum();
   s.backward();
   ASSERT_TRUE(output.allclose(expected));
