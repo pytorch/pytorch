@@ -187,7 +187,7 @@ void argmin_kernel_cuda_impl(TensorIterator& iter) {
 
 void argmax_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype(1) == kHalf) {
-    return argmax_kernel_cuda_impl<at::Half, float>(iter);
+    argmax_kernel_cuda_impl<at::Half, float>(iter);
   }
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmax_cuda", [&]() {
     argmax_kernel_cuda_impl<scalar_t>(iter);
@@ -196,10 +196,10 @@ void argmax_kernel_cuda(TensorIterator& iter) {
 
 void argmin_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype(1) == kHalf) {
-    return argmin_kernel_cuda_impl<at::Half, float>(iter);
+    argmin_kernel_cuda_impl<at::Half, float>(iter);
   }
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmin_cuda", [&]() {
-  argmin_kernel_cuda_impl<scalar_t>(iter);
+    argmin_kernel_cuda_impl<scalar_t>(iter);
   });
 }
 
