@@ -237,7 +237,7 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
     std::string(toString(tensor.scalar_type())).append("Storage");
   pushGlobal("torch", data_type);
   // root_key
-  pushString(std::to_string(tensor_data_.size()));
+  pushString(c10::to_string(tensor_data_.size()));
   // location
   std::ostringstream ss;
   ss << tensor.device();
@@ -402,14 +402,20 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-void Pickler::pushDouble(double value) {
-  AT_ASSERT(sizeof(double) == 8);
-  char* bytes = reinterpret_cast<char*>(&value);
-
-  push<PickleOpCode>(PickleOpCode::BINFLOAT);
-  for (size_t i = 0; i < 8; ++i) {
-    push<uint8_t>(bytes[8 - i - 1]);
+static inline double swapDouble(double value) {
+  const char* bytes = reinterpret_cast<const char*>(&value);
+  double flipped;
+  char* out_bytes = reinterpret_cast<char*>(&flipped);
+  for (size_t i = 0; i < sizeof(double); ++i) {
+    out_bytes[i] = bytes[sizeof(double) - i - 1];
   }
+  return *reinterpret_cast<double*>(out_bytes);
+}
+
+void Pickler::pushDouble(double value) {
+  push<PickleOpCode>(PickleOpCode::BINFLOAT);
+  // Python pickle format is big endian, swap.
+  push<double>(swapDouble(value));
 }
 
 void Pickler::pushLong(const std::string& data) {

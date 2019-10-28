@@ -528,12 +528,12 @@ c10::optional<T> generic_to(
 }
 
 namespace detail {
-template <typename Tuple, std::size_t... I>
+template <typename Tuple, std::size_t... INDEX>
 Tuple generic_to_tuple_impl(
     const std::vector<IValue>& t,
-    c10::guts::index_sequence<I...>) {
+    c10::guts::index_sequence<INDEX...>) {
   return std::make_tuple(
-      t[I].to<typename std::tuple_element<I, Tuple>::type>()...);
+      t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);
 }
 }
 

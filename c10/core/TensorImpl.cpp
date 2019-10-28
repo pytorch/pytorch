@@ -137,6 +137,8 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
       if (sizes_[a] < 2) {
         return false;
+      } else if (sizes_[b] < 2) {
+        return true;
       }
       return strides_[a] < strides_[b];
   });
@@ -221,6 +223,13 @@ AutogradMetaInterface::~AutogradMetaInterface() {}
 void TensorImpl::set_requires_grad(bool requires_grad) {
   if (!requires_grad && !autograd_meta_) return;
   if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+  // NB: In principle, setting requires_grad to false could result in
+  // the AutogradMeta becoming equal to a default constructed state,
+  // in which case we could apply the nullptr AutogradMeta optimization
+  // (see autograd_meta_ docs).  But we don't do this right now.  Note
+  // that it is unsound to unconditionally set AutogradMeta to false
+  // when you set requires_grad to False, as there may be nontrivial
+  // information content in the other fields.
   autograd_meta_->set_requires_grad(requires_grad, this);
 }
 

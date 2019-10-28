@@ -121,8 +121,8 @@ class QConv2dInt8 final : public c10::OperatorKernel {
     const uint8_t* act_ptr =
         reinterpret_cast<uint8_t*>(act_contig.data_ptr<c10::quint8>());
 
-    PackedConvWeight& pack_ptr =
-        cpp_custom_type_hack::cast<PackedConvWeight>(packed_weight);
+    PackedConvWeight<2>& pack_ptr =
+        cpp_custom_type_hack::cast<PackedConvWeight<2>>(packed_weight);
     auto packB = pack_ptr.w.get();
     auto& col_offsets = pack_ptr.col_offsets;
     auto& kernel = pack_ptr.kernel;
@@ -168,7 +168,7 @@ class QConv2dInt8 final : public c10::OperatorKernel {
       TORCH_CHECK(bias.dim() == 1, "bias should be a vector (1D Tensor)");
       TORCH_CHECK(
           bias.size(0) == K,
-          "bias should have K elements: " + std::to_string(K));
+          "bias should have K elements: " + c10::to_string(K));
       bias_ptr = bias.data_ptr<float>();
     }
 

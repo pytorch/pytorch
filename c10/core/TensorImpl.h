@@ -1571,6 +1571,17 @@ private:
   // This means accessors on autograd_meta_ have to be careful to test if they
   // got a nullptr, and handle default behavior appropriately in that case.
   //
+  // Note that we don't enforce the invariant that if the AutogradMeta is
+  // default constructed, it is nullptr (to do this, we'd have to continuously
+  // check if an AutogradMeta became, by mutation, it's equal to the default
+  // constructed form.  (This might be useful, but it seems rare enough that
+  // a requires_grad=True variable will turn back into the requires_grad=False
+  // version.)  So there are three representable states:
+  //
+  //    1. autograd_meta_ == nullptr
+  //    2. autograd_meta_ is default constructed (semantically, same as (1))
+  //    3. autograd_meta_ has nontrivial information content
+  //
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
 protected:
