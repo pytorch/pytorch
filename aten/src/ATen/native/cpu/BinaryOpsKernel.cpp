@@ -94,10 +94,21 @@ void div_kernel(TensorIterator& iter) {
 }
 
 void logical_xor_kernel(TensorIterator& iter) {
-  cpu_kernel(iter,
-    [](bool a, bool b) -> bool {
-      return a != b;
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "logical_xor_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> bool {
+          return bool(a) != bool(b);
+        });
     });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "logical_xor_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return static_cast<scalar_t>(bool(a) != bool(b));
+        });
+    });
+  }
 }
 
 void lt_kernel(TensorIterator& iter) {
@@ -206,7 +217,16 @@ void ne_kernel(TensorIterator& iter) {
        });
     });
   }
-  }
+}
+
+void smooth_l1_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "smooth_l1_cpu", [&]() {
+    cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
+      auto z = std::abs(a - b);
+      return z < scalar_t(1.) ? scalar_t(0.5) * z * z : z - scalar_t(0.5);
+    });
+  });
+}
 
 } // anonymous namespace
 
@@ -223,5 +243,6 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel);
 REGISTER_DISPATCH(ge_stub, &ge_kernel);
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
+REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 
 }} // namespace at::native

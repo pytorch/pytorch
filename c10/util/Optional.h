@@ -18,9 +18,13 @@
 // could be able to support initialization of optionals from convertible type U, also
 // remove two old constructors optional(const T&) and optional(T&&) as it could be
 // handled by the template<U=T> case with default template argument.
+// - `constexpr struct in_place_t {} in_place{}` is moved to `c10/util/in_place.h`,
+// so that it can also be used in `c10/util/variant.h`.
 
 #ifndef C10_UTIL_OPTIONAL_H_
 #define C10_UTIL_OPTIONAL_H_
+
+#include <c10/util/in_place.h>
 
 #include <cassert>
 #include <functional>
@@ -195,10 +199,6 @@ constexpr U convert(U v) {
 
 constexpr struct trivial_init_t {
 } trivial_init{};
-
-// 20.5.6, In-place construction
-constexpr struct in_place_t {
-} in_place{};
 
 // 20.5.7, Disengaged state indicator
 struct nullopt_t {

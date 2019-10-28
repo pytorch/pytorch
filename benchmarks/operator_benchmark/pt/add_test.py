@@ -13,7 +13,7 @@ add_long_configs = op_bench.cross_product_configs(
     M=[8, 64, 128],
     N=range(2, 128, 64),
     K=[8 ** x for x in range(0, 3)], 
-    device=['cpu', 'cuda'],
+    device=['cpu'],
     tags=["long"]
 )
 
@@ -25,7 +25,7 @@ add_short_configs = op_bench.config_list(
         [64, 64, 128],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu'],
     },
     tags=["short"], 
 )
@@ -42,13 +42,9 @@ class AddBenchmark(op_bench.TorchBenchmarkBase):
 
 # The generated test names based on add_short_configs will be in the following pattern: 
 # add_M8_N16_K32_devicecpu
-# add_M8_N16_K32_devicecuda
 # add_M8_N16_K32_devicecpu_bwdall
 # add_M8_N16_K32_devicecpu_bwd1
 # add_M8_N16_K32_devicecpu_bwd2
-# add_M8_N16_K32_devicecuda_bwdall
-# add_M8_N16_K32_devicecuda_bwd1
-# add_M8_N16_K32_devicecuda_bwd2
 # ...
 # Those names can be used to filter tests. 
 
