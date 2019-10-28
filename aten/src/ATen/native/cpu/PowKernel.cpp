@@ -143,7 +143,7 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
           [=](scalar_t base) -> scalar_t {
             return std::pow(base, scalar_t(exp));
           },
-          [=](Vec base) -> Vec { return base.pow(scalar_t(exp)); }
+          [=](Vec base) -> Vec { return base.pow(scalar_t(exp)); } // std::pow cannot accept mixed complex data types.
         );
       }
     });
