@@ -29,8 +29,9 @@ const enumtype::k##name k##name; \
 }
 
 #define TORCH_ENUM_PRETTY_PRINT(name) \
-const char* operator()(const enumtype::k##name& v) const { \
-  return #name; \
+std::string operator()(const enumtype::k##name& v) const { \
+  std::string k("k"); \
+  return k + #name; \
 }
 
 // NOTE: Backstory on why we need the following two macros:
@@ -105,9 +106,14 @@ TORCH_ENUM_DECLARE(ReLU)
 TORCH_ENUM_DECLARE(LeakyReLU)
 TORCH_ENUM_DECLARE(FanIn)
 TORCH_ENUM_DECLARE(FanOut)
-TORCH_ENUM_DECLARE(None)
-TORCH_ENUM_DECLARE(Mean)
+TORCH_ENUM_DECLARE(Constant)
+TORCH_ENUM_DECLARE(Reflect)
+TORCH_ENUM_DECLARE(Replicate)
+TORCH_ENUM_DECLARE(Circular)
 TORCH_ENUM_DECLARE(Sum)
+TORCH_ENUM_DECLARE(Mean)
+TORCH_ENUM_DECLARE(Max)
+TORCH_ENUM_DECLARE(None)
 TORCH_ENUM_DECLARE(BatchMean)
 
 namespace torch {
@@ -127,9 +133,14 @@ struct enum_name {
   TORCH_ENUM_PRETTY_PRINT(LeakyReLU)
   TORCH_ENUM_PRETTY_PRINT(FanIn)
   TORCH_ENUM_PRETTY_PRINT(FanOut)
-  TORCH_ENUM_PRETTY_PRINT(None)
-  TORCH_ENUM_PRETTY_PRINT(Mean)
+  TORCH_ENUM_PRETTY_PRINT(Constant)
+  TORCH_ENUM_PRETTY_PRINT(Reflect)
+  TORCH_ENUM_PRETTY_PRINT(Replicate)
+  TORCH_ENUM_PRETTY_PRINT(Circular)
   TORCH_ENUM_PRETTY_PRINT(Sum)
+  TORCH_ENUM_PRETTY_PRINT(Mean)
+  TORCH_ENUM_PRETTY_PRINT(Max)
+  TORCH_ENUM_PRETTY_PRINT(None)
   TORCH_ENUM_PRETTY_PRINT(BatchMean)
 };
 

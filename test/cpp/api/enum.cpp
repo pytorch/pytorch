@@ -7,7 +7,9 @@
 #define TORCH_ENUM_PRETTY_PRINT_TEST(name) \
 { \
   v = torch::k##name; \
-  ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), #name); \
+  std::string pretty_print_name("k"); \
+  pretty_print_name.append(#name); \
+  ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), pretty_print_name); \
 }
 
 TEST(EnumTest, AllEnums) {
@@ -25,9 +27,14 @@ TEST(EnumTest, AllEnums) {
     torch::enumtype::kLeakyReLU,
     torch::enumtype::kFanIn,
     torch::enumtype::kFanOut,
-    torch::enumtype::kNone,
-    torch::enumtype::kMean,
+    torch::enumtype::kConstant,
+    torch::enumtype::kReflect,
+    torch::enumtype::kReplicate,
+    torch::enumtype::kCircular,
     torch::enumtype::kSum,
+    torch::enumtype::kMean,
+    torch::enumtype::kMax
+    torch::enumtype::kNone,
     torch::enumtype::kBatchMean
   > v;
 
@@ -44,8 +51,13 @@ TEST(EnumTest, AllEnums) {
   TORCH_ENUM_PRETTY_PRINT_TEST(LeakyReLU)
   TORCH_ENUM_PRETTY_PRINT_TEST(FanIn)
   TORCH_ENUM_PRETTY_PRINT_TEST(FanOut)
-  TORCH_ENUM_PRETTY_PRINT_TEST(None)
-  TORCH_ENUM_PRETTY_PRINT_TEST(Mean)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Constant)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Reflect)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Replicate)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Circular)
   TORCH_ENUM_PRETTY_PRINT_TEST(Sum)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Mean)
+  TORCH_ENUM_PRETTY_PRINT_TEST(Max)
+  TORCH_ENUM_PRETTY_PRINT_TEST(None)
   TORCH_ENUM_PRETTY_PRINT_TEST(BatchMean)
 }
