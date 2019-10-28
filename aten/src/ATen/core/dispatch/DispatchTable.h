@@ -184,7 +184,6 @@ class DispatchTable final {
     // they are never called. These, however, register kernels for
     // VariableTensorId.
     // TODO Stop generating those kernels and re-enable this assertion here.
-    //TORCH_CHECK(dispatch_strategy_.is_valid_, "Tried to register a kernel with dispatch key ", toString(dispatch_key), " for operator ", operator_name_, " that doesn't have tensor arguments.");
     kernels_.set(dispatch_key, kernel, operator_name_);
   }
 
@@ -227,9 +226,6 @@ class DispatchTable final {
    */
    const KernelFunction& lookupBoxed(const Stack* stack) const {
      return lookup_([&] () -> c10::optional<TensorTypeId> {
-       if (!dispatch_strategy_.is_valid_) {
-         return c10::nullopt;
-       }
        return dispatch_strategy_.get_dispatch_key_boxed(stack);
      });
    }
@@ -243,10 +239,8 @@ class DispatchTable final {
     */
    template<class... Args>
    const KernelFunction& lookupUnboxed(const Args&... args) const {
+     std::cout << "lookupUnboxed: " << operator_name_ << std::endl;
      return lookup_([&] () -> c10::optional<TensorTypeId> {
-       if (!dispatch_strategy_.is_valid_) {
-         return c10::nullopt;
-       }
        return dispatch_strategy_.get_dispatch_key_unboxed<Args...>(args...);
      });
    }
@@ -272,15 +266,9 @@ private:
     // TODO: a potential optimization is to store a bitfield of arg locations,
     size_t num_args_;
 
-    // An invalid dispatch strategy means we can't dispatch any kernels.
-    // You're able to create a dispatch table with an invalid dispatch strategy,
-    // but adding kernels to it will fail.
-    // This is used to allow creating operators with empty argument lists
-    // as long as they only have fallback kernels and no dispatched kernels.
-    bool is_valid_;
-
-    TensorTypeId get_dispatch_key_boxed(const Stack* stack) const {
-
+    c10::optional<TensorTypeId> get_dispatch_key_boxed(const Stack* stack) const {
+      // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
+      //      but boxed doesn't yet. These should be aligned and do the same thing.
       TensorTypeSet ts;
       for (const auto& ivalue : torch::jit::last(*stack, num_args_)) {
         if (C10_LIKELY(ivalue.isTensor())) {
@@ -293,33 +281,26 @@ private:
           }
         }
       }
+      if (ts.empty()) {
+        return c10::nullopt;
+      }
       // TODO: Don't use legacy extractor; blocked on c10 understanding
       // variable
       return c10::legacyExtractTypeId(ts);
     }
 
     template<class... Args>
-    TensorTypeId get_dispatch_key_unboxed(const Args&... args) const {
-      AT_ASSERT(sizeof...(args) == num_args_, "Wrong number of arguments. Schema says ", num_args_, " but was called with ", sizeof...(args));
-      return impl::dispatchTypeId(detail::multi_dispatch_tensor_type_set(args...));
+    c10::optional<TensorTypeId> get_dispatch_key_unboxed(const Args&... args) const {
+      auto type_set = detail::multi_dispatch_tensor_type_set(args...);
+      if (type_set.empty()) {
+        return c10::nullopt;
+      }
+      return impl::dispatchTypeId(type_set);
     }
   };
 
   static DispatchStrategy get_dispatch_strategy_(const FunctionSchema& schema) {
-    bool is_valid = false;
-    for (size_t i = 0; i < schema.arguments().size(); ++i) {
-      const auto& type = schema.arguments()[i].type();
-      if (type->isSubtypeOf(TensorType::get())) {
-        is_valid = true;
-        break;
-      }
-      if (type->isSubtypeOf(ListType::ofTensors())) {
-        is_valid = true;
-        break;
-      }
-    }
-
-    return {schema.arguments().size(), is_valid};
+    return {schema.arguments().size()};
   }
 
   template<class GetDispatchKeyFunc>
