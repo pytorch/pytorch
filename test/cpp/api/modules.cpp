@@ -1720,6 +1720,112 @@ TEST_F(ModulesTest, PoissonNLLLoss) {
   }
 }
 
+TEST_F(ModulesTest, BCEWithLogitsLoss) {
+  using namespace at::Reduction;
+  { // test BCE with logits raises if target and input are different size
+    {
+      const auto target = torch::rand(5);
+      const auto input = torch::rand({5, 1});
+      ASSERT_THROWS_WITH(
+        BCEWithLogitsLoss()(input, target),
+        "must be the same as input size"
+      );
+    }
+    {
+      const auto target = torch::rand({5, 1});
+      const auto input = torch::rand(5);
+      ASSERT_THROWS_WITH(
+        BCEWithLogitsLoss()(input, target),
+        "must be the same as input size"
+      );
+    }
+  }
+  { // test BCE with logits gives same result as sigmoid and bce loss
+    auto sigmoid = Sigmoid();
+
+    auto target = torch::rand({64, 4});
+    auto output = torch::rand({64, 4}) - 0.5;
+
+    ASSERT_TRUE(torch::allclose(
+      BCEWithLogitsLoss()(output, target),
+      BCELoss()(sigmoid(output), target)
+    ));
+
+    auto weight = torch::rand(4);
+    ASSERT_TRUE(torch::allclose(
+      BCEWithLogitsLoss(
+        BCEWithLogitsLossOptions().weight(weight)
+      )(output, target),
+      BCELoss(
+        BCELossOptions().weight(weight)
+      )(sigmoid(output), target)
+    ));
+
+    // target = torch::zeros({4, 1}, torch::kFloat);
+    // output = torch::empty({4, 1}, torch::kFloat).fill_(-100);
+
+    // ASSERT_TRUE(torch::allclose(
+    //   BCEWithLogitsLoss()(output, target),
+    //   BCELoss()(sigmoid(output), target)
+    // ));
+
+    // ASSERT_TRUE(torch::allclose(
+    //   BCEWithLogitsLoss(
+    //     BCEWithLogitsLossOptions().reduction(Reduction::None)
+    //   )(output, target),
+    //   BCELoss(
+    //     BCELossOptions().reduction(Reduction::None)
+    //   )(sigmoid(output), target)
+    // ));
+
+    // weight = torch::rand({1}, torch::kFloat);
+    // ASSERT_TRUE(torch::allclose(
+    //   BCEWithLogitsLoss(
+    //     BCEWithLogitsLossOptions().weight(weight)
+    //   )(output, target),
+    //   BCELoss(
+    //     BCELossOptions().weight(weight)
+    //   )(sigmoid(output), target)
+    // ));
+  }
+  { // test BCE with logits has correct grad at zero
+    const auto output = torch::zeros({3, 1}, torch::requires_grad());
+    const auto target = torch::zeros({3, 1});
+    BCEWithLogitsLoss(BCEWithLogitsLossOptions()
+      .reduction(Reduction::Sum))(output, target).backward();
+    const auto expected_grad = torch::empty({3, 1}).fill_(0.5);
+    ASSERT_TRUE(torch::allclose(output.grad(), expected_grad));
+  }
+  // { // test BCE with logits broadcasts weights
+  //   const auto target = torch::rand({16, 4});
+  //   const auto output = torch::rand({16, 4}) - 0.5;
+
+  //   auto weight = torch::rand(4);
+  //   auto out1 = BCEWithLogitsLoss(
+  //     BCEWithLogitsLossOptions().weight(weight)
+  //   )(output, target);
+
+  //   weight = weight.expand(16, 4).contiguous();
+  //   auto out2 = BCEWithLogitsLoss(
+  //     BCEWithLogitsLossOptions().weight(weight)
+  //   )(output, target);
+
+  //   ASSERT_TRUE(torch::allclose(out1, out2));
+
+  //   weight = torch::rand({16, 1});
+  //   out1 = BCEWithLogitsLoss(
+  //     BCEWithLogitsLossOptions().weight(weight)
+  //   )(output, target);
+
+  //   weight = weight.expand({16, 4}).contiguous();
+  //   out2 = BCEWithLogitsLoss(
+  //     BCEWithLogitsLossOptions().weight(weight)
+  //   )(output, target);
+
+  //   ASSERT_TRUE(torch::allclose(out1, out2));
+  // }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -2531,4 +2637,14 @@ TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
     PoissonNLLLossOptions().log_input(false).full(true).eps(0.42)
     .reduction(at::Reduction::Reduction::Sum))),
     "torch::nn::PoissonNLLLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintBCEWithLogitsLoss) {
+  ASSERT_EQ(c10::str(BCEWithLogitsLoss()), "torch::nn::BCEWithLogitsLoss()");
+  ASSERT_EQ(c10::str(BCEWithLogitsLoss(
+    BCEWithLogitsLossOptions()
+    .weight(torch::ones({3, 3}))
+    .pos_weight(torch::ones({3, 3}))
+    .reduction(at::Reduction::Reduction::Sum))),
+    "torch::nn::BCEWithLogitsLoss()");
 }

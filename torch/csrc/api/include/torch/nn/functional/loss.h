@@ -155,6 +155,20 @@ inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
     options.full(), options.eps(), get_enum(options.reduction()));
 }
 
+inline Tensor binary_cross_entropy_with_logits(
+  const Tensor& input, const Tensor& target,
+  const BCEWithLogitsLossOptions& options = {}) {
+
+  TORCH_CHECK(target.sizes() == input.sizes(),
+    "Target size (", target.sizes(),
+    ") must be the same as input size (",
+    input.sizes(), ")"
+  );
+
+  return torch::binary_cross_entropy_with_logits(input, target,
+    options.weight(), options.pos_weight(), get_enum(options.reduction()));
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch

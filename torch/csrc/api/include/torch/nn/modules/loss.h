@@ -366,5 +366,27 @@ struct TORCH_API PoissonNLLLossImpl : public Cloneable<PoissonNLLLossImpl> {
 /// PyTorch's module storage semantics.
 TORCH_MODULE(PoissonNLLLoss);
 
+// ============================================================================
+
+struct TORCH_API BCEWithLogitsLossImpl : public Cloneable<BCEWithLogitsLossImpl> {
+  explicit BCEWithLogitsLossImpl(const BCEWithLogitsLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `BCEWithLogitsLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  BCEWithLogitsLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `BCEWithLogitsLossImpl`.
+/// See the documentation for `BCEWithLogitsLoss` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(BCEWithLogitsLoss);
+
 } // namespace nn
 } // namespace torch

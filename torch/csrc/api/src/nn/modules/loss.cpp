@@ -232,5 +232,24 @@ Tensor PoissonNLLLossImpl::forward(
   return F::poisson_nll_loss(log_input, target, options);
 }
 
+// ============================================================================
+
+BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(
+  const BCEWithLogitsLossOptions& options_) : options(options_) {
+    register_buffer("weight",options.weight());
+    register_buffer("pos_weight", options.pos_weight());
+}
+
+void BCEWithLogitsLossImpl::reset() {}
+
+void BCEWithLogitsLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::BCEWithLogitsLoss()";
+}
+
+Tensor BCEWithLogitsLossImpl::forward(
+  const Tensor& input, const Tensor& target) {
+  return F::binary_cross_entropy_with_logits(input, target, options);
+}
+
 } // namespace nn
 } // namespace torch

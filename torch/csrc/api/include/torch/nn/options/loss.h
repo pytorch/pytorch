@@ -184,5 +184,19 @@ struct TORCH_API PoissonNLLLossOptions {
   TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
 };
 
+// ============================================================================
+
+/// Options for BCEWithLogitsLoss functional and module.
+struct TORCH_API BCEWithLogitsLossOptions {
+  /// A manual rescaling weight given to the loss of each batch element.
+  /// If given, has to be a Tensor of size `nbatch`.
+  TORCH_ARG(Tensor, weight) = {};
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  /// A weight of positive examples.
+  /// Must be a vector with length equal to the number of classes.
+  TORCH_ARG(Tensor, pos_weight) = {};
+};
+
 } // namespace nn
 } // namespace torch
