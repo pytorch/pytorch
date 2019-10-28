@@ -7,7 +7,7 @@ namespace nn {
 
 template <size_t D, typename Derived>
 InstanceNormImpl<D, Derived>::InstanceNormImpl(const InstanceNormOptions& options_)
-    : options(options_) {}
+    :  BatchNormImpl(BatchNormOptions(options_.num_features())), options(options_) {}
 
 template <size_t D, typename Derived>
 Tensor InstanceNormImpl<D, Derived>::forward(const Tensor& input) {
