@@ -263,16 +263,68 @@ inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
     enumtype::reduction_get_enum(options.reduction()));
 }
 
+inline int get_enum(const at::Reduction::Reduction reduction) {
+  switch (reduction) {
+    case Reduction::None: return 0;
+    case Reduction::Mean: return 1;
+    case Reduction::Sum: return 2;
+    default: return -1;
+  }
+}    
+    
 inline Tensor nll_loss(
     const Tensor& input,
     const Tensor& target,
     const NLLLossOptions& options = {}) {
-  return torch::nll_loss(
-      input,
-      target,
-      options.weight(),
-      options.ignore_index(),
-      options.reduction());
+    if(input.dim() < 2){
+      TORCH_WARN("Expected 2 or more dimensions (got ", input.dim(), ")");
+    }
+    if(input.sizes()[0] != target.sizes()[0]){
+      TORCH_WARN("Expected input batch_size (", input.sizes()[0], ") to match target batch_size (", target.sizes()[0], ")");
+    }
+    
+  TORCH_CHECK(
+    options.reduction() == Reduction::None ||
+    options.reduction() == Reduction::Mean ||
+    options.reduction() == Reduction::Sum,
+    options.reduction() + " is not valid"
+  );
+    
+  if(input.dim() == 2){
+    ret = torch::nll_loss(
+          input,
+          target,
+          options.weight(),
+          options.ignore_index(),
+          get_enum(options.reduction()));
+  }
+  else if(input.dim() == 4){
+    ret = torch::nll_loss2d(
+          input,
+          target,
+          options.weight(),
+          options.ignore_index(),
+          get_enum(options.reduction()));
+  }
+  else{
+    n = input.sizes()[0];
+    c = input.sizes()[1];
+    auto out_size = torch::Tensor(tensor.sizes().slice(0, 1)).vec();
+    auto temp = torch::tensor(tensor.sizes().slice(2, len - 2)).vec();
+    out_size.insert(out_size.end(), temp.begin(), temp.end());
+    if(target.sizes().slice(1, target.dim() - 1) != input.sizes().slice(2, input.dim() - 2)){
+      TORCH_WARN("Expected target size{", out_size, "} got {", target.sizes().vec(), "}");
+  }
+  input = input.continuous().view({n, c, 1, -1});
+  target = target.continuous().view({n, 1, -1});
+  if (options.reduction() != 'None'){
+    auto ret = torch::nll_loss2d(input, target, options.weight(), get_enum(options.reduction()), options.ignore_index());
+  }
+  else{
+    auto out = torch::nll_loss2d(input, target, options.weight(), get_enum(options.reduction()), options.ignore_index());
+    auto ret = out.view(out_size);
+  }
+  return ret;
 }
 
 } // namespace functional

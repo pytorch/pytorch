@@ -248,7 +248,7 @@ Tensor PoissonNLLLossImpl::forward(
   return F::poisson_nll_loss(log_input, target, options);
 =======
 NLLLossImpl::NLLLossImpl(
-    const NLLLossOptions& options_)
+    const NLLLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
     reset();
 }

@@ -247,7 +247,7 @@ struct TORCH_API NLLLossOptions {
   /// ``True``, the loss is averaged over non-ignored targets.
   TORCH_ARG(double, ignore_index) = -100;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(torch::Reduction::Reduction, reduction) = torch::Reduction::Mean;
 };
 
 } // namespace nn
