@@ -14,7 +14,7 @@ inline Tensor l1_loss(
   return torch::l1_loss(
     input,
     target,
-    c10::visit(enumtype::_reduction_get_enum{}, options.reduction()));
+          
 }
 
 inline Tensor kl_div(
@@ -33,7 +33,7 @@ inline Tensor kl_div(
   if (c10::get_if<enumtype::kBatchMean>(&options.reduction())) {
     reduction_enum = torch::Reduction::Sum;
   } else {
-    reduction_enum = c10::visit(enumtype::_reduction_get_enum{}, options.reduction());
+    reduction_enum = enumtype::reduction_get_enum(options.reduction());
   }
 
   auto reduced = torch::kl_div(input, target, reduction_enum);
@@ -68,7 +68,7 @@ inline Tensor mse_loss(
     ret = torch::mse_loss(
       expanded_input,
       expanded_target,
-      c10::visit(enumtype::_reduction_get_enum{}, options.reduction()));
+      enumtype::reduction_get_enum(options.reduction()));
   }
   return ret;
 }
@@ -77,7 +77,7 @@ inline Tensor binary_cross_entropy(
     const Tensor& input,
     const Tensor& target,
     const BCELossOptions& options = {}) {
-  auto reduction_enum = c10::visit(enumtype::_reduction_get_enum{}, options.reduction());
+  auto reduction_enum = enumtype::reduction_get_enum(options.reduction());
 
   if (target.sizes() != input.sizes()) {
     TORCH_WARN("Using a target size (", target.sizes(), ") ",
@@ -108,7 +108,7 @@ inline Tensor hinge_embedding_loss(
       input,
       target,
       options.margin(),
-      c10::visit(enumtype::_reduction_get_enum{}, options.reduction()));
+      enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor multi_margin_loss(
@@ -126,7 +126,7 @@ inline Tensor multi_margin_loss(
     options.p(),
     options.margin(),
     options.weight(),
-    c10::visit(enumtype::_reduction_get_enum{}, options.reduction())
+    enumtype::reduction_get_enum(options.reduction())
   );
 }
 
@@ -140,7 +140,7 @@ inline Tensor cosine_embedding_loss(
     input2,
     target,
     options.margin(),
-    c10::visit(enumtype::_reduction_get_enum{}, options.reduction()));
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor multilabel_margin_loss(
@@ -150,7 +150,7 @@ inline Tensor multilabel_margin_loss(
   return torch::multilabel_margin_loss(
     input,
     target,
-    c10::visit(enumtype::_reduction_get_enum{}, options.reduction()));
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor soft_margin_loss(
@@ -160,7 +160,7 @@ inline Tensor soft_margin_loss(
   return torch::soft_margin_loss(
     input,
     target,
-    c10::visit(enumtype::_reduction_get_enum{}, options.reduction()));
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor multilabel_soft_margin_loss(
@@ -186,7 +186,7 @@ inline Tensor multilabel_soft_margin_loss(
     ret = input;
     TORCH_INTERNAL_ASSERT(
       false,
-      c10::visit(enumtype::enum_name{}, options.reduction()),
+      enumtype::get_enum_name(options.reduction()),
       " is not valid");
   }
   return ret;
@@ -205,7 +205,7 @@ inline Tensor triplet_margin_loss(
       options.p(),
       options.eps(),
       options.swap(),
-      c10::visit(enumtype::_reduction_get_enum{}, options.reduction()));
+      enumtype::reduction_get_enum(options.reduction()));
 }
 
 } // namespace functional
