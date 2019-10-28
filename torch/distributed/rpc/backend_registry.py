@@ -3,8 +3,8 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import collections
 import enum
 
+import torch.distributed as dist
 import torch.distributed.distributed_c10d as dc10d
-from torch.distributed import ProcessGroupAgent
 
 
 BackendValue = collections.namedtuple("BackendValue", ["init_backend_handler"])
@@ -49,29 +49,38 @@ def process_group_init_backend_handler(
     **kwargs
 ):
     # Initialize ProcessGroup.
-    if not dc10d.is_initialized():
-        world_size = len(worker_name_to_id)
-        dc10d.init_process_group(
-            backend="gloo", store=store, rank=self_rank, world_size=world_size
+    if dist.is_initialized():
+        raise RuntimeError(
+            "Default process group must not be initialized before `init_model_parallel`."
         )
 
-    group = dc10d._get_default_group()
-    assert group is not None, "Failed to initialize default ProcessGroup."
+    world_size = len(worker_name_to_id)
+    dist.init_process_group(
+        backend="gloo", store=store, rank=self_rank, world_size=world_size
+    )
 
-    if (self_rank != -1) and (self_rank != group.rank()):
-        raise RuntimeError(
-            "self_rank argument {} doesn't match pg rank {}".format(
-                self_rank, group.rank()
+    try:
+        group = dc10d._get_default_group()
+        assert group is not None, "Failed to initialize default ProcessGroup."
+
+        if (self_rank != -1) and (self_rank != group.rank()):
+            raise RuntimeError(
+                "self_rank argument {} doesn't match pg rank {}".format(
+                    self_rank, group.rank()
+                )
             )
-        )
-    if (worker_name_to_id is not None) and (len(worker_name_to_id) != group.size()):
-        raise RuntimeError(
-            "worker_name_to_id argument {} doesn't match pg size {}".format(
-                worker_name_to_id, group.size()
+        if (worker_name_to_id is not None) and (len(worker_name_to_id) != group.size()):
+            raise RuntimeError(
+                "worker_name_to_id argument {} doesn't match pg size {}".format(
+                    worker_name_to_id, group.size()
+                )
             )
-        )
-    # TODO: add try-except and destroy _agent in all processes if any fails.
-    return ProcessGroupAgent(self_name, group, num_send_recv_threads)
+        # TODO: add try-except and destroy _agent in all processes if any fails.
+        return dist.ProcessGroupAgent(self_name, group, num_send_recv_threads)
+    except Exception as ex:
+        dist.destroy_process_group()
+        raise ex
+
 
 
 register_backend("PROCESS_GROUP", process_group_init_backend_handler)

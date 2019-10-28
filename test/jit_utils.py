@@ -241,9 +241,9 @@ class JitTestCase(TestCase):
         perform_assert(graph, kind, len(nodes), num_kind_nodes,
                        consider_subgraphs)
 
-    def assertExpectedONNXGraph(self, trace, *args, **kwargs):
-        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
-        self.assertExpectedGraph(trace, *args, **kwargs)
+    def assertExpectedONNXGraph(self, g, *args, **kwargs):
+        g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
+        self.assertExpectedGraph(g, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
         if isinstance(trace, torch._C.Graph):

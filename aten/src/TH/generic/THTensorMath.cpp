@@ -217,6 +217,11 @@ static void THTensor_(addmmImpl)(THTensor *r_, THTensor *t, THTensor *m1, THTens
     }
   }
 
+  if((r_->size(0) == 0) || (r_->size(1) == 0))
+  {
+    return;
+  }
+
   // n == 1 || ldc >= max(1, m)
   #define LDC_COND(M, N, LDC) ((N) == 1 || (LDC) >= THMax(1, M))
 
