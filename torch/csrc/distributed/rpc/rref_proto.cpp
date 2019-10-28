@@ -101,20 +101,23 @@ Message RRefFetchRet::toMessage() && {
   auto payload =
       jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
 
-  return Message(
-      std::move(payload), std::move(tensor_table), MessageType::RREF_FETCH_RET);
+  return Message(std::move(payload), std::move(tensor_table), type_);
 }
 
-std::unique_ptr<RRefFetchRet> RRefFetchRet::fromMessage(
+std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
     const Message& message) {
-  auto payload = static_cast<const char*>(message.payload().data());
-  auto payload_size = message.payload().size();
+  auto values = toIValues(message, MessageType::SCRIPT_RREF_FETCH_RET);
+  TORCH_INTERNAL_ASSERT(
+      values.size() == 1,
+      "RRef of IValue should contain a single IValue, but got ",
+      values.size());
+  return c10::guts::make_unique<ScriptRRefFetchRet>(std::move(values));
+}
 
-  auto value =
-      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
-  auto values = value.toTuple()->elements();
-
-  return c10::guts::make_unique<RRefFetchRet>(std::move(values));
+std::unique_ptr<PythonRRefFetchRet> PythonRRefFetchRet::fromMessage(
+    const Message& message) {
+  return c10::guts::make_unique<PythonRRefFetchRet>(
+      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET));
 }
 
 std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(
