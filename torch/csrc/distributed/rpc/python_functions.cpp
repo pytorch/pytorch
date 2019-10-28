@@ -30,6 +30,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
     const py::kwargs& kwargs,
     Stack& stack) {
   Symbol symbol = Symbol::fromQualString(opName);
+
   if (symbol.is_aten()) {
     for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
       try {
@@ -37,7 +38,6 @@ std::shared_ptr<Operator> matchBuiltinOp(
         // ``createStackForSchema`` to avoid throwing an error.
         stack = torch::jit::createStackForSchema(
             op->schema(), args, kwargs, c10::nullopt);
-
       } catch (std::runtime_error& e) {
         VLOG(1) << "Couldn't match schema: " << op->schema()
                 << " to args: " << args << " and kwargs: " << kwargs

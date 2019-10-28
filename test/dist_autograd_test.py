@@ -37,8 +37,36 @@ def _set_rpc_done(ctx_id, rank_distance):
     known_context_ids.append(ctx_id)
 
 
+def _check_rpc_done(rank_distance):
+    while not rpc_done[rank_distance]:
+        time.sleep(0.1)
+
+
+def _torch_ones(sizes, requires_grad=False):
+    return torch.ones(sizes, requires_grad=requires_grad)
+
+
+def _create_ones_rref_on(dst, sizes):
+    return rpc.remote(
+        dst,
+        _torch_ones,
+        args=(sizes,),
+        kwargs={"requires_grad":True}
+    )
+
+
+def _compare_owner_value(context_id, rref, grad):
+    grads = dist_autograd.get_gradients(context_id)
+    return torch.equal(grads[rref.local_value().wait()], grad)
+
+
 def my_py_add(t1, t2):
     return torch.add(t1, t2)
+
+
+def my_rref_add(rref_t1, t2):
+    ret = torch.add(rref_t1.local_value().wait(), t2)
+    return ret
 
 
 def my_py_nested_call(t1, t2, dst, world_size, hops):
@@ -67,6 +95,15 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
     # all contexts have been cleaned up if trying to retrieve any context resulted in a RuntimeError.
     success = len(context_id_to_raised) == len(known_context_ids) and all(context_id_to_raised.values())
     return success
+
+
+def _run_trainer(rref_t1, t2, t2_grad, ps, rank_diff):
+    with dist_autograd.context() as context_id:
+        ret = rpc.rpc_sync(ps, my_rref_add, args=(rref_t1, t2))
+        dist_autograd.backward([ret.sum()])
+        # prevent deleting dist autograd context
+        rpc.rpc_sync(ps, _set_rpc_done, args=(context_id, rank_diff))
+        rpc.rpc_sync(ps, _check_rpc_done, args=(0, ))
 
 
 from torch.autograd import Function
@@ -120,9 +157,7 @@ class DistAutogradTest(object):
         return self.dst_rank
 
     def _check_rpc_done(self, rank_distance):
-        while not rpc_done[rank_distance]:
-            time.sleep(0.1)
-            pass
+        _check_rpc_done(rank_distance)
 
     @property
     def world_size(self):
@@ -687,6 +722,110 @@ class DistAutogradTest(object):
                 loss = ret.sum()
                 ret = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
                 local_grads = ret if ret else local_grads
+
+    def _test_backward_rref(self, dst):
+        local_grads = None
+        t1 = torch.ones((3, 3), requires_grad=True)
+        t2 = torch.zeros((3, 3), requires_grad=True)
+
+        local_ret = torch.add(t1, t2)
+        local_ret.sum().backward()
+        with dist_autograd.context() as context_id:
+            rref_t1 = rpc.remote(
+                dst,
+                _torch_ones,
+                args=((3, 3),),
+                kwargs={"requires_grad":True}
+            )
+            rref = rpc.remote(dst, my_rref_add, args=(rref_t1, t2))
+            ret = rref.to_here().wait()
+            dist_autograd.backward([ret.sum()])
+
+            # verify grads on caller
+            grads = dist_autograd.get_gradients(context_id)
+            self.assertIn(t2, grads)
+            self.assertEqual(grads[t2], t2.grad)
+
+            # verify grads on callee
+            self.assertTrue(
+                rpc.rpc_sync(
+                    dst,
+                    _compare_owner_value,
+                    args=(context_id, rref_t1, t1.grad)
+                )
+            )
+
+    @dist_init
+    def test_backward_rref(self):
+        self._test_backward_rref("worker{}".format(self._next_rank()))
+
+    @dist_init
+    def test_backward_rref_multi(self):
+        if self.rank > 0:
+            self._test_backward_rref("worker0")
+
+    @dist_init
+    def test_backward_rref_multi_user(self):
+        local_grads = None
+        t1 = torch.ones((3, 3), requires_grad=True)
+        t2 = torch.zeros((3, 3), requires_grad=True)
+
+        local_ret = torch.add(t1, t2)
+        local_ret.sum().backward()
+
+        # create rref on self
+        # TODO: simplify this once we support rpc to self
+        self_name = "worker{}".format(self.rank)
+        rref_t1 = rpc.rpc_sync(
+            "worker{}".format(self._next_rank()),
+            _create_ones_rref_on,
+            args=(self_name, (3, 3))
+        )
+
+        rank_diffs = [1, 2, 3]
+        futures = []
+        for rank_diff in rank_diffs:
+            futures.append(rpc.rpc_async(
+                "worker{}".format((self.rank + rank_diff) % self.world_size),
+                _run_trainer,
+                args=(rref_t1, t2, t2.grad, self_name, rank_diff)
+            ))
+
+        for rank_diff in rank_diffs:
+            self._check_rpc_done(rank_diff)
+
+
+        # trainers are done and holding the context for verification
+        accumulate_grad_func = None
+        for rank_diff in rank_diffs:
+            ctx_id = ctx_ids[rank_diff]
+            ctx = dist_autograd._retrieve_context(ctx_id)
+            send_functions = ctx._send_functions()
+            self.assertEqual(1, len(send_functions))
+
+            next_funcs = list(send_functions.values())[0].next_functions
+            add_backward_fn = next_funcs[0][0]
+
+            self.assertEqual("AddBackward0", add_backward_fn.name())
+
+            # Verify the next two functions are the same recv backward function.
+            next_funcs = add_backward_fn.next_functions
+            self.assertEqual(2, len(next_funcs))
+            self.assertEqual(
+                "torch::autograd::AccumulateGrad", next_funcs[0][0].name()
+            )
+            if accumulate_grad_func:
+                self.assertEqual(accumulate_grad_func, next_funcs[0][0])
+            else:
+                accumulate_grad_func = next_funcs[0][0]
+            self.assertEqual(
+                "torch::distributed::autograd::RecvRpcBackward", next_funcs[1][0].name()
+            )
+
+        _set_rpc_done(None, 0)
+
+        for fut in futures:
+            fut.wait()
 
     @dist_init
     def test_backward_multiple_round_trips(self):
