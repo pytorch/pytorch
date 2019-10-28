@@ -209,7 +209,7 @@ jobs:
         run: |
           set -eux
           git remote add upstream https://github.com/pytorch/pytorch
-          git fetch upstream "${{ github.base_ref}}"
+          git fetch upstream "$GITHUB_BASE_REF"
 
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
@@ -237,9 +237,11 @@ jobs:
           # Run Clang-Tidy
           # The negative filters below are to exclude files that include onnx_pb.h or
           # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
+          MERGE_BASE=$(git merge-base $GITHUB_HEAD_REF $GITHUB_BASE_REF)
           python tools/clang_tidy.py                  \
+            --verbose                                 \
             --paths torch/csrc/                       \
-            --diff "${{ github.event.pull_request.base.sha}}" \
+            --diff "$MERGE_BASE"                      \
             -g"-torch/csrc/jit/export.cpp"            \
             -g"-torch/csrc/jit/import.cpp"            \
             -g"-torch/csrc/jit/netdef_converter.cpp"  \
