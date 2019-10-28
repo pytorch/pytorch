@@ -150,20 +150,24 @@ static auto check_has_torch_function(PyObject* obj) -> bool
 }
 
 /*
-check_exact() and check() have a lot of similar code. check_exact() and check()
-were introduced when __torch_function__ support was added.
-
-When the function signature are created during parse(), check_exact() only checks if the parameter is
-a Tensor. check() looks for subclass of Tensor being passed as an argument. It is called after we have
-checked for __torch_function__ overload on the obj while running parse(). If we didn't run check()
-and check_exact() separately, there would be an overload.
+* is_exact flag was introduced when __torch_function__ support was added.
+*
+* When the function signatures are created during parse(), is_exact ensures
+* that the subTensors are checked later after checking for  __torch_function__
+* overload on the obj. This ensures that there is minimal overload when we
+* don't have overloaded SubTensor(s).
 */
 
-auto FunctionParameter::check_exact(PyObject* obj) -> bool
+auto FunctionParameter::check(PyObject* obj, bool is_exact=true) -> bool
 {
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_CheckExact(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
+      if(is_exact){
+        return THPVariable_CheckExact(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
+      }
+      else{
+        return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
+      }
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:
@@ -175,9 +179,17 @@ auto FunctionParameter::check_exact(PyObject* obj) -> bool
       if (THPUtils_checkDouble(obj)) {
         return true;
       }
-      if (THPVariable_CheckExact(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
-        return !var.requires_grad() && var.dim() == 0;
+      if(is_exact){
+        if (THPVariable_CheckExact(obj)) {
+          auto& var = ((THPVariable*)obj)->cdata;
+          return !var.requires_grad() && var.dim() == 0;
+        }
+      }
+      else{
+        if (THPVariable_Check(obj)) {
+          auto& var = ((THPVariable*)obj)->cdata;
+          return !var.requires_grad() && var.dim() == 0;
+        }
       }
       return false;
     }
@@ -185,74 +197,16 @@ auto FunctionParameter::check_exact(PyObject* obj) -> bool
       if (THPUtils_checkLong(obj)) {
         return true;
       }
-      if (THPVariable_CheckExact(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
-        return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
-      }
-      return false;
-    }
-#ifdef BUILD_NAMEDTENSOR
-    case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
-    case ParameterType::DIMNAME_LIST: {
-      if (THPUtils_checkDimnameList(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
-      return size == 1 && THPUtils_checkDimname(obj);
-    }
-#endif
-    case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
-    case ParameterType::INT_LIST: {
-      if (PyTuple_Check(obj) || PyList_Check(obj)) {
-        return true;
-      }
-      // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
-      return size > 0 && THPUtils_checkLong(obj);
-    }
-    case ParameterType::GENERATOR: return THPGenerator_Check(obj);
-    case ParameterType::BOOL: return PyBool_Check(obj);
-    case ParameterType::STORAGE: return isStorage(obj);
-    case ParameterType::PYOBJECT: return true;
-    case ParameterType::SCALARTYPE: return THPDtype_Check(obj) || THPPythonScalarType_Check(obj);
-    case ParameterType::LAYOUT: return THPLayout_Check(obj);
-    case ParameterType::MEMORY_FORMAT: return THPMemoryFormat_Check(obj);
-    case ParameterType::QSCHEME: return THPQScheme_Check(obj);
-    case ParameterType::DEVICE:
-      return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
-    case ParameterType::STRING: return THPUtils_checkString(obj);
-    default: throw std::runtime_error("unknown parameter type");
-  }
-}
-
-auto FunctionParameter::check(PyObject* obj) -> bool
-{
-  switch (type_) {
-    case ParameterType::TENSOR: {
-      return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
-    }
-    case ParameterType::SCALAR:
-    case ParameterType::COMPLEX:
-      if (PyComplex_Check(obj)) {
-        return true;
-      }
-      // fallthrough
-    case ParameterType::DOUBLE: {
-      if (THPUtils_checkDouble(obj)) {
-        return true;
-      }
-      if (THPVariable_Check(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
-        return !var.requires_grad() && var.dim() == 0;
-      }
-      return false;
-    }
-    case ParameterType::INT64: {
-      if (THPUtils_checkLong(obj)) {
-        return true;
-      }
-      if (THPVariable_Check(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
-        return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
+      if(is_exact){
+        if (THPVariable_CheckExact(obj)) {
+          auto& var = ((THPVariable*)obj)->cdata;
+          return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
+        }
+      }else{
+        if (THPVariable_Check(obj)) {
+          auto& var = ((THPVariable*)obj)->cdata;
+          return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
+        }
       }
       return false;
     }
@@ -644,7 +598,7 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       }
       return false;
     // check for Tensor type.
-    } else if (param.check_exact(obj)) {  // NOLINT
+    } else if (param.check(obj)) {  // NOLINT
       dst[i++] = obj;
     // XXX: the Variable check is necessary because sizes become tensors when
     // tracer is enabled. This behavior easily leads to ambiguities, and we
@@ -687,7 +641,7 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
           ++num_overloaded_args;
         }
       }
-    } else if (param.check(obj)) {
+    } else if (param.check(obj, false)) {
     // check for subclass of Tensor type when it is not overloaded with a __torch_function__.
       dst[i++] = obj;
     } else if (raise_exception) {
