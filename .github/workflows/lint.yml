@@ -254,6 +254,6 @@ jobs:
           check_name: 'clang-tidy'
           linter_output_path: 'clang-tidy-output.txt'
           commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) (?<errorCode>\[.*\])'
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
