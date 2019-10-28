@@ -12,17 +12,18 @@ namespace nn {
 
 /// Options for a pad functional.
 struct TORCH_API PadOptions {
+  typedef c10::variant<
+    enumtype::kConstant,
+    enumtype::kReflect,
+    enumtype::kReplicate,
+    enumtype::kCircular> mode_t;
+
   PadOptions(std::vector<int64_t> pad);
 
   /// m-elements tuple, where m/2 <= input dimensions and m is even.
   TORCH_ARG(std::vector<int64_t>, pad);
 
   /// "constant", "reflect", "replicate" or "circular". Default: "constant"
-  typedef c10::variant<
-    enumtype::kConstant,
-    enumtype::kReflect,
-    enumtype::kReplicate,
-    enumtype::kCircular> mode_t;
   TORCH_ARG(mode_t, mode) = torch::kConstant;
 
   /// fill value for "constant" padding. Default: 0

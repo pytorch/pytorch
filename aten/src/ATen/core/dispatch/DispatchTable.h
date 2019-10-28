@@ -50,7 +50,6 @@ class DispatchTable final {
     // they are never called. These, however, register kernels for
     // VariableTensorId.
     // TODO Stop generating those kernels and re-enable this assertion here.
-    //TORCH_CHECK(dispatchKeyExtractor_.is_valid_, "Tried to register a kernel with dispatch key ", toString(dispatchKey), " for operator ", operatorName_, " that doesn't have tensor arguments.");
     auto emplaced = kernels_.emplace(dispatchKey, kernel);
     if (!emplaced.second) {
       // Element already existed. Overwrite it.
