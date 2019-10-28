@@ -179,7 +179,7 @@ static inline Tensor _run_cufft(
     IntArrayRef output_sizes, bool input_was_cloned
 ) {
   if (config.should_clone_input() && !input_was_cloned) {
-    input = input.clone();
+    input = input.clone(at::MemoryFormat::Contiguous);
   }
 
   auto& plan = config.plan();
