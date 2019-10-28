@@ -1018,19 +1018,6 @@
     - real max
 ]]
 [[
-  name: _th_zero_
-  cname: zero
-  return: self
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _th_cumsum
   cname: cumsum
   cpu_bool: True

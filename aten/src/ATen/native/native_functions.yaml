@@ -3001,8 +3001,8 @@
   supports_named_tensor: True
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_zero_
-    CUDA: legacy::cuda::_th_zero_
+    CPU: zero_
+    CUDA: zero_
     SparseCPU: zero_sparse_
     SparseCUDA: zero_sparse_
     MkldnnCPU: mkldnn_zero_
