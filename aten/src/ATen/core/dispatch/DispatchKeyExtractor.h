@@ -86,9 +86,11 @@ namespace detail {
     // optimize this if statement away because it's based on
     // a compile time constant.
     if (args_have_tensor_options<Args...>::value) {
-      type_set(TensorOptionsAccumulator().apply(args...).options);
+      TensorOptions tensorOptions = TensorOptionsAccumulator().apply(args...).options;
+      if (tensorOptions.has_dtype() && tensorOptions.has_device() && tensorOptions.has_layout()) {
+        type_set(tensorOptions);
+      }
     }
-
     return type_set.ts;
   }
 }
