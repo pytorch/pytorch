@@ -28,9 +28,18 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
     scalar_t *tbp = tb->data<scalar_t>();
     ptrdiff_t sz = THTensor_(nElement)(ta);
     ptrdiff_t i;
-    for (i=0; i<sz; ++i){
-      if(tap[i] != tbp[i]) return 0;
-    }
+    at::parallel_for(
+        0,
+        sz,
+        HYPER_TH_OMP_OVERHEAD_THRESHOLD,
+        [&](int64_t begin, int64_t end) {
+          for (auto iter = begin; iter < end; iter++) {
+            if (equal && tap[iter] != tbp[iter]) {
+              equal = 0;
+              break;
+            }
+          }
+        });
   } else {
     // Short-circuit the apply function on inequality
     TH_TENSOR_APPLY2(scalar_t, ta, scalar_t, tb,
