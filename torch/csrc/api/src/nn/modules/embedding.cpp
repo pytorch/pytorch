@@ -87,10 +87,8 @@ void EmbeddingBagImpl::reset() {
 }
 
 torch::Tensor EmbeddingBagImpl::forward(
-    const torch::Tensor& input,
-    const torch::Tensor& offsets,
-    const torch::Tensor& per_sample_weights) {
-  return F::embedding_bag(input, weight, offsets, options, per_sample_weights);
+    const torch::Tensor& input) {
+  return F::embedding_bag(input, weight, options);
 }
 
 void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {

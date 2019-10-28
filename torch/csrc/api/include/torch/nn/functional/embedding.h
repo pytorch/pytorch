@@ -33,13 +33,11 @@ inline Tensor embedding(const Tensor& input, Tensor weight, EmbeddingOptions opt
 inline Tensor embedding_bag(
     const Tensor& input,
     Tensor weight,
-    const Tensor& offsets,
-    const EmbeddingBagOptions& options,
-    const Tensor& per_sample_weights) {
+    const EmbeddingBagOptions& options) {
 
   Tensor input_ = input;
-  Tensor offsets_ = offsets;
-  Tensor per_sample_weights_ = per_sample_weights;
+  Tensor offsets_ = options.offsets();
+  Tensor per_sample_weights_ = options.per_sample_weights();
 
   TORCH_CHECK(!per_sample_weights_.defined() || input.sizes() == per_sample_weights_.sizes(),
     "embedding_bag: If per_sample_weights (", per_sample_weights_.sizes(), ") is not null, then it must have the same shape as the input (", input.sizes(), ")");

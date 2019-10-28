@@ -31,6 +31,7 @@ namespace nn {
   /// Options for the `EmbeddingBag` module.
   struct TORCH_API EmbeddingBagOptions {
     typedef c10::variant<enumtype::kSum, enumtype::kMean, enumtype::kMax> mode_t;
+    EmbeddingBagOptions();
     EmbeddingBagOptions(int64_t num_embeddings, int64_t embedding_dim);
     /// The size of the dictionary of embeddings.
     TORCH_ARG(int64_t, num_embeddings);
