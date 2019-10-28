@@ -455,7 +455,7 @@ TEST(TensorTest, MultidimTensorCtor) {
   }
 }
 
-TEST(TensorTest, MultidimTensrCtor_CUDA) {
+TEST(TensorTest, MultidimTensorCtor_CUDA) {
   {
     auto tensor = torch::tensor(
       {{{{{{{{1.0, 2.0, 3.0}}}}}, {{{{{4.0, 5.0, 6.0}}}}}, {{{{{7.0, 8.0, 9.0}}}}}}}},
@@ -468,6 +468,18 @@ TEST(TensorTest, MultidimTensrCtor_CUDA) {
       torch::arange(1, 10, torch::kDouble).view(tensor.sizes()).to(torch::kCUDA)));
     ASSERT_FALSE(tensor.requires_grad());
   }
+}
+
+TEST(TensorTest, TensorCtorPreservesInitListDtype) {
+  ASSERT_EQ(torch::tensor({1, 2, 3}).dtype(), torch::kInt);
+  ASSERT_EQ(torch::tensor({{1, 2, 3}}).dtype(), torch::kInt);
+  ASSERT_EQ(torch::tensor({1., 2., 3.}).dtype(), torch::kDouble);
+  ASSERT_EQ(torch::tensor({{1., 2., 3.}}).dtype(), torch::kDouble);
+
+  ASSERT_EQ(torch::tensor({1, 2, 3}, torch::TensorOptions()).dtype(), torch::kInt);
+  ASSERT_EQ(torch::tensor({{1, 2, 3}}, torch::TensorOptions()).dtype(), torch::kInt);
+  ASSERT_EQ(torch::tensor({1., 2., 3.}, torch::TensorOptions()).dtype(), torch::kDouble);
+  ASSERT_EQ(torch::tensor({{1., 2., 3.}}, torch::TensorOptions()).dtype(), torch::kDouble);
 }
 
 TEST(TensorTest, PrettyPrintTensorDataContainer) {
