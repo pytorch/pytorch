@@ -34,6 +34,18 @@ Tensor _shape_as_tensor(const Tensor& self) {
   return at::tensor(self.sizes(), options);
 }
 
+Tensor& set_(Tensor& result, Storage source) {
+  return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
+}
+
+// this needs to be split along CPU/CUDA lines because we don't have a consistent
+// way of getting the allocator to use for a device (c10::GetAllocator is not
+// the same as at::cuda::getCUDADeviceAllocator().
+Tensor& set_cpu_(Tensor& result) {
+  Storage storage(result.dtype(), 0, c10::GetAllocator(kCPU), true);
+  return result.set_(storage, 0, {0}, {});
+}
+
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
@@ -486,7 +498,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
     return self.as_strided(shape, *stride);
   }
-  return at::_unsafe_view(self.clone(), shape);
+  return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
