@@ -795,7 +795,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
 
   // if we actually profile we can rely on profiling information
   // so we don't have to mark every gradient as possibly undefined
-  if (!getProfilingMode()) {
+  if (!getProfilingMode() && getExecutorMode()) {
     for (size_t i = 0; i < grad_desc.df_input_vjps.size(); i++) {
       auto tt = grad_desc.df->block()->inputs().at(i);
       if (auto ttt = tt->type()->cast<TensorType>()) {

@@ -15,11 +15,12 @@ from itertools import product, permutations
 
 from test_jit import JitTestCase, enable_cpu_fuser, RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, \
     backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
-    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything, IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR
-from jit_utils import enable_profiling_mode, ProfilingMode
+    LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell, _inline_everything
+from jit_utils import enable_profiling_mode, ProfilingMode, IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR
 
-torch._C._jit_set_profiling_executor(True)
-torch._C._jit_set_profiling_mode(True)
+if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+    torch._C._jit_set_profiling_executor(True)
+    torch._C._jit_set_profiling_mode(True)
 
 
 def strip_profiling_nodes(nodes):
@@ -733,7 +734,6 @@ class TestFuser(JitTestCase):
         inputs = get_lstm_inputs('cuda')
         ge = self.checkTrace(LSTMCellF, inputs)
         graph = ge.graph_for(*inputs)
-        print(str(graph))
         # .check_not("aten::add") don't get pulled into FusionGroup because of BailOuts
         FileCheck().check_not("Chunk").check_not("aten::sigmoid") \
             .check_not("aten::tanh").check("FusionGroup").check_next("TupleConstruct") \

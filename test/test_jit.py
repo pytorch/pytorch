@@ -43,7 +43,7 @@ from common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
 from jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, enable_profiling_mode, ProfilingMode, do_input_map, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
-    get_forward, get_forward_graph, get_module_method
+    get_forward, get_forward_graph, get_module_method, IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR
 from common_nn import module_tests, new_module_tests, criterion_tests
 from common_methods_invocations import method_tests as autograd_method_tests
 from common_methods_invocations import create_input, unpack_variables, \
@@ -102,8 +102,6 @@ PY35 = sys.version_info >= (3, 5)
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
 
-IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR = True
-
 def doAutodiffCheck(testname):
 
     if not IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
@@ -140,10 +138,11 @@ meth_call = torch._C.ScriptMethod.__call__
 
 def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
-        with enable_profiling_mode(ProfilingMode.FULL):
-            del kwargs['profile_and_replay']
-            callable(*args, **kwargs)
-            return callable(*args, **kwargs)
+        del kwargs['profile_and_replay']
+        if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+            with enable_profiling_mode(ProfilingMode.FULL):
+                callable(*args, **kwargs)
+                return callable(*args, **kwargs)
 
     return callable(*args, **kwargs)
 
@@ -153,11 +152,12 @@ def prof_func_call(*args, **kwargs):
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
-# enable profiling graph executor for all tests in this file by default
-torch._C._jit_set_profiling_executor(True)
-
 torch._C.ScriptFunction.__call__ = prof_func_call
 torch._C.ScriptMethod.__call__ = prof_meth_call
+
+if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+    # enable profiling graph executor for all tests in this file by default
+    torch._C._jit_set_profiling_executor(True)
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
@@ -566,7 +566,10 @@ class TestJit(JitTestCase):
             # the unprofiled graph should return the correct result
             self.assertEqual(func(input, profile_and_replay=True), result)
             gre = func.graph_for(input)
-            FileCheck().check("prim::Constant").check_next("prim::BailoutTemplate").run(gre)
+            if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+                FileCheck().check("prim::Constant").check_next("prim::BailoutTemplate").run(gre)
+            else:
+                FileCheck().check_not("prim::If").run(gre)
 
         def test_dim():
             @torch.jit.script
@@ -2224,11 +2227,9 @@ graph(%Ra, %Rb):
 
             with freeze_rng_state():
                 out_ref = torch.nn.functional.dropout(x)
-                out_ref = torch.nn.functional.dropout(x)
                 grad_ref = torch.autograd.grad(out_ref.sum(), x)
 
             with freeze_rng_state():
-                out = func(x)
                 out = func(x)
                 grad = torch.autograd.grad(out.sum(), x)
 
@@ -5335,6 +5336,7 @@ a")
         # NOTE: cannot optimize yet because broadcasts are not inserted before the fuser runs
         self.checkScript(func, [alpha, beta, x, y], optimize=False)
 
+    @unittest.skipIf(not IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR, "skip if profiling isn't enabled")
     def test_profiling_graph_executor(self):
         @torch.jit.script
         def def_in_one_branch(x, z):
@@ -5466,8 +5468,13 @@ a")
         loop_outputs = list(loop_body.outputs())
 
         self.assertTrue(loop_inputs[1].requires_grad())
-        bailouts_in_outer_block = graph.findAllNodes("prim::BailOut", False)
-        self.assertFalse(bailouts_in_outer_block[1].output().requires_grad())
+        
+        if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+            bailouts_in_outer_block = graph.findAllNodes("prim::BailOut", False)
+            self.assertFalse(bailouts_in_outer_block[1].output().requires_grad())
+        else:
+            self.assertTrue(loop.output().requires_grad())
+            self.assertFalse(loop_outputs[1].requires_grad())
 
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
@@ -6854,15 +6861,23 @@ a")
         ''')
         ops = ['tensor', 'as_tensor']
         inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]']
-        expected_shape = ["Long(1)", "Bool(1)", "Double(1)", "Double()", "Long()", "Bool()", "Long(1, 1)"]
+        if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+            expected_shape = ["Long(1)", "Bool(1)", "Double(1)", "Double()", "Long()", "Bool()", "Long(1, 1)"]
+        else:
+            expected_shape = ["Long(*)", ("Bool(*)"), "Double(*)", "Double()", "Long()", "Bool()", "Long(*, *)"]
 
         for op in ops:
             for inp, expect in zip(inputs, expected_shape):
                 code = tensor_template.format(tensor_op=op, input=inp)
                 scope = {}
                 exec(code, globals(), scope)
-                fn = self.checkScript(code, ())
-                FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(fn.graph_for())
+                if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+                    fn = self.checkScript(code, ())
+                    FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(fn.graph_for())
+                else:
+                    cu = torch.jit.CompilationUnit(code)
+                    torch._C._jit_pass_complete_shape_analysis(cu.func.graph, (), False)
+                    FileCheck().check(expect).check("aten::{tensor_op}".format(tensor_op=op)).run(cu.func.graph)
 
         @torch.jit.script
         def test_dtype(inp_dtype):
@@ -6870,17 +6885,26 @@ a")
             a = torch.tensor(1.0, dtype=torch.float, requires_grad=True)
             return a, torch.tensor(1.0, dtype=inp_dtype)  # noqa T484
 
-        g = test_dtype.graph_for(5, profile_and_replay=True)
-        # both should have completed shapes
-        FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut").check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
+        if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+            g = test_dtype.graph_for(5, profile_and_replay=True)
+            # both should have completed shapes
+            FileCheck().check("Tensor = aten::tensor").check("Float() = prim::BailOut").check("Tensor = aten::tensor").check("Half() = prim::BailOut").run(g)
+        else:
+            g = test_dtype.graph_for(5)
+            # first should have type set second should not
+            FileCheck().check("Float() = aten::tensor").check("Tensor = aten::tensor").run(g)
 
         @torch.jit.script
         def test_as_tensor_tensor_input(input):
             a = torch.as_tensor(input, dtype=input.dtype)
             return a, torch.as_tensor(input, dtype=torch.float)
 
-        g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile_and_replay=True)
-        FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
+        if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+            g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4), profile_and_replay=True)
+            FileCheck().check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").check("Tensor = aten::as_tensor").check("Float(3, 4) = prim::BailOut").run(g)
+        else:
+            g = test_as_tensor_tensor_input.graph_for(torch.ones(3, 4))
+            FileCheck().check("Tensor = aten::as_tensor").check("Float(*, *) = aten::as_tensor").run(g)
 
 
     def test_tensor_requires_grad(self):
@@ -10865,7 +10889,31 @@ a")
 
         self.checkScript(foo, ())
 
+    @unittest.skipIf(IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR, "the original version of test_rand")
     def test_rand(self):
+        def test_rand():
+            a = torch.rand([3, 4])
+            return a + 1.0 - a
+
+        self.checkScript(test_rand, ())
+        fn = torch.jit.script(test_rand)
+        out = fn()
+        self.assertEqual(out.dtype, torch.double)
+        g = fn.graph_for()
+        # Testing shape analysis correctly setting type
+        FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(g)
+
+        @torch.jit.script
+        def randint():
+            return torch.randint(0, 5, [1, 2])
+        out = randint()
+        self.assertEqual(out.dtype, torch.double)
+        # although the type should be int here, testing that the runtime dtype
+        # and shape analysis dtype is the same.
+        FileCheck().check("Double(*, *)").check_not("Float(*, *)").run(randint.graph_for())
+
+    @unittest.skipIf(not IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR, "the original version of test_rand")
+    def test_rand_profiling(self):
         def test_rand():
             a = torch.rand([3, 4])
             return a + 1.0 - a
