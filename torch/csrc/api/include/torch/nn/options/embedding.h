@@ -41,16 +41,24 @@ namespace nn {
     /// The p of the p-norm to compute for the `max_norm` option. Default ``2``.
     TORCH_ARG(float, norm_type) = 2.;
     /// If given, this will scale gradients by the inverse of frequency of the words in the mini-batch. Default ``False``.
-    /// Note: this option is not supported when ``mode="max"``.
+    /// Note: this option is not supported when ``mode="kMax"``.
     TORCH_ARG(bool, scale_grad_by_freq) = false;
-    /// ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag. ``"sum"`` computes the weighted sum, taking `per_sample_weights`
-    /// into consideration. ``"mean"`` computes the average of the values in the bag, ``"max"`` computes the max value over each bag.
+    /// ``"kSum"``, ``"kMean"`` or ``"kMax"``. Specifies the way to reduce the bag. ``"kSum"`` computes the weighted sum, taking `per_sample_weights`
+    /// into consideration. ``"kMean"`` computes the average of the values in the bag, ``"kMax"`` computes the max value over each bag.
     TORCH_ARG(mode_t, mode) = torch::kMean;
     /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
-    /// Note: this option is not supported when ``mode="max"``.
+    /// Note: this option is not supported when ``mode="kMax"``.
     TORCH_ARG(bool, sparse) = false;
     /// The learnable weights of the module of shape (num_embeddings, embedding_dim)
     TORCH_ARG(torch::Tensor, _weight) = Tensor();
+    /// `offsets` is required to be a 1D tensor containing the starting index positions of each bag in `input`. Therefore, for `offsets` of shape `(B)`,
+    /// `input` will be viewed as having ``B`` bags. Empty bags (i.e., having 0-length) will have returned vectors filled by zeros.
+    // --only used in F::embedding_bag
+    TORCH_ARG(torch::Tensor, offsets) = Tensor();
+    // per_sample_weights is a tensor of float / double weights, or NULL to indicate all weights should be taken to be ``1``. If specified, `per_sample_weights`
+    // must have exactly the same shape as input and is treated as having the same `offsets`, if those are not ``NULL``. Only supported for ``mode='sum'``.
+    // --only used in F::embedding_bag
+    TORCH_ARG(torch::Tensor, per_sample_weights) = Tensor();
   };
 } // namespace nn
 } // namespace torch

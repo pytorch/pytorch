@@ -72,6 +72,8 @@ EmbeddingBagImpl::EmbeddingBagImpl(const EmbeddingBagOptions& options_) : option
 }
 
 void EmbeddingBagImpl::reset() {
+  TORCH_CHECK(!(sparse && c10::get_if<enumtype::kMax>(&options.mode())), "Sparse option is not supported when mode=KMax");
+  TORCH_CHECK(!(scale_grad_by_freq && c10::get_if<enumtype::kMax>(&options.mode())), "scale_grad_by_freq option is not supported when mode=KMax");
   if (!options._weight().defined()) {
     weight = register_parameter(
         "weight", torch::empty({options.num_embeddings(), options.embedding_dim()}));
