@@ -380,7 +380,7 @@ static void check_shape_forward(const at::Tensor& input,
 
   TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported");
   TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
-  TORCH_CHECK(!params.is_stride_nonpos(), "non positive stride is not supported");
+  TORCH_CHECK(!params.is_stride_nonpos(), "non-positive stride is not supported");
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
