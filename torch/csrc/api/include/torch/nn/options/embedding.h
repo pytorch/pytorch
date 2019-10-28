@@ -30,6 +30,7 @@ namespace nn {
 
   /// Options for the `EmbeddingBag` module.
   struct TORCH_API EmbeddingBagOptions {
+    typedef c10::variant<enumtype::kSum, enumtype::kMean, enumtype::kMax> mode_t;
     EmbeddingBagOptions(int64_t num_embeddings, int64_t embedding_dim);
     /// The size of the dictionary of embeddings.
     TORCH_ARG(int64_t, num_embeddings);
@@ -44,7 +45,6 @@ namespace nn {
     TORCH_ARG(bool, scale_grad_by_freq) = false;
     /// ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag. ``"sum"`` computes the weighted sum, taking `per_sample_weights`
     /// into consideration. ``"mean"`` computes the average of the values in the bag, ``"max"`` computes the max value over each bag.
-    typedef c10::variant<enumtype::kSum, enumtype::kMean, enumtype::kMax> mode_t;
     TORCH_ARG(mode_t, mode) = torch::kMean;
     /// If ``True``, gradient w.r.t. `weight` matrix will be a sparse tensor.
     /// Note: this option is not supported when ``mode="max"``.

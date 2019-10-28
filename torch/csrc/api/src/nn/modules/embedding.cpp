@@ -1,7 +1,6 @@
 #include <torch/nn/modules/embedding.h>
 
 #include <torch/types.h>
-#include <torch/cuda.h>
 #include <torch/utils.h>
 #include <torch/nn/init.h>
 

@@ -6,7 +6,6 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
-#include <cstdint>
 #include <cstddef>
 
 namespace torch {
