@@ -49,12 +49,6 @@
         broadcast: mask inplace fallback types:Byte
       - THByteTensor* mask
       - real value
-    - zero_dim_tensor_only: True
-      arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Byte
-      - THByteTensor* mask
-      - THTensor* value
 ]]
 [[
   name: _th_masked_fill_bool_
@@ -70,12 +64,6 @@
         broadcast: mask inplace fallback types:Bool
       - THBoolTensor* mask
       - real value
-    - zero_dim_tensor_only: True
-      arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Bool
-      - THBoolTensor* mask
-      - THTensor* value
 ]]
 [[
   name: _th_masked_scatter_
@@ -268,13 +256,6 @@
         wrap_dim: self
       - THIndexTensor* index
       - real value
-    - zero_dim_tensor_only: True
-      arguments:
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - THIndexTensor* index
-        - THTensor* value
 ]]
 [[
   name: _th_scatter_
