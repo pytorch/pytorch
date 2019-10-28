@@ -293,8 +293,8 @@ Tensor _nnpack_spatial_convolution(
         weight.data_ptr<float>(),
         bias_.data_ptr<float>(),
         output.data_ptr<float>(),
-        nullptr,
-        nullptr,
+        workspace, // workspace_buffer
+        &workspace_size, // workspace_size
         nnp_activation_identity,
         nullptr, // activation parameters
         nnpack_threadpool(),
@@ -316,8 +316,8 @@ Tensor _nnpack_spatial_convolution(
         weight.data_ptr<float>(),
         bias_.data_ptr<float>(),
         output.data_ptr<float>(),
-        nullptr,
-        nullptr,
+        workspace, // workspace_buffer
+        &workspace_size, // workspace_size
         nnp_activation_identity,
         nullptr, // activation parameters
         nnpack_threadpool(),
@@ -444,8 +444,8 @@ Tensor _nnpack_spatial_convolution_backward_input(
         gradOutput.data_ptr<float>(),
         weight.data_ptr<float>(),
         gradInput.data_ptr<float>(),
-        nullptr,
-        nullptr,
+        workspace, // workspace_buffer
+        &workspace_size, // workspace_size
         nnp_activation_identity,
         nullptr, // activation_parameters
         nnpack_threadpool(),
@@ -564,8 +564,8 @@ Tensor _nnpack_spatial_convolution_backward_weight(
         input_.data_ptr<float>(),
         gradOutput.data_ptr<float>(),
         gradWeight.data_ptr<float>(),
-        nullptr,
-        nullptr,
+        workspace, // workspace_buffer
+        &workspace_size, // workspace_size
         nnp_activation_identity,
         nullptr, // activation_parameters
         nnpack_threadpool(),
