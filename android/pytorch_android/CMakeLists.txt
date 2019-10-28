@@ -43,6 +43,7 @@ endfunction(import_static_lib)
 import_static_lib(libtorch)
 import_static_lib(libc10)
 import_static_lib(libnnpack)
+import_static_lib(libnnpack_reference_layers)
 import_static_lib(libpytorch_qnnpack)
 import_static_lib(libeigen_blas)
 import_static_lib(libcpuinfo)
@@ -56,6 +57,7 @@ target_link_libraries(pytorch
     -Wl,--no-whole-archive
     libc10
     libnnpack
+    libnnpack_reference_layers
     libpytorch_qnnpack
     libeigen_blas
     libcpuinfo

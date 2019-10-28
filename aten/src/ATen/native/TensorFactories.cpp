@@ -323,21 +323,12 @@ Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
   return result.fill_(fill_value);
 }
 
-Tensor full_like(
-    const Tensor& self,
-    Scalar fill_value,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::full_like(
-      self, fill_value, self.options(), optional_memory_format);
+Tensor full_like(const Tensor& self, Scalar fill_value) {
+  return native::full_like(self, fill_value, self.options());
 }
 
-Tensor full_like(
-    const Tensor& self,
-    Scalar fill_value,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, options, optional_memory_format);
-  return result.fill_(fill_value);
+Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
+  return native::full(self.sizes(), fill_value, options);
 }
 
 Tensor new_full(
@@ -384,20 +375,14 @@ Tensor& ones_out(Tensor& result, IntArrayRef size) {
   return native::full_out(result, size, /*fill_value=*/1);
 }
 
-Tensor ones_like(
-    const Tensor& self,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, options, optional_memory_format);
-  return result.fill_(1);
+Tensor ones_like(const Tensor& self) {
+  return native::ones(self.sizes(), self.options());
 }
 
-Tensor ones_like(
-    const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::ones_like(
-      self, self.options(), optional_memory_format);
+Tensor ones_like(const Tensor& self, const TensorOptions& options) {
+  return native::ones(self.sizes(), options);
 }
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
@@ -424,18 +409,12 @@ Tensor& rand_out(Tensor& result, IntArrayRef size, Generator* generator) {
   return result.uniform_(0, 1, generator);
 }
 
-Tensor rand_like(
-    const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return native::rand_like(self, self.options(), optional_memory_format);
+Tensor rand_like(const Tensor& self) {
+  return native::rand_like(self, self.options());
 }
 
-Tensor rand_like(
-    const Tensor& self,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, options, optional_memory_format);
-  return result.uniform_(0, 1, nullptr);
+Tensor rand_like(const Tensor& self, const TensorOptions& options) {
+  return native::rand(self.sizes(), options);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
