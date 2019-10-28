@@ -158,7 +158,7 @@ struct _compute_reduction_enum {
     return at::Reduction::END;
   }
   // NOTE: if `c10::visit(enumtype::_compute_reduction_enum{}, ...)` is called
-  // on any other types of enum, the compiler would properly throws the following error:
+  // on any other types of enum, the compiler would properly throw the following error:
   // ```
   // error: static assertion failed: `visit` requires the visitor to be exhaustive.
   // ```
