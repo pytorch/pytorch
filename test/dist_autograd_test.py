@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import time
 import unittest
+import sys
 
 import torch
 import torch.distributed as dist
@@ -461,6 +462,7 @@ class DistAutogradTest(object):
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
                 rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1))
         # the thread's context id should be cleaned up
+        print(context_id)
         with self.assertRaises(RuntimeError):
             dist_autograd._retrieve_context(context_id)
         # check that all contexts have been cleaned up.
@@ -719,12 +721,14 @@ class DistAutogradTest(object):
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
 
-            time.sleep(300);
+            time.sleep(390);
             if self.rank == 2:
                 pass
             else:
+                print(context_id)
                 with self.assertRaises(RuntimeError):
                     dist_autograd._retrieve_context(context_id)
+                print("worked")
 
     @dist_init(setup_model_parallel=True)
     def test_backward_without_context(self):
