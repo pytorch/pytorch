@@ -20,7 +20,7 @@ from jit_utils import enable_profiling_mode, ProfilingMode, IN_TRANSITION_TO_PRO
 
 if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
     torch._C._jit_set_profiling_executor(True)
-    torch._C._jit_set_profiling_mode(True)
+    torch._C._jit_set_profiling_mode(False)
 
 
 def strip_profiling_nodes(nodes):

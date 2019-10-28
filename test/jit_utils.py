@@ -33,7 +33,7 @@ import sys
 import tempfile
 import textwrap
 
-IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR = False
+IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR = True
 
 class ProfilingMode(Enum):
     OFF = 1
@@ -44,7 +44,8 @@ class ProfilingMode(Enum):
 def enable_profiling_mode(flag):
     if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(flag != ProfilingMode.OFF)
-        old_prof_mode_state = torch._C._jit_set_profiling_mode(flag == ProfilingMode.FULL)
+        #old_prof_mode_state = torch._C._jit_set_profiling_mode(flag == ProfilingMode.FULL)
+        old_prof_mode_state = torch._C._jit_set_profiling_mode(False)
     try:
         yield
     finally:

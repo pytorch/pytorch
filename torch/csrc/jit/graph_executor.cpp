@@ -206,21 +206,27 @@ static void unpackReturnTuple(Stack &stack) {
   stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
 }
 
+struct DifferentiableGraphOp;
+
 struct DifferentiableGraphBackward : public autograd::Node {
   DifferentiableGraphBackward(
-      GraphExecutor executor,
+      const std::shared_ptr<Graph>& unspec_graph,
       size_t input_size,
-      size_t capture_size)
-      : executor(std::move(executor)),
-        captures_(capture_size),
-        input_instructions_(input_size) {}
+      size_t capture_size,
+      c10::optional<GraphExecutor>& grad_executor)
+      : captures_(capture_size),
+        input_instructions_(input_size),
+        unspecialized_graph_(unspec_graph),
+        grad_executor_(grad_executor) {}
 
   variable_list apply(variable_list&& inputs) override {
     Stack stack;
-    stack.reserve(captures_.size() + inputs.size());
+    size_t num_args = captures_.size() + inputs.size();
+    stack.reserve(num_args);
 
     input_instructions_.unpack(std::move(inputs), stack);
     captures_.unpack(stack, shared_from_this());
+    GraphExecutor& executor = getExecutor(stack);
     GRAPH_DEBUG("Running DifferentiableGraphBackward for ", &executor);
     executor.run(stack);
     unpackReturnTuple(stack);
@@ -257,6 +263,66 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
   void capture(const IValue& val, bool is_output) {
     captures_.capture(val, is_output);
+  }
+
+
+  static c10::TensorTypePtr getTensorType(bool defined) {
+    auto tensor_type = TensorType::get();
+
+    if (defined) {
+      return tensor_type;
+    }
+
+    return tensor_type->withUndefined();
+  }
+
+  GraphExecutor& getExecutor(Stack& stack) {
+
+    // tensor lists are hashed as a single boolean value
+    // since all tensors will be either defined or undefined
+
+    std::vector<bool> hash;
+
+    for (IValue& v : stack) {
+      if (v.isTensorList()) {
+        auto list = v.toTensorListRef();
+        hash.push_back(list.size() > 0 ? list[0].defined() : true);
+      } else if (v.isTensor()) {
+        hash.push_back(v.toTensor().defined());
+      } else {
+        // assume that every other type is defined
+        hash.push_back(true);
+      }
+    }
+
+
+  TORCH_INTERNAL_ASSERT(unspecialized_graph_->inputs().size() == hash.size());
+  if (grad_executors_.count(hash) == 0) {
+
+    std::shared_ptr<Graph> spec_copy = unspecialized_graph_->copy();
+    
+    for (auto i = 0; i < hash.size(); i++) {
+      auto input_type = spec_copy->inputs().at(i);
+      bool defined = hash[i];
+      if (input_type->type()->kind() == TensorType::Kind) {
+        input_type->setType(getTensorType(defined));
+      } else if (
+          input_type->type()->kind() == ListType::Kind &&
+          input_type->type()->expect<ListType>()->getElementType()->kind() ==
+              TensorType::Kind) {
+        input_type->setType(ListType::create(getTensorType(defined)));
+      }
+    }
+    grad_executors_[hash] = GraphExecutor(spec_copy);
+  }
+
+
+  // set last optimized graph
+  // make a copy because DifferentiableBackward might disappear
+  // by the time we get to use diff_op_.grad_executor
+  grad_executor_ = GraphExecutor(grad_executors_[hash].graph()) ;
+  return grad_executors_[hash];
+
   }
 
   void addOutputForTensor(const at::Tensor& tensor) {
@@ -319,6 +385,9 @@ struct DifferentiableGraphBackward : public autograd::Node {
   GraphExecutor executor;
   CaptureList captures_;
   UnpackInstructions input_instructions_;
+  std::unordered_map<std::vector<bool>, GraphExecutor> grad_executors_;
+  std::shared_ptr<Graph> unspecialized_graph_;
+  c10::optional<GraphExecutor>& grad_executor_;
 };
 
 // an optimized way of executing the subgraph computed directly on
@@ -330,17 +399,18 @@ struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
       : f(grad.f),
         grad(std::move(grad)),
-        grad_executor(this->grad.df),
+        grad_executor(),
         num_inputs(this->grad.f->inputs().size()),
         num_outputs(this->grad.f->outputs().size()) {}
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   int operator()(Stack& stack) const {
     auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
-        grad_executor,
+        this->grad.df,
         grad.df_input_vjps.size(),
         grad.df_input_captured_inputs.size() +
-            grad.df_input_captured_outputs.size());
+            grad.df_input_captured_outputs.size(),
+            grad_executor);
 
     {
       auto inputs = last(stack, num_inputs);
@@ -378,6 +448,7 @@ struct DifferentiableGraphOp {
 
  private:
   friend GraphExecutor* detail::getGradExecutor(Operation& op);
+  friend struct DifferentiableGraphBackward;
 
   at::Tensor detach(at::Tensor t) const {
     if (!t.defined()) {
@@ -426,7 +497,7 @@ struct DifferentiableGraphOp {
 
   Code f;
   Gradient grad;
-  GraphExecutor grad_executor;
+  mutable c10::optional<GraphExecutor> grad_executor;
 
   const size_t num_inputs;
   const size_t num_outputs;
@@ -459,7 +530,9 @@ namespace detail {
 
 GraphExecutor* getGradExecutor(Operation& op) {
   if (auto diff_op = op.target<DifferentiableGraphOp>()) {
-    return &diff_op->grad_executor;
+
+    TORCH_INTERNAL_ASSERT(diff_op->grad_executor.has_value())
+    return &(*diff_op->grad_executor);
   }
   return nullptr;
 }
