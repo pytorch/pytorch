@@ -921,6 +921,12 @@ class TestNN(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
                 module(input)
 
+            # Zero stride check
+            module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=0, bias=True).to(dtype)
+            input = torch.randn(1, 3, 4, 4).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, 'zero stride is not supported'):
+                module(input)
+
     def test_invalid_conv3d(self):
         for dtype in [torch.bfloat16, torch.float, torch.double]:
             module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)

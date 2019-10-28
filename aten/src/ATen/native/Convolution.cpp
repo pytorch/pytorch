@@ -32,6 +32,7 @@ struct ConvParams {
   bool is_output_padding_big() const;
   bool is_padding_neg() const;
   bool is_stride_neg() const;
+  bool is_stride_zero() const;
   void view1d_as_2d();
   bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input) const;
@@ -113,6 +114,13 @@ auto ConvParams::is_stride_neg() const -> bool {
   return is_non_neg;
 }
 
+auto ConvParams::is_stride_zero() const -> bool {
+  bool is_non_zero = false;
+  for (int s : stride) {
+    is_non_zero |= (s == 0);
+  }
+  return is_non_zero;
+}
 
 auto ConvParams::view1d_as_2d() -> void {
   if (stride.size() == 1) {
@@ -382,6 +390,7 @@ static void check_shape_forward(const at::Tensor& input,
   TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported");
   TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
   TORCH_CHECK(!params.is_stride_neg(), "negative stride is not supported");
+  TORCH_CHECK(!params.is_stride_zero(), "zero stride is not supported");
 
   TORCH_CHECK(weight_dim == k,
            "Expected ", weight_dim, "-dimensional input for ", weight_dim,
