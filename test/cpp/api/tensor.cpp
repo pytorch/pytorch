@@ -674,7 +674,7 @@ TEST(TensorTest, Data) {
 }
 
 TEST(TensorTest, BackwardAndGrad) {
-  auto x = torch::tensor({5.}, at::TensorOptions().requires_grad(true));
+  auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
   y.backward();
   ASSERT_EQ(x.grad().item<float>(), 10.0);
@@ -686,7 +686,7 @@ TEST(TensorTest, BackwardAndGrad) {
 }
 
 TEST(TensorTest, BackwardCreatesOnesGrad) {
-  const auto x = torch::tensor({5.}, at::TensorOptions().requires_grad(true));
+  const auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   x.backward();
   ASSERT_TRUE(torch::equal(x.grad(),
               torch::ones_like(x)));
@@ -700,7 +700,7 @@ TEST(TensorTest, BackwardNonScalarOutputs) {
 }
 
 TEST(TensorTest, IsLeaf) {
-  auto x = torch::tensor({5.}, at::TensorOptions().requires_grad(true));
+  auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
   ASSERT_TRUE(x.is_leaf());
   ASSERT_FALSE(y.is_leaf());
@@ -713,7 +713,7 @@ TEST(TensorTest, IsLeaf) {
 }
 
 TEST(TensorTest, OutputNr) {
-  auto x = torch::tensor({5.}, at::TensorOptions().requires_grad(true));
+  auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
   ASSERT_EQ(x.output_nr(), 0);
   ASSERT_EQ(y.output_nr(), 0);
@@ -743,7 +743,7 @@ TEST(TensorTest, Version) {
 }
 
 TEST(TensorTest, Detach) {
-  auto x = torch::tensor({5.}, at::TensorOptions().requires_grad(true));
+  auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
   const auto y_detached = y.detach();
   ASSERT_FALSE(y.is_leaf());
@@ -758,7 +758,7 @@ TEST(TensorTest, Detach) {
 }
 
 TEST(TensorTest, DetachInplace) {
-  auto x = torch::tensor({5.}, at::TensorOptions().requires_grad(true));
+  auto x = torch::tensor({5}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = x * x;
   auto y_detached = y.detach_();
   ASSERT_TRUE(y.is_leaf());
