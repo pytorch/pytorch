@@ -6,6 +6,9 @@ find_package(Torch REQUIRED)
 
 add_library(custom_ops SHARED op.cpp)
 
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/pybind11/ ./pybind11)
 pybind11_add_module(custom_class SHARED classes.cpp)
 target_link_libraries(custom_class PRIVATE "${TORCH_LIBRARIES}")
