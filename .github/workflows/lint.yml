@@ -210,8 +210,9 @@ jobs:
           set -eux
           git remote add upstream https://github.com/pytorch/pytorch
           git fetch upstream "$GITHUB_BASE_REF"
-          git fetch upstream "$GITHUB_HEAD_REF"
-          MERGE_BASE=$(git merge-base $GITHUB_HEAD_REF $GITHUB_BASE_REF)
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
 
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
