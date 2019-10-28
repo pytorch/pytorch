@@ -92,6 +92,7 @@ Message RequestCallbackImpl::processRpc(
       auto& ctx = RRefContext::getInstance();
 
       auto ownerRRef = ctx.getOrCreateOwnerRRef<py::object>(rrefId);
+
       ownerRRef->setValue(
           PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
       ctx.addForkOfOwner(rrefId, forkId);
@@ -103,8 +104,7 @@ Message RequestCallbackImpl::processRpc(
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return std::move(RRefFetchRet(RRefFetchRet({rref->getValue()})))
-          .toMessage();
+      return std::move(ScriptRRefFetchRet({rref->getValue()})).toMessage();
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
@@ -114,8 +114,7 @@ Message RequestCallbackImpl::processRpc(
           ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
       SerializedPyObj result =
           PythonRpcHandler::getInstance().serialize(rref->getValue());
-      return std::move(RRefFetchRet(RRefFetchRet(result.toIValues())))
-          .toMessage();
+      return std::move(PythonRRefFetchRet(result.toIValues())).toMessage();
     }
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);

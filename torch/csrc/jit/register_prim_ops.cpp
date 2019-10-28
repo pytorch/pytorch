@@ -131,7 +131,7 @@ void checkDoubleInRange(double a) {
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
     throw c10::Error(
-        "Cannot convert float " + std::to_string(a) + " to integer", "");
+        "Cannot convert float " + c10::to_string(a) + " to integer", "");
     return;
   }
 }
@@ -731,6 +731,15 @@ RegisterOperators reg(
            at::Tensor self = pop(stack).toTensor();
            bool keep_graph = retain_graph ? retain_graph.value() : create_graph;
            self.backward(gradient, keep_graph, create_graph);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
+         "aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)",
+         [](Stack& stack) {
+           bool _requires_grad = pop(stack).toBool();
+           at::Tensor self = pop(stack).toTensor();
+           self.requires_grad_(_requires_grad);
            return 0;
          },
          aliasAnalysisConservative()),
