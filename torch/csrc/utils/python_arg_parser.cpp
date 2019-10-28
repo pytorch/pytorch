@@ -135,7 +135,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 static auto get_tensor_torch_function() -> PyObject*
 {
   PyObject* method = PyObject_GetAttrString((PyObject*)THPVariableClass, "__torch_function__");
-  assert(method != nullptr);
+  TORCH_INTERNAL_ASSERT(method != nullptr);
   return method;
 }
 
@@ -148,6 +148,16 @@ static auto check_has_torch_function(PyObject* obj) -> bool
   }
   return false;
 }
+
+/*
+check_exact() and check() have a lot of similar code. check_exact() and check()
+were introduced when __torch_function__ support was added.
+
+When the function signature are created during parse(), check_exact() only checks if the parameter is
+a Tensor. check() looks for subclass of Tensor being passed as an argument. It is called after we have
+checked for __torch_function__ overload on the obj while running parse(). If we didn't run check()
+and check_exact() separately, there would be an overload.
+*/
 
 auto FunctionParameter::check_exact(PyObject* obj) -> bool
 {
@@ -633,6 +643,7 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         missing_args(*this, i);
       }
       return false;
+    // check for Tensor type.
     } else if (param.check_exact(obj)) {  // NOLINT
       dst[i++] = obj;
     // XXX: the Variable check is necessary because sizes become tensors when
@@ -677,6 +688,7 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         }
       }
     } else if (param.check(obj)) {
+    // check for subclass of Tensor type when it is not overloaded with a __torch_function__.
       dst[i++] = obj;
     } else if (raise_exception) {
       if (is_kwd) {

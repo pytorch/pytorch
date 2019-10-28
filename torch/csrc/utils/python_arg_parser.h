@@ -629,8 +629,6 @@ static bool _is_basic_python_type(PyTypeObject *tp)
     tp == Py_TYPE(Py_NotImplemented) ||
 
     PyModule_Check(tp) ||
-    /* TODO: ndarray, but we can't see PyArray_Type here */
-
     /* sentinel to swallow trailing || */
     false
   );
@@ -640,19 +638,19 @@ static bool _is_basic_python_type(PyTypeObject *tp)
  * Lookup a special method, following the python approach of looking up
  * on the type object, rather than on the instance itself.
  *
- * Assumes that the special method is a numpy-specific one, so does not look
- * at builtin types, nor does it look at a base ndarray.
+ * Assumes that the special method is a torch-specific one, so does not look
+ * at builtin types, nor does it look at a base Tensor.
  *
  * In future, could be made more like _Py_LookupSpecial
  */
 
 static PyObject* PyTorch_LookupSpecial(PyObject *obj, char* name)
 {
-  if(PyObject_HasAttrString(obj, name) == 0){
-    return NULL;
-  }
   PyTypeObject *tp = Py_TYPE(obj);
   if (_is_basic_python_type(tp)) {
+    return NULL;
+  }
+  if(PyObject_HasAttrString(obj, name) == 0){
     return NULL;
   }
   return PyObject_FastGetAttrString((PyObject *)tp, name);
@@ -661,7 +659,7 @@ static PyObject* PyTorch_LookupSpecial(PyObject *obj, char* name)
 static PyObject* get_torch_function(PyObject* obj)
 {
   const char* torch_function_name = "__torch_function__";
-  return PyTorch_LookupSpecial(obj, (char*)torch_function_name);
+  return PyTorch_LookupSpecial(obj, const_cast<char*>(torch_function_name));
 }
-  
+
 } // namespace torch
