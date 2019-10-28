@@ -9,7 +9,8 @@ namespace autograd {
 constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
 constexpr int kMaxWorkerId = 65535;
-const std::chrono::duration<double> kContextTimeout = std::chrono::seconds(2);
+/* const std::chrono::duration<double> kContextTimeout = std::chrono::seconds(2); */
+const auto kContextTimeout = std::chrono::seconds(2);
 
 constexpr int64_t kInvalidContextId = -1;
 
@@ -28,7 +29,6 @@ DistAutogradContainer::DistAutogradContainer()
   terminateWatchdog_.store(false);
   cleanupWatchdogThread_ = std::thread(&DistAutogradContainer::cleanupContextWatchdog, this);
   LOG(ERROR) << getWorkerId() << "- watchdog thread created\n";
-  std::chrono::time_point<std::chrono::system_clock> creation_time = std::chrono::system_clock::now(); 
   creation_time = std::chrono::high_resolution_clock::now();
 }
 
@@ -198,15 +198,16 @@ void DistAutogradContainer::cleanupContextWatchdog() {
     {
       std::lock_guard<std::mutex> guard(autograd_context_lock_);
       for (auto& pair : autograd_context_) {
-        // TODO: see if you can just invoke destructor
-        eraseContextIdAndReset(pair.first);
-        LOG(ERROR) << getWorkerId() << "- DELETING " << pair.first << "\n";
-        /* std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now(); */ 
-        /* auto now = std::chrono::high_resolution_clock::now(); */
-        /* LOG(ERROR) << std::chrono::duration_cast<std::chrono::milliseconds>(now - creation_time).count() << "\n"; */
-        /* LOG(ERROR) << (now - creation_time).count() << "\n"; */
-        /* LOG(ERROR) << std::chrono::seconds(2).count() << "\n"; */
-        LOG(ERROR) << getWorkerId() << "- queue size post-deletion is " << autograd_context_.size() << "\n";
+        auto now = std::chrono::high_resolution_clock::now();
+        auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - creation_time);
+        LOG(ERROR) << diff.count() << "\n";
+        LOG(ERROR) << kContextTimeout.count() << "\n";
+        if (diff >= kContextTimeout) {
+          // TODO: see if you can just invoke destructor
+          eraseContextIdAndReset(pair.first);
+          LOG(ERROR) << getWorkerId() << "- DELETING " << pair.first << "\n";
+          LOG(ERROR) << getWorkerId() << "- queue size post-deletion is " << autograd_context_.size() << "\n";
+        }
       }
     }
     // CV stuff
