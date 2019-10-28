@@ -1423,6 +1423,28 @@ class TestONNXRuntime(unittest.TestCase):
         model = CumSum()
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid(self):
+        class Meshgrid(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.meshgrid(x, y, z)
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.randn(5, requires_grad=True)
+        self.run_test(Meshgrid(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid_scalar(self):
+        class Meshgrid(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.meshgrid(x, y, z)
+
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.tensor(2.0)
+        self.run_test(Meshgrid(), (x, y, z))
+
     def test_baddbmm(self):
         class MyModule(torch.nn.Module):
             def forward(self, input, batch1, batch2):
