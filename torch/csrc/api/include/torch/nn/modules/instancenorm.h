@@ -9,14 +9,17 @@ namespace torch {
 namespace nn {
 
 /// Base class for all (dimesnsion-specialized) instanceNorm modules
-template <size_t D, typename Derived>
+template <typename Derived>
 class TORCH_API InstanceNormImpl : public torch::nn::BatchNormImpl {
+ protected:
+  virtual void _check_input_dim(const Tensor& input);
+
  public:
   InstanceNormImpl(int64_t num_features)
     : InstanceNormImpl(InstanceNormOptions(num_features)) {} 
   explicit InstanceNormImpl(const InstanceNormOptions& options_);
 
-  virtual void _check_input_dim(const Tensor& input);
+
 
   Tensor forward(const Tensor& input);
   
@@ -24,26 +27,29 @@ class TORCH_API InstanceNormImpl : public torch::nn::BatchNormImpl {
   InstanceNormOptions options;
 };
 
-class TORCH_API InstanceNorm1dImpl : public InstanceNormImpl<1, InstanceNorm1dImpl> {
+class TORCH_API InstanceNorm1dImpl : public InstanceNormImpl<InstanceNorm1dImpl> {
  public:
-  using InstanceNormImpl<1, InstanceNorm1dImpl>::InstanceNormImpl;
+  using InstanceNormImpl<InstanceNorm1dImpl>::InstanceNormImpl;
+ private:
   void _check_input_dim(const Tensor& input);
 };
 
 TORCH_MODULE(InstanceNorm1d);
 
-class TORCH_API InstanceNorm2dImpl : public InstanceNormImpl<2, InstanceNorm2dImpl> {
+class TORCH_API InstanceNorm2dImpl : public InstanceNormImpl<InstanceNorm2dImpl> {
  public:
-  using InstanceNormImpl<2, InstanceNorm2dImpl>::InstanceNormImpl;
+  using InstanceNormImpl<InstanceNorm2dImpl>::InstanceNormImpl;
+ private:
   void _check_input_dim(const Tensor& input);
 };
 
 TORCH_MODULE(InstanceNorm2d);
 
 
-class TORCH_API InstanceNorm3dImpl : public InstanceNormImpl<3, InstanceNorm3dImpl> {
+class TORCH_API InstanceNorm3dImpl : public InstanceNormImpl<InstanceNorm3dImpl> {
  public:
-  using InstanceNormImpl<3, InstanceNorm3dImpl>::InstanceNormImpl;
+  using InstanceNormImpl<InstanceNorm3dImpl>::InstanceNormImpl;
+ private:
   void _check_input_dim(const Tensor& input);
 };
 
