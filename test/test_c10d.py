@@ -1288,10 +1288,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             timeout=timedelta(seconds=10))
         # test that pickling errors are raised when objects cannot be pickled
 
-        class Unpicklable:
+        def foo():
             pass
 
-        unpicklable = [Unpicklable() for _ in range(self.world_size)]
+        unpicklable = [foo for _ in range(self.world_size)]
         with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
             c10d.distributed_c10d.all_gather_object(unpicklable[self.rank % self.world_size])
 
