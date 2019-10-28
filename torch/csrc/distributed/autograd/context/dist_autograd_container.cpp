@@ -9,7 +9,7 @@ namespace autograd {
 constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
 constexpr int kMaxWorkerId = 65535;
-const std::chrono::duration<double> kContextTimeout = std::chrono::seconds(200);
+const std::chrono::duration<double> kContextTimeout = std::chrono::seconds(2);
 
 constexpr int64_t kInvalidContextId = -1;
 
@@ -29,11 +29,13 @@ DistAutogradContainer::DistAutogradContainer()
   cleanupWatchdogThread_ = std::thread(&DistAutogradContainer::cleanupContextWatchdog, this);
   LOG(ERROR) << getWorkerId() << "- watchdog thread created\n";
   std::chrono::time_point<std::chrono::system_clock> creation_time = std::chrono::system_clock::now(); 
+  creation_time = std::chrono::high_resolution_clock::now();
 }
 
 DistAutogradContainer::~DistAutogradContainer() {
   LOG(ERROR) << getWorkerId() << "- destructor called\n";
   terminateWatchdog_.store(true);
+  cleanupWatchdogCV_.notify_one();
   cleanupWatchdogThread_.join();
   LOG(ERROR) << getWorkerId() << "- thread joined\n";
 }
@@ -192,21 +194,47 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
 void DistAutogradContainer::cleanupContextWatchdog() {
   LOG(ERROR) << getWorkerId() << "- scheduled again!\n";
   std::this_thread::sleep_for(kContextTimeout);
-  while(!terminateWatchdog_.load()) {
-    std::lock_guard<std::mutex> guard(autograd_context_lock_);
-    for (auto& pair : autograd_context_) {
-      if (autograd_context_.find(pair.first) != autograd_context_.end()) { 
-        LOG(ERROR) << "just in case " << pair.first << "\n";
-        sendReleaseContextRpc(pair.first);
+  while (!terminateWatchdog_.load()) {
+    {
+      std::lock_guard<std::mutex> guard(autograd_context_lock_);
+      for (auto& pair : autograd_context_) {
+        // TODO: see if you can just invoke destructor
         eraseContextIdAndReset(pair.first);
+        /* std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now(); */ 
+        auto now = std::chrono::high_resolution_clock::now();
+        LOG(ERROR) << std::chrono::duration_cast<std::chrono::milliseconds>(now - creation_time).count() << "\n";
+        LOG(ERROR) << (now - creation_time).count() << "\n";
+        LOG(ERROR) << std::chrono::seconds(2).count() << "\n";
         LOG(ERROR) << getWorkerId() << "- queue size post-deletion is " << autograd_context_.size() << "\n";
-        if (autograd_context_.empty()) {
-          return;
-        }
       }
     }
+    // CV stuff
+    std::unique_lock<std::mutex> lock(cleanupWatchdogCVMutex_);
+    cleanupWatchdogCV_.wait_for(
+        lock,
+        std::chrono::seconds(60),
+        [&]() -> bool { return terminateWatchdog_.load(); });
   }
 }
+
+/* void DistAutogradContainer::cleanupContextWatchdog() { */
+/*   LOG(ERROR) << getWorkerId() << "- scheduled again!\n"; */
+/*   std::this_thread::sleep_for(kContextTimeout); */
+/*   while(!terminateWatchdog_.load()) { */
+/*     std::lock_guard<std::mutex> guard(autograd_context_lock_); */
+/*     for (auto& pair : autograd_context_) { */
+/*       /1* if (autograd_context_.find(pair.first) != autograd_context_.end()) { *1/ */ 
+/*         LOG(ERROR) << "just in case " << pair.first << "\n"; */
+/*         sendReleaseContextRpc(pair.first); */
+/*         eraseContextIdAndReset(pair.first); */
+/*         LOG(ERROR) << getWorkerId() << "- queue size post-deletion is " << autograd_context_.size() << "\n"; */
+/*         if (autograd_context_.empty()) { */
+/*           return; */
+/*         } */
+/*       /1* } *1/ */
+/*     } */
+/*   } */
+/* } */
 
 DistAutogradContext& DistAutogradContainer::retrieveContext(
     int64_t context_id) {

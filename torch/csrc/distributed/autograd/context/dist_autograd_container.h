@@ -97,6 +97,7 @@ class TORCH_API DistAutogradContainer {
   // function should be called with the lock.
   void eraseContextIdAndReset(int64_t context_id);
 
+  // Function that cleans up DistAutogradContexts when the timeout is up.
   void cleanupContextWatchdog();
 
   // Auto incrementing context id used to identify unique autograd passes.
@@ -115,6 +116,12 @@ class TORCH_API DistAutogradContainer {
   // Thread running the cleanupContextWatchdog
   std::thread cleanupWatchdogThread_;
 
+  // Condition Variable to control watchdog thread's wait time
+  std::condition_variable cleanupWatchdogCV_;
+
+  // CV Mutex
+  std::mutex cleanupWatchdogCVMutex_;
+
   // Whether or not the container has been initialized appropriately.
   bool initialized_;
 
@@ -131,7 +138,8 @@ class TORCH_API DistAutogradContainer {
   // Maximum allowed value for autograd_context_id or autograd_message_id.
   int64_t max_id_;
 
-  std::chrono::time_point<std::chrono::system_clock> creation_time;
+  /* std::chrono::time_point<std::chrono::system_clock> creation_time; */
+  std::chrono::time_point<std::chrono::high_resolution_clock> creation_time;
 };
 
 } // namespace autograd
