@@ -150,11 +150,11 @@ std::string get_enum_name(V variant_enum) {
 
 template <typename V>
 at::Reduction::Reduction reduction_get_enum(V variant_enum) {
-  if (c10::get_if<enumtype::kNone>(&options.reduction())) {
+  if (c10::get_if<enumtype::kNone>(&variant_enum)) {
     return at::Reduction::None;
-  } else if (c10::get_if<enumtype::kMean>(&options.reduction())) {
+  } else if (c10::get_if<enumtype::kMean>(&variant_enum)) {
     return at::Reduction::Mean;
-  } else if (c10::get_if<enumtype::kSum>(&options.reduction())) {
+  } else if (c10::get_if<enumtype::kSum>(&variant_enum)) {
     return at::Reduction::Sum;
   } else {
     TORCH_CHECK(
