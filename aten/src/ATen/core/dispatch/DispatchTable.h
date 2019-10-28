@@ -98,7 +98,10 @@ namespace detail {
     // optimize this if statement away because it's based on
     // a compile time constant.
     if (args_have_tensor_options<Args...>::value) {
-      type_set(TensorOptionsAccumulator().apply(args...).options);
+      TensorOptions tensorOptions = TensorOptionsAccumulator().apply(args...).options;
+      if (tensorOptions.has_dtype() && tensorOptions.has_device() && tensorOptions.has_layout()) {
+        type_set(tensorOptions);
+      }
     }
     return type_set.ts;
   }
@@ -239,7 +242,6 @@ class DispatchTable final {
     */
    template<class... Args>
    const KernelFunction& lookupUnboxed(const Args&... args) const {
-     std::cout << "lookupUnboxed: " << operator_name_ << std::endl;
      return lookup_([&] () -> c10::optional<TensorTypeId> {
        return dispatch_strategy_.get_dispatch_key_unboxed<Args...>(args...);
      });
