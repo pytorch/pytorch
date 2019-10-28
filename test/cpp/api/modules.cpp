@@ -271,7 +271,7 @@ TEST_F(ModulesTest, LPPool1d) {
 
 TEST_F(ModulesTest, Identity) {
   Identity identity;
-  auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::requires_grad());
+  auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = identity->forward(input);
   auto expected = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::kFloat);
   auto s = output.sum();
@@ -283,7 +283,7 @@ TEST_F(ModulesTest, Identity) {
 
 TEST_F(ModulesTest, AdaptiveMaxPool1d) {
   AdaptiveMaxPool1d model(3);
-  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::requires_grad());
+  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = model(x);
   torch::Tensor s = y.sum();
 
@@ -296,7 +296,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool1d) {
 
 TEST_F(ModulesTest, AdaptiveMaxPool1dReturnIndices) {
   AdaptiveMaxPool1d model(3);
-  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::requires_grad());
+  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   torch::Tensor y, indices;
   std::tie(y, indices) = model->forward_with_indices(x);
 
@@ -484,7 +484,7 @@ TEST_F(ModulesTest, AdaptiveMaxPool3dReturnIndices) {
 
 TEST_F(ModulesTest, AdaptiveAvgPool1d) {
   AdaptiveAvgPool1d model(3);
-  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::requires_grad());
+  auto x = torch::tensor({{{1, 2, 3, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = model(x);
   torch::Tensor s = y.sum();
 
@@ -567,7 +567,7 @@ TEST_F(ModulesTest, AdaptiveAvgPool3d) {
 
 TEST_F(ModulesTest, MaxUnpool1d) {
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
-  auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool1d{3};
   auto y = model->forward(x, indices);
 
@@ -577,7 +577,7 @@ TEST_F(ModulesTest, MaxUnpool1d) {
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
-  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   model = MaxUnpool1d{MaxUnpool1dOptions(3).stride(2).padding(1)};
   y = model->forward(x, indices, std::vector<int64_t>({1, 1, 5}));
 
@@ -622,7 +622,7 @@ TEST_F(ModulesTest, MaxUnpool2d) {
     {21, 23, 24}}},
   {{{31, 33, 34},
     {41, 43, 44},
-    {46, 48, 49}}}}, torch::requires_grad());
+    {46, 48, 49}}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool2d{MaxUnpool2dOptions(3).stride(2).padding(1)};
   auto y = model->forward(x, indices);
 
@@ -668,7 +668,7 @@ TEST_F(ModulesTest, MaxPool2d_MaxUnpool2d) {
 
 TEST_F(ModulesTest, MaxUnpool3d) {
   auto indices = torch::tensor({{{{{26}}}}}, torch::kLong);
-  auto x = torch::tensor({{{{{26}}}}}, torch::requires_grad());
+  auto x = torch::tensor({{{{{26}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool3d{3};
   auto y = model->forward(x, indices);
 
@@ -696,7 +696,7 @@ TEST_F(ModulesTest, MaxUnpool3dOutputSize) {
     {{{{{21, 23},
         {29, 31}},
        {{53, 55},
-        {61, 63}}}}}, torch::requires_grad());
+        {61, 63}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto model = MaxUnpool3d{MaxUnpool3dOptions(3).stride(2).padding(1)};
   auto y = model->forward(x, indices, std::vector<int64_t>({1, 1, 4, 4, 4}));
 
@@ -1080,7 +1080,7 @@ TEST_F(ModulesTest, KLDivLoss) {
 
 TEST_F(ModulesTest, HingeEmbeddingLoss) {
   HingeEmbeddingLoss loss(HingeEmbeddingLossOptions().margin(2));
-  auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::requires_grad());
+  auto input = torch::tensor({{2, 22, 4}, {20, 10, 0}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{2, 6, 4}, {1, 10, 0}}, torch::kFloat);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({10}, torch::kFloat);
@@ -1107,8 +1107,8 @@ TEST_F(ModulesTest, MultiMarginLoss) {
 
 TEST_F(ModulesTest, CosineEmbeddingLoss) {
   CosineEmbeddingLoss cos(CosineEmbeddingLossOptions().margin(0.5));
-  auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}}, torch::requires_grad());
-  auto input2 = torch::tensor({{2, 3, 5}, {9, 12, 0}}, torch::requires_grad());
+  auto input1 = torch::tensor({{2, 3, 4}, {6, 2, 4}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto input2 = torch::tensor({{2, 3, 5}, {9, 12, 0}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({1, -1});
   auto output = cos(input1, input2, target);
   auto expected = torch::tensor({0.1004}, torch::kFloat);
@@ -1162,8 +1162,8 @@ TEST_F(ModulesTest, TripletMarginLoss) {
 
 TEST_F(ModulesTest, CosineSimilarity) {
   CosineSimilarity cos(CosineSimilarityOptions().dim(1));
-  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
-  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = cos->forward(input1, input2);
   auto expected = torch::tensor({0.8078, 0.8721}, torch::kFloat);
   auto s = output.sum();
@@ -1229,8 +1229,8 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
 
 TEST_F(ModulesTest, PairwiseDistance) {
   PairwiseDistance dist(PairwiseDistanceOptions(1));
-  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::requires_grad());
-  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::requires_grad());
+  auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = dist->forward(input1, input2);
   auto expected = torch::tensor({6, 6}, torch::kFloat);
   auto s = output.sum();
