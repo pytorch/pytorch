@@ -33,7 +33,7 @@ inline Tensor embedding(const Tensor& input, Tensor weight, EmbeddingOptions opt
 inline Tensor embedding_bag(
     const Tensor& input,
     Tensor weight,
-    const EmbeddingBagOptions& options) {
+    const EmbeddingBagOptions& options = {}) {
 
   Tensor input_ = input;
   Tensor offsets_ = options.offsets();
