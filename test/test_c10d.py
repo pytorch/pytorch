@@ -1265,6 +1265,37 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allgather_basics(self):
         self._test_allgather_basics(lambda t: t.clone())
 
+    def test_all_gather_object(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.distributed_c10d.init_process_group(
+            backend=dist.Backend.GLOO, store=store, world_size=self.world_size, rank=self.rank,
+            timeout=timedelta(seconds=10))
+        gather_objects = [
+            {'key1': 3, 'key2': 4, 'key3': {'nested': True}},
+            3,
+            "example_string",
+            [1, 2, True, "string", [4, 5, "nested"]]
+        ]
+        ret = c10d.distributed_c10d.all_gather_object(
+            gather_objects[self.rank % len(gather_objects)]
+        )
+        self.assertEqual(gather_objects, ret)
+
+    def test_all_gather_object_error(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.distributed_c10d.init_process_group(
+            backend=dist.Backend.GLOO, store=store, world_size=self.world_size, rank=self.rank,
+            timeout=timedelta(seconds=10))
+        # test that pickling errors are raised when objects cannot be pickled
+
+        class Unpicklable:
+            pass
+
+        unpicklable = [Unpicklable() for _ in range(self.world_size)]
+        with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
+            c10d.distributed_c10d.all_gather_object(unpicklable[self.rank % self.world_size])
+
+
     @skip_if_not_multigpu
     @skip_if_rocm
     def test_allgather_basics_cuda(self):

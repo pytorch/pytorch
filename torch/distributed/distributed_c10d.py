@@ -1,4 +1,5 @@
 import torch
+import pickle
 import warnings
 from torch._six import string_classes
 from datetime import timedelta
@@ -225,6 +226,27 @@ def _check_tensor_list(param, param_name):
        not all(isinstance(p, torch.Tensor) for p in param):
         raise RuntimeError("Invalid function argument. Expected parameter `{}` "
                            "to be of type List[torch.Tensor].".format(param_name))
+
+
+def _object_to_tensor(obj):
+    """
+    Helper function to convert an arbitrary picklable python object to a tensor
+    Returns a torch.ByteTensor representing the pickled object.
+    """
+    buf = pickle.dumps(obj)
+    storage = torch.ByteStorage.from_buffer(buf)
+    byte_tensor = torch.ByteTensor(storage)
+    size = torch.LongTensor([byte_tensor.numel()])
+    return byte_tensor, size
+
+
+def _tensor_to_object(tensor, size):
+    """
+    Helper function to convert a ByteTensor created by _object_to_tensor back to
+    the picklable python object.
+    """
+    buf = tensor.cpu().numpy().tobytes()[:size]
+    return pickle.loads(buf)
 
 
 def is_mpi_available():
@@ -1120,6 +1142,37 @@ def all_gather_multigpu(output_tensor_lists,
         return work
     else:
         work.wait()
+
+
+def all_gather_object(object, group=group.WORLD, async_op=False):
+    """
+    Performs all_gather on a picklable object.
+    """
+    if _rank_not_in_group(group):
+        return
+    _check_default_pg()
+
+    byte_tensor, size = _object_to_tensor(object)
+
+    group_size = torch.distributed.get_world_size(group=group)
+    object_size_list = [torch.LongTensor([0]) for _ in range(group_size)]
+
+    # collect the object sizes from all the tensors
+    all_gather(object_size_list, size, group=group)
+
+    # create the list of output tensors needed for all_gather
+    max_object_size = max(object_size_list)
+    tensor_list = [torch.ByteTensor(size=(max_object_size,)) for _ in range(group_size)]
+
+    if size != max_object_size:
+        # all tensors input into gather should be of the same size, so pad the local tensor if it is not the max size.
+        padding = torch.ByteTensor(size=(max_object_size - size,))
+        byte_tensor = torch.cat((byte_tensor, padding), dim=0)
+
+    all_gather(tensor_list, byte_tensor, group=group, async_op=async_op)
+    # unpickle the tensors back into objects.
+    objects = [_tensor_to_object(tensor, object_size) for object_size, tensor in zip(object_size_list, tensor_list)]
+    return objects
 
 
 def all_gather(tensor_list,
