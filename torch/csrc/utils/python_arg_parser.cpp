@@ -588,10 +588,6 @@ pyobject_array_insert(PyObject **array, int length, int index, PyObject *item)
 
 auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
                               PyObject* overloaded_args[], bool raise_exception) -> bool {  // NOLINT
-  int num_overloaded_args = 0;
-  int arg_index = 0;
-  int j;
-  int new_class = 1;
   auto nargs = PyTuple_GET_SIZE(args);
   ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
   ssize_t arg_pos = 0;
@@ -611,7 +607,11 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     return false;
   }
 
+  bool new_class = true;
+  int arg_index = 0;
   int i = 0;
+  int j;
+  int num_overloaded_args = 0;
   for (auto& param : params) {
     PyObject* obj = nullptr;
     bool is_kwd = false;
@@ -663,7 +663,7 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       dst[i++] = obj;
       for (j = 0; j < num_overloaded_args; j++) {
         if (Py_TYPE(obj) == Py_TYPE(overloaded_args[j])) {
-          new_class = 0;
+          new_class = false;
           break;
         }
       }
@@ -741,16 +741,17 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
 }
 
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
+  constexpr int torch_max_args = 32;
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
-    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr}; // NOLINT
+    PyObject* overloaded_args[torch_max_args] = {nullptr}; // NOLINT
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
     return PythonArgs(0, traceable, signature, parsed_args, overloaded_args);
   }
 
   int i = 0;
   for (auto& signature : signatures_) {
-    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr};  // NOLINT
+    PyObject* overloaded_args[torch_max_args] = {nullptr};  // NOLINT
     if (signature.parse(args, kwargs, parsed_args, overloaded_args, false)) {
       return PythonArgs(i, traceable, signature, parsed_args, overloaded_args);
     }
@@ -770,9 +771,10 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
     i++;
   }
 
+  constexpr int torch_max_args = 32;
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
-    PyObject* overloaded_args[TH_MAX_ARGS] = {nullptr};  // NOLINT
+    PyObject* overloaded_args[torch_max_args] = {nullptr};  // NOLINT
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
   }
 

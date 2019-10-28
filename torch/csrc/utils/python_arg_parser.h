@@ -74,8 +74,6 @@
 #include <string>
 #include <vector>
 
-#define TH_MAX_ARGS 32
-
 namespace torch {
 
 enum class ParameterType {
@@ -557,6 +555,8 @@ inline PyObject* PythonArgs::pyobject(int i) {
 }
 
 /*
+ * Reference: https://github.com/numpy/numpy/blob/f4c497c768e0646df740b647782df463825bfd27/numpy/core/src/common/get_attr_string.h#L42
+ *
  * Stripped down version of PyObject_GetAttrString,
  * avoids lookups for None, tuple, and List objects,
  * and doesn't create a PyErr since this code ignores it.
