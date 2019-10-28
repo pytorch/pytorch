@@ -147,10 +147,10 @@ def _lazy_init():
                        "'spawn' start method")
             raise RuntimeError(
                 "Cannot re-initialize CUDA in forked subprocess. " + msg)
-        if _cudart is None:
-            raise RuntimeError(
-                "libcudart functions unavailable. It looks like you have a broken build?")
         _check_driver()
+        if _cudart is None:
+            raise AssertionError(
+                "libcudart functions unavailable. It looks like you have a broken build?")
         torch._C._cuda_init()
         _original_pid = os.getpid()
         # Some of the queued calls may reentrantly call _lazy_init();
