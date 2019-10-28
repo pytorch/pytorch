@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ExpandUtils.h>
 #include <torch/nn/options/loss.h>
 
 namespace torch {
