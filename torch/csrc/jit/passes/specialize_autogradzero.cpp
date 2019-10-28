@@ -143,14 +143,19 @@ void specializeAutogradZero(Graph &g) {
             break;
           }
         }
-        // fallthrough
+        setOutputStatesToUnknown(n);
+        break;
       }
       default:
-        for (auto o : n->outputs()) {
-          state[o] = State::Unknown;
-        }
+        setOutputStatesToUnknown(n);
         break;
     }
+  }
+}
+
+void setOutputStatesToUnknown(Node* n) {
+  for (auto o : n->outputs()) {
+    state[o] = State::Unknown;
   }
 }
 
