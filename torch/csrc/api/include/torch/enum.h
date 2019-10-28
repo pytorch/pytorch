@@ -159,7 +159,7 @@ at::Reduction::Reduction reduction_get_enum(V variant_enum) {
   } else {
     TORCH_CHECK(
       false,
-      "Unsupported reduction enum: ", get_enum_name(variant_enum));
+      get_enum_name(variant_enum), " is not a valid value for reduction");
     return at::Reduction::END;
   }
 }
