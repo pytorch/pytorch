@@ -555,6 +555,35 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
                 model = getattr(torchvision.models, model_name)()
                 w.add_graph(model, torch.zeros(input_shape))
 
+class TestTensorBoardPytorchGraph_single_operator(BaseTestCase):
+    import torch.nn as nn
+    from common_nn import module_tests, new_module_tests
+
+    modules = torch.nn.modules.__all__
+    tested = []
+    untested = []
+    for test_params in module_tests + new_module_tests:
+        if 'module_name' in test_params and 'input_size' in test_params:
+            # print(test_params)
+            if 'constructor_args' in test_params:
+                model = getattr(nn, test_params['module_name'])(*test_params['constructor_args'])
+            else:
+                model = getattr(nn, test_params['module_name'])()
+
+            input = torch.zeros(test_params['input_size'])
+            tested.append(test_params['module_name'])
+            # print(model(input))
+            # add_graph(...)
+        elif 'fullname' in test_params and 'constructor' in test_params and 'input_size' in test_params:
+            model = test_params['constructor']()
+            input = torch.zeros(test_params['input_size'])
+            tested.append(test_params['fullname'])
+            # add_graph(...)
+            # print(model(input))
+        else:  # numerical accuracy tests?
+            untested.append(test_params)
+
+
 class TestTensorBoardFigure(BaseTestCase):
     @skipIfNoMatplotlib
     def test_figure(self):
