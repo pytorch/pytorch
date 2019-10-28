@@ -289,9 +289,8 @@ inline Tensor nll_loss(
     options.reduction() == Reduction::Sum,
     options.reduction() + " is not valid"
   );
-    
   if(input.dim() == 2){
-    ret = torch::nll_loss(
+    auto ret = torch::nll_loss(
           input,
           target,
           options.weight(),
@@ -299,7 +298,7 @@ inline Tensor nll_loss(
           get_enum(options.reduction()));
   }
   else if(input.dim() == 4){
-    ret = torch::nll_loss2d(
+    auto ret = torch::nll_loss2d(
           input,
           target,
           options.weight(),
@@ -307,16 +306,16 @@ inline Tensor nll_loss(
           get_enum(options.reduction()));
   }
   else{
-    n = input.sizes()[0];
-    c = input.sizes()[1];
-    auto out_size = torch::Tensor(tensor.sizes().slice(0, 1)).vec();
-    auto temp = torch::tensor(tensor.sizes().slice(2, len - 2)).vec();
+    auto n = input.sizes()[0];
+    auto c = input.sizes()[1];
+    auto out_size = torch::Tensor(input.sizes().slice(0, 1)).vec();
+    auto temp = torch::tensor(input.sizes().slice(2, input.dim() - 2)).vec();
     out_size.insert(out_size.end(), temp.begin(), temp.end());
     if(target.sizes().slice(1, target.dim() - 1) != input.sizes().slice(2, input.dim() - 2)){
       TORCH_WARN("Expected target size{", out_size, "} got {", target.sizes().vec(), "}");
   }
-  input = input.continuous().view({n, c, 1, -1});
-  target = target.continuous().view({n, 1, -1});
+  input = input.contiguous().view({n, c, 1, -1});
+  target = target.contiguous().view({n, 1, -1});
   if (options.reduction() != 'None'){
     auto ret = torch::nll_loss2d(input, target, options.weight(), get_enum(options.reduction()), options.ignore_index());
   }

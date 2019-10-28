@@ -534,7 +534,7 @@ TEST_F(FunctionalTest, TripletMarginLoss) {
       anchor, positive, negative, TripletMarginLossOptions().margin(1.0));
   auto expected = torch::tensor({0.}, torch::kFloat);
 
-  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  ASSERT_TRUE(output.allclose(expected, 1e-3));
 }
 
 TEST_F(FunctionalTest, NLLLoss) {
@@ -542,12 +542,12 @@ TEST_F(FunctionalTest, NLLLoss) {
                                {-3.7038, -0.1038, -2.6038},
                               {-2.3422, -1.3422, -0.4422}},
                              torch::kFloat);
-  auto target = torch::tensor({1, 0, 2}, torch::kLong);
+  auto target = torch::tensor({1, 0, 2}, torch::kLong); 
   auto output = F::nll_loss(
       input, target, NLLLossOptions());
-  auto expected = torch::tensor({2.4257501}, torch::kFloat);
-
-  ASSERT_TRUE(output.allclose(expected, 1e-04));
+  auto expected = torch::tensor({2.4258}, torch::kFloat);
+  std::cout << output<< "\nHi\n";
+  ASSERT_TRUE(output.allclose(expected, 1e-3));
   ASSERT_EQ(input.sizes(), input.grad().sizes());
 }
 

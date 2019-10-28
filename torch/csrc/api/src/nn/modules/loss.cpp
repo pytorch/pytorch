@@ -258,7 +258,7 @@ void NLLLossImpl::pretty_print(std::ostream& stream) const {
 }
 
 void NLLLossImpl::reset() {
-  register_buffer("weight", options.weight());
+  weight = register_buffer("weight", options.weight());
 }
 
 Tensor NLLLossImpl::forward(
