@@ -39,8 +39,8 @@ class FileStore : public Store {
   const std::string cleanupKey_;
   const std::string regularPrefix_;
 
-  std::pair<std::mutex, std::unordered_map<std::string, std::vector<uint8_t>>>
-      cache_;
+  typedef std::unordered_map<std::string, std::vector<uint8_t>> Cache;
+  std::pair<std::mutex, Cache> cache_;
   template <class Function>
   auto lockedCache(Function&& function) {
     std::lock_guard<std::mutex> l(cache_.first);

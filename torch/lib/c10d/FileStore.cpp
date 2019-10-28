@@ -251,7 +251,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     File file(path_, O_RDONLY, timeout_);
     auto lock = file.lockShared();
     auto size = file.size();
-    if (lockedCache([&](auto& cache) { return cache.count(regKey) == 0; }) &&
+    if (lockedCache([&](Cache& cache) { return cache.count(regKey) == 0; }) &&
         size == pos_) {
       // No new entries; release the shared lock and sleep for a bit
       lock.unlock();
@@ -266,11 +266,11 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     // Always refresh since even though the key exists in the cache,
     // it might be outdated
     pos_ = refresh(file, pos_, cache_);
-    if (lockedCache([&](auto& cache) { return cache.count(regKey) != 0; })) {
+    if (lockedCache([&](Cache& cache) { return cache.count(regKey) != 0; })) {
       break;
     }
   }
-  return lockedCache([&](auto& cache) { return cache[regKey]; });
+  return lockedCache([&](Cache& cache) { return cache[regKey]; });
 }
 
 int64_t FileStore::addHelper(const std::string& key, int64_t i) {
@@ -278,7 +278,7 @@ int64_t FileStore::addHelper(const std::string& key, int64_t i) {
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_);
 
-  auto value = lockedCache([&](auto& cache) { return cache[key]; });
+  auto value = lockedCache([&](Cache& cache) { return cache[key]; });
   int64_t ti = i;
   if (!value.empty()) {
     auto buf = reinterpret_cast<const char*>(value.data());
@@ -306,7 +306,7 @@ bool FileStore::check(const std::vector<std::string>& keys) {
 
   for (const auto& key : keys) {
     std::string regKey = regularPrefix_ + key;
-    if (lockedCache([&](auto& cache) { return cache.count(regKey) == 0; })) {
+    if (lockedCache([&](Cache& cache) { return cache.count(regKey) == 0; })) {
       return false;
     }
   }
