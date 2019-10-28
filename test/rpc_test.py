@@ -308,6 +308,22 @@ class RpcTest(object):
                 num_send_recv_threads=16,
             )
 
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+        # Wait for all init to complete.
+        dist.barrier()
+        # `dist.init_model_parallel` assumes no `_default_pg` is created,
+        # and will create one.
+        dist.destroy_process_group()
+
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
             rpc.init_model_parallel(
                 self_name=" ",
@@ -318,6 +334,22 @@ class RpcTest(object):
                 num_send_recv_threads=16,
             )
 
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+        # Wait for all init to complete.
+        dist.barrier()
+        # `dist.init_model_parallel` assumes no `_default_pg` is created,
+        # and will create one.
+        dist.destroy_process_group()
+
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
             rpc.init_model_parallel(
                 self_name="",
@@ -327,6 +359,22 @@ class RpcTest(object):
                 worker_name_to_id=self.worker_name_to_id,
                 num_send_recv_threads=16,
             )
+
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+        # Wait for all init to complete.
+        dist.barrier()
+        # `dist.init_model_parallel` assumes no `_default_pg` is created,
+        # and will create one.
+        dist.destroy_process_group()
 
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
