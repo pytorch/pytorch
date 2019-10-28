@@ -170,7 +170,7 @@ at::Reduction::Reduction reduction_get_enum(V variant_enum) {
 }
 
 template <typename V>
-at::Reduction::Reduction get_enum_name(V variant_enum) {
+std::string get_enum_name(V variant_enum) {
   return c10::visit(enumtype::_compute_enum_name{}, variant_enum);
 }
 
