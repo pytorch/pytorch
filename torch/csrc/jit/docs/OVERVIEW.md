@@ -531,7 +531,7 @@ SugaredValues are how the compiler represents non-first class values during Grap
 
 SugaredValues are also how we interact with Python runtime during the compilation process. For instance, `math.pi` is resolved to 3.1415... by first resolving `math` to a SugaredValue representing accesses to Python modules (PythonModuleValue) whose `attr` function turns python numbers into  `prim::Constant` Nodes in the graph.
 
-Finally, normal Values are also represented by the SimpleValue SugaredValue in places where it is valid either a SugaredValue or a normal Value will appear.
+Finally, normal Values are also represented by the SimpleValue SugaredValue in places where it is valid that either a SugaredValue or a normal Value will appear.
 
 ## Resolver ##
 
