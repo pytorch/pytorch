@@ -10,7 +10,7 @@
 
 #include <qnnpack/q8gemm.h>
 
-void q8sumrows_ukernel_4x__neon(
+void pytorch_q8sumrows_ukernel_4x__neon(
     const uint8_t* restrict a,
     size_t m,
     size_t k,

@@ -12,7 +12,7 @@
 
 #include <qnnpack/q8avgpool.h>
 
-void q8avgpool_ukernel_up8xm__sse2(
+void pytorch_q8avgpool_ukernel_up8xm__sse2(
     size_t n,
     size_t ks,
     size_t kc,

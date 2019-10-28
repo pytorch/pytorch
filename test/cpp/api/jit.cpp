@@ -65,7 +65,7 @@ TEST(TorchScriptTest, TestNestedIValueModuleArgMatching) {
         std::string(error.what_without_backtrace())
             .find("nested_loop() Expected a value of type 'List[List[Tensor]]'"
                   " for argument 'a' but instead found type "
-                  "'List[List[List[t]]]'") == 0);
+                  "'List[List[List[Tensor]]]'") == 0);
   };
 }
 

@@ -295,8 +295,8 @@ def bceloss_no_reduce_test():
             lambda i: F.binary_cross_entropy(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()),
-        check_gradgrad=False,
-        pickle=False)
+        pickle=False,
+        precision=7e-4)
 
 
 def bceloss_no_reduce_scalar_test():
@@ -307,7 +307,6 @@ def bceloss_no_reduce_scalar_test():
             lambda i: F.binary_cross_entropy(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()),
-        check_gradgrad=False,
         pickle=False)
 
 
@@ -321,8 +320,8 @@ def bceloss_weights_no_reduce_test():
                                              weight=weights.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, p, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
-        check_gradgrad=False,
-        pickle=False
+        pickle=False,
+        precision=3e-4
     )
 
 
@@ -336,7 +335,6 @@ def bceloss_weights_no_reduce_scalar_test():
                                              weight=weights.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
-        check_gradgrad=False,
         pickle=False
     )
 
@@ -1219,6 +1217,14 @@ new_module_tests = [
         desc='pad2size1',
     ),
     dict(
+        module_name='Conv1d',
+        constructor_args=(4, 5, 3),
+        input_size=(0, 4, 10),
+        cudnn=True,
+        desc='zero_batch',
+        test_cuda=(not TEST_WITH_ROCM),
+    ),
+    dict(
         fullname='Conv1d_dilated',
         constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
         input_size=(2, 4, 10),
@@ -1308,6 +1314,15 @@ new_module_tests = [
         check_with_long_tensor=True,
     ),
     dict(
+        module_name='Conv2d',
+        constructor_args=(3, 4, (3, 2)),
+        input_size=(0, 3, 7, 5),
+        cudnn=True,
+        desc='zero_batch',
+        check_with_long_tensor=True,
+        test_cuda=(not TEST_WITH_ROCM),
+    ),
+    dict(
         fullname='Conv2d_groups',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
@@ -1380,56 +1395,66 @@ new_module_tests = [
         constructor_args=((3, 3), (2, 2), (1, 1)),
         cpp_constructor_args='(torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1}))',
         input_size=(1, 3, 7, 7),
+        check_with_channels_last=True,
     ),
     dict(
         module_name='AvgPool1d',
         constructor_args=(2,),
+        cpp_constructor_args="(2)",
         input_size=(2, 3, 6),
     ),
     dict(
         module_name='AvgPool1d',
         constructor_args=((2,), (2,)),
+        cpp_constructor_args="(torch::nn::AvgPool1dOptions(2).stride(2))",
         input_size=(2, 3, 6),
         desc='stride',
     ),
     dict(
         module_name='AvgPool1d',
         constructor_args=(2, 2, 1),
+        cpp_constructor_args="(torch::nn::AvgPool1dOptions(2).stride(2).padding(1))",
         input_size=(2, 3, 6),
         desc='stride_pad',
     ),
     dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2),),
+        cpp_constructor_args="(torch::nn::AvgPool2dOptions({2, 2}))",
         input_size=(2, 3, 6, 6),
     ),
     dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2), (2, 2)),
+        cpp_constructor_args="(torch::nn::AvgPool2dOptions({2, 2}).stride({2, 2}))",
         input_size=(2, 3, 6, 6),
         desc='stride',
     ),
     dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2), (2, 2), (1, 1)),
+        cpp_constructor_args="(torch::nn::AvgPool2dOptions({2, 2}).stride({2, 2}).padding({1, 1}))",
         input_size=(2, 3, 6, 6),
         desc='stride_pad',
     ),
     dict(
         fullname='AvgPool2d_divisor',
         constructor=lambda: nn.AvgPool2d((2, 2), divisor_override=1),
+        cpp_constructor_args="(torch::nn::AvgPool2dOptions({2, 2}).divisor_override(1))",
         input_size=(2, 3, 6, 6),
         check_with_long_tensor=True,
     ),
     dict(
         fullname='AvgPool2d_divisor_stride',
         constructor=lambda: nn.AvgPool2d((2, 2), (2, 2), divisor_override=1),
+        cpp_constructor_args="(torch::nn::AvgPool2dOptions({2, 2}).stride({2, 2}).divisor_override(1))",
         input_size=(2, 3, 6, 6),
         check_with_long_tensor=True,
     ),
     dict(
         fullname='AvgPool2d_divisor_stride_pad',
         constructor=lambda: nn.AvgPool2d((2, 2), (2, 2), (1, 1), divisor_override=1),
+        cpp_constructor_args="(torch::nn::AvgPool2dOptions({2, 2}).stride({2, 2}).padding({1, 1}).divisor_override(1))",
         input_size=(2, 3, 6, 6),
         check_with_long_tensor=True,
     ),
@@ -1551,6 +1576,15 @@ new_module_tests = [
         check_with_long_tensor=True,
     ),
     dict(
+        module_name='Conv3d',
+        constructor_args=(3, 4, (2, 3, 4)),
+        input_size=(0, 3, 3, 4, 5),
+        cudnn=True,
+        check_with_long_tensor=True,
+        desc='zero_batch',
+        test_cuda=(not TEST_WITH_ROCM),
+    ),
+    dict(
         fullname='Conv3d_groups',
         constructor=lambda: nn.Conv3d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 4, 5, 4),
@@ -1603,83 +1637,97 @@ new_module_tests = [
     dict(
         module_name='AvgPool3d',
         constructor_args=((2, 2, 2),),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions({2, 2, 2}))",
         input_size=(2, 3, 4, 4, 4),
     ),
     dict(
         module_name='AvgPool3d',
         constructor_args=(2, (2, 2, 2)),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions(2).stride({2, 2, 2}))",
         input_size=(2, 3, 5, 5, 5),
         desc='stride',
     ),
     dict(
         module_name='AvgPool3d',
         constructor_args=(2, 2, (1, 1, 1)),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions(2).stride(2).padding({1, 1, 1}))",
         input_size=(2, 3, 5, 5, 5),
         desc='stride_pad',
     ),
     dict(
         module_name='AvgPool3d',
         constructor_args=(4, 2, (1, 2, 1)),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions(4).stride(2).padding({1, 2, 1}))",
         input_size=(2, 3, 5, 5, 5),
         desc='stride_pad_gpu_fixedkw_output',
     ),
     dict(
         module_name='AvgPool3d',
         constructor_args=((2, 4, 8), 1, (1, 1, 2)),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions({2, 4, 8}).stride(1).padding({1, 1, 2}))",
         input_size=(2, 3, 2, 4, 8),
         desc='stride_pad_gpu_general_output',
     ),
     dict(
         module_name='AvgPool3d',
         constructor_args=(3, 1, 0),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions(3).stride(1).padding(0))",
         input_size=(2, 3, 4, 4, 4),
         desc='stride1_pad0_gpu_input',
     ),
     dict(
         module_name='AvgPool3d',
         constructor_args=(2, 2, (1, 1, 1)),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions(2).stride(2).padding({1, 1, 1}))",
         input_size=(2, 3, 4, 4, 4),
         desc='stride_pad_gpu_input_nooverlap',
     ),
     dict(
         fullname='AvgPool3d_divisor',
         constructor=lambda: nn.AvgPool3d((2, 2, 2), divisor_override=1),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions({2, 2, 2}).divisor_override(1))",
         input_size=(2, 3, 4, 4, 4),
         check_with_long_tensor=True,
     ),
     dict(
         fullname='AvgPool3d_divisor_stride',
         constructor=lambda: nn.AvgPool3d(2, (2, 2, 2), divisor_override=1),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions(2).stride({2, 2, 2}).divisor_override(1))",
         input_size=(2, 3, 5, 5, 5),
         check_with_long_tensor=True,
     ),
     dict(
         fullname='AvgPool3d_divisor_stride_pad',
         constructor=lambda: nn.AvgPool3d(2, 2, (1, 1, 1), divisor_override=1),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions(2).stride(2).padding({1, 1, 1}).divisor_override(1))",
         input_size=(2, 3, 5, 5, 5),
         check_with_long_tensor=True,
     ),
     dict(
         fullname='AvgPool3d_divisor_stride_pad_gpu_fixedkw_output',
         constructor=lambda: nn.AvgPool3d(4, 2, (1, 2, 1), divisor_override=1),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions(4).stride(2).padding({1, 2, 1}).divisor_override(1))",
         input_size=(2, 3, 5, 5, 5),
         check_with_long_tensor=True,
     ),
     dict(
         fullname='AvgPool3d_divisor_stride_pad_gpu_general_output',
         constructor=lambda: nn.AvgPool3d((2, 4, 8), 1, (1, 1, 2), divisor_override=1),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions({2, 4, 8}).stride(1).padding({1, 1, 2}).divisor_override(1))",
         input_size=(2, 3, 2, 4, 8),
         check_with_long_tensor=True,
     ),
     dict(
         fullname='AvgPool3d_divisor_stride1_pad0_gpu_input',
         constructor=lambda: nn.AvgPool3d(3, 1, 0, divisor_override=1),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions(3).stride(1).padding(0).divisor_override(1))",
         input_size=(2, 3, 4, 4, 4),
         check_with_long_tensor=True,
     ),
     dict(
         fullname='AvgPool3d_divisor_stride_pad_gpu_input_nooverlap',
         constructor=lambda: nn.AvgPool3d(2, 2, (1, 1, 1), divisor_override=1),
+        cpp_constructor_args="(torch::nn::AvgPool3dOptions(2).stride(2).padding({1, 1, 1}).divisor_override(1))",
         input_size=(2, 3, 4, 4, 4),
         check_with_long_tensor=True,
     ),
@@ -3320,10 +3368,11 @@ class NNTestCase(TestCase):
         numerical_t = list(iter_tensors(numerical))
 
         # TODO: compare structure
-        self.assertLessEqual(
-            max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
-            PRECISION
-        )
+        if input.numel() != 0:
+            self.assertLessEqual(
+                max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
+                PRECISION
+            )
 
     def check_criterion_jacobian(self, criterion, input, target):
         eps = 1e-6
@@ -3487,7 +3536,7 @@ class ModuleTest(TestBase):
                 dim = d + 1
                 break
         noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
-        assert noncontig.numel() == 1 or not noncontig.is_contiguous()
+        assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
 

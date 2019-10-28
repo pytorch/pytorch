@@ -534,6 +534,7 @@ def method_tests():
         ('norm', (S, S), ('fro',), 'fro_default'),
         ('norm', (S, S), ('fro', [0, 1],), 'fro'),
         ('norm', (S, S), ('nuc',), 'nuc', (), NO_ARGS, [skipIfNoLapack]),
+        ('norm', (S, S, S), ('nuc', [1, 2]), 'nuc_batched', (), NO_ARGS, [skipIfNoLapack]),
         ('norm', (S, S), (-1,), 'neg_1'),
         ('norm', (S, S), (-2,), 'neg_2'),
         ('norm', (S, S), (-0.5,), 'neg_0_5'),

@@ -11,6 +11,7 @@
 #include <ATen/detail/HIPHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/QEngine.h>
 
 #include <memory>
 #include <mutex>
@@ -105,7 +106,11 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-private:
+  at::QEngine qEngine() const;
+  void setQEngine(at::QEngine e);
+  const std::vector<at::QEngine>& supportedQEngines() const;
+
+ private:
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
       lazyInitCUDA();
@@ -122,6 +127,7 @@ private:
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
   bool enabled_mkldnn = true;
+  c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 };

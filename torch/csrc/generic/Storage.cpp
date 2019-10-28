@@ -279,13 +279,13 @@ static struct PyMemberDef THPStorage_(members)[] = {
   {nullptr}
 };
 
-static PyObject * THPStorage_(device)(THPStorage* self) {
+static PyObject * THPStorage_(device)(THPStorage* self, void *unused) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata->device());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(dtype)(THPStorage *self)
+static PyObject * THPStorage_(dtype)(THPStorage *self, void *unused)
 {
   HANDLE_TH_ERRORS
   return torch::autograd::utils::wrap(

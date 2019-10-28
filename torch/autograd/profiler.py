@@ -342,10 +342,10 @@ class record_function(object):
         self.name = name
 
     def __enter__(self):
-        torch.autograd._push_range(self.name)
+        self.handle = torch.ops.profiler._record_function_enter(self.name)
 
     def __exit__(self, *args):
-        torch.autograd._pop_range()
+        torch.ops.profiler._record_function_exit(self.handle)
         return False
 
 
@@ -612,6 +612,9 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.self_cpu_time_total += other.self_cpu_time_total
         self.count += 1
         return self
+
+    def __iadd__(self, other):
+        return self.add(other)
 
     def __repr__(self):
         return (

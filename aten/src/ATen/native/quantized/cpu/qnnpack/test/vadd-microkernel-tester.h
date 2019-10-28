@@ -136,7 +136,7 @@ class VAddMicrokernelTester {
     return this->iterations_;
   }
 
-  void test(q8vadd_ukernel_function q8vadd) const {
+  void test(pytorch_q8vadd_ukernel_function q8vadd) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);

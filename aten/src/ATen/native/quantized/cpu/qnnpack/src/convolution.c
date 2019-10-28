@@ -257,7 +257,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
 
       switch (kernel_size) {
         case 9:
-          pack_q8dw_w(
+          pytorch_pack_q8dw_w(
               kernel_height,
               kernel_width,
               groups,
@@ -272,7 +272,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
           break;
         case 25:
           /* change this later */
-          pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -285,7 +285,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
               bias,
               convolution->packed_weights,
               true);
-          pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -299,7 +299,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
               (char*)convolution->packed_weights +
                   (10 + sizeof(int32_t) / sizeof(uint8_t)) * c_stride,
               false);
-          pack_q8dw_w_dilation(
+          pytorch_pack_q8dw_w_dilation(
               kernel_height,
               kernel_width,
               groups,
@@ -349,7 +349,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
           convolution->packed_weights, 0, packed_group_weights_size * groups);
 
       for (uint32_t group = 0; group < groups; group++) {
-        pack_swizzle_q8gemm_b(
+        pytorch_pack_swizzle_q8gemm_b(
             group_output_channels,
             group_input_channels,
             nr,
@@ -390,7 +390,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
       switch (ukernel_type) {
         case pytorch_qnnp_ukernel_type_gemm:
           for (uint32_t group = 0; group < groups; group++) {
-            pack_q8gemm_w(
+            pytorch_pack_q8gemm_w(
                 group_output_channels,
                 group_input_channels,
                 nr,
@@ -407,7 +407,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_convolution2d_nhwc_q8(
           break;
         case pytorch_qnnp_ukernel_type_conv:
           for (uint32_t group = 0; group < groups; group++) {
-            pack_q8conv_w(
+            pytorch_pack_q8conv_w(
                 group_output_channels,
                 kernel_size,
                 group_input_channels,

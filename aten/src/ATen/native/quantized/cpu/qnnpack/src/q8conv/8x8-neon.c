@@ -11,7 +11,7 @@
 #include <qnnpack/q8conv.h>
 #include <requantization/runtime-neon.h>
 
-void q8conv_ukernel_8x8__neon(
+void pytorch_q8conv_ukernel_8x8__neon(
     size_t mr,
     size_t nr,
     size_t kc,
