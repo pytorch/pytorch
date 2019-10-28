@@ -42,16 +42,15 @@ class ProfilingMode(Enum):
 
 @contextmanager
 def enable_profiling_mode(flag):
+    if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
+        old_prof_exec_state = torch._C._jit_set_profiling_executor(flag != ProfilingMode.OFF)
+        old_prof_mode_state = torch._C._jit_set_profiling_mode(flag == ProfilingMode.FULL)
+    try:
+        yield
+    finally:
         if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
-            old_prof_exec_state = torch._C._jit_set_profiling_executor(flag != ProfilingMode.OFF)
-            old_prof_mode_state = torch._C._jit_set_profiling_mode(flag == ProfilingMode.FULL)
-        try:
-            yield
-        finally:
-            if IN_TRANSITION_TO_PROFILING_GRAPH_EXECUTOR:
-                torch._C._jit_set_profiling_executor(old_prof_exec_state)
-                torch._C._jit_set_profiling_mode(old_prof_mode_state)
-    
+            torch._C._jit_set_profiling_executor(old_prof_exec_state)
+            torch._C._jit_set_profiling_mode(old_prof_mode_state)
 
 def execWrapper(code, glob, loc):
     if PY2:
@@ -365,7 +364,7 @@ class JitTestCase(TestCase):
             with enable_profiling_mode(profiling):
                 if isinstance(script, str):
                     # Compile the string to a Script function
-                    #with enable_profiling_mode(profiling):
+                    # with enable_profiling_mode(profiling):
                     cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
 
                     # Execute the Python function so we can run it later and get its

@@ -16,7 +16,8 @@ struct GuardElimination {
         aliasDb_(c10::guts::make_unique<AliasDb>(graph_)) {}
 
   void run() {
-    size_t attempts = 5;
+    const size_t MAX_ATTEMPTS = 5;
+    size_t attempts = MAX_ATTEMPTS;
     while (attempts-- && moveGuardsToDefs(graph_->block())) {
     }
     GRAPH_DUMP("After moveGuardsToDefs", graph_);
