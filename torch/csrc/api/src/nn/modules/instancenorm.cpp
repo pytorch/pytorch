@@ -6,7 +6,8 @@ namespace torch {
 namespace nn {
 
 template <size_t D, typename Derived>
-InstanceNormImpl<D, Derived>::InstanceNormImpl(const BatchNormOptions& options_){}
+InstanceNormImpl<D, Derived>::InstanceNormImpl(const InstanceNormOptions& options_)
+    : options(options_) {}
 
 template <size_t D, typename Derived>
 Tensor InstanceNormImpl<D, Derived>::forward(const Tensor& input) {

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/nn/modules/batchnorm.h>
-#include <torch/nn/options/batchnorm.h>
+#include <torch/nn/options/instancenorm.h>
 #include <torch/nn/functional/instancenorm.h>
 
 namespace torch {
@@ -12,13 +12,15 @@ template <size_t D, typename Derived>
 class TORCH_API InstanceNormImpl : public torch::nn::BatchNormImpl {
  public:
   InstanceNormImpl(int64_t num_features)
-    : BatchNormImpl(BarchNormOptions(num_features)) {}
-  explicit InstanceNormImpl(const BatchNormOptions& options_);
+    : InstanceNormImpl(InstanceNormOptions(num_features)) {}
+  explicit InstanceNormImpl(const InstanceNormOptions& options_);
 
   virtual void _check_input_dim(const Tensor& input);
 
   Tensor forward(const Tensor& input);
   
+  /// The optons with which this `Module` was constructed.
+  InstanceNormOptions options;
 };
 
 class TORCH_API InstanceNorm1dImpl : public InstanceNormImpl<1, InstanceNorm1dImpl> {
