@@ -11,7 +11,6 @@ class Dataset(Generic[T_co]):
 class IterableDataset(Dataset[T_co]):
     def __iter__(self) -> Iterable[T_co]: ...
 
- 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     tensors: List[Tensor]
 
@@ -22,6 +21,12 @@ class ConcatDataset(Dataset[T_co]):
     cumulative_sizes: List[int]
 
     def __init__(self, datasets: Iterable[Dataset]) -> None: ...
+
+class ChainDataset(IterableDataset):
+    datasets: List[IterableDataset]
+
+    def __init__(self, *datasets: Iterable[IterableDataset]) -> None: ...
+    def __len__(self) -> int: ...
 
 class Subset(Dataset[T_co]):
     dataset: Dataset[T_co]
