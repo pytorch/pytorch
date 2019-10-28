@@ -169,21 +169,37 @@ void min_values_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+template <typename scalar_t, typename acc_t=scalar_t>
+void argmax_kernel_cuda_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<scalar_t, int64_t>(
+    iter,
+    ArgMaxOps<scalar_t, acc_t>{},
+    thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::lower_bound(), 0));
+};
+
+template <typename scalar_t, typename acc_t=scalar_t>
+void argmin_kernel_cuda_impl(TensorIterator& iter) {
+  gpu_reduce_kernel<scalar_t, int64_t>(
+    iter,
+    ArgMinOps<scalar_t, acc_t>{},
+    thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
+};
+
 void argmax_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmax_cuda", [&]() {
-    gpu_reduce_kernel<scalar_t, int64_t>(
-      iter,
-      ArgMaxOps<scalar_t>{},
-      thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::lower_bound(), 0));
+  if (iter.dtype() == kHalf) {
+    argmax_kernel_cuda_impl<at::Half, float>(iter);
+  }
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "argmax_cuda", [&]() {
+    argmax_kernel_cuda_impl<scalar_t>(iter);
   });
 }
 
 void argmin_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmin_cuda", [&]() {
-    gpu_reduce_kernel<scalar_t, int64_t>(
-      iter,
-      ArgMinOps<scalar_t>{},
-      thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
+  if (iter.dtype() == kHalf) {
+    argmin_kernel_cuda_impl<at::Half, float>(iter);
+  }
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "argmin_cuda", [&]() {
+    argmin_kernel_cuda_impl<scalar_t>(iter);
   });
 }
 

@@ -274,9 +274,9 @@ struct GreaterOrNan {
   }
 };
 
-template <typename comp_t>
+template <typename comp_t, typename scalar_t>
 struct ArgReductionOps {
-  using scalar_t = typename binary_function_traits<comp_t>::arg1_t;
+  // using scalar_t = typename binary_function_traits<comp_t>::arg1_t;
   using index_t = int64_t;
   using arg_t = detail::pair<scalar_t, index_t>;
 
@@ -302,14 +302,14 @@ struct ArgReductionOps {
 
 } // namespace detail
 
-template <typename scalar_t>
+template <typename scalar_t, typename acc_t=scalar_t>
 struct ArgMaxOps :
-  public detail::ArgReductionOps<detail::GreaterOrNan<scalar_t>> {
+  public detail::ArgReductionOps<detail::GreaterOrNan<acc_t>, scalar_t> {
 };
 
-template <typename scalar_t>
+template <typename scalar_t, typename acc_t=scalar_t>
 struct ArgMinOps :
-  public detail::ArgReductionOps<detail::LessOrNan<scalar_t>> {
+  public detail::ArgReductionOps<detail::LessOrNan<acc_t>, scalar_t> {
 };
 
 }} // namespace at::native
