@@ -12582,15 +12582,6 @@ class TestTorchDeviceType(TestCase):
 
         self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
 
-    def test_memory_format_full_like_strides(self, device):
-        def input_generator_fn(device):
-            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
-
-        def transformation_fn(tensor, **kwargs):
-            return torch.full_like(tensor, 7, **kwargs)
-
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
-
     def test_memory_format_type_shortcuts(self, device):
         def input_generator_fn(device):
             return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).clamp(0, 1).round().contiguous(memory_format=torch.channels_last)
