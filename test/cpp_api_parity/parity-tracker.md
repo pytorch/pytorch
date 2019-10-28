@@ -91,7 +91,7 @@ torch.nn.TransformerDecoder|No|No
 torch.nn.TransformerEncoderLayer|No|No
 torch.nn.TransformerDecoderLayer|No|No
 torch.nn.Identity|Yes|No
-torch.nn.Linear|No|No
+torch.nn.Linear|Yes|No
 torch.nn.Bilinear|Yes|No
 torch.nn.Flatten|No|No
 torch.nn.Dropout|No|No
