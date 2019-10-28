@@ -15,19 +15,6 @@
         - THTensor* self
         - THTensor* source
     - cname: setStorage
-      scalar_check: False
-      arguments:
-        - THTensor* self
-        - CONSTANT NULL, 0, {0}, {}
-    - cname: setStorage
-      scalar_check: False
-      arguments:
-        - THTensor* self
-        - THStorage* source
-        - CONSTANT 0
-        - CONSTANT {static_cast<int64_t>(source.size())}
-        - CONSTANT {}
-    - cname: setStorage
       arguments:
         - THTensor* self
         - THStorage* source
