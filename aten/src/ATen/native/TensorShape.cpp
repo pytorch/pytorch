@@ -498,7 +498,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
     return self.as_strided(shape, *stride);
   }
-  return at::_unsafe_view(self.clone(), shape);
+  return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
