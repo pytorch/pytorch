@@ -187,7 +187,9 @@ class File {
 off_t refresh(
     File& file,
     off_t pos,
-    std::unordered_map<std::string, std::vector<uint8_t>>& cache) {
+    std::pair<
+        std::mutex,
+        std::unordered_map<std::string, std::vector<uint8_t>>>& cache) {
   auto size = file.size();
   if (size != pos) {
     std::string tmpKey;
@@ -196,7 +198,10 @@ off_t refresh(
     while (size > pos) {
       file.read(tmpKey);
       file.read(tmpValue);
-      cache[tmpKey] = std::move(tmpValue);
+      {
+        std::unique_lock<std::mutex> l(cache.first);
+        cache.second[tmpKey] = std::move(tmpValue);
+      }
       pos = file.tell();
     }
   }
@@ -246,7 +251,8 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     File file(path_, O_RDONLY, timeout_);
     auto lock = file.lockShared();
     auto size = file.size();
-    if (cache_.count(regKey) == 0 && size == pos_) {
+    if (lockedCache([&](auto& cache) { return cache.count(regKey) == 0; }) &&
+        size == pos_) {
       // No new entries; release the shared lock and sleep for a bit
       lock.unlock();
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -260,12 +266,11 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     // Always refresh since even though the key exists in the cache,
     // it might be outdated
     pos_ = refresh(file, pos_, cache_);
-    if (cache_.count(regKey) != 0) {
+    if (lockedCache([&](auto& cache) { return cache.count(regKey) != 0; })) {
       break;
     }
   }
-
-  return cache_[regKey];
+  return lockedCache([&](auto& cache) { return cache[regKey]; });
 }
 
 int64_t FileStore::addHelper(const std::string& key, int64_t i) {
@@ -273,7 +278,7 @@ int64_t FileStore::addHelper(const std::string& key, int64_t i) {
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_);
 
-  const auto& value = cache_[key];
+  auto value = lockedCache([&](auto& cache) { return cache[key]; });
   int64_t ti = i;
   if (!value.empty()) {
     auto buf = reinterpret_cast<const char*>(value.data());
@@ -301,7 +306,7 @@ bool FileStore::check(const std::vector<std::string>& keys) {
 
   for (const auto& key : keys) {
     std::string regKey = regularPrefix_ + key;
-    if (cache_.count(regKey) == 0) {
+    if (lockedCache([&](auto& cache) { return cache.count(regKey) == 0; })) {
       return false;
     }
   }
