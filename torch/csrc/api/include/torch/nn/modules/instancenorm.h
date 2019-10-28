@@ -12,7 +12,7 @@ namespace nn {
 template <typename Derived>
 class TORCH_API InstanceNormImpl : public torch::nn::BatchNormImpl {
  protected:
-  virtual void _check_input_dim(const Tensor& input);
+  virtual void _check_input_dim(const Tensor& input) = 0;
 
  public:
   InstanceNormImpl(int64_t num_features)
@@ -31,7 +31,7 @@ class TORCH_API InstanceNorm1dImpl : public InstanceNormImpl<InstanceNorm1dImpl>
  public:
   using InstanceNormImpl<InstanceNorm1dImpl>::InstanceNormImpl;
  private:
-  void _check_input_dim(const Tensor& input);
+  void _check_input_dim(const Tensor& input) override;
 };
 
 TORCH_MODULE(InstanceNorm1d);
@@ -40,7 +40,7 @@ class TORCH_API InstanceNorm2dImpl : public InstanceNormImpl<InstanceNorm2dImpl>
  public:
   using InstanceNormImpl<InstanceNorm2dImpl>::InstanceNormImpl;
  private:
-  void _check_input_dim(const Tensor& input);
+  void _check_input_dim(const Tensor& input) override;
 };
 
 TORCH_MODULE(InstanceNorm2d);
@@ -50,7 +50,7 @@ class TORCH_API InstanceNorm3dImpl : public InstanceNormImpl<InstanceNorm3dImpl>
  public:
   using InstanceNormImpl<InstanceNorm3dImpl>::InstanceNormImpl;
  private:
-  void _check_input_dim(const Tensor& input);
+  void _check_input_dim(const Tensor& input) override;
 };
 
 TORCH_MODULE(InstanceNorm3d);
