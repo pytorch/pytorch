@@ -11,6 +11,13 @@
 namespace torch {
 namespace jit {
 
+// In order to solve the conflict between the macro and the variable in MSVC,
+// we need to save the value first to `UNICODE_TMP` and undefine `UNICODE`.
+#ifdef UNICODE
+# define UNICODE_TMP UNICODE
+# undef UNICODE
+#endif
+
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
   MARK = '(',
@@ -85,6 +92,12 @@ enum class PickleOpCode : char {
   MEMOIZE = '\x94',
   FRAME = '\x95'
 };
+
+// Here we will restore the value of `UNICODE` from `UNICODE_TMP`. 
+#ifdef UNICODE_TMP
+# define UNICODE UNICODE_TMP
+# undef UNICODE_TMP
+#endif
 
 enum PicklerClass : uint8_t {
   // A reference to the tensor table
