@@ -112,9 +112,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   python tools/amd_build/build_amd.py
-  # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
-  # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
-  USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
+  python setup.py install --user
 
   # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
   bash tools/amd_build/unwrap_clang.sh
