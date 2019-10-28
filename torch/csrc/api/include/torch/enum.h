@@ -143,35 +143,25 @@ struct _compute_enum_name {
   TORCH_ENUM_PRETTY_PRINT(BatchMean)
 };
 
-struct _compute_reduction_enum {
-  at::Reduction::Reduction operator()(const enumtype::kNone& v) const {
-    return at::Reduction::None;
-  }
-  at::Reduction::Reduction operator()(const enumtype::kMean& v) const {
-    return at::Reduction::Mean;
-  }
-  at::Reduction::Reduction operator()(const enumtype::kSum& v) const {
-    return at::Reduction::Sum;
-  }
-  at::Reduction::Reduction operator()(const enumtype::kBatchMean& v) const {
-    TORCH_CHECK(false, "Unsupported reduction enum");
-    return at::Reduction::END;
-  }
-  // NOTE: if `c10::visit(enumtype::_compute_reduction_enum{}, ...)` is called
-  // on any other types of enum, the compiler would properly throw the following error:
-  // ```
-  // error: static assertion failed: `visit` requires the visitor to be exhaustive.
-  // ```
-};
-
-template <typename V>
-at::Reduction::Reduction reduction_get_enum(V variant_enum) {
-  return c10::visit(enumtype::_compute_reduction_enum{}, variant_enum);
-}
-
 template <typename V>
 std::string get_enum_name(V variant_enum) {
   return c10::visit(enumtype::_compute_enum_name{}, variant_enum);
+}
+
+template <typename V>
+at::Reduction::Reduction reduction_get_enum(V variant_enum) {
+  if (c10::get_if<enumtype::kNone>(&options.reduction())) {
+    return at::Reduction::None;
+  } else if (c10::get_if<enumtype::kMean>(&options.reduction())) {
+    return at::Reduction::Mean;
+  } else if (c10::get_if<enumtype::kSum>(&options.reduction())) {
+    return at::Reduction::Sum;
+  } else {
+    TORCH_CHECK(
+      false,
+      "Unsupported reduction enum: ", get_enum_name(variant_enum));
+    return at::Reduction::END;
+  }
 }
 
 } // namespace enumtype
