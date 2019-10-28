@@ -33,7 +33,7 @@ TEST(EnumTest, AllEnums) {
     torch::enumtype::kCircular,
     torch::enumtype::kSum,
     torch::enumtype::kMean,
-    torch::enumtype::kMax
+    torch::enumtype::kMax,
     torch::enumtype::kNone,
     torch::enumtype::kBatchMean
   > v;
