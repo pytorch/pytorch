@@ -52,7 +52,7 @@ std::string operator()(const enumtype::k##name& v) const { \
 // ```
 // Tensor some_functional(
 //     const Tensor& input,
-//     const SomeOptions& options = {}) {
+//     SomeOptions options = {}) {
 //   ...
 // }
 // ```
@@ -64,8 +64,7 @@ std::string operator()(const enumtype::k##name& v) const { \
 // However, it throws the following error instead:
 //
 // ```
-// error: invalid initialization of reference of type ‘const SomeOptions&’
-// from expression of type ‘const torch::enumtype::kNone’
+// error: could not convert ‘torch::kNone’ from ‘const torch::enumtype::kNone’ to ‘torch::nn::SomeOptions’
 // ```
 //
 // To get around this problem, we explicitly provide the following constructors for `SomeOptions`:
@@ -79,7 +78,7 @@ std::string operator()(const enumtype::k##name& v) const { \
 // so that the conversion from `torch::kNone` to `SomeOptions` would work.
 //
 // Note that we also provide the default constructor `SomeOptions() {}`, so that
-// `const SomeOptions& options = {}` can work.
+// `SomeOptions options = {}` can work.
 #define TORCH_OPTIONS_CTOR_VARIANT_ARG3(OPTIONS_NAME, ARG_NAME, TYPE1, TYPE2, TYPE3) \
 OPTIONS_NAME() {} \
 OPTIONS_NAME(torch::enumtype::TYPE1 ARG_NAME) : ARG_NAME##_(torch::TYPE1) {} \
@@ -119,7 +118,7 @@ TORCH_ENUM_DECLARE(BatchMean)
 namespace torch {
 namespace enumtype {
 
-struct enum_name {
+struct _compute_enum_name {
   TORCH_ENUM_PRETTY_PRINT(Linear)
   TORCH_ENUM_PRETTY_PRINT(Conv1D)
   TORCH_ENUM_PRETTY_PRINT(Conv2D)
@@ -144,7 +143,7 @@ struct enum_name {
   TORCH_ENUM_PRETTY_PRINT(BatchMean)
 };
 
-struct _reduction_get_enum {
+struct _compute_reduction_enum {
   at::Reduction::Reduction operator()(const enumtype::kNone& v) const {
     return at::Reduction::None;
   }
@@ -158,7 +157,22 @@ struct _reduction_get_enum {
     TORCH_CHECK(false, "Unsupported reduction enum");
     return at::Reduction::END;
   }
+  // NOTE: if `c10::visit(enumtype::_compute_reduction_enum{}, ...)` is called
+  // on any other types of enum, the compiler would properly throws the following error:
+  // ```
+  // error: static assertion failed: `visit` requires the visitor to be exhaustive.
+  // ```
 };
+
+template <typename V>
+at::Reduction::Reduction reduction_get_enum(V variant_enum) {
+  return c10::visit(enumtype::_compute_reduction_enum{}, variant_enum);
+}
+
+template <typename V>
+at::Reduction::Reduction get_enum_name(V variant_enum) {
+  return c10::visit(enumtype::_compute_enum_name{}, variant_enum);
+}
 
 } // namespace enumtype
 } // namespace torch

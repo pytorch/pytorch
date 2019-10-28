@@ -9,7 +9,7 @@
   v = torch::k##name; \
   std::string pretty_print_name("k"); \
   pretty_print_name.append(#name); \
-  ASSERT_EQ(c10::visit(torch::enumtype::enum_name{}, v), pretty_print_name); \
+  ASSERT_EQ(torch::enumtype::get_enum_name(v), pretty_print_name); \
 }
 
 TEST(EnumTest, AllEnums) {
