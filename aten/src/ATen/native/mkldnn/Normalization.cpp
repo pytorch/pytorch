@@ -17,7 +17,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     bool train,
     double momentum,
     double eps) {
-  AT_ERROR("mkldnn_batch_norm: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_batch_norm: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
@@ -31,7 +31,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
     bool train,
     double eps,
     std::array<bool,3> grad_input_mask) {
-  AT_ERROR("mkldnn_batch_norm_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_batch_norm_backward: ATen not compiled with MKLDNN support");
 }
 
 } // namespace native
@@ -53,14 +53,14 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     bool train,
     double momentum,
     double eps) {
-  AT_ASSERTM(input.dim() == 4 || input.dim() == 5,
+  TORCH_CHECK(input.dim() == 4 || input.dim() == 5,
              "mkldnn_batch_norm: currently mkldnn only support 2d and 3d batchnorm");
-  AT_ASSERTM(weight.defined() && bias.defined(),
+  TORCH_CHECK(weight.defined() && bias.defined(),
              "mkldnn_batch_norm: currently mkldnn only support affine model");
 
   ideep::tensor& x = itensor_from_mkldnn(input);
-  const ideep::tensor w = get_mkldnn_tensor(weight);
-  const ideep::tensor b = get_mkldnn_tensor(bias);
+  const ideep::tensor w = itensor_from_tensor(weight);
+  const ideep::tensor b = itensor_from_tensor(bias);
 
   bool use_running_stat = (running_mean.defined() && running_var.defined());
   ideep::tensor y;
@@ -68,14 +68,16 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   if (train) {
     ideep::tensor saved_mean;
     ideep::tensor saved_var;
+    ideep::batch_normalization_forward_training::compute<AllocForMKLDNN>(
+        x, w, b, y, saved_mean, saved_var, momentum, eps);
     if (use_running_stat) {
-      ideep::tensor m = itensor_view_from_dense(running_mean);
-      ideep::tensor v = itensor_view_from_dense(running_var);
-      ideep::batch_normalization_forward_training::compute<AllocForMKLDNN>(
-          x, w, b, y, saved_mean, saved_var, m, v, momentum, eps);
-    } else {
-      ideep::batch_normalization_forward_training::compute<AllocForMKLDNN>(
-          x, w, b, y, saved_mean, saved_var, momentum, eps);
+      auto len = x.get_nelems() / w.get_nelems(); // n*h*w
+      ideep::tensor m = itensor_from_tensor(running_mean);
+      ideep::tensor v = itensor_from_tensor(running_var);
+      const std::vector<float> scales_mean{1 - momentum, momentum};
+      const std::vector<float> scales_var{1 - momentum , momentum * len / (len - 1)};
+      ideep::sum::compute(scales_mean, {m, saved_mean}, m);
+      ideep::sum::compute(scales_var, {v, saved_var}, v);
     }
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(y), input.options()),
@@ -83,8 +85,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
         new_with_itensor_mkldnn(std::move(saved_var), input.options()));
   } else {
     if (use_running_stat) {
-      ideep::tensor m = get_mkldnn_tensor(running_mean);
-      ideep::tensor v = get_mkldnn_tensor(running_var);
+      ideep::tensor m = itensor_from_tensor(running_mean);
+      ideep::tensor v = itensor_from_tensor(running_var);
       ideep::batch_normalization_forward_inference::compute<AllocForMKLDNN>(
           x, m, v, w, b, y, eps);
     } else {
@@ -108,11 +110,10 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
     bool train,
     double eps,
     std::array<bool,3> grad_input_mask) {
-  AT_ASSERTM(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
-
+  TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
   ideep::tensor& grady = itensor_from_mkldnn(grad_output);
   ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::tensor w = itensor_view_from_dense(weight);
+  ideep::tensor w = itensor_from_tensor(weight);
   ideep::tensor& m = itensor_from_mkldnn(save_mean);
   ideep::tensor& v = itensor_from_mkldnn(save_invstd);
 

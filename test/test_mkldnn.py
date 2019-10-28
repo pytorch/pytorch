@@ -178,16 +178,14 @@ class TestMkldnn(TestCase):
             adaptive_avg_pool2d(x.to_mkldnn()).to_dense())
 
     def test_batch_norm2d(self):
-        N = torch.randint(3, 10, (1,)).item()
-        C = torch.randint(3, 100, (1,)).item()
-        x = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
+        x = torch.randn(64, 3, 35, 45, dtype=torch.float32) * 10
 
         for train in [True, False]:
             # TODO: support none affine
             for affine in [True]:
                 for track_running_stats in [True, False]:
                     bn = torch.nn.BatchNorm2d(
-                        C,
+                        3,
                         affine=affine,
                         track_running_stats=track_running_stats).float().train(train)
                     if (train or not track_running_stats):
@@ -197,14 +195,19 @@ class TestMkldnn(TestCase):
                     self.assertEqual(
                         bn(x),
                         mkldnn_bn(x.to_mkldnn()).to_dense())
+                    if train and track_running_stats:
+                        self.assertEqual(
+                            bn.running_mean,
+                            mkldnn_bn.running_mean)
+                        self.assertEqual(
+                            bn.running_var,
+                            mkldnn_bn.running_var)
                     if (not train and track_running_stats):
                         self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
                         self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
 
     def test_batch_norm2d_backward(self):
-        N = torch.randint(3, 10, (1,)).item()
-        C = torch.randint(3, 100, (1,)).item()
-        x = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
+        x = torch.randn(64, 3, 35, 45, dtype=torch.float32) * 10
 
         # TODO: support none affine
         for affine in [True]:
@@ -212,7 +215,7 @@ class TestMkldnn(TestCase):
                 x1 = x.clone().requires_grad_()
                 x2 = x.clone().to_mkldnn().requires_grad_()
                 bn = torch.nn.BatchNorm2d(
-                    C,
+                    3,
                     affine=affine,
                     track_running_stats=track_running_stats).float().train(True)
                 mkldnn_bn = copy.deepcopy(bn)

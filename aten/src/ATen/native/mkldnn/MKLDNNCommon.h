@@ -32,7 +32,7 @@ ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 ideep::tensor itensor_view_from_dense(const Tensor& tensor);
 
 // Helper function for getting an ideep tensor out of an aten Tensor.
-ideep::tensor get_mkldnn_tensor(const at::Tensor& tensor);
+ideep::tensor itensor_from_tensor(const at::Tensor& tensor);
 
 }}
 
