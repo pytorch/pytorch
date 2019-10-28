@@ -804,18 +804,20 @@ TEST_F(ModulesTest, Bilinear) {
 
 TEST_F(ModulesTest, Fold) {
   {
-    Fold model(FoldOptions({4, 5}, {2, 2}));
-    auto x = torch::randn({1, 3 * 2 * 2, 12}, torch::requires_grad());
-    auto y = model(x);
-    torch::Tensor s = y.sum();
-
+    Fold model(FoldOptions({3, 2}, {2, 2}));
+    auto input = torch::ones({1, 3 * 2 * 2, 2}, torch::requires_grad());
+    auto output = model(input);
+    auto expected = torch::tensor(
+        {{{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+          {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+          {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}}}},
+        torch::kFloat);
+    auto s = output.sum();
     s.backward();
-    ASSERT_EQ(y.ndimension(), 4);
+
     ASSERT_EQ(s.ndimension(), 0);
-    ASSERT_EQ(y.size(0), 1);
-    ASSERT_EQ(y.size(1), 3);
-    ASSERT_EQ(y.size(2), 4);
-    ASSERT_EQ(y.size(3), 5);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 3, 3, 2}));
+    ASSERT_TRUE(output.allclose(expected));
   }
   {
     // input wrong dimension
