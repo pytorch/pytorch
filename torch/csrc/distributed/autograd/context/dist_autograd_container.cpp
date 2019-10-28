@@ -200,11 +200,12 @@ void DistAutogradContainer::cleanupContextWatchdog() {
       for (auto& pair : autograd_context_) {
         // TODO: see if you can just invoke destructor
         eraseContextIdAndReset(pair.first);
+        LOG(ERROR) << getWorkerId() << "- DELETING " << pair.first << "\n";
         /* std::chrono::time_point<std::chrono::system_clock> now = std::chrono::system_clock::now(); */ 
-        auto now = std::chrono::high_resolution_clock::now();
-        LOG(ERROR) << std::chrono::duration_cast<std::chrono::milliseconds>(now - creation_time).count() << "\n";
-        LOG(ERROR) << (now - creation_time).count() << "\n";
-        LOG(ERROR) << std::chrono::seconds(2).count() << "\n";
+        /* auto now = std::chrono::high_resolution_clock::now(); */
+        /* LOG(ERROR) << std::chrono::duration_cast<std::chrono::milliseconds>(now - creation_time).count() << "\n"; */
+        /* LOG(ERROR) << (now - creation_time).count() << "\n"; */
+        /* LOG(ERROR) << std::chrono::seconds(2).count() << "\n"; */
         LOG(ERROR) << getWorkerId() << "- queue size post-deletion is " << autograd_context_.size() << "\n";
       }
     }
