@@ -32,6 +32,10 @@ class FileStore : public Store {
  protected:
   int64_t addHelper(const std::string& key, int64_t i);
 
+  bool cacheEntryFound(const std::string& regKey);
+  std::vector<uint8_t> cacheEntry(const std::string& regKey);
+  void insertCache(const std::string& regKey, std::vector<uint8_t>&& value);
+
   std::string path_;
   off_t pos_;
 
@@ -39,13 +43,8 @@ class FileStore : public Store {
   const std::string cleanupKey_;
   const std::string regularPrefix_;
 
-  typedef std::unordered_map<std::string, std::vector<uint8_t>> Cache;
-  std::pair<std::mutex, Cache> cache_;
-  template <class Function>
-  auto lockedCache(Function&& function) {
-    std::lock_guard<std::mutex> l(cache_.first);
-    return function(cache_.second);
-  }
+  std::mutex cacheLock_;
+  std::unordered_map<std::string, std::vector<uint8_t>> cache_;
 };
 
 } // namespace c10d
