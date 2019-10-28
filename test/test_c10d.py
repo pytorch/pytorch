@@ -1306,6 +1306,37 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allgather_stress(inputs, lambda t: t.clone().cuda())
 
+    def test_allgather_coalesced_checks(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        dummy_input = [torch.Tensor([1])]
+        dummy_output_lists = [
+            [torch.Tensor([-1])] for _ in range(self.world_size)
+        ]
+        with self.assertRaisesRegex(RuntimeError,
+                                    "all_gather_coalesced does not support "
+                                    "async mode yet."):
+            c10d.all_gather_coalesced(
+                dummy_output_lists, dummy_input, pg, async_op=True)
+
+        # One of output tensors does not match input list.
+        dummy_output_lists[0] = [torch.Tensor(0)]
+        with self.assertRaisesRegex(RuntimeError, "Shape tensor mismatch"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+        # Output is not a list of lists.
+        dummy_output_lists = [torch.Tensor(0)]
+        with self.assertRaisesRegex(RuntimeError, "Invalid function argument"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+        # Output lists have too many elements
+        dummy_output_lists = [
+            [torch.Tensor([-1])] for _ in range(self.world_size + 1)
+        ]
+        with self.assertRaisesRegex(ValueError, "invalid output tensor"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
