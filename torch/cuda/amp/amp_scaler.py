@@ -189,7 +189,7 @@ class AmpScaler(object):
 
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
         inv_scale = self._scale.double().reciprocal().float()
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
+        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
 
         optimizer_state["found_inf_per_device"] = self._unscale_grads(optimizer, inv_scale, found_inf)
         optimizer_state["unscaled"] = True
@@ -266,7 +266,7 @@ class AmpScaler(object):
         if new_scale is not None:
             # Accept a new user-defined scale.
             if isinstance(new_scale, float):
-                self._scale = torch.full((1,), new_scale, dtype=torch.float32, device="cuda")
+                self._scale = torch.full((1,), new_scale, dtype=torch.float32, device=self._scale.device)
             else:
                 reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor with requires_grad=False."
                 assert isinstance(new_scale, torch.cuda.FloatTensor), reason
@@ -381,8 +381,10 @@ class AmpScaler(object):
         self._backoff_factor = state_dict["backoff_factor"]
 
     def _check_inf_per_device(self, optimizer):
-        dummy_inv_scale = torch.full((1,), 1.0, dtype=torch.float32, device="cuda")
-        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device="cuda")
+        assert self._scale is not None, self._scale_not_initialized_error("_check_inf_per_device")
+
+        dummy_inv_scale = torch.full((1,), 1.0, dtype=torch.float32, device=self._scale.device)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
 
         self._per_optimizer_states[id(optimizer)]["found_inf_per_device"] = \
             self._unscale_grads(optimizer, dummy_inv_scale, found_inf, allow_fp16=True)
