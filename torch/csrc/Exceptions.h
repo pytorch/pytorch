@@ -16,24 +16,27 @@
 /// NOTE [ Conversion Cpp Python Warning ]
 /// The warning handler cannot set python warnings immediately
 /// as it requires acquirering the GIL (potential deadlock)
-/// and would need to properly exit if the warning raised a
+/// and would need to cleanly exit if the warning raised a
 /// python error. To solve this, we buffer the warnings and
 /// process them when we go back to python.
-/// This leads to the following cases:
-/// - The GIL is acquired in the PyWarningHandler destructor
+/// This requires the two try/catch blocks below to handle the
+/// following cases:
 ///   - If there is no Error raised in the inner try/catch, the
 ///     bufferred warnings are processed as python warnings.
 ///     - If they don't raise an error, the function process with the
 ///       original return code.
-///     - If any of them raise an error, the error code is set and
-///       the destructor will raise a python_error() that will be
-///       caught by the outer try/catch that will be able to change
+///     - If any of them raise an error, the error is set (PyErr_*) and
+///       the destructor will raise a cpp exception python_error() that
+///       will be caught by the outer try/catch that will be able to change
 ///       the return value of the function to reflect the error.
 ///   - If an Error was raised in the inner try/catch, the inner try/catch
 ///     must set the python error. The buffered warnings are then
 ///     processed as cpp warnings as we cannot predict before hand
 ///     whether a python warning will raise an error or not and we
 ///     cannot handle two errors at the same time.
+/// This advanced handler will only be used in the current thread.
+/// If any other thread is used, warnings will be processed as
+/// cpp warnings.
 #define HANDLE_TH_ERRORS                                           \
   try {                                                            \
     torch::PyWarningHandler __enforce_warning_buffer;          \
@@ -219,25 +222,13 @@ public:
   void process(const at::SourceLocation &source_location,
                const std::string &msg) override;
 
-void mark_overlapping();
-
 private:
   using warning_buffer_t =
     std::vector<std::pair<c10::SourceLocation, std::string>>;
 
   warning_buffer_t warning_buffer_;
-  // To avoid deadlocks, if both the GIL and this lock is needed,
-  // The GIL needs to be acquired first.
-  std::mutex warning_buffer_mutex_;
-  at::WarningHandler* prev_handler_;
 
-  // Since our warning handler is global, we want to notify the user if
-  // there is a risk of the warning being raised by another python thread
-  // than the one that caused the warning.
-  bool overlapping_;
-  static constexpr char* PYWARNING_MAYBE_INVALID_PYTHON_STACKTRACE =
-    "The following warnings happened in a multithreaded or nested setting and so \
-the python stack traces below might be incorrect.";
+  at::WarningHandler* prev_handler_;
 };
 
 } // namespace torch

@@ -65,8 +65,10 @@ void Error::AppendMessage(const std::string& new_msg) {
 
 namespace Warning {
 
-// A warning handler should always exist so there is no corresponding delete
-static WarningHandler* warning_handler_ = new WarningHandler();
+namespace {
+  static WarningHandler base_warning_handler_ = WarningHandler();
+  static thread_local WarningHandler* warning_handler_ = &base_warning_handler_;
+}
 
 void warn(SourceLocation source_location, const std::string& msg) {
   warning_handler_->process(source_location, msg);
