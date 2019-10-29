@@ -39,6 +39,12 @@ at::Tensor& TensorImpl::grad() {
 
 const at::Tensor& TensorImpl::grad() const {
   if (type_set_.has(TensorTypeId::VariableTensorId)) {
+    // Yes, I know this looks really weird.  But I don't really have a choice as
+    // long as this function returns a const reference to Tensor.  I'm not
+    // really sure how I would have designed this API differently, but it
+    // is not so easy to fix right now because the mutable counterpart of
+    // this function must keep working so that "x.grad() = ..." keeps working
+    // (part of public API).
     if (!autograd_meta_) impl::GetAutogradMetaFactory()->undefined_tensor();
     return autograd_meta_->grad();
   } else {
@@ -238,7 +244,9 @@ void TensorImpl::set_requires_grad(bool requires_grad) {
   // (see autograd_meta_ docs).  But we don't do this right now.  Note
   // that it is unsound to unconditionally set AutogradMeta to false
   // when you set requires_grad to False, as there may be nontrivial
-  // information content in the other fields.
+  // information content in the other fields; for example, we may
+  // have set the string name for a Variable, or there may be hooks
+  // registered for it.
   autograd_meta_->set_requires_grad(requires_grad, this);
 }
 

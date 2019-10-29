@@ -846,11 +846,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * Set the pointer to autograd metadata.  A nullptr autograd metadata means
-   * that you are setting this tensor to not require grad and not track
-   * gradients.  (In the period of time when we still have Variable and
+   * Set the pointer to autograd metadata.  Without a call to this function, you
+   * have a non-Variable tensor.  With a call to this function, you are
+   * transforming this into a variable: a nullptr autograd metadata means
+   * that you are setting this variable to not require grad and not track
+   * gradients.
+   *
+   * NB: In the period of time when we still have Variable and
    * non-Variable tensors, explicitly setting null is still useful as it
-   * turns a tensor into a variable.)
+   * turns a tensor into a variable.
    */
   void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta);
 
@@ -1574,7 +1578,7 @@ private:
   //
   // Note that we don't enforce the invariant that if the AutogradMeta is
   // default constructed, it is nullptr (to do this, we'd have to continuously
-  // check if an AutogradMeta became, by mutation, it's equal to the default
+  // check if an AutogradMeta became, by mutation, equal to the default
   // constructed form.  (This might be useful, but it seems rare enough that
   // a requires_grad=True variable will turn back into the requires_grad=False
   // version.)  So there are three representable states:

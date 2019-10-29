@@ -300,6 +300,8 @@ public:
   void set_pyobj(PyObject* pyobj) noexcept;
 
  public:
+  // WARNING: This may return a nullptr.  If you require AutogradMeta to return
+  // a materialized structure, use materialize_autograd_meta instead.
   AutogradMeta* get_autograd_meta() const noexcept;
 
  private:
@@ -307,7 +309,11 @@ public:
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   at::TensorImpl* get() const;
   void create_cpp_hook();
-  void materialize_autograd_meta();
+
+  // Returns the current autograd meta, materializing it if it was previously
+  // none.  This counts as a *mutating* operation, so do not call it on
+  // "read-only" operators; in particular, this is NOT thread safe
+  AutogradMeta* materialize_autograd_meta();
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -619,8 +625,7 @@ inline Node* Variable::grad_fn_unsafe() const {
 
 inline void Variable::set_grad_accumulator(
     std::weak_ptr<Node> grad_accumulator) {
-  materialize_autograd_meta();
-  get_autograd_meta()->grad_accumulator_ = std::move(grad_accumulator);
+  materialize_autograd_meta()->grad_accumulator_ = std::move(grad_accumulator);
 }
 
 inline std::shared_ptr<Node> Variable::try_get_grad_accumulator() const {
@@ -640,9 +645,9 @@ inline Variable Variable::detach() const {
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
-  materialize_autograd_meta();
-  get_autograd_meta()->grad_fn_ = std::move(edge.function);
-  get_autograd_meta()->output_nr_ = edge.input_nr;
+  auto* meta = materialize_autograd_meta();
+  meta->grad_fn_ = std::move(edge.function);
+  meta->output_nr_ = edge.input_nr;
 }
 
 inline uint32_t Variable::output_nr() const noexcept {
@@ -685,8 +690,7 @@ inline const c10::VariableVersion& Variable::version_counter() const noexcept {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::add_hook(std::shared_ptr<FunctionPreHook> hook) {
-  materialize_autograd_meta();
-  get_autograd_meta()->hooks_.push_back(std::move(hook));
+  materialize_autograd_meta()->hooks_.push_back(std::move(hook));
 }
 
 namespace {
@@ -705,8 +709,7 @@ inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks()
 
 inline void Variable::clear_hooks() {
   // This is a little goofy, but usually this should be a no oop
-  materialize_autograd_meta();
-  get_autograd_meta()->hooks_.clear();
+  materialize_autograd_meta()->hooks_.clear();
 }
 
 template <typename T>
@@ -767,8 +770,7 @@ inline const Variable& Variable::base() const {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::set_name(const std::string& name) {
-  materialize_autograd_meta();
-  get_autograd_meta()->name_ = name;
+  materialize_autograd_meta()->name_ = name;
 }
 
 namespace {
