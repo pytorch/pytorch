@@ -935,11 +935,18 @@ class RpcTest(object):
         if TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP:
             self.assertEqual(test_func(), "expected result")
 
+
     def test_sender_exceptions(self):
-        dist.init_process_group(backend="gloo", init_method=self.init_method, timeout=timedelta(seconds=10))
+        dist.init_process_group(
+            backend="gloo",
+            init_method=self.init_method,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=10))
+
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
-            backend=TEST_CONFIG.backend,
+            backend=TEST_CONFIG.rpc_backend,
             self_rank=self.rank,
             init_method=self.init_method,
         )
