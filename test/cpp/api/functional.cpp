@@ -1454,6 +1454,8 @@ TEST_F(FunctionalTest, PoissonNLLLoss) {
   const auto input = torch::tensor({0.5, 1.5, 2.5});
   const auto target = torch::tensor({1., 2., 3.});
   const auto component_wise_loss = torch::exp(input) - target * input;
+  ASSERT_TRUE(torch::allclose(torch::mean(component_wise_loss),
+    F::poisson_nll_loss(input, target)));
   ASSERT_TRUE(torch::allclose(component_wise_loss,
     F::poisson_nll_loss(input, target,
     PoissonNLLLossOptions().reduction(Reduction::None))));
