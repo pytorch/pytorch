@@ -12,7 +12,7 @@ inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
   if (training) {
     auto size = input.sizes();
     int64_t size_prods = size[0];
-    for (int i = 0; i < size.size() - 2; i++) {
+    for (size_t i = 0; i < size.size() - 2; i++) {
       size_prods *= size[i + 2];
     }
     TORCH_CHECK(size_prods != 1,
