@@ -718,6 +718,7 @@ class DistAutogradTest(object):
         global known_context_ids
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
+            dist_autograd._setContextCleanupTimeout(2)
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
 

@@ -84,6 +84,10 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
   });
 
   module.def(
+      "_setContextCleanupTimeout",
+      [](int64_t newTimeout) { DistAutogradContainer::getInstance().setCleanupContextTimeout(newTimeout); });
+
+  module.def(
       "_retrieve_context",
       [](int64_t context_id) -> const DistAutogradContext& {
         return DistAutogradContainer::getInstance().retrieveContext(context_id);

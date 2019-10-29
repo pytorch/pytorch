@@ -77,6 +77,8 @@ class TORCH_API DistAutogradContainer {
   // Clear current context id
   void clearCurrentContext();
 
+  void setCleanupContextTimeout(int64_t newTimeout);
+
  private:
   DistAutogradContainer();
   virtual ~DistAutogradContainer();
@@ -134,6 +136,8 @@ class TORCH_API DistAutogradContainer {
 
   // Autograd message id to identify unique send/recv autograd function pairs.
   std::atomic<int64_t> next_autograd_message_id_;
+
+  std::chrono::duration<int64_t> cleanupContextTimeout;
 
   // Maximum allowed value for autograd_context_id or autograd_message_id.
   int64_t max_id_;
