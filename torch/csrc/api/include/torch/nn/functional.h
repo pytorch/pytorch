@@ -9,5 +9,4 @@
 #include <torch/nn/functional/padding.h>
 #include <torch/nn/functional/pixelshuffle.h>
 #include <torch/nn/functional/pooling.h>
-#include <torch/nn/functional/upsampling.h>
 #include <torch/nn/functional/vision.h>
