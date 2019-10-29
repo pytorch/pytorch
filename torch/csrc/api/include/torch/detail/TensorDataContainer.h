@@ -108,17 +108,16 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
         ", but got element of scalar type: ",
         elem.scalar_type());
     }
-    sizes_.clear();
     sizes_.reserve(first_elem.sizes().size() + 1);
     sizes_.push_back(init_list.size());
     sizes_.insert(sizes_.end(), first_elem.sizes().begin(), first_elem.sizes().end());
   }
 
 #define TENSOR(T, S) \
-  TensorDataContainer(at::ArrayRef<T> values) { \
-    type_ = TensorDataContainerType::Tensor; \
-    sizes_ = {(int64_t)values.size()}; \
-    scalar_type_ = at::k##S; \
+  TensorDataContainer(at::ArrayRef<T> values) : \
+      sizes_({(int64_t)values.size()}), \
+      scalar_type_(at::k##S), \
+      type_(TensorDataContainerType::Tensor) { \
     at::AutoNonVariableTypeMode non_var_type_mode(true);  \
     tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU).is_variable(false));       \
   }
