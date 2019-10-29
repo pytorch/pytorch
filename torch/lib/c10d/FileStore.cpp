@@ -232,7 +232,7 @@ FileStore::~FileStore() {
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   std::string regKey = regularPrefix_ + key;
-  std::unique_lock l(activeFileOpLock_);
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
   File file(path_, O_RDWR | O_CREAT, timeout_);
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
@@ -244,7 +244,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   const auto start = std::chrono::steady_clock::now();
   while (true) {
-    std::unique_lock l(activeFileOpLock_);
+    std::unique_lock<std::mutex> l(activeFileOpLock_);
     File file(path_, O_RDONLY, timeout_);
     auto lock = file.lockShared();
     auto size = file.size();
@@ -270,7 +270,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
 }
 
 int64_t FileStore::addHelper(const std::string& key, int64_t i) {
-  std::unique_lock l(activeFileOpLock_);
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
   File file(path_, O_RDWR | O_CREAT, timeout_);
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_);
@@ -297,7 +297,7 @@ int64_t FileStore::add(const std::string& key, int64_t i) {
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {
-  std::unique_lock l(activeFileOpLock_);
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
   File file(path_, O_RDONLY, timeout_);
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_);
