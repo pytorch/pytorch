@@ -195,8 +195,8 @@ void argmin_kernel_cuda_impl(TensorIterator& iter) {
 
 void argmax_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype(1) == kHalf) {
-    // Instead of implementing is_nan and warp_shfl_down 
-    // we can convert halfs to float and do all the operations in float
+    // Instead of implementing is_nan and warp_shfl_down
+    // we can convert halves to float and do all the operations in float
     argmax_kernel_cuda_impl<at::Half, float>(iter);
   } else {
     AT_DISPATCH_ALL_TYPES(iter.dtype(1), "argmax_cuda", [&]() {
