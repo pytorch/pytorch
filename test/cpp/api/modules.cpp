@@ -1189,7 +1189,7 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
 }
 
 TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
-  MultiLabelMarginLoss loss(torch::Reduction::None);
+  MultiLabelMarginLoss loss(torch::kNone);
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
@@ -1255,7 +1255,7 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
 }
 
 TEST_F(ModulesTest, SoftMarginLossNoReduction) {
-  SoftMarginLoss loss(torch::Reduction::None);
+  SoftMarginLoss loss(torch::kNone);
   auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output = loss->forward(input, target);
@@ -1271,7 +1271,7 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
-  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::Reduction::None).weight(weight);
+  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight);
   MultiLabelSoftMarginLoss loss = MultiLabelSoftMarginLoss(options);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
