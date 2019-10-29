@@ -269,6 +269,21 @@ TEST_F(ModulesTest, LPPool1d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
+TEST_F(ModulesTest, LPPool2d) {
+  int norm_type = 2;
+  int stride = 2;
+  std::vector<int64_t> kernel_size({2, 3});
+
+  LPPool2d model(LPPool2dOptions(norm_type, kernel_size).stride(stride));
+  auto x = torch::ones({1, 2, 5});
+  auto y = model(x);
+  auto expected = (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) * (kernel_size[0] * kernel_size[1])).pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
 TEST_F(ModulesTest, Identity) {
   Identity identity;
   auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::requires_grad());
@@ -1738,6 +1753,153 @@ TEST_F(ModulesTest, Threshold) {
   }
 }
 
+TEST_F(ModulesTest, Upsampling1D) {
+  {
+    Upsample model(UpsampleOptions()
+                       .size({4})
+                       .mode(torch::kNearest));
+    auto input = torch::ones({1, 1, 2}, torch::requires_grad());
+    auto output = model->forward(input);
+    auto expected = torch::ones({1, 1, 4});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(UpsampleOptions()
+                           .scale_factor({scale_factor})
+                           .mode(torch::kLinear)
+                           .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+  {
+    // linear (1D) upsampling spatial invariance
+    Upsample model(UpsampleOptions()
+                       .scale_factor({3})
+                       .mode(torch::kLinear)
+                       .align_corners(false));
+    auto input = torch::zeros({1, 1, 9});
+    input.narrow(2, 0, 4).normal_();
+    auto output = model->forward(input);
+    auto expected = model->forward(input.narrow(2, 0, 5));
+
+    ASSERT_TRUE(torch::allclose(output.narrow(2, 0, 15), expected));
+  }
+}
+
+TEST_F(ModulesTest, Upsampling2D) {
+  {
+    Upsample model(UpsampleOptions()
+                       .size({4, 4})
+                       .mode(torch::kNearest));
+    auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
+    auto output = model->forward(input);
+    auto expected = torch::ones({1, 1, 4, 4});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(UpsampleOptions()
+                           .scale_factor({scale_factor, scale_factor})
+                           .mode(torch::kBilinear)
+                           .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(UpsampleOptions()
+                           .scale_factor({scale_factor, scale_factor})
+                           .mode(torch::kBicubic)
+                           .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+}
+
+TEST_F(ModulesTest, Upsampling3D) {
+  {
+    Upsample model(UpsampleOptions()
+                       .size({4, 4, 4})
+                       .mode(torch::kNearest));
+    auto input = torch::ones({1, 1, 2, 2, 2}, torch::requires_grad());
+    auto output = model->forward(input);
+    auto expected = torch::ones({1, 1, 4, 4, 4});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(
+            UpsampleOptions()
+                .scale_factor({scale_factor, scale_factor, scale_factor})
+                .mode(torch::kTrilinear)
+                .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2, 2, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected =
+            torch::ones({1, 1, expected_size, expected_size, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -1890,6 +2052,134 @@ TEST_F(ModulesTest, ReplicationPad3d) {
   }
 }
 
+TEST_F(ModulesTest, ZeroPad2d) {
+  {
+    ZeroPad2d m(ZeroPad2dOptions(2));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{0., 0., 0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 1., 2., 0., 0.},
+                                     {0., 0., 3., 4., 5., 0., 0.},
+                                     {0., 0., 6., 7., 8., 0., 0.},
+                                     {0., 0., 0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 0., 0., 0., 0.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ZeroPad2d m(ZeroPad2dOptions({1, 1, 2, 0}));
+    auto input = torch::arange(9, torch::kFloat).reshape({1, 1, 3, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{0., 0., 0., 0., 0.},
+                                     {0., 0., 0., 0., 0.},
+                                     {0., 0., 1., 2., 0.},
+                                     {0., 3., 4., 5., 0.},
+                                     {0., 6., 7., 8., 0.}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ConstantPad1d) {
+  {
+    ConstantPad1d m(ConstantPad1dOptions(2, 3.5));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 2, 4});
+    auto output = m(input);
+    auto expected = torch::tensor({{{3.5000, 3.5000, 0.0000, 1.0000, 2.0000, 3.0000, 3.5000, 3.5000},
+                                    {3.5000, 3.5000, 4.0000, 5.0000, 6.0000, 7.0000, 3.5000, 3.5000}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ConstantPad1d m(ConstantPad1dOptions({3, 1}, 3.5));
+    auto input = torch::arange(6, torch::kFloat).reshape({1, 2, 3});
+    auto output = m(input);
+    auto expected = torch::tensor({{{3.5000, 3.5000, 3.5000, 0.0000, 1.0000, 2.0000, 3.5000},
+                                    {3.5000, 3.5000, 3.5000, 3.0000, 4.0000, 5.0000, 3.5000}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ConstantPad2d) {
+  {
+    ConstantPad2d m(ConstantPad2dOptions(2, 3.5));
+    auto input = torch::arange(4, torch::kFloat).reshape({1, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{3.5000, 3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                    {3.5000, 3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                    {3.5000, 3.5000, 0.0000, 1.0000, 3.5000, 3.5000},
+                                    {3.5000, 3.5000, 2.0000, 3.0000, 3.5000, 3.5000},
+                                    {3.5000, 3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                    {3.5000, 3.5000, 3.5000, 3.5000, 3.5000, 3.5000}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ConstantPad2d m(ConstantPad2dOptions({3, 0, 2, 1}, 3.5));
+    auto input = torch::arange(4, torch::kFloat).reshape({1, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                    {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                    {3.5000, 3.5000, 3.5000, 0.0000, 1.0000},
+                                    {3.5000, 3.5000, 3.5000, 2.0000, 3.0000},
+                                    {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
+TEST_F(ModulesTest, ConstantPad3d) {
+  {
+    ConstantPad3d m(ConstantPad3dOptions(1, 3.5));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000}},
+                                     {{3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 0.0000, 1.0000, 3.5000},
+                                      {3.5000, 2.0000, 3.0000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000}},
+                                     {{3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 4.0000, 5.0000, 3.5000},
+                                      {3.5000, 6.0000, 7.0000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000}},
+                                     {{3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    ConstantPad3d m(ConstantPad3dOptions({1, 2, 1, 2, 1, 2}, 3.5));
+    auto input = torch::arange(8, torch::kFloat).reshape({1, 1, 2, 2, 2});
+    auto output = m(input);
+    auto expected = torch::tensor({{{{{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}},
+                                     {{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 0.0000, 1.0000, 3.5000, 3.5000},
+                                      {3.5000, 2.0000, 3.0000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}},
+                                     {{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 4.0000, 5.0000, 3.5000, 3.5000},
+                                      {3.5000, 6.0000, 7.0000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}},
+                                     {{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}},
+                                     {{3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000},
+                                      {3.5000, 3.5000, 3.5000, 3.5000, 3.5000}}}}}, torch::kFloat);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintLinear) {
   ASSERT_EQ(
       c10::str(Linear(3, 4)), "torch::nn::Linear(in_features=3, out_features=4, bias=true)");
@@ -1918,6 +2208,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
   ASSERT_EQ(
       c10::str(Conv2d(options)),
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintUpsample) {
+  ASSERT_EQ(
+      c10::str(Upsample(UpsampleOptions().size({2, 4, 4}))),
+      "torch::nn::Upsample(size=[2, 4, 4], mode=kNearest)");
+  ASSERT_EQ(
+      c10::str(Upsample(UpsampleOptions().scale_factor({0.5, 1.5}).mode(torch::kBilinear))),
+      "torch::nn::Upsample(scale_factor=[0.5, 1.5], mode=kBilinear)");
 }
 
 TEST_F(ModulesTest, PrettyPrintUnfold) {
@@ -1984,6 +2283,12 @@ TEST_F(ModulesTest, PrettyPrintLPPool) {
   ASSERT_EQ(
       c10::str(LPPool1d(LPPool1dOptions(1, 2).stride(5).ceil_mode(true))),
       "torch::nn::LPPool1d(norm_type=1, kernel_size=2, stride=5, ceil_mode=true)");
+  ASSERT_EQ(
+      c10::str(LPPool2d(2, std::vector<int64_t>({1, 2}))),
+      "torch::nn::LPPool2d(norm_type=2, kernel_size=[1, 2], stride=[1, 2], ceil_mode=false)");
+  ASSERT_EQ(
+      c10::str(LPPool2d(LPPool2dOptions(1, std::vector<int64_t>({3, 4})).stride({5, 6}).ceil_mode(true))),
+      "torch::nn::LPPool2d(norm_type=1, kernel_size=[3, 4], stride=[5, 6], ceil_mode=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
@@ -2108,8 +2413,8 @@ TEST_F(ModulesTest, PrettyPrintEmbeddingBag) {
       c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true))),
       "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true)");
   ASSERT_EQ(
-      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode("sum"))),
-      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=sum)");
+      c10::str(EmbeddingBag(EmbeddingBagOptions(10, 2).max_norm(2).norm_type(2.5).scale_grad_by_freq(true).sparse(true).mode(torch::kSum))),
+      "torch::nn::EmbeddingBag(num_embeddings=10, embedding_dim=2, max_norm=2, norm_type=2.5, scale_grad_by_freq=true, sparse=true, mode=kSum)");
 }
 
 TEST_F(ModulesTest, PrettyPrintL1Loss) {
@@ -2214,6 +2519,36 @@ TEST_F(ModulesTest, PrettyPrintReplicationPad) {
   ASSERT_EQ(
       c10::str(ReplicationPad3d(ReplicationPad3dOptions({1, 2, 1, 2, 1, 2}))),
       "torch::nn::ReplicationPad3d(padding=[1, 2, 1, 2, 1, 2])");
+}
+
+TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
+  ASSERT_EQ(
+      c10::str(ZeroPad2d(ZeroPad2dOptions(2))),
+      "torch::nn::ZeroPad2d(padding=[2, 2, 2, 2])");
+  ASSERT_EQ(
+      c10::str(ZeroPad2d(ZeroPad2dOptions({1, 1, 2, 0}))),
+      "torch::nn::ZeroPad2d(padding=[1, 1, 2, 0])");
+}
+
+TEST_F(ModulesTest, PrettyPrintConstantPad) {
+  ASSERT_EQ(
+      c10::str(ConstantPad1d(ConstantPad1dOptions(2, 3.5))),
+      "torch::nn::ConstantPad1d(padding=[2, 2], value=3.5)");
+  ASSERT_EQ(
+      c10::str(ConstantPad1d(ConstantPad1dOptions({3, 1}, 3.5))),
+      "torch::nn::ConstantPad1d(padding=[3, 1], value=3.5)");
+  ASSERT_EQ(
+      c10::str(ConstantPad2d(ConstantPad2dOptions(2, 3.5))),
+      "torch::nn::ConstantPad2d(padding=[2, 2, 2, 2], value=3.5)");
+  ASSERT_EQ(
+      c10::str(ConstantPad2d(ConstantPad2dOptions({3, 0, 2, 1}, 3.5))),
+      "torch::nn::ConstantPad2d(padding=[3, 0, 2, 1], value=3.5)");
+  ASSERT_EQ(
+      c10::str(ConstantPad3d(ConstantPad3dOptions(1, 3.5))),
+      "torch::nn::ConstantPad3d(padding=[1, 1, 1, 1, 1, 1], value=3.5)");
+  ASSERT_EQ(
+      c10::str(ConstantPad3d(ConstantPad3dOptions({1, 2, 1, 2, 1, 2}, 3.5))),
+      "torch::nn::ConstantPad3d(padding=[1, 2, 1, 2, 1, 2], value=3.5)");
 }
 
 TEST_F(ModulesTest, PrettyPrintNestedModel) {

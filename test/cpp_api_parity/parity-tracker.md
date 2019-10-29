@@ -28,7 +28,7 @@ torch.nn.AvgPool2d|Yes|No
 torch.nn.AvgPool3d|Yes|No
 torch.nn.FractionalMaxPool2d|No|No
 torch.nn.LPPool1d|Yes|No
-torch.nn.LPPool2d|No|No
+torch.nn.LPPool2d|Yes|No
 torch.nn.AdaptiveMaxPool1d|Yes|No
 torch.nn.AdaptiveMaxPool2d|Yes|No
 torch.nn.AdaptiveMaxPool3d|Yes|No
@@ -40,10 +40,10 @@ torch.nn.ReflectionPad2d|Yes|No
 torch.nn.ReplicationPad1d|Yes|No
 torch.nn.ReplicationPad2d|Yes|No
 torch.nn.ReplicationPad3d|Yes|No
-torch.nn.ZeroPad2d|No|No
-torch.nn.ConstantPad1d|No|No
-torch.nn.ConstantPad2d|No|No
-torch.nn.ConstantPad3d|No|No
+torch.nn.ZeroPad2d|Yes|No
+torch.nn.ConstantPad1d|Yes|No
+torch.nn.ConstantPad2d|Yes|No
+torch.nn.ConstantPad3d|Yes|No
 torch.nn.ELU|Yes|No
 torch.nn.Hardshrink|Yes|No
 torch.nn.Hardtanh|Yes|No
@@ -91,7 +91,7 @@ torch.nn.TransformerDecoder|No|No
 torch.nn.TransformerEncoderLayer|No|No
 torch.nn.TransformerDecoderLayer|No|No
 torch.nn.Identity|Yes|No
-torch.nn.Linear|No|No
+torch.nn.Linear|Yes|No
 torch.nn.Bilinear|Yes|No
 torch.nn.Flatten|No|No
 torch.nn.Dropout|No|No
@@ -121,7 +121,7 @@ torch.nn.CosineEmbeddingLoss|Yes|No
 torch.nn.MultiMarginLoss|Yes|No
 torch.nn.TripletMarginLoss|Yes|No
 torch.nn.PixelShuffle|Yes|No
-torch.nn.Upsample|No|No
+torch.nn.Upsample|Yes|No
 torch.nn.DataParallel|No|No
 torch.nn.parallel.DistributedDataParallel|No|No
 torch.nn.utils.clip_grad_norm_|Yes|No

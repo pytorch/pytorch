@@ -30,7 +30,7 @@ from .gen_autograd_functions import uses_single_grad
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
     'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
-    'set_data', 'data', 'is_leaf', 'output_nr', '_version'
+    'set_data', 'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -156,7 +156,7 @@ ${return_type} ${api_name}(${type_method_formals}) {
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyC10Kernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 

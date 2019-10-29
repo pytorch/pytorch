@@ -49,7 +49,7 @@ SourceRange getPythonInterpreterSourceRange() {
   return SourceRange(source, 0, stack_trace_text.size());
 }
 
-std::shared_ptr<torch::jit::Graph> createGraphByTracing(
+std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& func,
     Stack trace_inputs,
     const py::function& var_name_lookup_fn,
@@ -57,38 +57,31 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
     script::Module* self) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
 
-  try {
-    auto enter_info = tracer::enter(std::move(trace_inputs), self);
-    auto graph = enter_info.first->graph;
-
-    getTracingState()->lookup_var_name_fn =
-        [var_name_lookup_fn](const Variable& var) -> std::string {
+  auto lookup_fn_adapter = [var_name_lookup_fn](const Variable& var) -> std::string {
       AutoGIL ag;
       return py::cast<std::string>(var_name_lookup_fn(var));
-    };
-    getTracingState()->force_outplace = force_outplace;
-    size_t num_func_inputs = enter_info.second.size();
-    py::tuple py_inputs(num_func_inputs);
-    for (size_t i = 0; i < num_func_inputs; ++i) {
-      py_inputs[i] = py::cast(enter_info.second[i]);
-    }
-    auto out = func(*py_inputs);
-    if (out.ptr() == Py_None) {
-      AT_ERROR(
-          "The traced function didn't return any values! Side-effects are not "
-          "captured in traces, so it would be a no-op.");
-    }
-    tracer::exit({toTypeInferredIValue(out)});
-    if (script::getInlineEverythingMode()) {
-      Inline(*graph);
-    }
-    LowerSimpleTuples(graph);
-    EliminateDeadCode(graph);
-    return graph;
-  } catch (...) {
-    tracer::abandon();
-    throw;
-  }
+  };
+
+  auto outs = tracer::trace(
+      std::move(trace_inputs),
+      [&func](Stack inputs) -> Stack {
+        size_t num_func_inputs = inputs.size();
+        py::tuple py_inputs(num_func_inputs);
+        for (size_t i = 0; i < num_func_inputs; ++i) {
+          py_inputs[i] = py::cast(inputs[i]);
+        }
+        auto out = func(*py_inputs);
+        if (out.ptr() == Py_None) {
+          AT_ERROR(
+              "The traced function didn't return any values! Side-effects are not "
+              "captured in traces, so it would be a no-op.");
+        }
+        return {toTypeInferredIValue(out)};
+      },
+      lookup_fn_adapter,
+      force_outplace,
+      self);
+  return std::make_pair(std::get<0>(outs)->graph, std::get<1>(outs));
 }
 
 Node* preRecordPythonTrace(
@@ -160,13 +153,9 @@ void initPythonTracerBindings(PyObject* module) {
       .def("graph", [](TracingState& s) { return s.graph; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
-  m.def("_tracer_enter", [](py::args trace_inputs) {
-    return tracer::enter(toTraceableStack(trace_inputs));
-  });
-  m.def("_tracer_exit", [](py::tuple var_outputs) {
-    tracer::exit(toTraceableStack(var_outputs));
-  });
-  m.def("_tracer_abandon", []() { tracer::abandon(); });
+  m.def("_create_graph_by_tracing", createGraphByTracing,
+    py::arg("func"), py::arg("inputs"), py::arg("var_name_lookup_fn"),
+    py::arg("force_outplace"), py::arg("self") = nullptr);
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
     return setTracingState(state);

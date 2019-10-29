@@ -78,6 +78,20 @@ TEST_F(FunctionalTest, LPPool1d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
+TEST_F(FunctionalTest, LPPool2d) {
+  int norm_type = 2;
+  int stride = 2;
+  std::vector<int64_t> kernel_size({2, 3});
+
+  auto x = torch::ones({1, 2, 5});
+  auto y = F::lp_pool2d(x, LPPool2dOptions(norm_type, kernel_size).stride(stride));
+  auto expected = (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) * (kernel_size[0] * kernel_size[1])).pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
 TEST_F(FunctionalTest, CosineSimilarity) {
   auto input1 = torch::tensor({{1, 2, 3}, {4, 5, 6}}, torch::kFloat);
   auto input2 = torch::tensor({{1, 8, 3}, {2, 1, 6}}, torch::kFloat);
@@ -270,6 +284,70 @@ TEST_F(FunctionalTest, HingeEmbeddingLoss) {
   auto output = F::hinge_embedding_loss(
       input, target, HingeEmbeddingLossOptions().margin(2));
   auto expected = torch::tensor({10}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, GridSample) {
+  auto input = torch::arange(9, torch::kFloat).view(std::vector<int64_t>({1, 1, 3, 3}));
+  auto grid = torch::tensor({{
+      {{-2., -1.}, {-1., -1.}, {0., -1.}},
+      {{-1., 0.}, {0., 0.}, {1., 0.}},
+      {{0., 1.}, {1., 1.}, {2., 1.}}
+  }}, torch::kFloat);
+
+  // bilinear, zeros, true
+  auto options = GridSampleOptions()
+                    .mode("bilinear")
+                    .padding_mode("zeros")
+                    .align_corners(true);
+  auto output = F::grid_sample(input, grid, options);
+  auto expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, zeros, false
+  options = GridSampleOptions()
+                .mode("bilinear")
+                .padding_mode("zeros")
+                .align_corners(false);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{0., 0., 0.5}, {1.5, 4., 2.5}, {3.5, 2., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // default options (bilinear, zeros, false) same result as above
+  output = F::grid_sample(input, grid);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // nearest, zeros, true
+  options = GridSampleOptions()
+                .mode("nearest")
+                .padding_mode("zeros")
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 0.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, border, true
+  options = GridSampleOptions()
+                .mode("bilinear")
+                .padding_mode("border")
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{0., 0., 1.}, {3., 4., 5.}, {7., 8., 8.}}}}, torch::kFloat);
+
+  ASSERT_TRUE(output.allclose(expected));
+
+  // bilinear, reflection, true
+  options = GridSampleOptions()
+                .mode("bilinear")
+                .padding_mode("reflection")
+                .align_corners(true);
+  output = F::grid_sample(input, grid, options);
+  expected = torch::tensor({{{{1., 0., 1.}, {3., 4., 5.}, {7., 8., 7.}}}}, torch::kFloat);
 
   ASSERT_TRUE(output.allclose(expected));
 }
@@ -895,6 +973,16 @@ TEST_F(FunctionalTest, Normalize) {
   }
 }
 
+TEST_F(FunctionalTest, GeLU) {
+  auto x = torch::tensor({{2., 3.}, {4., 5.}});
+  auto y_exp = torch::tensor({{1.9545, 2.9960}, {3.9999, 5.0000}}) +
+        torch::tensor({{-2.3842e-07, -4.9829e-05}, {-2.6703e-05, -1.4305e-06}});
+  auto y = F::gelu(x);
+  ASSERT_EQ(y.ndimension(), 2);
+  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2}));
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(FunctionalTest, ReLU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
@@ -1203,6 +1291,92 @@ TEST_F(FunctionalTest, BatchNorm1dDefaultOptions) {
   auto output = F::batch_norm(input, mean, variance);
   auto expected = (input - mean) / torch::sqrt(variance + 1e-5);
   ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, Interpolate) {
+  {
+    // 1D interpolation
+    auto input = torch::ones({1, 1, 2});
+    auto options = InterpolateOptions()
+                       .size({4})
+                       .mode(torch::kNearest);
+    auto output = F::interpolate(input, options);
+    auto expected = torch::ones({1, 1, 4});
+
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    // 2D interpolation
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        auto input = torch::ones({1, 1, 2, 2});
+        auto options = InterpolateOptions()
+                           .scale_factor({scale_factor, scale_factor})
+                           .mode(torch::kBilinear)
+                           .align_corners(align_corners);
+        auto output = F::interpolate(input, options);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size, expected_size});
+
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+  {
+    // 3D interpolation
+    for (const auto align_corners : {true, false}) {
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        auto input = torch::ones({1, 1, 2, 2, 2});
+        auto options =
+            InterpolateOptions()
+                .scale_factor({scale_factor, scale_factor, scale_factor})
+                .mode(torch::kTrilinear)
+                .align_corners(align_corners);
+        auto output = F::interpolate(input, options);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected =
+            torch::ones({1, 1, expected_size, expected_size, expected_size});
+
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+  {
+    auto input = torch::randn({3, 2, 2});
+    ASSERT_THROWS_WITH(
+        F::interpolate(input[0], InterpolateOptions().size({4, 4})),
+        "Input Error: Only 3D, 4D and 5D input Tensors supported (got 2D) "
+        "for the modes: nearest | linear | bilinear | bicubic | trilinear (got kNearest)");
+    ASSERT_THROWS_WITH(
+        F::interpolate(
+            torch::reshape(input, {1, 1, 1, 3, 2, 2}),
+            InterpolateOptions().size({1, 1, 1, 3, 4, 4})),
+        "Input Error: Only 3D, 4D and 5D input Tensors supported (got 6D) "
+        "for the modes: nearest | linear | bilinear | bicubic | trilinear (got kNearest)");
+    ASSERT_THROWS_WITH(
+        F::interpolate(input, InterpolateOptions()),
+        "either size or scale_factor should be defined");
+    ASSERT_THROWS_WITH(
+        F::interpolate(
+            input,
+            InterpolateOptions().size({3, 4, 4}).scale_factor({0.5})),
+        "only one of size or scale_factor should be defined");
+    ASSERT_THROWS_WITH(
+        F::interpolate(input, InterpolateOptions().scale_factor({3, 2})),
+        "scale_factor shape must match input shape. "
+        "Input is 1D, scale_factor size is 2");
+    ASSERT_THROWS_WITH(
+        F::interpolate(
+            input,
+            InterpolateOptions()
+                .mode(torch::kNearest)
+                .align_corners(true)),
+        "align_corners option can only be set with the "
+        "interpolating modes: linear | bilinear | bicubic | trilinear");
+  }
 }
 
 TEST_F(FunctionalTest, Pad) {
