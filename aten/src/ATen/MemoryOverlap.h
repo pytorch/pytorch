@@ -15,17 +15,20 @@ namespace at {
 // overlap.
 //
 // The checking algorithm can be described as:
-//   0. Return [ pass check ] if any dimension has size 0
+//   0. Return [ MemOverlap::NO ] if any dimension has size 0
 //   1. Ignore all dimensions that have size 1
-//   2. If no remaining dimensions, return [ pass check ]
-//   3. Sort the remaining dimensions according to the strides decreasingly
-//   4. Check that for each dimension k,
+//   2. Return [ MemOverlap::YES ] if any remaining dimension has stride >= 1
+//   3. If no remaining dimensions, return [ MemOverlap::NO ]
+//   4. Sort the remaining dimensions according to the strides decreasingly
+//   5. Check that for each dimension k,
 //
 //           stride[k] > \sum_{ i > k } (size[i] - 1) * stride[i]
 //
 //      That is equivalent to, after reordering the dimensions so strides are
 //      in decreasing order, checking that stride of each dimension is larger
 //      than the maximum memory offset in a slice at that dimension.
+//      If all check passes, return [ MemOverlap::NO], otherwise, return
+//      [ MemOverlap::TOO_HARD ].
 //
 // Obviously this check passes for contiguous tensors ( the dimensions will be
 // already sorted with LHS = stride[0] = \prod size[i] being exactly 1 larger
@@ -208,7 +211,7 @@ namespace at {
 //              So this is generally relaxing the constraint, and thus it
 //              preserves it.
 
-// This implements steps (2)~(4) of the algorithm in
+// This implements steps (3)~(5) of the algorithm in
 // NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
 // We are breaking the implementation for specific requirements as what is
 // needed as a helper for as_strided_backward

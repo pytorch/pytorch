@@ -1274,7 +1274,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayR
       out_strides_.insert(out_strides_.begin(), stride_i);
     }
   }
-  // Step (2)~(4) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
+  // Step (3)~(5) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
   //              on output geometry
   auto out_maybe_overlap = at::maybe_overlapping_memory(out_sizes_, out_strides_);
 
@@ -1298,7 +1298,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayR
       inp_strides_.insert(inp_strides_.begin(), stride_i);
     }
   }
-  // Step (1)~(4) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
+  // Step (3)~(5) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
   //              on input geometry
   auto inp_maybe_overlap = at::maybe_overlapping_memory(inp_sizes_, inp_strides_);
 

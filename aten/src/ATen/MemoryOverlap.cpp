@@ -35,13 +35,14 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
   sizes.reserve(dims);
   strides.reserve(dims);
 
-  // Step (0)~(1) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
+  // Step (0)~(2) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
   for (int i = 0; i < dims; ++i) {
     size_t size = t->sizes()[i];
     if (size == 0) {
+      return MemOverlap::NO;
     } else if (size > 1) {
       size_t stride = t->strides()[i];
-      if (stride < 1) {
+      if (stride <= 1) {
         return MemOverlap::YES;
       }
       sizes.emplace_back(size);
@@ -49,7 +50,7 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
     } // size == 1 is ignored here, see 
   }
  
-  // Step (2)~(4) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
+  // Step (3)~(5) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
   if (maybe_overlapping_memory(sizes, strides)) {
     return MemOverlap::TOO_HARD;
   } else {
