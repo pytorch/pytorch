@@ -7,11 +7,13 @@
 
 namespace torch {
 namespace jit {
+namespace detail {
 
-namespace {
 
 using autograd::Variable;
 using autograd::variable_list;
+
+namespace {
 
 c10::OperatorOptions aliasAnalysisInternalSpecialCase() {
   c10::OperatorOptions options;
@@ -143,24 +145,25 @@ static void unpackReturnTuple(Stack &stack) {
   stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
 }
 
-// DifferentiableGraphBackward contains methods that meant to be exposed to the public
-// while DifferentiableGraphBackwardInternal contains the data and methods to deal
-// with JIT internally
-struct DifferentiableGraphBackwardInternal : public detail::DifferentiableGraphBackward {
-  DifferentiableGraphBackwardInternal(
+} // namespace
+
+struct DifferentiableGraphBackwardImpl {
+  DifferentiableGraphBackwardImpl(
       GraphExecutor executor,
       size_t input_size,
-      size_t capture_size)
-      : DifferentiableGraphBackward(std::move(executor)),
+      size_t capture_size,
+      DifferentiableGraphBackward &node)
+      : executor(std::move(executor)),
         captures_(capture_size),
-        input_instructions_(input_size) {}
+        input_instructions_(input_size),
+        node(node) {}
 
-  variable_list apply(variable_list&& inputs) override {
+  variable_list apply(variable_list&& inputs) {
     Stack stack;
     stack.reserve(captures_.size() + inputs.size());
 
     input_instructions_.unpack(std::move(inputs), stack);
-    captures_.unpack(stack, shared_from_this());
+    captures_.unpack(stack, node.shared_from_this());
     executor.run(stack);
     unpackReturnTuple(stack);
 
@@ -176,7 +179,7 @@ struct DifferentiableGraphBackwardInternal : public detail::DifferentiableGraphB
     // graph input TensorList [x, x]. These two grads will
     // be accumulated to x.grad later using autograd::InputBuffer.
     variable_list outputs;
-    outputs.reserve(num_outputs());
+    outputs.reserve(node.num_outputs());
     size_t output_index = 0;
     for (IValue& v : stack) {
       if (v.isTensorList()) {
@@ -200,7 +203,7 @@ struct DifferentiableGraphBackwardInternal : public detail::DifferentiableGraphB
 
   void addOutputForTensor(const at::Tensor& tensor) {
     auto v = Variable(tensor);
-    add_next_edge(v.defined() ? v.gradient_edge() : autograd::Edge{});
+    node.add_next_edge(v.defined() ? v.gradient_edge() : autograd::Edge{});
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
@@ -217,10 +220,10 @@ struct DifferentiableGraphBackwardInternal : public detail::DifferentiableGraphB
     // up wanting to differentiate through integral tensors, which is
     // generally a hard error in autograd.
     if (at::isFloatingType(output.type().scalarType())) {
-      autograd::create_gradient_edge(output, shared_from_this());
+      autograd::create_gradient_edge(output, node.shared_from_this());
       output.set_requires_grad(true);
     } else {
-      add_input_metadata(autograd::Node::undefined_input{});
+      node.add_input_metadata(autograd::Node::undefined_input{});
     }
   }
 
@@ -237,10 +240,14 @@ struct DifferentiableGraphBackwardInternal : public detail::DifferentiableGraphB
     }
   }
 
+  std::string toString() const {
+    return executor.graph()->toString();
+  }
+
  private:
   void produceOutput(size_t i, at::Tensor output, variable_list& outputs) {
-    if (should_compute_output(i)) {
-      const auto& edge = next_edge(i);
+    if (node.should_compute_output(i)) {
+      const auto& edge = node.next_edge(i);
       if (output.defined()) {
         outputs.emplace_back(std::move(output));
       } else if (edge.is_valid()) {
@@ -254,8 +261,10 @@ struct DifferentiableGraphBackwardInternal : public detail::DifferentiableGraphB
     }
   }
 
+  GraphExecutor executor;
   CaptureList captures_;
   UnpackInstructions input_instructions_;
+  DifferentiableGraphBackward &node;
 };
 
 // an optimized way of executing the subgraph computed directly on
@@ -273,11 +282,12 @@ struct DifferentiableGraphOp {
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   int operator()(Stack& stack) const {
-    auto grad_fn = std::make_shared<DifferentiableGraphBackwardInternal>(
+    auto node = std::make_shared<DifferentiableGraphBackward>(
         grad_executor,
         grad.df_input_vjps.size(),
         grad.df_input_captured_inputs.size() +
             grad.df_input_captured_outputs.size());
+    auto grad_fn = node->pImpl;
 
     {
       auto inputs = last(stack, num_inputs);
@@ -347,14 +357,14 @@ struct DifferentiableGraphOp {
   }
   // Capture (save) inputs that would be required to subsequently run backwards
   void captureInputs(
-      DifferentiableGraphBackwardInternal& grad_fn,
+      DifferentiableGraphBackwardImpl& grad_fn,
       at::ArrayRef<IValue> inputs) const {
     for (size_t offset : grad.df_input_captured_inputs) {
       grad_fn.capture(inputs[offset], /*is_output*/ false);
     }
   }
   void captureOutputs(
-      DifferentiableGraphBackwardInternal& grad_fn,
+      DifferentiableGraphBackwardImpl& grad_fn,
       at::ArrayRef<IValue> outputs) const {
     for (size_t offset : grad.df_input_captured_outputs) {
       grad_fn.capture(outputs[offset], /*is_output*/ true);
@@ -391,10 +401,6 @@ RegisterOperators reg_graph_executor_ops({Operator(
     },
     aliasAnalysisInternalSpecialCase())});
 
-} // namespace
-
-namespace detail {
-
 GraphExecutor* getGradExecutor(Operation& op) {
   if (auto diff_op = op.target<DifferentiableGraphOp>()) {
     return &diff_op->grad_executor;
@@ -402,7 +408,18 @@ GraphExecutor* getGradExecutor(Operation& op) {
   return nullptr;
 }
 
-} // namespace detail
+DifferentiableGraphBackward::DifferentiableGraphBackward(
+  GraphExecutor executor, size_t input_size, size_t capture_size)
+  : pImpl(std::make_shared<DifferentiableGraphBackwardImpl>(std::move(executor), input_size, capture_size, *this)) {}
 
+std::string DifferentiableGraphBackward::toString() const {
+  return pImpl->toString();
+}
+
+variable_list DifferentiableGraphBackward::apply(variable_list&& inputs) {
+  return pImpl->apply(std::move(inputs));
+}
+
+} // namespace detail
 } // namespace jit
 } // namespace torch
