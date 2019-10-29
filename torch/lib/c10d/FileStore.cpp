@@ -184,11 +184,42 @@ class File {
   int fd_;
 };
 
+// RAII helper to limit concurrent ops from us to 1.
+class OneActiveOpLock {
+ public:
+  explicit OneActiveOpLock(
+      std::mutex& lock,
+      std::condition_variable& cv,
+      int32_t& count)
+      : lock_(lock), cv_(cv), count_(count) {
+    std::unique_lock<std::mutex> l(lock_);
+    cv_.wait(l, [&] { return count_ == 0; });
+    ++count_;
+  }
+  ~OneActiveOpLock() {
+    release();
+  }
+  void release() {
+    if (!released_) {
+      std::unique_lock<std::mutex> l(lock_);
+      --count_;
+      l.unlock();
+      cv_.notify_one();
+      released_ = true;
+    }
+  }
+
+ private:
+  std::mutex& lock_;
+  std::condition_variable& cv_;
+  int32_t& count_;
+  bool released_{false};
+};
+
 off_t refresh(
     File& file,
     off_t pos,
-    std::function<void(const std::string&, std::vector<uint8_t>&&)>
-        insertFunc) {
+    std::unordered_map<std::string, std::vector<uint8_t>>& cache) {
   auto size = file.size();
   if (size != pos) {
     std::string tmpKey;
@@ -197,7 +228,7 @@ off_t refresh(
     while (size > pos) {
       file.read(tmpKey);
       file.read(tmpValue);
-      insertFunc(tmpKey, std::move(tmpValue));
+      cache[tmpKey] = std::move(tmpValue);
       pos = file.tell();
     }
   }
@@ -233,6 +264,7 @@ FileStore::~FileStore() {
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   std::string regKey = regularPrefix_ + key;
+  OneActiveOpLock op(activeFileOpLock_, activeFileOpCv_, activeFileOps_);
   File file(path_, O_RDWR | O_CREAT, timeout_);
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
@@ -244,12 +276,14 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   const auto start = std::chrono::steady_clock::now();
   while (true) {
+    OneActiveOpLock op(activeFileOpLock_, activeFileOpCv_, activeFileOps_);
     File file(path_, O_RDONLY, timeout_);
     auto lock = file.lockShared();
     auto size = file.size();
-    if (!cacheEntryFound(regKey) && size == pos_) {
+    if (cache_.count(regKey) == 0 && size == pos_) {
       // No new entries; release the shared lock and sleep for a bit
       lock.unlock();
+      op.release();
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
@@ -260,28 +294,20 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
     }
     // Always refresh since even though the key exists in the cache,
     // it might be outdated
-    pos_ = refresh(
-        file,
-        pos_,
-        [this](const std::string& key, std::vector<uint8_t>&& value) {
-          insertCache(key, std::move(value));
-        });
-    if (cacheEntryFound(regKey)) {
-      break;
+    pos_ = refresh(file, pos_, cache_);
+    if (cache_.count(regKey) != 0) {
+      return cache_[regKey];
     }
   }
-  return cacheEntry(regKey);
 }
 
 int64_t FileStore::addHelper(const std::string& key, int64_t i) {
+  OneActiveOpLock op(activeFileOpLock_, activeFileOpCv_, activeFileOps_);
   File file(path_, O_RDWR | O_CREAT, timeout_);
   auto lock = file.lockExclusive();
-  pos_ = refresh(
-      file, pos_, [this](const std::string& key, std::vector<uint8_t>&& value) {
-        insertCache(key, std::move(value));
-      });
+  pos_ = refresh(file, pos_, cache_);
 
-  auto value = cacheEntry(key);
+  const auto& value = cache_[key];
   int64_t ti = i;
   if (!value.empty()) {
     auto buf = reinterpret_cast<const char*>(value.data());
@@ -303,16 +329,14 @@ int64_t FileStore::add(const std::string& key, int64_t i) {
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {
+  OneActiveOpLock op(activeFileOpLock_, activeFileOpCv_, activeFileOps_);
   File file(path_, O_RDONLY, timeout_);
   auto lock = file.lockShared();
-  pos_ = refresh(
-      file, pos_, [this](const std::string& key, std::vector<uint8_t>&& value) {
-        insertCache(key, std::move(value));
-      });
+  pos_ = refresh(file, pos_, cache_);
 
   for (const auto& key : keys) {
     std::string regKey = regularPrefix_ + key;
-    if (!cacheEntryFound(regKey)) {
+    if (cache_.count(regKey) == 0) {
       return false;
     }
   }
@@ -340,23 +364,6 @@ void FileStore::wait(
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-}
-
-bool FileStore::cacheEntryFound(const std::string& regKey) {
-  std::lock_guard<std::mutex> l(cacheLock_);
-  return cache_.count(regKey) != 0;
-}
-
-std::vector<uint8_t> FileStore::cacheEntry(const std::string& regKey) {
-  std::lock_guard<std::mutex> l(cacheLock_);
-  return cache_[regKey];
-}
-
-void FileStore::insertCache(
-    const std::string& regKey,
-    std::vector<uint8_t>&& value) {
-  std::lock_guard<std::mutex> l(cacheLock_);
-  cache_[regKey] = std::move(value);
 }
 
 } // namespace c10d
