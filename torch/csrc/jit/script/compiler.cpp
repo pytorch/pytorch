@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -1625,6 +1626,30 @@ struct to_ir {
     }
   }
 
+  void emitUnrolledLoop(
+      const SourceRange& loc,
+      const List<Stmt>& body,
+      SugaredValuePtr iterable,
+      const List<Expr>& targets) {
+    auto static_len = toIValue(iterable->len(loc, method));
+    TORCH_INTERNAL_ASSERT(static_len, "Static For should have defined length");
+    int64_t len = static_len->toInt();
+
+    // In order to support ModuleLists which return different types,
+    // as with an nn.Sequential which has a module that returns a Dict and then
+    // a module which returns a Tensor,
+    // we do not push a new environment frame because if we did all intermediary
+    // values would have to subtype the input type.
+    for (int64_t i = 0; i < len; ++i) {
+      auto index =
+          materializeConstant(i, *method.graph(), loc, integral_constants);
+      auto sugared_value = iterable->getitem(loc, method, index);
+      emitExprsAssign(
+          targets, {sugared_value}, targets.range(), /*n_binders=*/1);
+      emitStatements(body);
+    }
+  }
+
   void emitFor(const For& stmt) {
     const auto& targets = stmt.targets();
     const auto& itrs = stmt.itrs();
@@ -1636,29 +1661,14 @@ struct to_ir {
     // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
     SugaredValuePtr sv = emitSugaredExpr(itrs[0], 1);
-    IterableValuePtr iterable = sv->asIterable(loc, method);
+    SugaredValuePtr iterable = sv->iter(loc, method);
 
     // We unroll the loop for iterables that contain ModuleLists so that we can
     // compile Heterogenous module lists.
-    // In order to support ModuleLists which return different types,
-    // as with an nn.Sequential which has a module that returns a Dict and then
-    // a module which returns a Tensor,
-    // we do not push a new environment frame because if we did all intermediary
-    // values would have to subtype the input type.
-
-    if (!iterable->emitUnrolled()) {
-      return emitLoopCommon(loc, body, iterable->getValue(), targets, {});
-    }
-    TORCH_INTERNAL_ASSERT(
-        iterable->getLen(), "Static For should have defined length");
-    int64_t len = *iterable->getLen();
-    for (int64_t i = 0; i < len; ++i) {
-      auto index =
-          materializeConstant(i, *method.graph(), loc, integral_constants);
-      auto sugared_value = iterable->getValue()->getitem(loc, method, index);
-      emitExprsAssign(
-          targets, {sugared_value}, itrs[0].range(), /*n_binders=*/1);
-      emitStatements(body);
+    if (!iterable->shouldEmitUnrolled()) {
+      emitLoopCommon(loc, body, iterable, targets, {});
+    } else {
+      emitUnrolledLoop(loc, body, iterable, targets);
     }
   }
 
@@ -2454,9 +2464,9 @@ struct to_ir {
       }
       // We construct the iterable tree here using the IterableTree
       // SugaredValue, The tree consists of SimpleValue, RangeValue or
-      // IterableValue: For SimpleValues(List, Dict, etc) or RangeValue. We will
+      // IterableTree: For SimpleValues(List, Dict, etc) or RangeValue. We will
       // make them as tree leaves since we could get the loop information from
-      // len() and get_item(). For IterableValue like zip(), enumerate(), we can
+      // len() and get_item(). For IterableTree like zip(), enumerate(), we can
       // model them as a combination of leaves, and we emit a IterableTree value
       // to record the tree information
       case prim::range: {
@@ -2494,16 +2504,21 @@ struct to_ir {
             loc,
             integral_constants);
         range_inputs.emplace_back(end);
-        SugaredValuePtr range_sv =
-            std::make_shared<RangeValue>(loc, method, range_inputs);
         SugaredValuePtr expr_sv = emitSugaredExpr(inputs[0], 1);
-        auto iterable_value = expr_sv->asIterable(loc, method);
+        auto iterable_value = expr_sv->iter(loc, method);
+
         // range should have the same static length as the other iterable
-        auto range_value =
-            std::make_shared<IterableValue>(range_sv, iterable_value->getLen());
+        c10::optional<int64_t> iter_static_len = c10::nullopt;
+        if (auto maybe_ival = toIValue(iterable_value->len(loc, method))) {
+          iter_static_len = maybe_ival->toInt();
+        }
+
+        SugaredValuePtr range_sv = std::make_shared<RangeValue>(
+            loc, method, range_inputs, iter_static_len);
+
         auto tree = std::make_shared<IterableTree>();
-        tree->addChild(loc, range_value);
-        tree->addChild(loc, iterable_value);
+        tree->addChild(loc, method, range_sv);
+        tree->addChild(loc, method, iterable_value);
         return tree;
       }
       case prim::zip: {
@@ -2516,9 +2531,8 @@ struct to_ir {
         }
         auto iterable_tree = std::make_shared<IterableTree>();
         for (Expr expr : inputs) {
-          auto iterable =
-              emitSugaredExpr(expr, 1)->asIterable(apply.range(), method);
-          iterable_tree->addChild(apply.range(), iterable);
+          auto iterable = emitSugaredExpr(expr, 1)->iter(apply.range(), method);
+          iterable_tree->addChild(apply.range(), method, iterable);
         }
         return iterable_tree;
       }
@@ -2590,16 +2604,13 @@ struct to_ir {
     if (val->node()->kind() != opSymbol) {
       return val;
     }
-    auto maybe_constant_input = toIValue(val->node()->input());
-    if (!maybe_constant_input) {
+
+    auto maybe_out_stack = tryConstantPropNode(val->node());
+    if (!maybe_out_stack) {
       return val;
     }
-    auto op = getOperation(val->node());
-    Stack stack;
-    stack.push_back(*maybe_constant_input);
-    op(stack);
-    AT_ASSERT(stack.size() == 1);
-    return graph->insertConstant(stack[0], tree->range());
+    TORCH_INTERNAL_ASSERT(maybe_out_stack->size() == 1);
+    return graph->insertConstant(maybe_out_stack->at(0), tree->range());
   }
 
   std::shared_ptr<SugaredValue> emitForkExpr(

@@ -14,6 +14,24 @@
 namespace torch {
 namespace jit {
 
+c10::optional<Stack> tryConstantPropNode(const Node* node) {
+  if (node->kind() == prim::Load) {
+    return c10::nullopt;
+  }
+  Stack stack;
+  for (const Value* input : node->inputs()) {
+    if (auto ival = toIValue(input)) {
+      stack.push_back(ival);
+    } else {
+      return c10::nullopt;
+    }
+  }
+  auto op = getOperation(node);
+  op(stack);
+  TORCH_INTERNAL_ASSERT(stack.size() == node->outputs().size());
+  return stack;
+}
+
 namespace {
 
 std::unordered_set<Symbol> skip_list = {

@@ -142,9 +142,9 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       const std::string& field,
       Value* newValue) override;
 
-  IterableValuePtr asIterable(const SourceRange& loc, Function& m) override;
+  SugaredValuePtr iter(const SourceRange& loc, Function& m) override;
 
-  IterableValuePtr desugarModuleContainer(
+  SugaredValuePtr desugarModuleContainer(
       bool get_keys,
       bool get_values,
       const SourceRange& loc,
@@ -156,7 +156,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 };
 
 struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
-  explicit ModuleDictMethod(IterableValuePtr iterable, const std::string& name)
+  explicit ModuleDictMethod(SugaredValuePtr iterable, const std::string& name)
       : iterable_(iterable), name_(name){};
 
   std::string kind() const override {
@@ -173,10 +173,10 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
       throw ErrorReport(loc)
           << name_ << " method does not accept any arguments";
     }
-    return iterable_->getValue();
+    return iterable_;
   }
 
-  IterableValuePtr iterable_;
+  SugaredValuePtr iterable_;
   const std::string name_;
 };
 

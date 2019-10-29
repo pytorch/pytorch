@@ -22,9 +22,6 @@ using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 // that separates their behavior from the AST -> IR converter itself.
 // This allows us to keep dependencies on python minimal.
 
-struct IterableValue;
-using IterableValuePtr = std::shared_ptr<IterableValue>;
-
 struct TORCH_API SugaredValue
     : public std::enable_shared_from_this<SugaredValue> {
   // what is this node? for error reporting (e.g. Module, python function)
@@ -69,7 +66,9 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << kind() << " cannot be used as a type";
   }
 
-  virtual IterableValuePtr asIterable(const SourceRange& loc, Function& m) {
+  virtual std::shared_ptr<SugaredValue> iter(
+      const SourceRange& loc,
+      Function& m) {
     throw ErrorReport(loc) << kind() << " cannot be used as an iterable";
   }
 
@@ -98,11 +97,22 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
+  // We handle iteration over Module Containers by unrolling the for loop over
+  // each value. Any Sugared Value that contains a module list should be emitted
+  // unrolled. See comment in `emitUnrolledLoop` for why we do this
+  virtual bool shouldEmitUnrolled() {
+    return false;
+  }
+
   // return length of this thing, if not then it can't be iterated.
+  // If it does not have a statically-determinable length, then it cannot
+  // be iterated over with a modulelist. If it does it must return a constant
+  // Value *
   virtual Value* len(const SourceRange& loc, Function& m) {
     throw ErrorReport(loc) << "'" << kind() << "'"
                            << " object is not iterable";
   }
+
   // expression for ith elemement for iterable value
   virtual std::shared_ptr<SugaredValue> getitem(
       const SourceRange& loc,
@@ -118,7 +128,8 @@ struct TORCH_API SugaredValue
 // most things in the environment are just simple value types
 // and not special python syntax sugar types
 struct TORCH_API SimpleValue : public SugaredValue {
-  SimpleValue(Value* value) : value_(value) {}
+  SimpleValue(Value* value, c10::optional<int64_t> static_len = c10::nullopt)
+      : value_(value), static_len_(static_len) {}
   std::string kind() const override {
     std::stringstream ss;
     ss << "value of type '" << value_->type()->python_str() << "'";
@@ -150,7 +161,8 @@ struct TORCH_API SimpleValue : public SugaredValue {
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override;
 
-  IterableValuePtr asIterable(const SourceRange& loc, Function& m) override;
+  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
+      override;
 
   Value* getValue() const {
     return value_;
@@ -162,6 +174,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
 
  private:
   Value* value_;
+  c10::optional<int64_t> static_len_;
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
@@ -214,13 +227,15 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
   }
 
   std::string kind() const override {
-    return "Sugared Tuple";
+    return "Tuple";
   }
 
   SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
       override {
     TORCH_INTERNAL_ASSERT(
-        toIValue(idx), loc, "Expected integer literal for Sugared Tuple");
+        idx->type()->cast<IntType>() && toIValue(idx),
+        loc,
+        "Expected integer literal for Sugared Tuple");
     auto index = toIValue(idx)->toInt();
     TORCH_INTERNAL_ASSERT(
         index >= 0 && index < static_cast<int64_t>(tup_.size()),
@@ -229,12 +244,23 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
     return tup_.at(index);
   }
 
-  IterableValuePtr asIterable(const SourceRange& loc, Function& m) override {
-    return std::make_shared<IterableValue>(
-        shared_from_this(), tup_.size(), contains_module_list_);
+  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
+      override {
+    return shared_from_this();
+  };
+
+  bool shouldEmitUnrolled() override {
+    return contains_module_list_;
+  }
+
+  Value* len(const SourceRange& loc, Function& m) {
+    auto static_len = static_cast<int64_t>(tup_.size());
+    return insertConstant(*m.graph(), static_len, loc);
   };
 
   std::vector<std::shared_ptr<SugaredValue>> tup_;
+  // Any SugaredValue that contains a ModuleList must be unrolled when iterated
+  // over
   bool contains_module_list_;
 };
 
@@ -493,7 +519,11 @@ struct TORCH_API SpecialFormValue : public SugaredValue {
 
 // matched against for special handling of range expressions
 struct TORCH_API RangeValue : SugaredValue {
-  RangeValue(const SourceRange& loc, Function& m, std::vector<Value*> inputs);
+  RangeValue(
+      const SourceRange& loc,
+      Function& m,
+      std::vector<Value*> input,
+      c10::optional<int64_t> static_len = c10::nullopt);
 
   std::string kind() const override {
     return "range";
@@ -501,7 +531,8 @@ struct TORCH_API RangeValue : SugaredValue {
   Value* len(const SourceRange& loc, Function& m) override;
   SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
       override;
-  IterableValuePtr asIterable(const SourceRange& loc, Function& m) override;
+  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
+      override;
 
  private:
   Value* start_;
@@ -512,39 +543,7 @@ struct TORCH_API RangeValue : SugaredValue {
   // derivation nodes to simplify the graph and enable more possible
   // optimizations
   bool has_only_end_;
-  c10::optional<int64_t> static_len_;
-};
-
-// We handle iteration over Module Containers by unrolling the for loop over
-// each value. As a result we need to statically know the number of elements of
-// the iterable. IterableValue contains an underlying SugaredValue, its static
-// length if it is known, and whether or not the Iterable needs to be emmitted
-// statically. We error if an iterable contains both a SugaredValue that needs
-// to be emitted statically, and a SugaredValue which does not have a
-// statically-determinable length.
-struct IterableValue {
-  IterableValue(
-      SugaredValuePtr value,
-      c10::optional<int64_t> len = c10::nullopt,
-      bool emit_unrolled = false)
-      : value_(std::move(value)), len_(len), emit_unrolled_(emit_unrolled){};
-
-  SugaredValuePtr getValue() const {
-    return value_;
-  }
-
-  c10::optional<int64_t> getLen() const {
-    return len_;
-  }
-
-  bool emitUnrolled() const {
-    return emit_unrolled_;
-  }
-
- private:
-  std::shared_ptr<SugaredValue> value_;
-  c10::optional<int64_t> len_;
-  bool emit_unrolled_ = false;
+  c10::optional<int64_t> static_len_ = c10::nullopt;
 };
 
 // Specialized Tree structure to matched against for special handling
@@ -563,31 +562,31 @@ struct TORCH_API IterableTree : SugaredValue {
   IterableTree() = default;
   IterableTree(
       const SourceRange& range,
-      at::ArrayRef<IterableValuePtr> children) {
+      Function& m,
+      at::ArrayRef<SugaredValuePtr> children) {
     for (const auto& child : children) {
-      addChild(range, child);
+      addChild(range, m, child);
     }
   }
   std::string kind() const override {
     return "iterabletree";
   }
 
-  IterableValuePtr asIterable(const SourceRange& loc, Function& m) override {
-    return std::make_shared<IterableValue>(
-        shared_from_this(), static_len_, emit_unrolled_);
+  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
+      override {
+    return shared_from_this();
   }
 
-  void addChild(const SourceRange& range, const IterableValuePtr& iter_value);
+  void addChild(
+      const SourceRange& range,
+      Function& m,
+      const SugaredValuePtr iter_value);
 
   std::vector<SugaredValuePtr> get_children() {
     return children_;
   }
 
-  c10::optional<int64_t> staticLen() const {
-    return static_len_;
-  }
-
-  bool emitUnrolled() const {
+  bool shouldEmitUnrolled() override {
     return emit_unrolled_;
   }
 

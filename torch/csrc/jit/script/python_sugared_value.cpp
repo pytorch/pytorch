@@ -216,7 +216,7 @@ static bool isModuleType(const TypePtr& type) {
   return false;
 }
 
-IterableValuePtr ModuleValue::desugarModuleContainer(
+SugaredValuePtr ModuleValue::desugarModuleContainer(
     bool get_keys,
     bool get_values,
     const SourceRange& loc,
@@ -252,25 +252,19 @@ IterableValuePtr ModuleValue::desugarModuleContainer(
   }
 
   bool contains_module_list = true;
-  int64_t len = submoduleNames.size();
   if (get_keys && !get_values) {
-    return std::make_shared<SugaredTupleValue>(keys, true)->asIterable(loc, m);
+    return std::make_shared<SugaredTupleValue>(keys, contains_module_list);
   } else if (get_values && !get_keys) {
-    return std::make_shared<SugaredTupleValue>(values, true)
-        ->asIterable(loc, m);
+    return std::make_shared<SugaredTupleValue>(values, contains_module_list);
   } else if (get_values && get_keys) {
-    auto key_list = std::make_shared<IterableValue>(
-        std::make_shared<SugaredTupleValue>(keys, true),
-        len,
-        contains_module_list);
-    auto value_list = std::make_shared<IterableValue>(
-        std::make_shared<SugaredTupleValue>(values, true),
-        len,
-        contains_module_list);
+    auto key_list =
+        std::make_shared<SugaredTupleValue>(keys, contains_module_list);
+    auto value_list =
+        std::make_shared<SugaredTupleValue>(values, contains_module_list);
     auto iterator = std::make_shared<IterableTree>();
-    iterator->addChild(loc, key_list);
-    iterator->addChild(loc, value_list);
-    return iterator->asIterable(loc, m);
+    iterator->addChild(loc, m, key_list);
+    iterator->addChild(loc, m, value_list);
+    return iterator->iter(loc, m);
   } else {
     TORCH_INTERNAL_ASSERT(false);
   }
@@ -381,7 +375,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
                          << " has no attribute '" << field << "' " << hint;
 }
 
-IterableValuePtr ModuleValue::asIterable(const SourceRange& loc, Function& m) {
+SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
   const auto iterableModuleKind = concreteType_->getIterableModuleKind();
   if (iterableModuleKind == IterableModuleKind::NONE) {
     throw ErrorReport(loc)

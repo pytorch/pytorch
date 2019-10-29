@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/script/sugared_value.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/script/tree_views.h>
 
@@ -292,6 +293,9 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   Graph& g = *m.graph();
   if (val_type->cast<ListType>() || val_type->cast<StringType>() ||
       val_type->isSubtypeOf(TensorType::get())) {
+    if (static_len_) {
+      return insertConstant(*m.graph(), *static_len_, loc);
+    }
     return g.insert(aten::len, {val}, {}, loc);
   } else {
     throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
@@ -325,19 +329,18 @@ SugaredValuePtr SimpleValue::getitem(
   }
 }
 
-IterableValuePtr SimpleValue::asIterable(const SourceRange& loc, Function& m) {
+SugaredValuePtr SimpleValue::iter(const SourceRange& loc, Function& m) {
   auto value = getValue();
   auto type = value->type();
   // built-in iterable types
   if (type->cast<ListType>() || type->cast<StringType>() ||
       type->cast<TensorType>()) {
-    return std::make_shared<IterableValue>(
-        std::make_shared<SimpleValue>(value));
+    return std::make_shared<SimpleValue>(value);
   }
   // dicts iterate over keys
   if (type->cast<DictType>()) {
-    return std::make_shared<IterableValue>(std::make_shared<SimpleValue>(
-        m.graph()->insert(aten::keys, {value}, {}, loc)));
+    return std::make_shared<SimpleValue>(
+        m.graph()->insert(aten::keys, {value}, {}, loc));
   }
   // we allow iteration over tuples if their types can be unified
   if (auto tup = type->cast<TupleType>()) {
@@ -347,11 +350,9 @@ IterableValuePtr SimpleValue::asIterable(const SourceRange& loc, Function& m) {
           << "Heterogenous or empty tuples cannot be iterated over. Found "
           << type->python_str();
     }
-    int64_t static_len = tup->elements().size();
     auto li = m.graph()->createList(*tuple_type, createTupleUnpack(value));
     auto out = m.graph()->insertNode(li)->output();
-    return std::make_shared<IterableValue>(
-        std::make_shared<SimpleValue>(out), static_len);
+    return std::make_shared<SimpleValue>(out, tup->elements().size());
   } else {
     throw ErrorReport(loc) << "'" << type->python_str() << "'"
                            << " object is not iterable";
@@ -361,7 +362,8 @@ IterableValuePtr SimpleValue::asIterable(const SourceRange& loc, Function& m) {
 RangeValue::RangeValue(
     const SourceRange& loc,
     Function& m,
-    std::vector<Value*> inputs) {
+    std::vector<Value*> inputs,
+    c10::optional<int64_t> static_len) {
   for (size_t i = 0; i < inputs.size(); ++i) {
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
@@ -394,19 +396,25 @@ RangeValue::RangeValue(
                            << inputs.size();
   }
 
-  // TODO: !has_only_end calculation
-  if (has_only_end_ && toIValue(end_)) {
-    static_len_ = toIValue(end_)->toInt();
+  if (static_len) {
+    static_len_ = static_len;
   } else {
-    static_len_ = c10::nullopt;
+    auto len_node = len(loc, m)->node();
+    auto maybe_out_stack = tryConstantPropNode(len_node);
+    if (maybe_out_stack) {
+      static_len_ = maybe_out_stack->at(0).toInt();
+    }
   }
 }
 
-IterableValuePtr RangeValue::asIterable(const SourceRange& loc, Function& m) {
-  return std::make_shared<IterableValue>(shared_from_this(), static_len_);
+SugaredValuePtr RangeValue::iter(const SourceRange& loc, Function& m) {
+  return shared_from_this();
 };
 
 Value* RangeValue::len(const SourceRange& loc, Function& m) {
+  if (static_len_) {
+    return insertConstant(*m.graph(), *static_len_, loc);
+  }
   if (has_only_end_) {
     return end_;
   } else {
@@ -452,6 +460,10 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
   // if it's a iterable tree, we get the base iterables that consists of
   // SimpleValue or RangeValue, and then calculate the minimum length of all the
   // base iterables to be max_trip_count_val
+  if (static_len_) {
+    return insertConstant(*m.graph(), *static_len_, loc);
+  }
+
   Graph& g = *m.graph();
   std::vector<SugaredValuePtr> base_iters = get_base_iterables();
   std::vector<Value*> lengths;
@@ -477,9 +489,14 @@ SugaredValuePtr IterableTree::getitem(
 
 void IterableTree::addChild(
     const SourceRange& range,
-    const IterableValuePtr& iter_value) {
-  auto child_len = iter_value->getLen();
-  auto child_unrolled = iter_value->emitUnrolled();
+    Function& m,
+    const SugaredValuePtr iter_value) {
+  auto child_len_val = iter_value->len(range, m);
+  c10::optional<int64_t> child_len = c10::nullopt;
+  if (auto maybe_ival = toIValue(child_len_val)) {
+    child_len = maybe_ival->toInt();
+  }
+  auto child_unrolled = iter_value->shouldEmitUnrolled();
   if (children_.size() == 0) {
     static_len_ = child_len;
     emit_unrolled_ = child_unrolled;
@@ -496,7 +513,7 @@ void IterableTree::addChild(
     emit_unrolled_ = emit_unrolled_ || child_unrolled;
   }
 
-  children_.push_back(iter_value->getValue());
+  children_.push_back(iter_value);
 }
 
 std::shared_ptr<SugaredValue> MagicMethod::call(
