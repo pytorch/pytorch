@@ -1942,28 +1942,46 @@ t2.start()
         dev1a = torch.device("cuda:1")
         dev1b = torch.device("cuda:1")
 
-        assert hash(dev0a) == hash(dev0b)
-        assert hash(dev1a) == hash(dev1b)
+        self.assertTrue(hash(dev0a) == hash(dev0b))
+        self.assertTrue(hash(dev1a) == hash(dev1b))
 
         d[dev0a] = "0a"
         d[dev0b] = "0b"
-        assert len(d) == 1
-        assert d[dev0a] == "0b"
+        self.assertTrue(len(d) == 1)
+        self.assertTrue(d[dev0a] == "0b")
 
         d[dev1a] = "1a"
         d[dev1b] = "1b"
-        assert len(d) == 2
-        assert d[dev1a] == "1b"
+        self.assertTrue(len(d) == 2)
+        self.assertTrue(d[dev1a] == "1b")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_scale(self):
+        scaler = torch.cuda.amp.AmpScaler(init_scale=2.)
+        t0 = torch.tensor([4.0], dtype=torch.float32, device="cuda:0")
+        t1 = torch.tensor([4.0], dtype=torch.float32, device="cuda:1")
+        # Create some nested iterables of tensors on different devices.
+        outputs = (t1.clone(), (t0.clone(), t1.clone()), [t0.clone(), (t1.clone(), t0.clone())])
+        outputs = scaler.scale(outputs)
+        self.assertTrue(outputs[0] == 8.0 and outputs[1][0] == 8.0 and outputs[1][1] == 8.0 and
+                        outputs[2][0] == 8.0 and outputs[2][1][0] == 8.0 and outputs[2][1][1] == 8.0)
+        self.assertTrue(scaler._scale.device == t1.device)
 
     def test_grad_scaling_state_dict(self):
-        s0 = torch.cuda.amp.AmpScaler(init_scale=3., growth_factor=4., backoff_factor=5.)
-        s1 = torch.cuda.amp.AmpScaler(init_scale=6., growth_factor=7., backoff_factor=8.)
+        for lazy_init_scale in True, False:
+            s0 = torch.cuda.amp.AmpScaler(init_scale=3., growth_factor=4., backoff_factor=5.)
+            s1 = torch.cuda.amp.AmpScaler(init_scale=6., growth_factor=7., backoff_factor=8.)
 
-        s1.load_state_dict(s0.state_dict())
+            if lazy_init_scale:
+                # Dummy scale() call to ensure the scale tensor is lazily initialized.
+                s1.scale(torch.tensor([4.0], dtype=torch.float32, device="cuda:0"))
+                self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
 
-        self.assertTrue(s1.get_scale() == 3.)
-        self.assertTrue(s1.get_growth_factor() == 4.)
-        self.assertTrue(s1.get_backoff_factor() == 5.)
+            s1.load_state_dict(s0.state_dict())
+
+            self.assertTrue(s1.get_scale() == 3.)
+            self.assertTrue(s1.get_growth_factor() == 4.)
+            self.assertTrue(s1.get_backoff_factor() == 5.)
 
     def _create_scaling_models_optimizers(self, device="cuda"):
         # Create a module+optimizer that will use scaling, and a control module+optimizer
@@ -2070,7 +2088,8 @@ t2.start()
                 if try_scaling_api:
                     grad_params = torch.autograd.grad(scaler.scale(loss),
                                                       model.parameters(), create_graph=True)
-                    grad_params = [p * (1. / scaler.get_scale()) for p in grad_params]
+                    inv_scale = 1. / scaler.get_scale()
+                    grad_params = [p * inv_scale for p in grad_params]
                 else:
                     grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
 

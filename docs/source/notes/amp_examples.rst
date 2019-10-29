@@ -113,7 +113,8 @@ Here's how that looks for a simple L2 penalty::
         # manually unscale them before computing the penalty.  The unscale should be out-of-place
         # and autograd-exposed.  For these reasons, and because grad_params are not owned by any optimizer,
         # calling scaler.unscale(optimizer) here is unsuitable, and we use ordinary ops instead:
-        grad_params = [p*(1./scaler.get_scale()) for p in grad_params]
+        inv_scale = 1./scaler.get_scale()
+        grad_params = [p*inv_scale for p in grad_params]
 
         # Compute the penalty term and add it to the loss
         grad_norm = 0

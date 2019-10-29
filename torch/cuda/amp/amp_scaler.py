@@ -15,7 +15,7 @@ class _MultiDeviceReplicator(object):
     def get(self, device):
         retval = self._per_device_tensors.get(device, None)
         if retval is None:
-            retval = self.master.clone() if (device == self.master.device) else self.master.to(device)
+            retval = self.master.to(device=device, non_blocking=True, copy=True)
             self._per_device_tensors[device] = retval
         return retval
 
@@ -51,7 +51,7 @@ class AmpScaler(object):
     It does so by checking the gradients for infs and NaNs during every :meth:`step` or separate :meth:`unscale`.
     If no infs/NaNs are found, :meth:`step` runs the underlying ``optimizer.step()`` as usual and
     :meth:`update` multiplies the scale factor by the growth factor.  If infs/NaNs are found, :meth:`step` skips the
-    underlying ``optimizer.step()`` (so the params themselves remain unpolluted) and multiplies the scale factor by
+    underlying ``optimizer.step()`` (so the params themselves remain uncorrupted) and multiplies the scale factor by
     the backoff factor.
 
     The scale factor often causes infs/NaNs to appear in gradients for the first few iterations as its
@@ -74,10 +74,17 @@ class AmpScaler(object):
                  enabled=True):
         self._enabled = enabled
         if enabled:
-            self._scale = torch.full((1,), init_scale, dtype=torch.float32, device="cuda")
+            self._init_scale = init_scale
+            # self._scale will be lazily initialized during the first call to scaler.scale(loss or outputs)
+            self._scale = None
             self._growth_factor = growth_factor
             self._backoff_factor = backoff_factor
             self._per_optimizer_states = defaultdict(dict)
+
+    @staticmethod
+    def _scale_not_initialized_error(funcname):
+        return "Attempted to call {} but the scale tensor is None. This may indicate your ".format(funcname) + \
+               "script did not use scaler.scale(loss or outputs) earlier in the iteration."
 
     def scale(self, outputs):
         """
@@ -98,14 +105,21 @@ class AmpScaler(object):
         # Short-circuit for the common case.
         if isinstance(outputs, torch.Tensor):
             assert outputs.is_cuda
-            return outputs * self._scale.to(outputs.device)
+            if self._scale is None:
+                self._scale = torch.full((1,), self._init_scale, dtype=torch.float32, device=outputs.device)
+            return outputs * self._scale.to(device=outputs.device, non_blocking=True)
 
         # Invoke the more complex machinery only if we're treating multiple outputs.
-        per_device_scale = _MultiDeviceReplicator(self._scale)
+        per_device_scale = None
 
         def apply_scale(val):
+            nonlocal per_device_scale
             if isinstance(val, torch.Tensor):
                 assert val.is_cuda
+                if self._scale is None:
+                    self._scale = torch.full((1,), self._init_scale, dtype=torch.float32, device=val.device)
+                if per_device_scale is None:
+                    per_device_scale = _MultiDeviceReplicator(self._scale)
                 return val * per_device_scale.get(val.device)
             elif isinstance(val, container_abcs.Iterable):
                 return type(val)(apply_scale(v) for v in val)
@@ -166,6 +180,8 @@ class AmpScaler(object):
         if not self._enabled:
             return
 
+        assert self._scale is not None, self._scale_not_initialized_error("unscale")
+
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
         if "unscaled" in optimizer_state:
@@ -206,6 +222,8 @@ class AmpScaler(object):
         if "closure" in kwargs:
             raise RuntimeError("Closure use is not currently supported if AmpScaler is enabled.")
 
+        assert self._scale is not None, self._scale_not_initialized_error("step")
+
         if (hasattr(optimizer, "step_supports_amp_scaling") and optimizer.step_supports_amp_scaling):
             # This optimizer has customized scaling-safe step logic, so we call it directly.
             # The contract with custom optimizers is that their step methods should accept an additional,
@@ -220,7 +238,7 @@ class AmpScaler(object):
 
         assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
 
-        if not sum(v.item() for k, v in optimizer_state["found_inf_per_device"].items()):
+        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
             return optimizer.step(*args, **kwargs)
 
     def update(self, new_scale=None):
@@ -243,6 +261,8 @@ class AmpScaler(object):
         if not self._enabled:
             return
 
+        assert self._scale is not None, self._scale_not_initialized_error("update")
+
         if new_scale is not None:
             # Accept a new user-defined scale.
             if isinstance(new_scale, float):
@@ -256,8 +276,9 @@ class AmpScaler(object):
         else:
             # Consume shared inf/nan data collected from optimizers to update the scale.
             # If all found_inf tensors are on the same device as self._scale, this operation is asynchronous.
-            found_infs = [found_inf.to(self._scale.device) for opt_id, state in self._per_optimizer_states.items()
-                          for device, found_inf in state["found_inf_per_device"].items()]
+            found_infs = [found_inf.to(device=self._scale.device, non_blocking=True)
+                          for state in self._per_optimizer_states.values()
+                          for found_inf in state["found_inf_per_device"].values()]
 
             assert len(found_infs) > 0, "No inf checks were recorded prior to update."
 
@@ -274,16 +295,21 @@ class AmpScaler(object):
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
         self._per_optimizer_states = defaultdict(dict)
 
+    def _get_scale_async(self):
+        return self._scale
+
     def get_scale(self):
         """
         Returns:
-            The scale factor (a single-element :class:`torch.cuda.FloatTensor`), or 1.0 if scaling is disabled.
+            A Python float containing the current scale, or 1.0 if scaling is disabled.
 
-        .. note::
-            :meth:`get_scale` alone does not incur a CPU-GPU sync, but if you wish to print the scale Tensor, or
-            inspect its value on the CPU by calling ``.item()``, that will incur a sync.
+        .. warning::
+            :meth:`get_scale` incurs a CPU-GPU sync.
         """
-        return self._scale if self._enabled else 1.0
+        if self._enabled:
+            return self._init_scale if self._scale is None else self._get_scale_async().item()
+        else:
+            return 1.0
 
     def get_growth_factor(self):
         r"""
@@ -324,13 +350,13 @@ class AmpScaler(object):
         r"""
         Returns the state of the scaler as a :class:`dict`.  It contains three entries:
 
-        * ``"scale"`` - a :class:`torch.cuda.FloatTensor` containing the current scale
+        * ``"scale"`` - a Python float containing the current scale
         * ``"growth_factor"`` - a Python float containing the current growth factor
         * ``"backoff_factor"`` - a Python float containing the current backoff factor
 
         If this instance is not enabled, returns an empty dict.
         """
-        return {"scale": self._scale,
+        return {"scale": self.get_scale(),
                 "growth_factor": self._growth_factor,
                 "backoff_factor": self._backoff_factor} if self._enabled else {}
 
@@ -348,7 +374,9 @@ class AmpScaler(object):
             raise RuntimeError("The source state dict is empty, possibly because it was saved "
                                "from a disabled instance of AmpScaler.")
 
-        self._scale.copy_(state_dict["scale"])
+        self._init_scale = state_dict["scale"]
+        if self._scale is not None:
+            self._scale.fill_(state_dict["scale"])
         self._growth_factor = state_dict["growth_factor"]
         self._backoff_factor = state_dict["backoff_factor"]
 
