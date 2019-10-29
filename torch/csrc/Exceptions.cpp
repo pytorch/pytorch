@@ -140,23 +140,12 @@ ValueError::ValueError(const char *format, ...) {
 void PyWarningHandler::process(
     const c10::SourceLocation& source_location,
     const std::string& msg) {
-  std::unique_lock<std::mutex> lock(warning_buffer_mutex_);
   warning_buffer_.push_back({source_location, msg});
 };
 
 PyWarningHandler::PyWarningHandler() noexcept(true):
-      prev_handler_(c10::Warning::get_warning_handler()),
-      overlapping_(false) {
+      prev_handler_(c10::Warning::get_warning_handler()) {
   c10::Warning::set_warning_handler(this);
-  auto prev_pyhandler = dynamic_cast<PyWarningHandler*>(prev_handler_);
-  if(prev_pyhandler != nullptr) {
-    this->mark_overlapping();
-    prev_pyhandler->mark_overlapping();
-  }
-}
-
-void PyWarningHandler::mark_overlapping() {
-  overlapping_ = true;
 }
 
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
@@ -164,26 +153,15 @@ void PyWarningHandler::mark_overlapping() {
 PyWarningHandler::~PyWarningHandler() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler_);
 
-  // The double lock is to keep the overall logic simple and avoid
-  // the need to thread local warnings.
-  // The has_warnings is still valid because the warning handler is
-  // changed on entering this function.
-  bool has_warnings;
-  {
-    std::unique_lock<std::mutex> lock(warning_buffer_mutex_);
-    has_warnings = warning_buffer_.size() > 0;
-  }
-
-  if(has_warnings) {
+  if(warning_buffer_.size() > 0) {
     AutoGIL gil;
-    std::unique_lock<std::mutex> lock(warning_buffer_mutex_);
 
     PyObject *ptype, *pvalue, *ptraceback;
     PyErr_Fetch(&ptype, &pvalue, &ptraceback);
 
     if(ptype) {
       // A python error happened after the warning
-      // Simply handle with the cpp handler
+      // Simply handle with the previous handler
       for(const auto& warning: warning_buffer_) {
         auto source_location = warning.first;
         const auto& msg = processErrorMsg(warning.second);
@@ -196,15 +174,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       PyErr_Restore(ptype, pvalue, ptraceback);
     } else {
       auto result = 0;
-      if(overlapping_) {
-        // This python thread might not be the one that caused the issue
-        // Warn the user about this.
-        result = PyErr_WarnEx(PyExc_RuntimeWarning, PYWARNING_MAYBE_INVALID_PYTHON_STACKTRACE, 1);
-      }
       for(const auto& warning: warning_buffer_) {
-        if (result < 0) {
-          break;
-        }
         auto source_location = warning.first;
         const auto& msg = processErrorMsg(warning.second);
         if (source_location.file == nullptr) {
@@ -217,6 +187,9 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
               /*lineno=*/source_location.line,
               /*module=*/nullptr,
               /*registry=*/nullptr);
+        }
+        if (result < 0) {
+          break;
         }
       }
       warning_buffer_.clear();
