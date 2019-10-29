@@ -796,6 +796,15 @@ class DistAutogradTest(object):
         rref_owner = "worker{}".format((self.rank + 2) % self.world_size)
         self._test_backward_rref(callee, rref_owner)
 
+    # In this test, every rank will serve as a parameter server (ps) and a
+    # driver, and then kicks off trainers on the other three ranks. So, we have:
+    # ps = rank0 with trainers = rank1/2/3
+    # ps = rank2 with trainers = rank2/3/0
+    # ps = rank3 with trainers = rank3/0/1
+    # ps = rank4 with trainers = rank0/1/2
+    #
+    # These four test ps-trainer groups run on completely separate autograd
+    # graphs, but they share the same set of underlying RpcAgents.
     @dist_init
     def test_backward_rref_multi_user(self):
         local_grads = None
@@ -831,32 +840,13 @@ class DistAutogradTest(object):
         # trainers are done and holding the context for verification
         accumulate_grad_func = None
         for rank_diff in rank_diffs:
-            # for each context, there should only be one send function, sending
-            # the result back to the trainer.
+            # make sure grads are accumulated for the same tensors and values
+            # are all correct
             ctx_id = ctx_ids[rank_diff]
-            ctx = dist_autograd._retrieve_context(ctx_id)
-            send_functions = ctx._send_functions()
-            self.assertEqual(1, len(send_functions))
-
-            # the result comes from a torch.add
-            next_funcs = list(send_functions.values())[0].next_functions
-            add_backward_fn = next_funcs[0][0]
-            self.assertEqual("AddBackward0", add_backward_fn.name())
-
-            # Verify the next two functions are the same recv backward function.
-            next_funcs = add_backward_fn.next_functions
-            self.assertEqual(2, len(next_funcs))
-            self.assertEqual(
-                "torch::autograd::AccumulateGrad", next_funcs[0][0].name()
-            )
-            if accumulate_grad_func:
-                self.assertEqual(accumulate_grad_func, next_funcs[0][0])
-            else:
-                accumulate_grad_func = next_funcs[0][0]
-            self.assertEqual(
-                "torch::distributed::autograd::RecvRpcBackward",
-                next_funcs[1][0].name()
-            )
+            grads = dist_autograd.get_gradients(ctx_id)
+            local_t1 = rref_t1.local_value().wait()
+            self.assertIn(local_t1, grads)
+            self.assertEqual(grads[local_t1], t1.grad)
 
         # unblock trainers
         _set_rpc_done(None, 0)

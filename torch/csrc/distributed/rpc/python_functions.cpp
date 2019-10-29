@@ -30,7 +30,6 @@ std::shared_ptr<Operator> matchBuiltinOp(
     const py::kwargs& kwargs,
     Stack& stack) {
   Symbol symbol = Symbol::fromQualString(opName);
-
   if (symbol.is_aten()) {
     for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
       try {
@@ -163,7 +162,6 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
   auto pythonUDFCall = c10::guts::make_unique<PythonUDFCall>(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
-
   return sendMessageWithAutograd(
       agent, dst, std::move(*pythonUDFCall).toMessage());
 }

@@ -246,7 +246,6 @@ void DistEngine::execute(const variable_list& roots) {
   std::shared_ptr<Node> graphRoot =
       std::make_shared<GraphRoot>(rootEdges, grads);
   edge_list outputEdges;
-
   // Compute dependencies locally, starting from all roots and all 'send'
   // functions.
   {
