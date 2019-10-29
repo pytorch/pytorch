@@ -33,7 +33,7 @@ import torch.nn.functional as F
 import torch.nn.parallel as dp
 import torch.optim as optim
 from torch.quantization import QConfig
-from torch.quantization._quantize_script import PackedParams
+from torch.quantization._quantize_script import ConvPackedParams, LinearPackedParams
 
 # Testing utils
 import jit_utils
@@ -765,11 +765,11 @@ class TestJit(JitTestCase):
 
         net = Net()
         t = torch.ones(2, requires_grad=True)
-        trace, outputs, inputs = torch.jit.get_trace_graph(net, (t,), return_inputs=True)
-        self.assertEqual(outputs, self.createFunctionFromGraph(trace)(*inputs))
-        self.assertExportImport(trace, (t,))
-        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
-        FileCheck().check("onnx::LogSoftmax").check("scope: Net").run(str(trace))
+        g, outputs, inputs = torch.jit.get_trace_graph(net, (t,), return_inputs=True)
+        self.assertEqual(outputs, self.createFunctionFromGraph(g)(*inputs))
+        self.assertExportImport(g, (t,))
+        g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
+        FileCheck().check("onnx::LogSoftmax").check("scope: Net").run(str(g))
 
     def test_scopes_identity_node(self):
 
@@ -792,11 +792,11 @@ class TestJit(JitTestCase):
         t = torch.ones(1, 3, 227, 227, requires_grad=True)
 
         with torch.onnx.set_training(model, False):
-            trace, _ = torch.jit.get_trace_graph(model, (t,))
+            g, _ = torch.jit.get_trace_graph(model, (t,))
 
-        self.assertExportImport(trace, (t,) + tuple(model.parameters()))
-        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
-        FileCheck().check("Net/Sequential[features]/Conv2d[0]").check("ReLU").check("MaxPool").run(str(trace))
+        self.assertExportImport(g, (t,) + tuple(model.parameters()))
+        g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
+        FileCheck().check("Net/Sequential[features]/Conv2d[0]").check("ReLU").check("MaxPool").run(str(g))
 
     def test_canonicalize_tensor_iterator(self):
         x = torch.randn(4, 4)
@@ -870,14 +870,14 @@ class TestJit(JitTestCase):
             z = (x + y) * (x + y) * (x + y) + t
             return z
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x, y))
-        self.run_pass('cse', trace)
+        g, _ = torch.jit.get_trace_graph(fn, (x, y))
+        self.run_pass('cse', g)
         do_exactly = True
         FileCheck().check_count("add", 1).check_count("mul", 2, do_exactly) \
             .check_count("tanh", 1, do_exactly).check_count("add", 2, do_exactly).check_next("return")  \
-            .run(str(trace))
+            .run(str(g))
 
-        self.assertExportImport(trace, (x, y))
+        self.assertExportImport(g, (x, y))
 
     def test_cse_not_introduce_aliasing(self):
         @torch.jit.script
@@ -1169,21 +1169,17 @@ graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w
         input_strs = [
             # aten::conv2d --> quantized::conv2d
             """
-graph(%a, %w, %b, %a_scale, %a_zero_point, %a_dtype, %w_scale, %w_zero_point, %w_dtype,
-%r_scale, %r_zero_point, %r_dtype, %c, %d, %e, %f):
+graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype,
+%r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %a_quant = aten::quantize_per_tensor(%a, %a_scale, %a_zero_point, %a_dtype)
-        # CHECK-NOT: aten::dequantize
         %a_dequant = aten::dequantize(%a_quant)
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        # CHECK-NOT: aten::dequantize
+        %packed_params = prim::GetAttr[name="_packed_params"](%packed_params_module)
+        %w_quant : Tensor, %b : Tensor? = quantized::conv_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
-        # CHECK: quantized::conv_prepack
         # CHECK: quantized::conv2d
         # CHECK-NOT: aten::conv2d
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %c, %d, %e, %f)
-        # CHECK-NOT: aten::quantize_per_tensor
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
-        # CHECK: aten::dequantize
         %r_dequant = aten::dequantize(%r_quant)
         return (%r_dequant)""",
             # addmm -> quantized::linear
@@ -1398,9 +1394,9 @@ graph(%input, %weight):
     )
     @_tmp_donotuse_dont_inline_everything
     def test_fold_prepack(self):
-        class M(torch.nn.Module):
+        class QLinear(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super(QLinear, self).__init__()
                 self.weight = torch.nn.Parameter(torch.rand((5, 5), dtype=torch.float))
                 self.bias = torch.nn.Parameter(torch.rand(5, dtype=torch.float))
 
@@ -1413,30 +1409,60 @@ graph(%input, %weight):
                 rq = torch.quantize_per_tensor(r, 0.2, 1, torch.quint8)
                 return rq
 
+        class QConv(torch.nn.Module):
+            def __init__(self):
+                super(QConv, self).__init__()
+                self.weight = torch.nn.Parameter(torch.rand((2, 3, 3, 3), dtype=torch.float))
+                self.bias = torch.nn.Parameter(torch.rand((2,), dtype=torch.float))
 
-        m = torch.jit.script(M())
-        data = torch.randn((5, 5), dtype=torch.float)
-        ref_res = m._c._get_method('forward')(data)
-        torch._C._jit_pass_fold_prepack(m._c, torch.jit.script(PackedParams())._c)
-        res = m._c._get_method('forward')(data)
-        # check attribute and graph
-        self.assertTrue(m._c._has_module('_packed_linear_weight_bias'))
-        # check values
-        original_w = m._c._get_parameter('weight')
-        ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
-        ref_b = m._c._get_parameter('bias')
-        w, b = m._c._get_module('_packed_linear_weight_bias')._get_method('_weight_bias')()
-        self.assertEqual(ref_w, w.dequantize())
-        self.assertEqual(ref_b, b)
-        self.assertEqual(ref_res, res)
+            def forward(self, x):
+                xq = torch.quantize_per_tensor(x, 0.2, 2, torch.quint8)
+                wq = torch.quantize_per_tensor(self.weight, 0.2, 1, torch.qint8)
+                stride, padding, dilation, groups = [1, 1], [0, 0], [1, 1], 1
+                packed = torch.ops.quantized.conv_prepack(wq, self.bias, stride, padding, dilation, groups)
+                w_unpacked, b_unpacked = torch.ops.quantized.conv_unpack(packed)
+                r = torch.nn.functional.conv2d(xq.dequantize(),
+                                               w_unpacked.dequantize(),
+                                               b_unpacked,
+                                               stride,
+                                               padding,
+                                               dilation,
+                                               groups)
+                rq = torch.quantize_per_tensor(r, 0.2, 2, torch.quint8)
+                return rq
 
-        # test serialization
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-        buffer.seek(0)
-        loaded_mod = torch.jit.load(buffer)
-        loaded_res = loaded_mod._c._get_method('forward')(data)
-        self.assertEqual(ref_res, loaded_res)
+        for name, M, data in [('linear', QLinear, torch.randn((5, 5), dtype=torch.float)),
+                              ('conv', QConv, torch.randn((1, 3, 24, 24), dtype=torch.float))]:
+            m = torch.jit.script(M())
+            ref_res = get_forward(m._c)(data)
+            linear_packed_params = torch.jit.script(LinearPackedParams())._c
+            conv_packed_params = torch.jit.script(ConvPackedParams())._c
+            torch._C._jit_pass_fold_prepack(m._c,
+                                            linear_packed_params,
+                                            conv_packed_params)
+            res = get_forward(m._c)(data)
+            # check attribute and graph
+            packed_module_list = [x for x, _ in m._c._get_modules()
+                                  if x.startswith('_' + name + '_packed_params_module')]
+            assert len(packed_module_list) == 1, \
+                'Expected to have one packed_params_module'
+            packed_module_name = packed_module_list[0]
+            # check values
+            original_w = m._c._get_parameter('weight')
+            ref_w = torch.quantize_per_tensor(original_w, 0.2, 1, torch.qint8).dequantize()
+            ref_b = m._c._get_parameter('bias')
+            w, b = m._c._get_module(packed_module_name)._get_method('_weight_bias')()
+            self.assertEqual(ref_w, w.dequantize())
+            self.assertEqual(ref_b, b)
+            self.assertEqual(ref_res, res)
+
+            # test serialization
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+            buffer.seek(0)
+            loaded_mod = torch.jit.load(buffer)
+            loaded_res = loaded_mod._c._get_method('forward')(data)
+            self.assertEqual(ref_res, loaded_res)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -1638,12 +1664,12 @@ graph(%Ra, %Rb):
             y.add_(3)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,))
-        self.run_pass('dce', trace)
+        g, _ = torch.jit.get_trace_graph(fn, (x,))
+        self.run_pass('dce', g)
         FileCheck().check_count("aten::clone", 1, exactly=True) \
             .check_count("aten::add_", 2, exactly=True) \
-            .check_next("return").run(str(trace))
-        self.assertExportImport(trace, (x,))
+            .check_next("return").run(str(g))
+        self.assertExportImport(g, (x,))
 
     def test_inplace_flags(self):
         class InplaceFn(Function):
@@ -1674,9 +1700,9 @@ graph(%Ra, %Rb):
             y = RegularFn.apply(y)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,), _force_outplace=True)
-        self.run_pass('dce', trace)
-        ops = [n for n in trace.graph().nodes()]
+        trace_graph, _ = torch.jit.get_trace_graph(fn, (x,), _force_outplace=True)
+        self.run_pass('dce', trace_graph)
+        ops = [n for n in trace_graph.nodes()]
         for op in ops:
             self.assertTrue(op.hasAttribute('inplace'))
         inplace_flags = [False, True, True, False]
@@ -1767,6 +1793,40 @@ graph(%Ra, %Rb):
         y = torch.randn(2, 7)
         self.assertEqual(ge(y).shape, y.shape)
         self.assertEqual(ge(x).shape, x.shape)
+
+    def do_trace_slice(self, requires_grad):
+        def slice(x):
+            results = []
+            for i in range(4):
+                results.append(x[:x.size(0) - i, i:x.size(2), i:3])
+            return tuple(results)
+
+        def slice_select(x):
+            results = []
+            for i in range(4):
+                results.append(x[:, i:, x.size(2) - 5])
+            return tuple(results)
+
+        x = torch.randn(5, 6, 7, requires_grad=requires_grad)
+        y = torch.randn(7, 8, 9, requires_grad=requires_grad)
+
+        # Check that it behaves as expected
+        traced_slice = torch.jit.trace(slice, x)
+        self.assertEqual(traced_slice(y), slice(y))
+        self.assertEqual(traced_slice(x), slice(x))
+
+        traced_slice_select = torch.jit.trace(slice_select, x)
+        self.assertEqual(traced_slice_select(y), slice_select(y))
+        self.assertEqual(traced_slice_select(x), slice_select(x))
+
+    def test_trace_slice(self):
+        self.do_trace_slice(False)
+
+    # test the different graph_executor path that happens when
+    # gradients are required and sizes are involved
+    def test_trace_slice_with_grad(self):
+        self.do_trace_slice(True)
+
 
     def test_trace_casts(self):
         casts = [
@@ -2031,10 +2091,9 @@ graph(%Ra, %Rb):
         def doit(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        trace, _ = torch.jit.get_trace_graph(doit, (x, y))
-        self.run_pass('dce', trace)
-        self.run_pass('canonicalize', trace)
-        g = trace.graph()
+        g, _ = torch.jit.get_trace_graph(doit, (x, y))
+        self.run_pass('dce', g)
+        self.run_pass('canonicalize', g)
         g2 = torch._C.Graph()
         g_to_g2 = {}
         for node in g.inputs():
@@ -2076,17 +2135,17 @@ graph(%Ra, %Rb):
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
-        trace, outputs, inputs = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x,
-                                                           _force_outplace=True, return_inputs=True)
-        m = self.createFunctionFromGraph(trace)
+        g, outputs, inputs = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x,
+                                                       _force_outplace=True, return_inputs=True)
+        m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
 
     def test_dropout(self):
         x = torch.ones(2, 2)
         with torch.random.fork_rng(devices=[]):
-            trace, outputs, inputs = torch.jit.get_trace_graph(nn.Dropout(0.6), x, return_inputs=True)
+            g, outputs, inputs = torch.jit.get_trace_graph(nn.Dropout(0.6), x, return_inputs=True)
         with torch.random.fork_rng(devices=[]):
-            m = self.createFunctionFromGraph(trace)
+            m = self.createFunctionFromGraph(g)
             self.assertEqual(outputs, m(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "test_dropout_cuda require CUDA")
@@ -2112,8 +2171,8 @@ graph(%Ra, %Rb):
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40)
-        trace, outputs, inputs = torch.jit.get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True)
-        m = self.createFunctionFromGraph(trace)
+        g, outputs, inputs = torch.jit.get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True)
+        m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
 
     def test_max_pool(self):
@@ -2152,9 +2211,9 @@ graph(%Ra, %Rb):
         x = torch.ones(1, 3, 224, 224)
         model = torchvision.models.AlexNet()
         with torch.random.fork_rng(devices=[]):
-            trace, outputs, inputs = torch.jit.get_trace_graph(model, x, return_inputs=True)
-        self.run_pass('cse', trace)
-        m = self.createFunctionFromGraph(trace)
+            g, outputs, inputs = torch.jit.get_trace_graph(model, x, return_inputs=True)
+        self.run_pass('cse', g)
+        m = self.createFunctionFromGraph(g)
         with torch.random.fork_rng(devices=[]):
             self.assertEqual(outputs, m(*inputs))
 
@@ -2166,11 +2225,11 @@ graph(%Ra, %Rb):
             out.copy_(x)
             return out
 
-        trace, outputs, inputs = torch.jit.get_trace_graph(f, (x, ), return_inputs=True)
-        self.run_pass('dce', trace)
-        m = self.createFunctionFromGraph(trace)
+        g, outputs, inputs = torch.jit.get_trace_graph(f, (x, ), return_inputs=True)
+        self.run_pass('dce', g)
+        m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
-        self.assertExportImport(trace, (x,))
+        self.assertExportImport(g, (x,))
 
     def test_shared_param(self):
         class MyModule(torch.nn.Module):
@@ -2182,10 +2241,10 @@ graph(%Ra, %Rb):
                 return x * self.a + self.b
 
         m = MyModule()
-        trace, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),))
-        self.run_pass('dce', trace)
-        self.assertEqual(len(list(trace.graph().inputs())), 2)
-        FileCheck().check("mul").check("add").run(str(trace))
+        g, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),))
+        self.run_pass('dce', g)
+        self.assertEqual(len(list(g.inputs())), 2)
+        FileCheck().check("mul").check("add").run(str(g))
 
     def test_trace_c10_ops(self):
         try:
@@ -2221,12 +2280,12 @@ graph(%Ra, %Rb):
 
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
-        trace, outputs, inputs = torch.jit.get_trace_graph(
+        g, outputs, inputs = torch.jit.get_trace_graph(
             lambda x: F.threshold(x, 0, 0, inplace=True), (x, ), return_inputs=True)
-        m = self.createFunctionFromGraph(trace)
+        m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
-        FileCheck().check("threshold_").run(str(trace))
-        self.assertExportImport(trace, (x,))
+        FileCheck().check("threshold_").run(str(g))
+        self.assertExportImport(g, (x,))
 
     def run_ge_tests(self, optimize, use_cuda):
         with torch.jit.optimized_execution(optimize):
@@ -12774,7 +12833,7 @@ a")
 
         f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
-            DynamicSliceExportMod(), (input,), f, example_outputs=example_outs)
+            DynamicSliceExportMod(), (input,), f, example_outputs=example_outs, opset_version=10)
 
     def test_string_frontend_elif(self):
         code = '''
@@ -16982,6 +17041,13 @@ additional_module_tests = [
         'constructor_args': (S, S),
         'input_size': (S, S),
     },
+    {
+        'module_name': 'MultiheadAttention',
+        'constructor_args': (128, 8),
+        'input_size': (10, 8, 128),
+        'extra_args': (torch.randn(10, 8, 128), torch.randn(10, 8, 128)),
+        'slowTest': True
+    }
 ]
 
 
