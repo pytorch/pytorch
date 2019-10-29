@@ -806,7 +806,7 @@ class DistAutogradTest(object):
     # These four test ps-trainer groups run on completely separate autograd
     # graphs, but they share the same set of underlying RpcAgents.
     @dist_init
-    def test_backward_rref_multi_user(self):
+    def test_trainer_ps(self):
         local_grads = None
         t1 = torch.ones((3, 3), requires_grad=True)
         t2 = torch.zeros((3, 3), requires_grad=True)

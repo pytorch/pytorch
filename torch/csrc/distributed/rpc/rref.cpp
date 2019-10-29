@@ -27,8 +27,7 @@ T& unwrapAutogradMessage(
     const Message& message,
     std::unique_ptr<RpcCommandBase>& response) {
   if (message.type() == MessageType::FORWARD_AUTOGRAD_RESP) {
-    auto& rpcWithAutograd =
-        static_cast<autograd::RpcWithAutograd&>(*response);
+    auto& rpcWithAutograd = static_cast<autograd::RpcWithAutograd&>(*response);
 
     // Attach 'recv' autograd function.
     addRecvRpcBackward(
