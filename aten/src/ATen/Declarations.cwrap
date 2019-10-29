@@ -15,19 +15,6 @@
         - THTensor* self
         - THTensor* source
     - cname: setStorage
-      scalar_check: False
-      arguments:
-        - THTensor* self
-        - CONSTANT NULL, 0, {0}, {}
-    - cname: setStorage
-      scalar_check: False
-      arguments:
-        - THTensor* self
-        - THStorage* source
-        - CONSTANT 0
-        - CONSTANT {static_cast<int64_t>(source.size())}
-        - CONSTANT {}
-    - cname: setStorage
       arguments:
         - THTensor* self
         - THStorage* source
@@ -1029,19 +1016,6 @@
     - long bins
     - real min
     - real max
-]]
-[[
-  name: _th_zero_
-  cname: zero
-  return: self
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  arguments:
-    - THTensor* self
 ]]
 [[
   name: _th_cumsum
