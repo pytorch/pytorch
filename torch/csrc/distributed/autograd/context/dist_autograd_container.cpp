@@ -196,24 +196,23 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
 }
 
 void DistAutogradContainer::cleanupContextWatchdog() {
-  LOG(ERROR) << getWorkerId() << "- scheduled again! watchdog: " << terminateWatchdog_.load() <<  "\n";
-  std::this_thread::sleep_for(kContextTimeout);
+  /* LOG(ERROR) << getWorkerId() << "- scheduled again! watchdog: " << terminateWatchdog_.load() <<  "\n"; */
+  /* std::this_thread::sleep_for(kContextTimeout); */
   while (!terminateWatchdog_.load()) {
     {
       std::lock_guard<std::mutex> guard(autograd_context_lock_);
-      LOG(ERROR) << getWorkerId() << "- got inside\n";
-      if (autograd_context_.empty()) {
-        LOG(ERROR) << getWorkerId() << "- nothing to loop thru\n";
-      }
+      /* LOG(ERROR) << getWorkerId() << "- got inside\n"; */
+      /* if (autograd_context_.empty()) { */
+      /*   LOG(ERROR) << getWorkerId() << "- nothing to loop thru\n"; */
+      /* } */
       for (auto it = autograd_context_.begin(); it != autograd_context_.end();) {
         auto now = std::chrono::high_resolution_clock::now();
-        LOG(ERROR) << getWorkerId() << "- candidate id " << it->first << "\n";
+        /* LOG(ERROR) << getWorkerId() << "- candidate id " << it->first << "\n"; */
         auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - std::get<1>(it->second));
-        LOG(ERROR) << getWorkerId() << "- curr time: " << diff.count() << "\n";
-        /* LOG(ERROR) << getWorkerId() << "- " << kContextTimeout.count() << "\n"; */
+        /* LOG(ERROR) << getWorkerId() << "- curr time: " << diff.count() << "\n"; */
         if (diff >= kContextTimeout) { // && autograd_context_.find(pair.first) != autograd_context_.end()) {
           // TODO: see if you can just invoke destructor
-          LOG(ERROR) << getWorkerId() << "- cleared timeout!\n";
+          /* LOG(ERROR) << getWorkerId() << "- cleared timeout!\n"; */
           LOG(ERROR) << getWorkerId() << "- DELETING " << it->first << "\n";
           /* eraseContextIdAndReset(pair.first); */
           auto context_id = it->first;
@@ -227,13 +226,19 @@ void DistAutogradContainer::cleanupContextWatchdog() {
       }
     }
     // CV stuff
-    LOG(ERROR) << "Waiting for destruction\n";
-    std::unique_lock<std::mutex> guard(cleanupWatchdogCVMutex_);
-    cleanupWatchdogCV_.wait_for(
-        guard,
-        std::chrono::seconds(60),
-        [&]() -> bool { return terminateWatchdog_.load(); });
+    /* LOG(ERROR) << getWorkerId() << "- Waiting for destruction\n"; */
+    /* std::unique_lock<std::mutex> guard(cleanupWatchdogCVMutex_); */
+    /* cleanupWatchdogCV_.wait_for( */
+    /*     guard, */
+    /*     std::chrono::seconds(300), */
+    /*     [&]() -> bool { return terminateWatchdog_.load(); }); */
   }
+  LOG(ERROR) << getWorkerId() << "- Waiting for destruction\n";
+  std::unique_lock<std::mutex> guard(cleanupWatchdogCVMutex_);
+  cleanupWatchdogCV_.wait_for(
+      guard,
+      std::chrono::seconds(300),
+      [&]() -> bool { return terminateWatchdog_.load(); });
 }
 
 /* void DistAutogradContainer::cleanupContextWatchdog() { */
