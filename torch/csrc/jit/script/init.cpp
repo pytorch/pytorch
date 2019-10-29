@@ -597,8 +597,9 @@ void initJitScriptBindings(PyObject* module) {
             // prereq: Module's buffers and parameters are unique
             // this was ensured in python before calling this function
             auto typed_inputs = toTraceableStack(input_tuple);
-            auto graph = tracer::createGraphByTracing(
-                func, typed_inputs, var_lookup_fn, force_outplace, &self);
+
+            std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
+                func, typed_inputs, var_lookup_fn, force_outplace, &self));
             const auto method_name = QualifiedName(self.name(), name);
             auto fn = self.class_compilation_unit()->create_function(
                 method_name, graph);
@@ -793,8 +794,8 @@ void initJitScriptBindings(PyObject* module) {
          py::function var_lookup_fn,
          bool force_outplace) {
         auto typed_inputs = toTraceableStack(input_tuple);
-        auto graph = tracer::createGraphByTracing(
-            func, typed_inputs, var_lookup_fn, force_outplace);
+        std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
+            func, typed_inputs, var_lookup_fn, force_outplace));
         auto cu = get_python_cu();
         auto name = c10::QualifiedName(qualname);
         auto result = cu->create_function(
