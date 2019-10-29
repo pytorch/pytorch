@@ -4,19 +4,6 @@ import contextlib
 from . import cudart, check_error
 
 
-class cudaOutputMode(object):
-    cudaKeyValuePair = ctypes.c_int(0)
-    cudaCSV = ctypes.c_int(1)
-
-    @staticmethod
-    def for_key(key):
-        if key == 'key_value':
-            return cudaOutputMode.cudaKeyValuePair
-        elif key == 'csv':
-            return cudaOutputMode.cudaCSV
-        else:
-            raise RuntimeError("supported CUDA profiler output modes are: key_value and csv")
-
 DEFAULT_FLAGS = [
     "gpustarttimestamp",
     "gpuendtimestamp",
@@ -29,6 +16,8 @@ DEFAULT_FLAGS = [
 
 
 def init(output_file, flags=None, output_mode='key_value'):
+    if not hasattr(rt, 'cudaOutputMode'):
+        raise AssertionError("HIP does not support profiler initialization!")
     rt = cudart()
     flags = DEFAULT_FLAGS if flags is None else flags
     if output_mode == 'key_value':

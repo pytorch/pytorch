@@ -502,12 +502,10 @@ void initModule(PyObject *module) {
   python::initCommMethods(module);
   // As weird as it seems, this file is also compiled for ROCm,
   // so this condition might not always be true...
-#ifdef USE_CUDA
   shared::initCudartBindings(module);
   shared::initNvtxBindings(module);
 #ifdef USE_CUDNN
   shared::initCudnnBindings(module);
-#endif
 #endif
 }
 

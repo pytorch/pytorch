@@ -1,5 +1,7 @@
 #include <Python.h>
 
+#include <array>
+
 #if PY_MAJOR_VERSION == 2
 PyMODINIT_FUNC init__global_deps() {}
 #else

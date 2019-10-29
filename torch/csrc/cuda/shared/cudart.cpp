@@ -10,9 +10,11 @@ void initCudartBindings(PyObject* module) {
 
   auto cudart = m.def_submodule("_cudart", "libcudart.so bindings");
 
+#ifndef __HIP_PLATFORM_HCC__
   py::enum_<cudaOutputMode_t>(cudart, "cudaOutputMode")
       .value("KeyValuePair", cudaKeyValuePair)
       .value("CSV", cudaCSV);
+#endif
 
   py::enum_<cudaError_t>(cudart, "cudaError")
       .value("success", cudaSuccess);
@@ -20,6 +22,9 @@ void initCudartBindings(PyObject* module) {
   cudart.def("cudaGetErrorString", cudaGetErrorString);
   cudart.def("cudaProfilerStart", cudaProfilerStart);
   cudart.def("cudaProfilerStop", cudaProfilerStop);
+#ifndef __HIP_PLATFORM_HCC__
+  cudart.def("cudaProfilerInitialize", cudaProfilerInitialize);
+#endif
 }
 
 } // namespace shared

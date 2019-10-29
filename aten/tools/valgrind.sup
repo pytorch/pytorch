@@ -13,6 +13,6 @@
    <Dynamically loaded MKL uninitialized jump>
    Memcheck:Cond
    fun:__intel_sse2_strrchr
-   fun:_ZN67_INTERNAL_45_______src_thirdparty_tbb_omp_dynamic_link_cpp_71fe09f45__kmp12init_dl_dataEv
+   fun:*_INTERNAL_45_______src_thirdparty_tbb_omp_dynamic_link_cpp*init_dl_data*
    fun:__sti__$E
 }

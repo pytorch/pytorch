@@ -880,7 +880,7 @@ if(USE_OPENMP AND OPENMP_FOUND)
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
   target_compile_options(torch INTERFACE ${OpenMP_CXX_FLAGS})
-  target_link_libraries(torch PRIVATE ${OpenMP_CXX_LIBRARIES})
+  target_link_libraries(torch INTERFACE ${OpenMP_CXX_LIBRARIES})
 endif()
 
 
