@@ -52,6 +52,17 @@ RENAME_TRACE = {
     'fill': 'full_like',
 }
 
+RENAME_TRACE_ADD_ARGS = {
+    'fill': '''\
+    c10::optional<MemoryFormat> memory_format = c10::nullopt;
+    jit::tracer::addInputs(node, "memory_format", memory_format);
+''',
+    'zero': '''\
+    c10::optional<MemoryFormat> memory_format = c10::nullopt;
+    jit::tracer::addInputs(node, "memory_format", memory_format);
+''',
+}
+
 # (declaration name, argument name) -> attribute name
 RENAME_ATTRIBUTES = {
     ('fill_', 'value'): 'fill_value'
@@ -408,7 +419,15 @@ def format_prerecord_trace(declaration):
     is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
 
     local['set_op_name'] = format_trace_op_name(declaration)
-    local['add_trace_inputs'] = format_trace_inputs(declaration)
+
+    api_name = uninplace_api_name(declaration['api_name'])
+    add_args = RENAME_TRACE_ADD_ARGS.get(api_name, '')
+    select_params = {}
+    select_params['cond'] = 'tracer_state->force_outplace'
+    select_params['true'] = add_args
+    select_params['false'] = ''
+    additional_inputs = SELECT.substitute(select_params)
+    local['add_trace_inputs'] = format_trace_inputs(declaration) + additional_inputs
 
     local['inplace_guard'] = ''
     if is_inplace:
