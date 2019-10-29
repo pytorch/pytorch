@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/nn/options/batchnorm.h>
 #include <torch/types.h>
 
 namespace torch {
