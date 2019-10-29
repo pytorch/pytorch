@@ -224,7 +224,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
       }
     } else if (is_init_list()) {
       stream << "{";
-      for (const auto it = init_list_.begin(); it != init_list_.end(); it++) {
+      for (const TensorDataContainer* it = init_list_.begin(); it != init_list_.end(); it++) {
         stream << *it;
         if (std::next(it) != init_list_.end()) stream << ", ";
       }
