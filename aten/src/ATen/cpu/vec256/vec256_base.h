@@ -81,8 +81,8 @@ public:
   // Also, technically according to the C++ standard, we don't have to define
   // a constexpr variable if we never odr-use it.  But it seems that some
   // versions GCC/Clang have buggy determinations on whether or not an
-  // identifier is odr-used or not, and in any case it's hard to tel if
-  // a variabe is odr-used or not.  So best to just cut the probem at the root.
+  // identifier is odr-used or not, and in any case it's hard to tell if
+  // a variable is odr-used or not.  So best to just cut the probem at the root.
   static constexpr int size() {
     return 32 / sizeof(T);
   }

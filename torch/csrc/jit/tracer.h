@@ -205,34 +205,12 @@ TORCH_API std::function<void()> pauseTracing();
 
 TORCH_API Value* getValueTrace(const IValue& var);
 
-struct TypedStack : public std::pair<Stack, TupleTypePtr>
-{
-  using pair::pair;
-
-  // NB: The inherited default constructor gives nullptr for |type|,
-  //     so we provide a saner one.
-  TypedStack()
-    : pair({}, TupleType::create({}))
-  {}
-
-  Stack& stack() {
-    return this->first;
-  }
-  TupleTypePtr& types() {
-    return this->second;
-  }
-  size_t size() {
-    auto s = stack().size();
-    AT_ASSERT(s == types()->elements().size());
-    return s;
-  }
-};
-
-TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> enter(
-    TypedStack inputs,
+TORCH_API std::pair<std::shared_ptr<TracingState>, Stack> trace(
+    Stack inputs,
+    const std::function<Stack(Stack)>& traced_fn,
+    std::function<std::string(const Variable&)> var_name_lookup_fn,
+    bool force_outplace = false,
     script::Module* self = nullptr);
-
-TORCH_API void exit(const Stack& outputs);
 
 TORCH_API void abandon();
 

@@ -567,3 +567,27 @@ TEST(TensorTest, SetData) {
   y = at::tensor({5});
   ASSERT_THROWS_WITH(x.set_data(y), "set_data is not implemented for Tensor");
 }
+
+TEST(TensorTest, RequiresGradInplace) {
+  auto x = torch::tensor({5.0});
+  x.requires_grad_(true);
+  ASSERT_TRUE(x.requires_grad());
+
+  auto y = x * x;
+  ASSERT_THROWS_WITH(y.requires_grad_(false),
+    "you can only change requires_grad flags of leaf variables.");
+
+  x.requires_grad_(false);
+  ASSERT_FALSE(x.requires_grad());
+
+  const auto int_tensor = torch::tensor({5}, at::TensorOptions().dtype(torch::kInt));
+  ASSERT_THROWS_WITH(int_tensor.requires_grad_(true),
+    "Only Tensors of floating point dtype can require gradients");
+
+  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
+  y = x * x;
+  ASSERT_THROWS_WITH(x.requires_grad_(false),
+    "requires_grad_ is not implemented for Tensor");
+  ASSERT_THROWS_WITH(y.requires_grad_(false),
+    "requires_grad_ is not implemented for Tensor");
+}
