@@ -90,7 +90,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
   if (input->dim() == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else if (training) {
+#if CUDNN_VERSION >= 7400
     mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#else
+    mode = CUDNN_BATCHNORM_SPATIAL;
+#endif // CUDNN_VERSION >= 7400
   } else {
     mode = CUDNN_BATCHNORM_SPATIAL;
     // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
@@ -98,9 +102,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     // accuracy losses in convolution models such as ResNeXt-101 and
     // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
   }
-  auto op = CUDNN_BATCHNORM_OPS_BN;
 
   auto output_t = at::empty_like(*input, input->options(), input->suggest_memory_format());
+
   TensorArg output{ output_t, "output", 0 };
 
   auto handle = getCudnnHandle();
@@ -115,7 +119,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
   Tensor reserve;
 
   if (training) {
+
+    int64_t num_features = input_t.size(1);
+    save_mean = at::empty({ num_features }, weight_t.options());
+    save_var = at::empty({ num_features }, weight_t.options());
     
+#if CUDNN_VERSION >= 7400
+    auto op = CUDNN_BATCHNORM_OPS_BN;
     size_t workspace_size;
     AT_CUDNN_CHECK(cudnnGetBatchNormalizationForwardTrainingExWorkspaceSize(
         handle,
@@ -139,10 +149,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         idesc.desc(),
         &reserve_size));
     reserve = at::empty(reserve_size, input->options().dtype(kByte));
-
-    int64_t num_features = input_t.size(1);
-    save_mean = at::empty({ num_features }, weight_t.options());
-    save_var = at::empty({ num_features }, weight_t.options());
 
     AT_CUDNN_CHECK(cudnnBatchNormalizationForwardTrainingEx(
         handle,
@@ -170,7 +176,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         workspace_size,
         reserve.data_ptr(),
         reserve_size));
-
+#else
+    reserve = at::empty({0}, input->options().dtype(kByte));
+    AT_CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
+      handle, mode, &one, &zero,
+      idesc.desc(), input->data_ptr(),
+      idesc.desc(), output->data_ptr(),
+      wdesc.desc(),
+      weight->data_ptr(),
+      bias->data_ptr(),
+      exponential_average_factor,
+      at::maybe_data_ptr(running_mean),
+      at::maybe_data_ptr(running_var),
+      epsilon,
+      save_mean.data_ptr(),
+      save_var.data_ptr()));
+#endif // CUDNN_VERSION >= 7400
   } else {
     reserve = at::empty({0}, input->options().dtype(kByte));
     AT_CUDNN_CHECK(cudnnBatchNormalizationForwardInference(
@@ -239,14 +260,16 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   if (input->dim() == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
+#if CUDNN_VERSION >= 7400
+    mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#else
+    mode = CUDNN_BATCHNORM_SPATIAL;
+#endif // CUDNN_VERSION >= 7400
     // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
     // introduced in CuDNN 7 for performance optimization, but it results in
     // accuracy losses in convolution models such as ResNeXt-101 and
     // video R(2+1)D. We will fall back to the normal CUDNN_BATCHNORM_SPATIAL
-    // mode = CUDNN_BATCHNORM_SPATIAL;
-    mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
   }
-  auto op = CUDNN_BATCHNORM_OPS_BN;
 
   auto grad_input_t  = at::empty(input->sizes(), input->options(), input->suggest_memory_format());
   auto grad_weight_t = at::empty(weight->sizes(), weight->options());
@@ -261,6 +284,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
+
+#if CUDNN_VERSION >= 7400
+  auto op = CUDNN_BATCHNORM_OPS_BN;
 
   size_t workspace_size;
   AT_CUDNN_CHECK(cudnnGetBatchNormalizationBackwardExWorkspaceSize(
@@ -296,6 +322,19 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     workspace_size,
     reserve->data_ptr(),
     reserve->numel()));
+#else
+  AT_CUDNN_CHECK(cudnnBatchNormalizationBackward(
+    handle, mode, &one, &zero, &one, &zero,
+    idesc.desc(), input->data_ptr(),
+    odesc.desc(), grad_output->data_ptr(),
+    idesc.desc(), grad_input_t.data_ptr(),
+    wdesc.desc(), weight->data_ptr(),
+    grad_weight_t.data_ptr(),
+    grad_bias_t.data_ptr(),
+    epsilon,
+    save_mean->data_ptr(),
+    save_var->data_ptr()));
+#endif // CUDNN_VERSION >= 7400
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }
