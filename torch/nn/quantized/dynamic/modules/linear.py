@@ -45,6 +45,11 @@ class Linear(nnq.Linear):
     def _get_name(self):
         return 'DynamicQuantizedLinear'
 
+    def extra_repr(self):
+        return 'in_features={}, out_features={}'.format(
+            self.in_features, self.out_features
+        )
+
     @classmethod
     def from_float(cls, mod):
         r"""Create a dynamic quantized module from a float module or qparams_dict
