@@ -1,7 +1,8 @@
-#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <memory>
@@ -23,7 +24,7 @@ static std::unordered_set<Value *> collectLoopCounts(Node *n) {
     it = outerNode->owningBlock();
   }
 
-  return loopCounts;
+  return std::move(loopCounts);
 }
 
 struct BailOutGraphBuilderForNode {
@@ -142,10 +143,14 @@ struct BailOutGraphBuilderForNode {
   }
 
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
-
+    // add graph inputs for guard's input
+    // and loop counts for loops `n` is contained in
+    // to make sure we can line bailout grap's inputs up properly
+    // with arguments to this BailOut node.
     for (auto bi : n->inputs()) {
       getOrAddInputForValue(bi);
     }
+
     buildBailOutBlockFrom(n);
     // add graph outputs
     for (auto ov : graph_->outputs()) {
@@ -239,11 +244,9 @@ struct BailOutInserter {
         // currently, there's always one guaded input
         bailout_node->addInput(it->input());
 
-        // we need to collect loop counts to
-        // record the number of iterations already run
-        // however, liveness doesn't capture loop counts
-        // if they aren't used explicitly in a loop
-        // so we collect them manually here
+        // collect loop counts since liveness won't collect them
+        // if they aren't used explicitly, but they are used
+        // by BailOut graphs if we trigger a bailout inside a loop
         auto loopCounts = collectLoopCounts(*it);
         for (auto lc : loopCounts) {
           bailout_node->addInput(lc);
@@ -296,8 +299,8 @@ void InsertBailOuts(std::shared_ptr<Graph> graph) {
 // index matches the given `index`
 static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
   for (auto n : b->nodes()) {
-    if (n->kind() == prim::BailOut && n->hasAttribute(attr::index) &&
-        n->i(attr::index) == index) {
+    if ((n->kind() == prim::BailOut || n->kind() == prim::Guard) &&
+        n->hasAttribute(attr::index) && n->i(attr::index) == index) {
       return n;
     }
     for (auto ib : n->blocks()) {
@@ -313,7 +316,7 @@ static Node* locateBailOutNodeInUnoptimizedGraph(Block* b, int64_t index) {
 // to its users
 static void removeBailouts(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::BailOut) {
+    if (it->kind() == prim::BailOut || it->kind() == prim::Guard) {
       // clear profiling information
       it->inputs().at(0)->setType(TensorType::get());
       it->output()->replaceAllUsesWith(it->inputs().at(0));
@@ -333,16 +336,20 @@ TORCH_API std::shared_ptr<Graph> BuildBailOutGraphFrom(
     const std::shared_ptr<Graph>& target) {
   auto orig_bailout_node =
       locateBailOutNodeInUnoptimizedGraph(orig->block(), bailout_index);
+
+  GRAPH_DEBUG("bailout triggered for ", *orig_bailout_node);
+  GRAPH_DUMP("original bailout graph ", orig);
   TORCH_INTERNAL_ASSERT(
       orig_bailout_node->inputs().at(0)->type()->cast<FunctionType>() ==
       nullptr);
   TORCH_INTERNAL_ASSERT(
-      orig_bailout_node && orig_bailout_node->kind() == prim::BailOut &&
+      orig_bailout_node &&
+      (orig_bailout_node->kind() == prim::BailOut ||
+       orig_bailout_node->kind() == prim::Guard) &&
       bailout_index == orig_bailout_node->i(attr::index));
   BailOutGraphBuilderForNode bg(orig, target);
   auto bailout_graph = bg.buildBailOutGraphFrom(orig_bailout_node);
   removeBailouts(bailout_graph->block());
-  ConstantPooling(bailout_graph);
   return bailout_graph;
 }
 

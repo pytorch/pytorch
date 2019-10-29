@@ -765,7 +765,7 @@ Value* Value::setDebugName(const std::string& name) {
     if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
       if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
           std::string::npos) {
-        suffix = std::stoll(name.substr(last_dot_pos + 1));
+        suffix = c10::stoll(name.substr(last_dot_pos + 1));
         name_base = name.substr(0, last_dot_pos);
       }
     }
@@ -940,6 +940,8 @@ bool Node::hasSideEffects() const {
     case prim::CallMethod:
     case prim::BailoutTemplate:
     case prim::profile:
+    case prim::BailOut:
+    case prim::Guard:
       return true;
   }
 
@@ -1384,15 +1386,16 @@ Node* Graph::createWithSubgraph(Symbol kind) {
   return n;
 }
 
-Node* Graph::createTuple(
-    at::ArrayRef<Value*> values,
-    c10::optional<c10::QualifiedName> qualname,
-    std::shared_ptr<FunctionSchema> schema) {
-  auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(
-      std::move(types), std::move(qualname), std::move(schema));
+Node* Graph::createTuple(at::ArrayRef<Value*> values, TupleTypePtr tuple_type) {
+  TORCH_INTERNAL_ASSERT(
+      !tuple_type || tuple_type->schema(),
+      "only pass tuple_type when creating a named tuple");
+  if (!tuple_type) {
+    auto types = fmap(values, [](Value* v) { return v->type(); });
+    tuple_type = TupleType::create(std::move(types));
+  }
   auto n = create(prim::TupleConstruct, values);
-  n->output()->setType(tt);
+  n->output()->setType(tuple_type);
   return n;
 }
 

@@ -608,10 +608,10 @@ class ShapePropagator {
         // We refresh the tuple type, because the input types could have been
         // refined.
         auto orig_type = node->output()->type()->expect<TupleType>();
-        node->output()->setType(TupleType::create(
-            fmap(node->inputs(), [](Value* v) { return v->type(); }),
-            orig_type->name(),
-            orig_type->schema()));
+        auto new_types =
+            fmap(node->inputs(), [](Value* v) { return v->type(); });
+        node->output()->setType(
+            orig_type->createWithContained(std::move(new_types)));
         return;
       }
       case prim::TupleUnpack: {
@@ -856,7 +856,7 @@ class ShapePropagator {
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
             "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
-            "aten::empty_like(Tensor self) -> Tensor",
+            "aten::empty_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
             "aten::full_like(Tensor self, Scalar fill_value) -> Tensor",
             "aten::ones_like(Tensor self) -> Tensor",
             "aten::rand_like(Tensor self) -> Tensor",

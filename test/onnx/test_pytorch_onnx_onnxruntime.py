@@ -15,7 +15,7 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion, skipIfNoLapack
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -380,7 +380,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_slice_neg_large(self):
         class NegSlice(torch.nn.Module):
             def forward(self, x):
-                return x[:, :, :, :, -3]
+                return x[:, :, -3:-1, :, -1]
 
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
@@ -394,6 +394,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -403,8 +404,14 @@ class TestONNXRuntime(unittest.TestCase):
                 return tuple(results)
 
         x = torch.rand(5, 5, 5)
-        self.run_test(DynamicSliceExportMod(), x)
+        y = torch.randn(6, 7, 8)
+        self.run_test(DynamicSliceExportMod(), x, test_with_inputs=[y],
+                      input_names=['input_1'],
+                      output_names=['output_1'],
+                      dynamic_axes={'input_1': [0, 1, 2],
+                                    'output_1': [0, 1, 2]})
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic_script(self):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -414,6 +421,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(1, 2)
         self.run_test(DynamicSliceModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic_to_end(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -423,7 +431,9 @@ class TestONNXRuntime(unittest.TestCase):
                 return tuple(results)
 
         x = torch.rand(5, 5, 5)
-        self.run_test(DynamicSliceExportMod(), x)
+        self.run_test(DynamicSliceExportMod(), x,
+                      dynamic_axes={'input_1': [0, 1, 2],
+                      'output_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_dynamic(self):
@@ -546,6 +556,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModel(mode, use_size, is_upsample)
         self.run_test(model, x)
 
+    # TODO: Enable bicubic, linear1d and linear3d when implemented in ORT
     def _interpolate_tests(self, is_upsample):
         # - cubic mode is not supported for opsets below 11;
         # - linear mode does not match for opsets below 11;
@@ -556,7 +567,7 @@ class TestONNXRuntime(unittest.TestCase):
         # in round_prefer_floor ONNX). (The below tests
         # do not  show this error for nearest mode for
         # all opsets)
-        modes = ["nearest", "linear", "cubic"]
+        modes = ["nearest", "linear"]  # TODO : add "bicubic" when enabled in ORT
         if self.opset_version < 11:
             modes = ["nearest"]
         x = [torch.randn(1, 2, 4, requires_grad=True),
@@ -566,13 +577,18 @@ class TestONNXRuntime(unittest.TestCase):
         for mode in modes:
             for xi in x:
                 mode_i = mode
-                if mode == "cubic" and xi.dim() != 4:
+                if mode == "bicubic" and xi.dim() != 4:
                     continue
                 elif mode == "linear":
-                    if xi.dim() == 4:
+                    if xi.dim() == 3:
+                        # TODO : enable when linear mode is implemented for 1d inputs in ORT
+                        continue
+                    elif xi.dim() == 4:
                         mode_i = "bilinear"
                     elif xi.dim() == 5:
+                        # TODO : enable when linear mode is implemented for 3d inputs in ORT
                         mode_i = "trilinear"
+                        continue
                 self._interpolate(xi, mode_i, True, is_upsample)
                 # the following cases, require dynamic sizes/scales,
                 # which which is not supported for opset_version < 9
@@ -581,16 +597,38 @@ class TestONNXRuntime(unittest.TestCase):
                     self._interpolate(xi, mode_i, False, is_upsample)
                     self._interpolate_script(xi, mode_i, False, is_upsample)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
 
-    # enable when supported in ORT for opset 11
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
+
+    def test_groupnorm(self):
+        model = torch.nn.GroupNorm(3, 6, 0.002)
+        x = torch.randn(4, 6, 180, 180, 180)
+        self.run_test(model, x)
+
+        model = torch.nn.GroupNorm(1, 6, 0.002)
+        x = torch.randn(4, 6, 180, 180)
+        self.run_test(model, x)
+
+        model = torch.nn.GroupNorm(6, 6, 0.002)
+        x = torch.randn(4, 6, 180, 180)
+        self.run_test(model, x)
+
+    def test_groupnorm_noaffine(self):
+        model = torch.nn.GroupNorm(4, 8, 0.002, affine=False)
+        x = torch.randn(3, 8, 224, 224)
+        self.run_test(model, x)
+
+        model = torch.nn.GroupNorm(1, 6, 0.002, affine=False)
+        x = torch.randn(4, 6, 180, 180)
+        self.run_test(model, x)
+
+        model = torch.nn.GroupNorm(6, 6, 0.002, affine=False)
+        x = torch.randn(4, 6, 180, 180)
+        self.run_test(model, x)
 
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
@@ -713,9 +751,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 5, 10, 10)
         self.run_test(model, x)
 
-    # enable test for opset 11 when ScatterElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_scatter(self):
         class ScatterModel(torch.nn.Module):
             def forward(self, input, indices, values):
@@ -742,9 +778,7 @@ class TestONNXRuntime(unittest.TestCase):
         values = torch.arange(3 * 2 * 2, dtype=torch.float32).view(3, 2, 2)
         self.run_test(ScatterModel(), (input, indices, values))
 
-    # enable test for opset 11 when ScatterElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_scatter_add(self):
         class ScatterModel(torch.nn.Module):
             def forward(self, input, indices, values):
@@ -755,9 +789,7 @@ class TestONNXRuntime(unittest.TestCase):
         values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
         self.run_test(ScatterModel(), input=(input, indices, values))
 
-    # enable test for opset 11 when GatherElements is supported in ORT
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_gather(self):
         class GatherModel(torch.nn.Module):
             def forward(self, input, indices):
@@ -1391,6 +1423,28 @@ class TestONNXRuntime(unittest.TestCase):
         model = CumSum()
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid(self):
+        class Meshgrid(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.meshgrid(x, y, z)
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.randn(5, requires_grad=True)
+        self.run_test(Meshgrid(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid_scalar(self):
+        class Meshgrid(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.meshgrid(x, y, z)
+
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.tensor(2.0)
+        self.run_test(Meshgrid(), (x, y, z))
+
     def test_baddbmm(self):
         class MyModule(torch.nn.Module):
             def forward(self, input, batch1, batch2):
@@ -1437,6 +1491,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
+
+    @skipIfNoLapack
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_det(self):
+        class Det(torch.nn.Module):
+            def forward(self, x):
+                return torch.det(x)
+
+        x = torch.randn(2, 3, 5, 5)
+        self.run_test(Det(), x)
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
