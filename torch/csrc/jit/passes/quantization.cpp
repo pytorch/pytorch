@@ -974,7 +974,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
-        return (%packed_params))";
+        return (%packed_params) )";
 
   // (is_conv, pattern, packed_params_module)
   auto pattern_and_modules = {
