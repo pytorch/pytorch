@@ -107,7 +107,7 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
 
 # This function creates a dis atugorad context, run rpc_sync on the given ps,
 # and then blocks until the ps has verified the grads are correctly accumulated.
-def _run_trainer(rref_t1, t2, t2_grad, ps, rank_diff):
+def _run_trainer(rref_t1, t2, ps, rank_diff):
     with dist_autograd.context() as context_id:
         ret = rpc.rpc_sync(ps, my_rref_add, args=(rref_t1, t2))
         dist_autograd.backward([ret.sum()])
@@ -830,7 +830,7 @@ class DistAutogradTest(object):
             futures.append(rpc.rpc_async(
                 "worker{}".format((self.rank + rank_diff) % self.world_size),
                 _run_trainer,
-                args=(rref_t1, t2, t2.grad, self_name, rank_diff)
+                args=(rref_t1, t2, self_name, rank_diff)
             ))
 
         # check if the trainers have done with their backward pass
