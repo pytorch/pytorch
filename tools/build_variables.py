@@ -227,6 +227,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/pixelshuffle.cpp",
         "torch/csrc/api/src/nn/modules/pooling.cpp",
         "torch/csrc/api/src/nn/modules/rnn.cpp",
+        "torch/csrc/api/src/nn/modules/upsampling.cpp",
         "torch/csrc/api/src/nn/modules/container/functional.cpp",
         "torch/csrc/api/src/nn/modules/container/named_any.cpp",
         "torch/csrc/api/src/nn/options/activation.cpp",
