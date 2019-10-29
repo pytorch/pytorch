@@ -42,12 +42,13 @@ MemOverlap has_internal_overlap(TensorImpl* t) {
       return MemOverlap::NO;
     } else if (size > 1) {
       size_t stride = t->strides()[i];
-      if (stride <= 1) {
+      if (stride == 0 ||
+          std::find(strides.begin(), strides.end(), stride) != strides.end()) {
         return MemOverlap::YES;
       }
       sizes.emplace_back(size);
       strides.emplace_back(stride);
-    } // size == 1 is ignored here, see 
+    } // size == 1 is ignored here
   }
  
   // Step (3)~(5) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]

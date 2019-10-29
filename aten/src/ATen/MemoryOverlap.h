@@ -17,7 +17,8 @@ namespace at {
 // The checking algorithm can be described as:
 //   0. Return [ MemOverlap::NO ] if any dimension has size 0
 //   1. Ignore all dimensions that have size 1
-//   2. Return [ MemOverlap::YES ] if any remaining dimension has stride >= 1
+//   2. Return [ MemOverlap::YES ] if any remaining dimension has stride == 0 or
+//      duplicated strides with each other
 //   3. If no remaining dimensions, return [ MemOverlap::NO ]
 //   4. Sort the remaining dimensions according to the strides decreasingly
 //   5. Check that for each dimension k,
