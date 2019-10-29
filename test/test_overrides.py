@@ -41,12 +41,12 @@ class DiagonalTensor(object):
     example`_ in the NumPy documentation.
 
     Note that this class does *not* inherit from ``torch.tensor``, interaction
-    with the pytorch dispatch system happens via the `__torch_function__`
+    with the pytorch dispatch system happens via the ``__torch_function__``
     protocol.
 
-    DiagonalTensor represents a 2D tensor with *N* rows and columns that has
+    ``DiagonalTensor`` represents a 2D tensor with *N* rows and columns that has
     diagonal entries set to *value* and all other entries set to zero. The
-    main functionality of `DiagonalTensor` is to provide a more compact
+    main functionality of ``DiagonalTensor`` is to provide a more compact
     string representation of a diagonal tensor than in the base tensor class:
 
     >>> d = DiagonalTensor(5, 2)
@@ -210,7 +210,7 @@ def implements_tensor_like(torch_function):
     return decorator
 
 # Functions that are publicly available in the torch API but cannot be
-# overrided with __torhc_function__ (usually because none of their
+# overrided with __torch_function__ (usually because none of their
 # arguments are tensors or tensor-likes) need an entry in this tuple.
 
 IGNORED_TORCH_FUNCTIONS = (
