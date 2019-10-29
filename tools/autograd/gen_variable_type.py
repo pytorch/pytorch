@@ -30,7 +30,7 @@ from .gen_autograd_functions import uses_single_grad
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
     'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
-    'set_data', 'data', 'is_leaf', 'output_nr', '_version'
+    'set_data', 'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
 }
 
 # These functions we don't want to record for tracing, because we always want
@@ -102,7 +102,7 @@ if (${tensor_name}_storage_saved.has_value())
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
 std::vector<c10::optional<Storage>> ${tensorlist_name}_storage_saved(${tensorlist_name}.size());
-for (Tensor tensor : ${tensorlist_name})
+for (const Tensor& tensor : ${tensorlist_name})
   ${tensorlist_name}_storage_saved.push_back(
     tensor.has_storage() ? c10::optional<Storage>(tensor.storage()) : c10::nullopt);
 """)
@@ -144,11 +144,11 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-static ${return_type} ${api_name}(${type_method_formals}) ;
+${return_type} ${api_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${api_name}(${type_method_formals}) {
+${return_type} ${api_name}(${type_method_formals}) {
   ${type_definition_body}
 }
 """)
@@ -163,7 +163,7 @@ UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .kernel<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, &VariableType::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -474,6 +474,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
             wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
                 declaration, formal_types=formal_types))
         else:
+            assert declaration['use_c10_dispatcher'] == 'unboxed_only'
             wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                 declaration, formal_types=formal_types))
 
@@ -498,7 +499,7 @@ def emit_body(declaration):
     inplace = declaration['inplace']
     is_out_fn = name.endswith('_out')
     modifies_arguments = inplace or is_out_fn
-    returns_void = len(returns) == 1 and returns[0]['type'] == 'void'
+    returns_void = len(returns) == 0
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)

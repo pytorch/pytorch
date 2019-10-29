@@ -34,6 +34,18 @@ Tensor _shape_as_tensor(const Tensor& self) {
   return at::tensor(self.sizes(), options);
 }
 
+Tensor& set_(Tensor& result, Storage source) {
+  return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
+}
+
+// this needs to be split along CPU/CUDA lines because we don't have a consistent
+// way of getting the allocator to use for a device (c10::GetAllocator is not
+// the same as at::cuda::getCUDADeviceAllocator().
+Tensor& set_cpu_(Tensor& result) {
+  Storage storage(result.dtype(), 0, c10::GetAllocator(kCPU), true);
+  return result.set_(storage, 0, {0}, {});
+}
+
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
@@ -486,7 +498,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
     return self.as_strided(shape, *stride);
   }
-  return at::_unsafe_view(self.clone(), shape);
+  return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
@@ -926,7 +938,12 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
 Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::compute_squeeze_outnames(self);
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
@@ -937,7 +954,11 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
     return self.as_strided(self.sizes(), self.strides());
   }
   auto g = inferSqueezeGeometry(self, dim);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
+#ifdef BUILD_NAMEDTENSOR
+  namedinference::propagate_names_except(result, self, {dim});
+#endif
+  return result;
 }
 
 Tensor & squeeze_(Tensor& self) {
@@ -1172,6 +1193,34 @@ Tensor alias(const Tensor& self) {
   namedinference::propagate_names(self_, self);
 #endif
   return self_;
+}
+
+Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
+  // some special handling to deal with allow dimension == 0 when self.dim() == 0
+  dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
+  int64_t max_size = self.dim() == 0 ? 1 : self.size(dimension);
+  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
+                                " is ", max_size, " but size is ", size);
+  TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
+
+  std::vector<int64_t> new_size(self.dim() + 1);
+  std::vector<int64_t> new_stride(self.dim() + 1);
+
+  new_size[self.dim()] = size;
+  new_stride[self.dim()] = self.dim() == 0 ? 1 : self.stride(dimension);
+  for(int64_t d = 0; d < self.dim(); d++) {
+    auto self_size = self.size(d);
+    auto self_stride = self.stride(d);
+    if(d == dimension) {
+      new_size[d] = (self_size - size) / step + 1;
+      new_stride[d] = step*self_stride;
+    } else {
+      new_size[d] = self_size;
+      new_stride[d] = self_stride;
+    }
+  }
+
+  return self.as_strided(new_size, new_stride);
 }
 
 }} // at::native

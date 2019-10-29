@@ -1,9 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-from .quantize import *  # noqa: F401
-from .observer import *  # noqa: F401
-from .QConfig import *  # noqa: F401
-from .fake_quantize import *  # noqa: F401
-from .fuse_modules import fuse_modules  # noqa: F401
+from .quantize import *
+from .observer import *
+from .qconfig import *
+from .fake_quantize import *
+from .fuse_modules import fuse_modules
+from .stubs import *
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -14,19 +15,19 @@ def default_eval_fn(model, calib_data):
         model(data)
 
 _all__ = [
-    'QuantWrapper', 'QuantStub', 'DeQuantStub', 'DEFAULT_MODULE_MAPPING',
-    # Top level API for quantizing a float model
+    'QuantWrapper', 'QuantStub', 'DeQuantStub',
+    # Top level API for eager mode quantization
     'quantize',
-    # Sub functions called by quantize
+    # Sub functions used by eager mode quantization
     'prepare', 'convert',
     # Sub functions for `prepare` and `swap_module`
-    'propagate_qconfig', 'add_quant_dequant', 'add_observer', 'swap_module',
-    'default_eval_fn',
+    'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
+    'default_eval_fn', 'get_observer_dict',
     # Observers
-    'Observer', 'WeightObserver', 'observer', 'default_observer',
+    'ObserverBase', 'WeightObserver', 'observer', 'default_observer',
     'default_weight_observer',
     # QConfig
-    'QConfig', 'default_qconfig', 'default_dynamic_qconfig',
+    'QConfig', 'default_qconfig', 'default_dynamic_qconfig', 'float16_dynamic_qconfig',
     # QAT utilities
     'default_qat_qconfig', 'prepare_qat', 'quantize_qat',
     # module transformations

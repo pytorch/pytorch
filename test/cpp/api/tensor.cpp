@@ -1,9 +1,7 @@
 #include <gtest/gtest.h>
 #include <test/cpp/api/support.h>
 
-#include <torch/types.h>
-
-#include <ATen/ATen.h>
+#include <torch/torch.h>
 
 #include <cmath>
 #include <cstddef>
@@ -171,7 +169,21 @@ TEST(TensorTest, ContainsCorrectValuesForManyValues) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
+  tensor = at::tensor(std::vector<int>({1, 2, 3}));
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
+  ASSERT_TRUE(exactly_equal(tensor[0], 1));
+  ASSERT_TRUE(exactly_equal(tensor[1], 2));
+  ASSERT_TRUE(exactly_equal(tensor[2], 3));
+
   tensor = at::tensor({1.5, 2.25, 3.125});
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], 1.5));
+  ASSERT_TRUE(almost_equal(tensor[1], 2.25));
+  ASSERT_TRUE(almost_equal(tensor[2], 3.125));
+
+  tensor = at::tensor(std::vector<double>({1.5, 2.25, 3.125}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
@@ -188,7 +200,23 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
+  tensor = torch::tensor(std::vector<int>({1, 2, 3}));
+  ASSERT_TRUE(tensor.is_variable());
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
+  ASSERT_TRUE(exactly_equal(tensor[0], 1));
+  ASSERT_TRUE(exactly_equal(tensor[1], 2));
+  ASSERT_TRUE(exactly_equal(tensor[2], 3));
+
   tensor = torch::tensor({1.5, 2.25, 3.125});
+  ASSERT_TRUE(tensor.is_variable());
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kDouble);
+  ASSERT_TRUE(almost_equal(tensor[0], 1.5));
+  ASSERT_TRUE(almost_equal(tensor[1], 2.25));
+  ASSERT_TRUE(almost_equal(tensor[2], 3.125));
+
+  tensor = torch::tensor(std::vector<double>({1.5, 2.25, 3.125}));
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
@@ -199,23 +227,51 @@ TEST(TensorTest, ContainsCorrectValuesForManyValuesVariable) {
 
 TEST(TensorTest, MultidimTensorCtor) {
   {
+    auto tensor = torch::tensor({{1, 2}});
+    ASSERT_EQ(tensor.dtype(), torch::kInt);
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 2}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kInt).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    auto tensor = torch::tensor({{1.0, 2.0}});
+    ASSERT_EQ(tensor.dtype(), torch::kDouble);
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 2}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kDouble).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    auto tensor = torch::tensor({{1, 2}}, torch::dtype(torch::kInt));
+    ASSERT_EQ(tensor.dtype(), torch::kInt);
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 2}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kInt).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
+    auto tensor = torch::tensor({{{1, 2}}});
+    ASSERT_EQ(tensor.dtype(), torch::kInt);
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 2}));
+    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kInt).view(tensor.sizes())));
+    ASSERT_FALSE(tensor.requires_grad());
+  }
+  {
     auto tensor = torch::tensor({{1, 2}, {3, 4}});
     ASSERT_EQ(tensor.dtype(), torch::kInt);
-    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({2, 2}));
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({2, 2}));
     ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 5, torch::kInt).view(tensor.sizes())));
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
     auto tensor = torch::tensor({{1, 2}, {3, 4}}, torch::dtype(torch::kFloat).requires_grad(true));
     ASSERT_EQ(tensor.dtype(), torch::kFloat);
-    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({2, 2}));
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({2, 2}));
     ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 5, torch::kFloat).view(tensor.sizes())));
     ASSERT_TRUE(tensor.requires_grad());
   }
   {
     auto tensor = torch::tensor({{{{{{{{1.0, 2.0, 3.0}}}}}, {{{{{4.0, 5.0, 6.0}}}}}, {{{{{7.0, 8.0, 9.0}}}}}}}});
     ASSERT_EQ(tensor.dtype(), torch::kDouble);
-    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({1, 1, 3, 1, 1, 1, 1, 3}));
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 3, 1, 1, 1, 1, 3}));
     ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 10, torch::kDouble).view(tensor.sizes())));
     ASSERT_FALSE(tensor.requires_grad());
   }
@@ -240,7 +296,7 @@ TEST(TensorTest, MultidimTensorCtor_CUDA) {
       torch::dtype(torch::kDouble).device(torch::kCUDA));
     ASSERT_TRUE(tensor.device().is_cuda());
     ASSERT_EQ(tensor.dtype(), torch::kDouble);
-    ASSERT_EQ(tensor.sizes(), torch::IntArrayRef({1, 1, 3, 1, 1, 1, 1, 3}));
+    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 3, 1, 1, 1, 1, 3}));
     ASSERT_TRUE(torch::allclose(
       tensor,
       torch::arange(1, 10, torch::kDouble).view(tensor.sizes()).to(torch::kCUDA)));
@@ -248,25 +304,25 @@ TEST(TensorTest, MultidimTensorCtor_CUDA) {
   }
 }
 
-TEST(TensorTest, PrettyPrintListInitTensor) {
+TEST(TensorTest, PrettyPrintInitListTensor) {
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor(1.1)),
+      c10::str(torch::detail::InitListTensor(1.1)),
       "1.1");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor({1.1, 2.2})),
+      c10::str(torch::detail::InitListTensor({1.1, 2.2})),
       "{1.1, 2.2}");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor({{1, 2}, {3, 4}})),
+      c10::str(torch::detail::InitListTensor({{1, 2}, {3, 4}})),
       "{{1, 2}, {3, 4}}");
   }
   {
     ASSERT_EQ(
-      c10::str(torch::detail::ListInitTensor({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
+      c10::str(torch::detail::InitListTensor({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
       "{{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}}");
   }
 }
@@ -390,10 +446,10 @@ TEST(TensorTest, DataPtr) {
 }
 
 TEST(TensorTest, Data) {
-  const auto tensor = torch::empty({3, 3});
+  const auto tensor = torch::rand({3, 3});
   ASSERT_TRUE(torch::equal(tensor, tensor.data()));
 
-  const auto tensor2 = at::empty({3, 3});
+  const auto tensor2 = at::rand({3, 3});
   ASSERT_THROW(tensor2.data(), c10::Error);
 }
 
@@ -414,6 +470,13 @@ TEST(TensorTest, BackwardCreatesOnesGrad) {
   x.backward();
   ASSERT_TRUE(torch::equal(x.grad(),
               torch::ones_like(x)));
+}
+
+TEST(TensorTest, BackwardNonScalarOutputs) {
+  auto x = torch::randn({5, 5}, torch::requires_grad());
+  auto y = x * x;
+  ASSERT_THROWS_WITH(y.backward(),
+    "grad can be implicitly created only for scalar outputs");
 }
 
 TEST(TensorTest, IsLeaf) {
@@ -488,4 +551,43 @@ TEST(TensorTest, DetachInplace) {
   const auto message = "detach_ is not implemented for Tensor";
   ASSERT_THROWS_WITH(x.detach_(), message);
   ASSERT_THROWS_WITH(y.detach_(), message);
+}
+
+TEST(TensorTest, SetData) {
+  auto x = torch::randn({5});
+  auto y = torch::randn({5});
+  ASSERT_FALSE(torch::equal(x, y));
+  ASSERT_NE(x.data_ptr<float>(), y.data_ptr<float>());
+
+  x.set_data(y);
+  ASSERT_TRUE(torch::equal(x, y));
+  ASSERT_EQ(x.data_ptr<float>(), y.data_ptr<float>());
+
+  x = at::tensor({5});
+  y = at::tensor({5});
+  ASSERT_THROWS_WITH(x.set_data(y), "set_data is not implemented for Tensor");
+}
+
+TEST(TensorTest, RequiresGradInplace) {
+  auto x = torch::tensor({5.0});
+  x.requires_grad_(true);
+  ASSERT_TRUE(x.requires_grad());
+
+  auto y = x * x;
+  ASSERT_THROWS_WITH(y.requires_grad_(false),
+    "you can only change requires_grad flags of leaf variables.");
+
+  x.requires_grad_(false);
+  ASSERT_FALSE(x.requires_grad());
+
+  const auto int_tensor = torch::tensor({5}, at::TensorOptions().dtype(torch::kInt));
+  ASSERT_THROWS_WITH(int_tensor.requires_grad_(true),
+    "Only Tensors of floating point dtype can require gradients");
+
+  x = at::tensor({5}, at::TensorOptions().requires_grad(false));
+  y = x * x;
+  ASSERT_THROWS_WITH(x.requires_grad_(false),
+    "requires_grad_ is not implemented for Tensor");
+  ASSERT_THROWS_WITH(y.requires_grad_(false),
+    "requires_grad_ is not implemented for Tensor");
 }

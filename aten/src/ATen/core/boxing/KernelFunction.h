@@ -159,10 +159,10 @@ public:
    * >   public:
    * >     Tensor operator()(Tensor a, Tensor b) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor(std::make_shared<MyFunctor>());
+   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor(guts::make_unique<MyFunctor>());
    */
   template<bool AllowLegacyTypes = false, class KernelFunctor>
-  static KernelFunction makeFromUnboxedFunctor(std::shared_ptr<KernelFunctor> kernelFunctor) {
+  static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor) {
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
@@ -191,11 +191,11 @@ public:
    * >     Tensor operator()(Tensor a, Tensor b) {...}
    * > };
    * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor([] {
-   * >   return std::make_shared<MyFunctor>();
+   * >   return guts::make_unique<MyFunctor>();
    * > });
    */
   template<class KernelFunctor, bool AllowLegacyTypes = false>
-  static KernelFunction makeFromUnboxedFunctorFactory(std::function<std::shared_ptr<KernelFunctor>()> kernelFunctorFactory) {
+  static KernelFunction makeFromUnboxedFunctorFactory(std::function<std::unique_ptr<OperatorKernel>()> kernelFunctorFactory) {
     static_assert(guts::is_functor<KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor> but the argument is not a functor.");
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call KernelFunction::makeFromUnboxedFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
@@ -223,10 +223,10 @@ public:
    * >   public:
    * >     Tensor operator()(Tensor a, Tensor b) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor(std::make_shared<MyFunctor>());
+   * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor(guts::make_unique<MyFunctor>());
    */
   template<class KernelFunctor>
-  static KernelFunction makeFromUnboxedOnlyFunctor(std::shared_ptr<KernelFunctor> kernelFunctor) {
+  static KernelFunction makeFromUnboxedOnlyFunctor(std::unique_ptr<OperatorKernel> kernelFunctor) {
     // TODO We want to get rid of kernels that have only an unboxed function pointer.
     //      All kernels should have a boxed pointer.
 
@@ -259,8 +259,8 @@ public:
     static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     static_assert(func != nullptr, "Kernel function cannot be nullptr");
 
-    return makeFromUnboxedFunctor<AllowLegacyTypes>(
-      std::make_shared<typename detail::WrapKernelFunction<FuncType, func>::type>()
+    return makeFromUnboxedFunctor<AllowLegacyTypes, typename detail::WrapKernelFunction<FuncType, func>::type>(
+      guts::make_unique_base<OperatorKernel, typename detail::WrapKernelFunction<FuncType, func>::type>()
     );
   }
 
@@ -288,8 +288,8 @@ public:
     static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedOnlyFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     static_assert(func != nullptr, "Kernel function cannot be nullptr");
 
-    return makeFromUnboxedOnlyFunctor(
-      std::make_shared<typename detail::WrapKernelFunction<FuncType, func>::type>()
+    return makeFromUnboxedOnlyFunctor<typename detail::WrapKernelFunction<FuncType, func>::type> (
+      guts::make_unique_base<OperatorKernel, typename detail::WrapKernelFunction<FuncType, func>::type>()
     );
   }
 
@@ -310,8 +310,19 @@ public:
     static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
     TORCH_INTERNAL_ASSERT(func != nullptr, "Kernel function cannot be nullptr");
 
-    return makeFromUnboxedFunctor<AllowLegacyTypes>(
-      std::make_shared<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(func)
+    return makeFromUnboxedFunctor<AllowLegacyTypes, detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(
+      guts::make_unique_base<OperatorKernel, detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(func)
+    );
+  }
+
+  template<class FuncType>
+  static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func) {
+    static_assert(guts::is_function_type<FuncType>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a non-function type.");
+    static_assert(!std::is_same<FuncType, BoxedKernelFunction>::value, "Tried to call KernelFunction::makeFromUnboxedRuntimeFunction with a boxed function pointer. Please use KernelFunction::makeFromBoxedFunction instead.");
+    TORCH_INTERNAL_ASSERT(func != nullptr, "Kernel function cannot be nullptr");
+
+    return makeFromUnboxedOnlyFunctor<detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(
+      guts::make_unique_base<OperatorKernel, detail::WrapRuntimeKernelFunctor<guts::decay_t<FuncType>>>(func)
     );
   }
 
@@ -327,14 +338,14 @@ public:
   static KernelFunction makeFromUnboxedLambda(Lambda&& lambda) {
     static_assert(guts::is_functor<guts::decay_t<Lambda>>::value, "Tried to call KernelFunction::makeFromUnboxedLambda with a non-lambda type.");
 
-    return makeFromUnboxedFunctor<AllowLegacyTypes>(
-      std::make_shared<detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
+    return makeFromUnboxedFunctor<AllowLegacyTypes, detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(
+      guts::make_unique_base<OperatorKernel, detail::WrapRuntimeKernelFunctor<guts::decay_t<Lambda>>>(std::forward<Lambda>(lambda))
     );
   }
 
 private:
 
-  explicit KernelFunction(std::function<std::shared_ptr<OperatorKernel>()> functorFactory, std::shared_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
+  explicit KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
   : functorFactory_(std::move(functorFactory))
   , functor_(std::move(functor))
   , boxed_kernel_func_(boxed_kernel_func)
@@ -361,7 +372,7 @@ private:
   // initialization time yet (SIOF). So these register with a
   // functorFactory_ instead of a functor_ and will be initialized
   // on the first call to the KernelFunction.
-  std::function<std::shared_ptr<OperatorKernel>()> functorFactory_;
+  std::function<std::unique_ptr<OperatorKernel>()> functorFactory_;
   mutable std::shared_ptr<OperatorKernel> functor_;
 
   BoxedKernelFunction* boxed_kernel_func_;

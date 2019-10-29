@@ -22,11 +22,14 @@ from cpp_api_parity import TorchNNModuleMetadata
 #     as the Python module constructor.
 #
 # `num_attrs_recursive`: the number of attributes (including parameters, buffers and non-tensor
-#     attributes) of the Python module. If the module contains any submodule, the submodule's
-#     attributes also need to be counted.
+#     attributes, but excluding the attributes in `python_ignored_attrs`) of the Python module.
+#     If the module contains any submodule, the submodule's attributes also need to be counted.
 #
-# `python_legacy_constructor_args`: (optional) list of legacy Python constructor args that are
+# `python_ignored_constructor_args`: (optional) list of Python constructor args that are
 #     ignored in Python/C++ API parity test.
+#
+# `python_ignored_attrs`: (optional) list of Python module attributes (including parameters,
+#     buffers and non-tensor attributes) that are ignored in Python/C++ API parity test.
 #
 # `python_optional_attribute_to_jit_type`: (optional) map between Python None-able module
 #     attribute to its corresponding JIT type. For example, in `AvgPool2d`:
@@ -45,15 +48,21 @@ module_metadata_map = {
     ),
     'MaxPool1d': TorchNNModuleMetadata(
         cpp_default_constructor_args="(2)",
-        num_attrs_recursive=6,
+        num_attrs_recursive=5,
+        python_ignored_constructor_args=['return_indices'],
+        python_ignored_attrs=['return_indices'],
     ),
     'MaxPool2d': TorchNNModuleMetadata(
         cpp_default_constructor_args="(2)",
-        num_attrs_recursive=6,
+        num_attrs_recursive=5,
+        python_ignored_constructor_args=['return_indices'],
+        python_ignored_attrs=['return_indices'],
     ),
     'MaxPool3d': TorchNNModuleMetadata(
         cpp_default_constructor_args="(2)",
-        num_attrs_recursive=6,
+        num_attrs_recursive=5,
+        python_ignored_constructor_args=['return_indices'],
+        python_ignored_attrs=['return_indices'],
     ),
     'MaxUnpool1d': TorchNNModuleMetadata(),
     'MaxUnpool2d': TorchNNModuleMetadata(),
@@ -153,7 +162,7 @@ module_metadata_map = {
     'L1Loss': TorchNNModuleMetadata(
         cpp_default_constructor_args="()",
         num_attrs_recursive=1,
-        python_legacy_constructor_args=['size_average', 'reduce'],
+        python_ignored_constructor_args=['size_average', 'reduce'],
     ),
     'MSELoss': TorchNNModuleMetadata(),
     'CrossEntropyLoss': TorchNNModuleMetadata(),
