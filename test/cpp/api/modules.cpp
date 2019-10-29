@@ -830,15 +830,25 @@ TEST_F(ModulesTest, Fold) {
 
 TEST_F(ModulesTest, Unfold) {
   {
-    Unfold model(UnfoldOptions({2, 4}));
-    auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
+    Unfold model(UnfoldOptions(UnfoldOptions({2, 2}).padding(1).stride(2)));
+    auto input = torch::arange(2, 14, torch::requires_grad()).view({1, 2, 2, 3});
     auto output = model(input);
-    auto expected_sizes = std::vector<int64_t>({2, 16, 3});
+    auto expected = torch::tensor(
+        {{{0.0, 0.0, 0.0, 6.0},
+          {0.0, 0.0, 5.0, 7.0},
+          {0.0, 3.0, 0.0, 0.0},
+          {2.0, 4.0, 0.0, 0.0},
+          {0.0, 0.0, 0.0, 12.0},
+          {0.0, 0.0, 11.0, 13.0},
+          {0.0, 9.0, 0.0, 0.0},
+          {8.0, 10.0, 0.0, 0.0}}},
+        torch::kFloat);
     auto s = output.sum();
     s.backward();
 
-    ASSERT_EQ(output.sizes(), expected_sizes);
     ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 8, 4}));
+    ASSERT_TRUE(output.allclose(expected));
   }
   {
     // input wrong dimension
