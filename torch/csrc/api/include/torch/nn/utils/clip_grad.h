@@ -64,11 +64,9 @@ inline float clip_grad_norm_(
 inline void clip_grad_value_(
     std::vector<Tensor>& parameters,
     float clip_value) {
-  std::vector<Tensor> params_with_grad;
 
   for (const auto& param : parameters) {
-    auto& grad = param.grad();
-    if (grad.defined()) {
+    if (param.grad().defined()) {
       param.grad().data().clamp_(-clip_value, clip_value);
     }
   }
