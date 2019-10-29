@@ -78,7 +78,7 @@ class TORCH_API DistAutogradContainer {
   void clearCurrentContext();
 
   // Sets the timeout after which DistAutogradContexts will be cleaned up
-  void setCleanupContextTimeout(int64_t newTimeout);
+  void setCleanupContextTimeout(std::chrono::seconds newTimeout);
 
  private:
   DistAutogradContainer();

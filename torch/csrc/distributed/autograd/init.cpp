@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/types.h>
+#include <pybind11/chrono.h>
 
 namespace torch {
 namespace distributed {
@@ -85,7 +86,7 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
 
   module.def(
       "_setContextCleanupTimeout",
-      [](int64_t newTimeout) { DistAutogradContainer::getInstance().setCleanupContextTimeout(newTimeout); });
+      [](std::chrono::seconds newTimeout) { DistAutogradContainer::getInstance().setCleanupContextTimeout(newTimeout); });
 
   module.def(
       "_retrieve_context",

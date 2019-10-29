@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import time
 import unittest
 import sys
+import datetime
 
 import torch
 import torch.distributed as dist
@@ -715,7 +716,8 @@ class DistAutogradTest(object):
     @dist_init(clean_shutdown=False)
     def test_context_cleanup_timeout(self):
         with dist_autograd.context() as context_id:
-            dist_autograd._setContextCleanupTimeout(2)
+            timeout = datetime.timedelta(seconds=2)
+            dist_autograd._setContextCleanupTimeout(timeout)
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
 

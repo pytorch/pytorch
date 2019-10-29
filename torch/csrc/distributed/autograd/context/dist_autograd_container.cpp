@@ -59,11 +59,11 @@ DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
   return container;
 }
 
-void DistAutogradContainer::setCleanupContextTimeout(int64_t newTimeout) {
+void DistAutogradContainer::setCleanupContextTimeout(std::chrono::seconds newTimeout) {
   TORCH_CHECK(
-      newTimeout >=0,
+      newTimeout >= std::chrono::seconds::zero(),
       "cleanupContextTimeout must be nonnegative");
-  cleanupContextTimeout = std::chrono::seconds(newTimeout);
+  cleanupContextTimeout = newTimeout;
 }
 
 DistAutogradContainer& DistAutogradContainer::getInstance() {
