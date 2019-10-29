@@ -631,7 +631,7 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
         %w_dequant = aten::dequantize(%w_quant)
         %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        return (%r))";
+        return (%r) )";
 
   std::string linear_with_quant_prepack = R"(
 graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
@@ -640,7 +640,7 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
         %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        return (%r))";
+        return (%r) )";
 
   // Filter to match linear CallFunction
   auto filter = [](const Match& match,
@@ -950,7 +950,7 @@ graph(%self, %scale, %zero_point, %dtype):
   std::string replacement = R"(
 graph(%self, %scale, %zero_point, %dtype):
     %weight_quant = prim::GetAttr[name="_quantized_weight"](%self)
-    return (%weight_quant))";
+    return (%weight_quant) )";
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(pattern, replacement);
   rewriter.runOnGraph(graph, filter);
