@@ -67,10 +67,13 @@ void Variable::detach_() {
   if (is_view()) {
     AT_ERROR("Can't detach views in-place. Use detach() instead");
   }
-  // I think the choice here is conservative.  But there is some weirdness going
-  // on: why aren't, e.g., hooks cleared in this case?
-  materialize_autograd_meta();
-  auto autograd_meta = get_autograd_meta();
+  // I think the choice here is conservative.  In principle, doing
+  // an in-place detach should give us the ability to just clear
+  // the autograd meta.  But this function ONLY resets requires_grad,
+  // grad_fn and output_nr; there's other metadata like debug name
+  // and hooks which aren't cleared.  Is this function supposed to
+  // clear those too? I'm not too sure, so I'm leaving it be for now.
+  auto autograd_meta = materialize_autograd_meta();
   autograd_meta->set_requires_grad(false, unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;
@@ -192,8 +195,7 @@ void Variable::rebase_history(Edge gradient_edge) {
 }
 
 void Variable::create_cpp_hook() {
-  materialize_autograd_meta();
-  auto &list = get_autograd_meta()->cpp_hooks_list;
+  auto &list = materialize_autograd_meta()->cpp_hooks_list;
   list.reset(new hooks_list());
   std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, output_nr()));
   clear_hooks();
@@ -205,8 +207,7 @@ void Variable::create_cpp_hook() {
 }
 
 void Variable::remove_hook(unsigned pos) {
-  materialize_autograd_meta();
-  auto &list = get_autograd_meta()->cpp_hooks_list;
+  auto &list = materialize_autograd_meta()->cpp_hooks_list;
   TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*list)[pos] = nullptr;
@@ -231,11 +232,12 @@ static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_fa
 
 }
 
-void Variable::materialize_autograd_meta() {
+AutogradMeta* Variable::materialize_autograd_meta() {
   auto p = unsafeGetTensorImpl();
   if (!p->autograd_meta()) {
     p->set_autograd_meta(c10::guts::make_unique<AutogradMeta>());
   }
+  return get_autograd_meta();
 }
 
 }} // namespace torch::autograd

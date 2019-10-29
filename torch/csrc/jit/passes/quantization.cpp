@@ -145,6 +145,11 @@ class InsertObserversHelper {
   // Values that are the output of GetAttr[name="bias"] and they
   // will be propagated through the function call hierarchy
   std::unordered_set<Value*> bias_values_;
+  // Unique id generator for observer module, used for generating
+  // unique observer names when we insert observer module, we
+  // record the current unique id used to avoid incrementing from 0
+  // every time to find a unique id.
+  int uid_ = 0;
 };
 
 // Clone observer module and add it to the original module,
@@ -165,12 +170,15 @@ Node* InsertObserversHelper::insertObserverFor(
   } else {
     observer_module = std::get<0>(qconfig);
   }
-  std::string observer_name = "observer_for_" + v->debugName();
   script::Module observer = observer_module.clone();
+  std::string observer_name = "_observer_" + std::to_string(uid_++);
+  while (module.find_module(observer_name)) {
+    observer_name = "_observer_" + std::to_string(uid_++);
+  }
   module.register_module(observer_name, observer);
   // Get handle of observer module
   Node* observer_instance = g->create(c10::prim::GetAttr);
-  // self.observer_for_v
+  // self._observer_v
   observer_instance->addInput(g->inputs()[0]);
   observer_instance->s_(c10::attr::name, observer_name);
   observer_instance->output()->setDebugName(observer_name);
@@ -426,7 +434,7 @@ c10::optional<std::string> findObserverName(Value* v) {
         u.user->s(attr::name) == "forward") {
       auto module_instance = u.user->inputs().at(0);
       if (module_instance->node()->kind() == prim::GetAttr &&
-          module_instance->node()->s(attr::name).find("observer_for_") !=
+          module_instance->node()->s(attr::name).find("_observer_") !=
               std::string::npos) {
         return module_instance->node()->s(attr::name);
       }
@@ -544,7 +552,7 @@ c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
       child_instance->node()->kind() == prim::GetAttr,
       "Child instance should come from GetAttr.");
   auto child_module_name = child_instance->node()->s(attr::name);
-  if (child_module_name.find("observer_for_") == std::string::npos) {
+  if (child_module_name.find("_observer_") == std::string::npos) {
     auto child_module = module_.find_module(child_module_name);
     TORCH_INTERNAL_ASSERT(
         child_module,
@@ -1029,8 +1037,11 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       }
       auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
       // unique name for the module based on %w_quant
-      auto module_name =
-          module_name_prefix + std::to_string(w_quant_val->unique());
+      int uid = 0;
+      auto module_name = module_name_prefix + std::to_string(uid++);
+      while (module.find_module(module_name)) {
+        module_name_prefix + std::to_string(uid++);
+      }
       module.register_module(module_name, wrapper_module);
 
       // Add GetAttr of the packed module

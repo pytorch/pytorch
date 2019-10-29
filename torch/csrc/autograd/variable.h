@@ -33,6 +33,11 @@ struct Node;
 /// `Variable` called its `grad` (gradient). If the variable is a leaf, its
 /// gradient will be accumulated into this variable.
 ///
+/// Every Tensor is a Variable, but sometimes we colloquially refer to Variables
+/// that don't require gradients as Tensors (since none of the autograd
+/// machinery for Variables applies).  Historically, Variables and Tensors
+/// were separate concepts, but we've merged them together.
+///
 ///                              Gradient Edges
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /// Furthermore, `Variable`s have the notion of a `gradient_edge`, which is the
@@ -74,12 +79,10 @@ struct Node;
 /// operations you can perform on `Tensor`s also on `Variable`s. Furthermore,
 /// `Variable` and `Tensor` actually convert implicitly between each other. You
 /// can thus call functions defined on `Tensor`s also with `Variable`s. For
-/// this, the `Variable` class allows implicit construction from `Tensor`. It is
-/// the responsibility of calling code to ensure that this constructor is
-/// invoked only when the `Tensor` contains autograd metadata. Most notably, it
-/// is *not* correct to construct a brand new `Variable` from a `Tensor` using
-/// this constructor. To do so, you must use the `make_variable` free function
-/// instead. To create a view variable, use `make_variable_view`.
+/// this, the `Variable` class allows implicit construction from `Tensor`.
+///
+/// Our intention is to eliminate the Variable class in the near future, or make
+/// it so that only internal code uses it to do internal operations.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 struct AutogradMeta;
@@ -300,6 +303,8 @@ public:
   void set_pyobj(PyObject* pyobj) noexcept;
 
  public:
+  // WARNING: This may return a nullptr.  If you require AutogradMeta to return
+  // a materialized structure, use materialize_autograd_meta instead.
   AutogradMeta* get_autograd_meta() const noexcept;
 
  private:
@@ -307,7 +312,11 @@ public:
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   at::TensorImpl* get() const;
   void create_cpp_hook();
-  void materialize_autograd_meta();
+
+  // Returns the current autograd meta, materializing it if it was previously
+  // none.  This counts as a *mutating* operation, so do not call it on
+  // "read-only" operators; in particular, this is NOT thread safe
+  AutogradMeta* materialize_autograd_meta();
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -316,6 +325,8 @@ public:
 
 /// Each `Variable` has one unique `AutogradMeta` struct, which stores autograd
 /// metadata fields that are necessary for tracking the Variable's autograd history.
+/// As an optimization, a Variable may store a nullptr, in lieu of a default
+/// constructed AutogradMeta.
 
 struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::string name_;
@@ -514,6 +525,10 @@ inline Variable make_variable_view(
 /// set only for leaves, and determines whether the `Variable` will accumulate
 /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
 /// type *must* be `Tensor`.
+///
+/// TODO: Eliminate this function as much as possible, as it can be expressed
+/// more clearly as detach() or a no-op in most call sites (especially when
+/// there is only one use of the variable).
 inline Variable make_variable(
     at::Tensor data,
     bool requires_grad = false,
@@ -604,8 +619,7 @@ inline Node* Variable::grad_fn_unsafe() const {
 
 inline void Variable::set_grad_accumulator(
     std::weak_ptr<Node> grad_accumulator) {
-  materialize_autograd_meta();
-  get_autograd_meta()->grad_accumulator_ = std::move(grad_accumulator);
+  materialize_autograd_meta()->grad_accumulator_ = std::move(grad_accumulator);
 }
 
 inline std::shared_ptr<Node> Variable::try_get_grad_accumulator() const {
@@ -625,9 +639,9 @@ inline Variable Variable::detach() const {
 }
 
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
-  materialize_autograd_meta();
-  get_autograd_meta()->grad_fn_ = std::move(edge.function);
-  get_autograd_meta()->output_nr_ = edge.input_nr;
+  auto* meta = materialize_autograd_meta();
+  meta->grad_fn_ = std::move(edge.function);
+  meta->output_nr_ = edge.input_nr;
 }
 
 inline uint32_t Variable::output_nr() const noexcept {
@@ -670,8 +684,7 @@ inline const c10::VariableVersion& Variable::version_counter() const noexcept {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::add_hook(std::shared_ptr<FunctionPreHook> hook) {
-  materialize_autograd_meta();
-  get_autograd_meta()->hooks_.push_back(std::move(hook));
+  materialize_autograd_meta()->hooks_.push_back(std::move(hook));
 }
 
 namespace {
@@ -690,8 +703,7 @@ inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks()
 
 inline void Variable::clear_hooks() {
   // This is a little goofy, but usually this should be a no oop
-  materialize_autograd_meta();
-  get_autograd_meta()->hooks_.clear();
+  materialize_autograd_meta()->hooks_.clear();
 }
 
 template <typename T>
@@ -752,8 +764,7 @@ inline const Variable& Variable::base() const {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 inline void Variable::set_name(const std::string& name) {
-  materialize_autograd_meta();
-  get_autograd_meta()->name_ = name;
+  materialize_autograd_meta()->name_ = name;
 }
 
 namespace {
