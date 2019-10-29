@@ -129,11 +129,11 @@ torch::Tensor EmbeddingBagImpl::forward(
   }
 
   int mode_enum;
-  if (options.mode() == "sum") {
+  if (c10::get_if<enumtype::kSum>(&options.mode())) {
     mode_enum = 0;
-  } else if (options.mode() == "mean") {
+  } else if (c10::get_if<enumtype::kMean>(&options.mode())) {
     mode_enum = 1;
-  } else if (options.mode() =="max") {
+  } else if (c10::get_if<enumtype::kMax>(&options.mode())) {
     mode_enum = 2;
     TORCH_CHECK(!options.scale_grad_by_freq(), "max mode does not support scaling the gradient by the frequency");
     TORCH_CHECK(!options.sparse(), "max mode does not support sparse weights");
@@ -147,10 +147,10 @@ torch::Tensor EmbeddingBagImpl::forward(
   }
 
   TORCH_CHECK(
-    !per_sample_weights_.defined() || options.mode() == "sum",
+    !per_sample_weights_.defined() || c10::get_if<enumtype::kSum>(&options.mode()),
     "embedding_bag: per_sample_weights was not null. ",
-    "per_sample_weights is only supported for mode='sum' (got mode='",
-    options.mode(), "').Please open a feature request on GitHub.");
+    "per_sample_weights is only supported for mode='kSum' (got mode='",
+    c10::visit(torch::enumtype::enum_name{}, options.mode()), "').Please open a feature request on GitHub.");
 
   return std::get<0>(
     torch::embedding_bag(
@@ -178,8 +178,8 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
   if (options.sparse()) {
     stream << ", sparse=" << std::boolalpha << options.sparse();
   }
-  if (options.mode() != "mean") {
-      stream << ", mode=" << options.mode();
+  if (!c10::get_if<enumtype::kMean>(&options.mode())) {
+      stream << ", mode=" << c10::visit(torch::enumtype::enum_name{}, options.mode());
   }
   stream << ")";
 }
