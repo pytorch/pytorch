@@ -48,10 +48,13 @@ DONT_RECORD_TRACE = {
 
 # These functions have their names recorded under trace renamed,
 RENAME_TRACE = {
-    'zero': 'zeros_like',
-    'fill': 'full_like',
+    'zero': 'zeros_like',  # replacing aten::zero_ with aten::zeros_like
+    'fill': 'full_like',  # replacing aten::fill_ with aten::full_like
 }
 
+# In some cases outplace replacement of the operator requires more arguments.
+# We add them manually as we don't want to add unused arguments into the
+# native_functions.yaml
 RENAME_TRACE_ADD_ARGS = {
     'fill': '''\
     c10::optional<MemoryFormat> memory_format = c10::nullopt;
