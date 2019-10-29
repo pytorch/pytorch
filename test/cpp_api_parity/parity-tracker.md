@@ -28,7 +28,7 @@ torch.nn.AvgPool2d|Yes|No
 torch.nn.AvgPool3d|Yes|No
 torch.nn.FractionalMaxPool2d|No|No
 torch.nn.LPPool1d|Yes|No
-torch.nn.LPPool2d|No|No
+torch.nn.LPPool2d|Yes|No
 torch.nn.AdaptiveMaxPool1d|Yes|No
 torch.nn.AdaptiveMaxPool2d|Yes|No
 torch.nn.AdaptiveMaxPool3d|Yes|No
@@ -91,7 +91,7 @@ torch.nn.TransformerDecoder|No|No
 torch.nn.TransformerEncoderLayer|No|No
 torch.nn.TransformerDecoderLayer|No|No
 torch.nn.Identity|Yes|No
-torch.nn.Linear|No|No
+torch.nn.Linear|Yes|No
 torch.nn.Bilinear|Yes|No
 torch.nn.Flatten|No|No
 torch.nn.Dropout|No|No
