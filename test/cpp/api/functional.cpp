@@ -1266,6 +1266,92 @@ TEST_F(FunctionalTest, Threshold) {
   }
 }
 
+TEST_F(FunctionalTest, Interpolate) {
+  {
+    // 1D interpolation
+    auto input = torch::ones({1, 1, 2});
+    auto options = InterpolateOptions()
+                       .size({4})
+                       .mode(torch::kNearest);
+    auto output = F::interpolate(input, options);
+    auto expected = torch::ones({1, 1, 4});
+
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    // 2D interpolation
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        auto input = torch::ones({1, 1, 2, 2});
+        auto options = InterpolateOptions()
+                           .scale_factor({scale_factor, scale_factor})
+                           .mode(torch::kBilinear)
+                           .align_corners(align_corners);
+        auto output = F::interpolate(input, options);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size, expected_size});
+
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+  {
+    // 3D interpolation
+    for (const auto align_corners : {true, false}) {
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        auto input = torch::ones({1, 1, 2, 2, 2});
+        auto options =
+            InterpolateOptions()
+                .scale_factor({scale_factor, scale_factor, scale_factor})
+                .mode(torch::kTrilinear)
+                .align_corners(align_corners);
+        auto output = F::interpolate(input, options);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected =
+            torch::ones({1, 1, expected_size, expected_size, expected_size});
+
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+  {
+    auto input = torch::randn({3, 2, 2});
+    ASSERT_THROWS_WITH(
+        F::interpolate(input[0], InterpolateOptions().size({4, 4})),
+        "Input Error: Only 3D, 4D and 5D input Tensors supported (got 2D) "
+        "for the modes: nearest | linear | bilinear | bicubic | trilinear (got kNearest)");
+    ASSERT_THROWS_WITH(
+        F::interpolate(
+            torch::reshape(input, {1, 1, 1, 3, 2, 2}),
+            InterpolateOptions().size({1, 1, 1, 3, 4, 4})),
+        "Input Error: Only 3D, 4D and 5D input Tensors supported (got 6D) "
+        "for the modes: nearest | linear | bilinear | bicubic | trilinear (got kNearest)");
+    ASSERT_THROWS_WITH(
+        F::interpolate(input, InterpolateOptions()),
+        "either size or scale_factor should be defined");
+    ASSERT_THROWS_WITH(
+        F::interpolate(
+            input,
+            InterpolateOptions().size({3, 4, 4}).scale_factor({0.5})),
+        "only one of size or scale_factor should be defined");
+    ASSERT_THROWS_WITH(
+        F::interpolate(input, InterpolateOptions().scale_factor({3, 2})),
+        "scale_factor shape must match input shape. "
+        "Input is 1D, scale_factor size is 2");
+    ASSERT_THROWS_WITH(
+        F::interpolate(
+            input,
+            InterpolateOptions()
+                .mode(torch::kNearest)
+                .align_corners(true)),
+        "align_corners option can only be set with the "
+        "interpolating modes: linear | bilinear | bicubic | trilinear");
+  }
+}
+
 TEST_F(FunctionalTest, Pad) {
   {
     auto input = torch::arange(6, torch::kDouble).reshape({1, 2, 3});
