@@ -246,6 +246,7 @@ RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::pee
 """)
 
 SELECT = CodeTemplate("""\
+
 if (${cond}) {
   ${true}
 } else {
@@ -423,13 +424,19 @@ def format_prerecord_trace(declaration):
 
     local['set_op_name'] = format_trace_op_name(declaration)
 
-    api_name = uninplace_api_name(declaration['api_name'])
-    add_args = RENAME_TRACE_ADD_ARGS.get(api_name, '')
-    select_params = {}
-    select_params['cond'] = 'tracer_state->force_outplace'
-    select_params['true'] = add_args
-    select_params['false'] = ''
-    additional_inputs = SELECT.substitute(select_params)
+    is_inplace = declaration['api_name'] != uninplace_api_name(declaration['api_name'])
+    add_args = ''
+    if is_inplace:
+        api_name = uninplace_api_name(declaration['api_name'])
+        add_args = RENAME_TRACE_ADD_ARGS.get(api_name, '')
+    if add_args:
+        select_params = {}
+        select_params['cond'] = 'tracer_state->force_outplace'
+        select_params['true'] = add_args
+        select_params['false'] = ''
+        additional_inputs = SELECT.substitute(select_params)
+    else:
+        additional_inputs = ''
     local['add_trace_inputs'] = format_trace_inputs(declaration) + additional_inputs
 
     local['inplace_guard'] = ''
