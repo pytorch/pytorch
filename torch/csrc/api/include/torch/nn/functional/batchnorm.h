@@ -7,9 +7,7 @@ namespace nn {
 namespace functional {
 
 inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
-                         const Tensor& running_var, const Tensor& weight = Tensor(),
-                         const Tensor& bias = Tensor(), bool training = false,
-                         double momentum = 0.1, double eps = 1e-5) {
+                         const Tensor& running_var, const BatchNormOptions& options = {}, bool training = false) {
   if (training) {
     auto size = input.sizes();
     int64_t size_prods = size[0];
@@ -17,18 +15,18 @@ inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
       size_prods *= size[i + 2];
     }
     TORCH_CHECK(size_prods != 1,
-                "Expected more than 1 value per channel when trainng");
+                "Expected more than 1 value per channel when training, got input size ", size);
   }
 
   return torch::batch_norm(
     input,
-    weight,
-    bias,
+    options.weight(),
+    options.bias(),
     running_mean,
     running_var,
     training,
-    momentum,
-    eps,
+    options.momentum().value(),
+    options.eps(),
     at::globalContext().userEnabledCuDNN());
 }
 

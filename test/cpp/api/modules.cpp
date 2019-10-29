@@ -2073,7 +2073,7 @@ TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
       c10::str(BatchNorm1d(
           BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false)
           .track_running_stats(true))),
-      "torch::nn::BatchNorm1d(eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+      "torch::nn::BatchNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {

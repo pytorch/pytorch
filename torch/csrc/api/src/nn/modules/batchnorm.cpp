@@ -79,7 +79,7 @@ Tensor BatchNormImpl::pure_forward(
 }
 
 template <size_t D, typename Derived>
-BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormBaseOptions& options_)
+BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormOptions& options_)
     : options(options_) {
   reset();
 }

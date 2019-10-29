@@ -84,7 +84,7 @@ class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
   virtual void _check_input_dim(const Tensor& input) = 0;
 
  public:
-  explicit BatchNormImplBase(const BatchNormBaseOptions& options_);
+  explicit BatchNormImplBase(const BatchNormOptions& options_);
 
   Tensor forward(const Tensor& input);
 
@@ -96,7 +96,7 @@ class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
   void pretty_print(std::ostream& stream) const override;
 
   /// The options with which this module was constructed.
-  BatchNormBaseOptions options;
+  BatchNormOptions options;
 
   /// The learned weight.
   /// Only defined if the `affine` option was `true` upon construction.
