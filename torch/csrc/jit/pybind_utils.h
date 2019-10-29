@@ -44,8 +44,6 @@ namespace jit {
 // that is confusing to display to the end user since it always reports
 // locations in libtorch code rather than user code.
 
-using tracer::TypedStack;
-
 inline std::shared_ptr<script::CompilationUnit> get_python_cu() {
   return py::module::import("torch.jit")
       .attr("_python_cu")
@@ -123,7 +121,12 @@ inline InferredType tryToInferType(py::handle input) {
   }
 
   if (input.is(py::none())) {
-    return InferredType("Cannot infer type of a None value");
+    return InferredType(NoneType::get());
+  }
+
+  if (py::isinstance<StrongFunctionPtr>(input)) {
+    auto fn = py::cast<StrongFunctionPtr>(input).function_;
+    return InferredType(FunctionType::create(fn));
   }
 
   // Try basic types first
@@ -241,15 +244,16 @@ inline InferredType tryToInferContainerType(py::handle input) {
     }
     return InferredType(ListType::create(element_type));
   } else {
+    // TODO: this message is not correct anymore, since this InferredType is
+    // used from a bunch of circumstances unrelated to tracing. We can re-use
+    // this instead of the attribute_failure stuff in concreteType
     return InferredType(c10::str(
         "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
         "are supported ",
         "as inputs or outputs of traced functions",
         ", but instead got value of type ",
         py::str(input.get_type().attr("__name__")),
-        ".",
-        "\nValue: ",
-        py::repr(input)));
+        "."));
   }
 }
 
@@ -281,37 +285,24 @@ inline bool isTraceableType(TypePtr type) {
   return false;
 }
 
-inline TypedIValue toTraceableIValue(py::handle input) {
+inline IValue toTypeInferredIValue(py::handle input) {
   auto match = tryToInferType(input);
   if (!match.success()) {
     AT_ERROR(
         "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
   }
-  auto type = match.type();
+  return toIValue(input, match.type());
+}
 
-  if (isTraceableType(type)) {
-    return TypedIValue(toIValue(input, type), type);
-  }
-
-  AT_ERROR(
+inline Stack toTraceableStack(const py::tuple& inputs) {
+  auto info = toTypeInferredIValue(inputs);
+  AT_CHECK(
+      isTraceableType(info.type()),
       "Type '",
-      type->python_str(),
+      info.type()->python_str(),
       "' cannot be traced. Only Tensors and (possibly nested) Lists, Dicts, and"
       " Tuples of Tensors can be traced");
-}
-
-inline IValue toIValue(py::handle input) {
-  return toTraceableIValue(input).ivalue();
-}
-
-inline Stack toStack(const py::tuple& inputs) {
-  return toIValue(inputs).toTuple()->elements();
-}
-
-inline TypedStack toTypedStack(const py::tuple& inputs) {
-  auto info = toTraceableIValue(inputs);
-  return TypedStack(
-      info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
+  return info.toTuple()->elements();
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
@@ -539,7 +530,7 @@ inline IValue toIValue(
     case TypeKind::CapsuleType:
       AT_ERROR("Capsule Values aren't supported");
     case TypeKind::AnyType:
-      AT_ERROR("AnyType Values aren't supported");
+      return toTypeInferredIValue(obj);
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
@@ -680,6 +671,10 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
+    if (obj->type()->is_module()) {
+      return py::cast(script::Module(obj));
+    }
+
     auto pyCu = get_python_cu();
     auto res = tryToConvertToCustomClass(obj);
     if (res.has_value()) {
