@@ -12,7 +12,7 @@ enum class TensorDataContainerType { Scalar, InitList, Tensor };
 
 struct TensorDataContainer;
 
-inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer& init_list_tensor);
+inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer& tensor_data_container);
 
 // We use `TensorDataContainer` to support converting the following data container types
 // into the equivalent Tensor:
@@ -36,7 +36,7 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer&
 //
 // Here is the code path that it goes through:
 //
-// `at::Tensor tensor(detail::TensorDataContainer init_list_tensor)`
+// `at::Tensor tensor(detail::TensorDataContainer tensor_data_container)`
 //
 // which calls:
 //
@@ -54,9 +54,10 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer&
 // 2. It can be converted to `std::initializer_list<TensorDataContainer>`, thus matching
 //    `TensorDataContainer(std::initializer_list<TensorDataContainer>)`.
 //
-// How does the compiler decide which one to choose? According to `https://en.cppreference.com/w/cpp/language/list_initialization`,
-// braced-init-list always prefers the constructor that takes `std::initializer_list`. Hence we happily
-// move forward with constructor #2, and it calls the following:
+// How does the compiler decide which one to choose? According to
+// `https://en.cppreference.com/w/cpp/language/list_initialization`, braced-init-list always prefers
+// the constructor that takes `std::initializer_list`. Hence we happily move forward with constructor #2,
+// and it calls the following:
 //
 // `TensorDataContainer(1)`
 //
@@ -66,17 +67,24 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer&
 // `torch::tensor(at::ArrayRef<int> values)`, because `{1}` and `{2}` can be treated as
 // a list-initialization of an `int` value. However, this will produce a Tensor with sizes `{2}`,
 // but we actually want a Tensor with sizes `{2, 1}`. In order to avoid matching this function overload,
-// we removed the function overload and moved the ability to convert `at::ArrayRef<T>` (and similarly `std::vector<T>`)
-// into `TensorDataContainer`, and since for braced-init-list the `TensorDataContainer(std::initializer_list<TensorDataContainer>)`
-// constructor is always preferred over all other constructors, it will take the `std::initializer_list` path
-// and all is good again.
+// we removed the function overload and moved the ability to convert `at::ArrayRef<T>`
+// (and similarly `std::vector<T>`) into `TensorDataContainer`, and since for braced-init-list the
+// `TensorDataContainer(std::initializer_list<TensorDataContainer>)` constructor is always preferred
+// over all other constructors, it will take the `std::initializer_list` path and all is good again.
 struct TensorDataContainer {
   // NOTE: For tensors with zero-size dimensions (e.g. `torch::tensor({{}, {}})`),
   // the innermost empty braced-init-list `{}` matches the default constructor of
   // the innermost `TensorDataContainer`.
-  TensorDataContainer() : sizes_({0}), scalar_type_(at::ScalarType::Undefined), type_(TensorDataContainerType::InitList) {}
+  TensorDataContainer() :
+      sizes_({0}),
+      scalar_type_(at::ScalarType::Undefined),
+      type_(TensorDataContainerType::InitList) {}
 #define TENSOR(T, S) \
-  TensorDataContainer(T value) : sizes_(), scalar_type_(at::k##S), type_(TensorDataContainerType::Scalar), scalar_(value) {}
+  TensorDataContainer(T value) :
+      sizes_(),
+      scalar_type_(at::k##S),
+      type_(TensorDataContainerType::Scalar),
+      scalar_(value) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
   TensorDataContainer(std::initializer_list<TensorDataContainer> init_list) :
@@ -107,7 +115,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
   }
 
 #define TENSOR(T, S) \
-  TensorDataContainer(const at::ArrayRef<T>& values) { \
+  TensorDataContainer(at::ArrayRef<T> values) { \
     type_ = TensorDataContainerType::Tensor; \
     sizes_ = {(int64_t)values.size()}; \
     scalar_type_ = at::k##S; \
@@ -117,17 +125,19 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
-  // NOTE: We need to handle `std::vector` explicitly instead of relying on an implicit conversion to `at::ArrayRef`,
-  // otherwise the following error can be thrown when calling `torch::tensor(std::vector<double>({1.1, 2.2}))`:
+  // NOTE: We need to handle `std::vector` explicitly instead of relying on an implicit conversion
+  // to `at::ArrayRef`, otherwise the following error can be thrown when calling
+  // `torch::tensor(std::vector<double>({1.1, 2.2}))`:
   // ```
   // error: no matching function for call to ‘tensor(const std::vector<int>&)’
-  // no known conversion for argument 1 from ‘const std::vector<int>’ to ‘torch::detail::TensorDataContainer’
+  // no known conversion for argument 1 from ‘const std::vector<int>’ to
+  // ‘torch::detail::TensorDataContainer’
   // ```
   //
   // NOTE: `torch::tensor(std::vector<bool>)` is not supported for now, because
   // ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.
 #define TENSOR(T, S) \
-  TensorDataContainer(std::vector<T> values) : TensorDataContainer(at::ArrayRef<T>(values)) {}
+  TensorDataContainer(const std::vector<T>& values) : TensorDataContainer(at::ArrayRef<T>(values)) {}
 AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
 #undef TENSOR
 
@@ -204,13 +214,17 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
       if (scalar_type_ == at::ScalarType::BFloat16) {
         stream << static_cast<float>(scalar_.to<c10::BFloat16>());
       } else {
-        AT_DISPATCH_ALL_TYPES_AND2(at::kBool, at::kHalf, scalar_type_, "TensorDataContainer_pretty_print_scalar", [&] {
+        AT_DISPATCH_ALL_TYPES_AND2(
+            at::kBool,
+            at::kHalf,
+            scalar_type_,
+            "TensorDataContainer_pretty_print_scalar", [&] {
           stream << scalar_.to<scalar_t>();
         });
       }
     } else if (is_init_list()) {
       stream << "{";
-      for (const TensorDataContainer* it = init_list_.begin(); it != init_list_.end(); it++) {
+      for (const auto it = init_list_.begin(); it != init_list_.end(); it++) {
         stream << *it;
         if (std::next(it) != init_list_.end()) stream << ", ";
       }
@@ -224,7 +238,11 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
         if (scalar_type_ == at::ScalarType::BFloat16) {
           stream << static_cast<float>(tensor_[i].item<c10::BFloat16>());
         } else {
-          AT_DISPATCH_ALL_TYPES_AND2(at::kBool, at::kHalf, scalar_type_, "TensorDataContainer_pretty_print_tensor_item", [&] {
+          AT_DISPATCH_ALL_TYPES_AND2(
+              at::kBool,
+              at::kHalf,
+              scalar_type_,
+              "TensorDataContainer_pretty_print_tensor_item", [&] {
             stream << tensor_[i].item<scalar_t>();
           });
         }
@@ -235,11 +253,21 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
     }
   }
  private:
-  void fill_tensor(at::Tensor tensor) const {
+  void fill_tensor(at::Tensor& tensor) const {
     if (is_scalar()) {
+      TORCH_INTERNAL_ASSERT(
+        tensor.dim() == 0,
+        "Expected a 0-dim Tensor, but got Tensor with dimensions: ", tensor.dim());
       at::NoGradGuard guard;
       tensor.fill_(scalar_);
     } else if (is_init_list()) {
+      TORCH_INTERNAL_ASSERT(
+        tensor.sizes()[0] == init_list_.size(),
+        "Expected a Tensor with size ",
+        init_list_.size(),
+        " in its first dimension, but got Tensor with size ",
+        tensor.sizes()[0],
+        " in its first dimension");
       size_t index = 0;
       for (const auto& elem : init_list_) {
         elem.fill_tensor(tensor[index]);
@@ -262,8 +290,8 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
   at::Tensor tensor_;
 };
 
-inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer& init_list_tensor) {
-  init_list_tensor.pretty_print_recursive(stream);
+inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer& tensor_data_container) {
+  tensor_data_container.pretty_print_recursive(stream);
   return stream;
 }
 

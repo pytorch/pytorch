@@ -541,7 +541,7 @@ TEST(TensorIndexingTest, TestIndexSetitemBoolsSlices) {
     a("...") = neg_ones_expanded * 4;
     assert_equal(a, neg_ones * 4);
     if (a.dim() == 0) {
-      ASSERT_THROW(a({}) = neg_ones_expanded * 5, c10::Error); // yf225 TODO: can we have an at::IndexError?
+      ASSERT_THROW(a({}) = neg_ones_expanded * 5, c10::Error);
     }
   }
 }
