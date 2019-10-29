@@ -2166,15 +2166,6 @@ TEST_F(ModulesTest, PrettyPrintConv) {
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
 }
 
-TEST_F(ModulesTest, PrettyPrintFold) {
-  ASSERT_EQ(
-      c10::str(Fold(FoldOptions({2, 2}, {5, 5}))),
-      "torch::nn::Fold(output_size=[2, 2], kernel_size=[5, 5], dilation=[1, 1], padding=[0, 0], stride=[1, 1])");
-  ASSERT_EQ(
-      c10::str(Fold(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2, 1}).stride(2))),
-      "torch::nn::Fold(output_size=[8, 8], kernel_size=[3, 3], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
-}
-
 TEST_F(ModulesTest, PrettyPrintUpsample) {
   ASSERT_EQ(
       c10::str(Upsample(UpsampleOptions().size({2, 4, 4}))),
@@ -2182,6 +2173,15 @@ TEST_F(ModulesTest, PrettyPrintUpsample) {
   ASSERT_EQ(
       c10::str(Upsample(UpsampleOptions().scale_factor({0.5, 1.5}).mode(torch::kBilinear))),
       "torch::nn::Upsample(scale_factor=[0.5, 1.5], mode=kBilinear)");
+}
+
+TEST_F(ModulesTest, PrettyPrintFold) {
+  ASSERT_EQ(
+      c10::str(Fold(FoldOptions({2, 2}, {5, 5}))),
+      "torch::nn::Fold(output_size=[2, 2], kernel_size=[5, 5], dilation=[1, 1], padding=[0, 0], stride=[1, 1])");
+  ASSERT_EQ(
+      c10::str(Fold(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2, 1}).stride(2))),
+      "torch::nn::Fold(output_size=[8, 8], kernel_size=[3, 3], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
 }
 
 TEST_F(ModulesTest, PrettyPrintUnfold) {
