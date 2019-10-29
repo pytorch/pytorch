@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import concurrent.futures
 import sys
-import tempfile
 import unittest
 from collections import namedtuple
 from unittest import mock
