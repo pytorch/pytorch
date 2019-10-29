@@ -2,7 +2,6 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/functional/normalization.h>
-#include <torch/nn/functional/pooling.h>
 #include <torch/nn/options/normalization.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>

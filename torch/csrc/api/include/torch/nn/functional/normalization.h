@@ -5,8 +5,6 @@
 #include <torch/nn/functional/pooling.h>
 #include <torch/types.h>
 
-#include <vector>
-
 namespace torch {
 namespace nn {
 namespace functional {
@@ -15,7 +13,6 @@ inline Tensor normalize(
     const Tensor& input,
     const NormalizeOptions& options = {},
     c10::optional<Tensor> out = c10::nullopt) {
-  
     if (out == c10::nullopt) {
       auto denom = input.norm(options.p(), options.dim(), true).clamp_min(options.eps()).expand_as(input);
       return input / denom;
@@ -37,10 +34,10 @@ inline Tensor local_response_norm(
     const Tensor& input,
     const LocalResponseNormOptions& options) {
     auto dim = input.dim();
-    TORCH_CHECK( dim >=3 ,"Expected 3D or higher dimensionality input (got ",dim, " ,dimensions)");
+    TORCH_CHECK( dim >=3 ,"Expected 3D or higher dimensionality input (got ",dim, " dimensions)");
     auto div = input.mul(input).unsqueeze(1);
     if (dim == 3) {
-      div = pad(div, PadOptions({0, 0, options.size() / 2, (options.size() - 1) /2}));
+      div = pad(div, PadOptions({0, 0, options.size() / 2, (options.size() - 1) / 2}));
       div = avg_pool2d(div, AvgPool2dOptions({options.size(), 1}).stride(1)).squeeze(1);
     } else {
       auto sizes = input.sizes();
