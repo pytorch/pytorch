@@ -12,6 +12,7 @@ using DimMask = TensorIterator::DimMask;
 using PtrVector = TensorIterator::PtrVector;
 using loop_t = TensorIterator::loop_t;
 using loop2d_t = TensorIterator::loop2d_t;
+using StrideVector = TensorIterator::StrideVector;
 
 void TensorIterator::reorder_dimensions() {
   // Sort the dimensions based on strides in ascending order with reduced dims
@@ -48,7 +49,7 @@ void TensorIterator::reorder_dimensions() {
       } else if (stride0 <= stride1) {
         return -1;
       } else {
-        ret = 1;
+        return 1;
       }
     }
     return ret;
@@ -86,27 +87,54 @@ Device compute_device(at::ArrayRef<OperandInfo> operands) {
   return kCPU;
 }
 
-static std::tuple<Device, ScalarType> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
+static std::tuple<Device, ScalarType, bool> compute_common_type_(at::ArrayRef<OperandInfo> operands) {
   // See [Result type computation] in TensorIterator.h
   auto device = compute_device(operands);
+  auto common_type = ScalarType::Undefined;
+  bool all_same_type = true;
+  for (const auto& op: operands){
+    if (!op.tensor.defined()) continue;
+    //don't handle scalars
+    if (op.tensor.dim() > 0){
+      ScalarType current = op.tensor.scalar_type();
+      if (current == ScalarType::Undefined){
+        all_same_type = false;
+        break;
+      }
+      if (common_type == ScalarType::Undefined) common_type = current;
+      if (common_type != current) {
+        all_same_type = false;
+        break;
+      }
+    } else {
+      all_same_type = false;
+      break;
+    }
+  }
+  if (all_same_type) {
+    return std::make_tuple(device, common_type, true);
+  }
+  //TODO refactor so that no tensor copies are done
   std::vector<Tensor> tensors;
   std::transform(std::begin(operands), std::end(operands), std::back_inserter(tensors),
                   [](const OperandInfo& op) { return op.tensor; });
   auto dtype = at::native::result_type(tensors);
-  auto result = std::make_tuple(device, dtype);
+  auto result = std::make_tuple(device, dtype, false);
   TORCH_INTERNAL_ASSERT(dtype != ScalarType::Undefined);
   return result;
 }
 
-std::tuple<Device, ScalarType> TensorIterator::compute_common_type() {
+std::tuple<Device, ScalarType, bool> TensorIterator::compute_common_type() {
   return compute_common_type_(operands_);
 }
 
-static void validate_dtype(OperandInfo& op, ScalarType common_dtype, int ninputs) {
+static void validate_dtype(OperandInfo& op, ScalarType common_dtype, CommonDTypeStrategy strategy) {
+  bool check_output = strategy == CommonDTypeStrategy::CHECK || strategy == CommonDTypeStrategy::PROMOTE;
+  bool promoting = strategy == CommonDTypeStrategy::PROMOTE || (strategy == CommonDTypeStrategy::PROMOTE_INPUTS && !op.is_output);
   if (op.tensor.defined()) {
     // For binary_ops, we follow casting rules. For unary/nullary types
     // we require the type to match.
-    if (op.is_output) {
+    if (op.is_output && check_output) {
       if (!canCast(common_dtype, op.tensor.scalar_type()))
       {
         AT_ERROR("result type ", common_dtype,
@@ -114,7 +142,7 @@ static void validate_dtype(OperandInfo& op, ScalarType common_dtype, int ninputs
           op.tensor.scalar_type());
       }
     }
-    if (ninputs < 2 && op.dtype != op.tensor.scalar_type()) {
+    if (!promoting && op.dtype != op.tensor.scalar_type()) {
       AT_ERROR("expected dtype ", op.dtype, " but got dtype ", op.tensor.scalar_type());
     }
   }
@@ -130,14 +158,6 @@ static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype)
     } else {
       op.tensor =
           at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype));
-    }
-    auto original_element_size = op.original_tensor.element_size();
-    auto new_element_size = op.tensor.element_size();
-
-    // stride size (in bytes) can change if we change the dtype.
-    for( size_t i=0; i < op.stride_bytes.size(); i++ ) {
-      auto stride = op.stride_bytes[i] / original_element_size;
-      op.stride_bytes[i] = stride * new_element_size;
     }
   }
 }
@@ -155,18 +175,21 @@ void TensorIterator::compute_types() {
     }
   }
 
-  if (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_INPUTS) {
+  if (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE_INPUTS) {
     TORCH_CHECK(!missing_output_dtypes, "unable to compute and promote common dtype based only on inputs if there are missing dtypes for outputs");
   }
 
-  bool compute_common_dtype = (compute_common_dtype_strategy_ != CommonDTypeStrategy::COMPUTE_NONE);
-  bool compute_common_dtype_only_for_inputs = (compute_common_dtype_strategy_ == CommonDTypeStrategy::COMPUTE_INPUTS);
+  bool compute_common_dtype = (common_dtype_strategy_ != CommonDTypeStrategy::NONE);
+  bool compute_common_dtype_only_for_inputs = (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE_INPUTS);
+
+  bool may_have_differing_types = true;
 
   if (missing_dtypes || compute_common_dtype) {
     auto operands = compute_common_dtype_only_for_inputs ? at::ArrayRef<OperandInfo>(operands_).slice(noutputs()) : operands_;
     auto common_type = compute_common_type_(operands);
     auto common_device = std::get<0>(common_type);
     common_dtype = std::get<1>(common_type);
+    may_have_differing_types = !std::get<2>(common_type);
     bool has_cpu_scalar = false;
     for (auto& op : operands_) {
       if (!op.is_type_defined()) {
@@ -198,31 +221,33 @@ void TensorIterator::compute_types() {
           }
         }
       }
+    }
+  }
 
-      if (!compute_common_dtype_only_for_inputs) {
-        validate_dtype(op, common_dtype, ninputs());
-      }
-      if (!compute_common_dtype_only_for_inputs || !op.is_output) {
+  for (auto &op : operands_) {
+    if (may_have_differing_types) {
+      validate_dtype(op, common_dtype, common_dtype_strategy_);
+      if (compute_common_dtype && (!compute_common_dtype_only_for_inputs || !op.is_output)) {
         maybe_promote_common_dtype(op, common_dtype);
       }
+    }
 
-      if (op.tensor.defined() && op.device != op.tensor.device()) {
-        if (op.is_output) {
-          AT_ERROR("output with device ", op.tensor.device(),
-                   " doesn't match the desired device ", op.device);
-        } else if (op.tensor.dim() == 0) {
-          op.tensor = op.tensor.to(op.options());
-        } else {
-          AT_ERROR("expected device ", op.device,
-                   " but got device ", op.tensor.device());
-        }
+    if (op.tensor.defined() && op.device != op.tensor.device()) {
+      if (op.is_output) {
+        AT_ERROR("output with device ", op.tensor.device(),
+                  " doesn't match the desired device ", op.device);
+      } else if (op.tensor.dim() == 0) {
+        op.tensor = op.tensor.to(op.options());
+      } else {
+        AT_ERROR("expected device ", op.device,
+                  " but got device ", op.tensor.device());
       }
     }
   }
 }
 
-DimVector TensorIterator::compatible_stride(int element_size) const {
-  auto stride = DimVector();
+StrideVector TensorIterator::compatible_stride(int element_size) const {
+  auto stride = StrideVector();
   int64_t next_stride = element_size;
   for (int dim = 0; dim < ndim(); dim++) {
     stride.push_back(next_stride);
@@ -369,9 +394,9 @@ int64_t TensorIterator::numel() const {
   return numel;
 }
 
-DimVector TensorIterator::get_dim_strides(int dim) const {
+StrideVector TensorIterator::get_dim_strides(int dim) const {
   auto dims = ndim();
-  auto inner_strides = DimVector();
+  auto inner_strides = StrideVector();
   for (auto& op : operands_) {
     inner_strides.push_back(dims == 0 ? 0 : op.stride_bytes[dim]);
   }
@@ -478,8 +503,8 @@ void TensorIterator::for_each(loop2d_t loop) {
   }
 }
 
-DimVector TensorIterator::get_strides() const {
-  DimVector strides;
+StrideVector TensorIterator::get_strides() const {
+  StrideVector strides;
   for (int dim = 0; dim < ndim(); dim++) {
     for (int arg = 0; arg < ntensors(); arg++) {
       strides.push_back(operands_[arg].stride_bytes[dim]);
@@ -602,6 +627,7 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
   iter.add_input(a);
   iter.add_input(b);
   iter.allow_cpu_scalars_ = true;
+  iter.promote_common_dtype();
   iter.build();
   return iter;
 }
@@ -751,9 +777,11 @@ void TensorIterator::compute_strides() {
       auto original_shape = op.tensor.sizes();
       auto original_stride = op.tensor.strides();
       auto element_size_in_bytes = op.tensor.element_size();
-
-      op.stride_bytes.resize(ndim(), 0);
       auto offset = ndim() - original_shape.size();
+      if (offset > 0)
+          op.stride_bytes.resize(ndim(), 0);
+      else
+          op.stride_bytes.resize(ndim());
       for (size_t i = 0; i < original_shape.size(); i++) {
         if (original_shape[i] == 1) {
           op.stride_bytes[offset + i] = 0;
@@ -827,12 +855,12 @@ void TensorIterator::build() {
 #endif
   // compute the broadcasted shape
   compute_shape();
+  // compute the result dtype and device
+  compute_types();
   // compute each tensor's stride after broadcasting
   compute_strides();
   // re-order dimensions to improve coalescing
   reorder_dimensions();
-  // compute the result dtype and device
-  compute_types();
   // allocate the output tensor if it's not provided
   allocate_outputs();
 #ifdef BUILD_NAMEDTENSOR

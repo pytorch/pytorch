@@ -143,6 +143,8 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
       if (sizes_[a] < 2) {
         return false;
+      } else if (sizes_[b] < 2) {
+        return true;
       }
       return strides_[a] < strides_[b];
   });
@@ -223,13 +225,5 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
 }
 
 AutogradMetaInterface::~AutogradMetaInterface() {}
-
-bool NonVariableTypeMode::is_enabled() {
-  return !impl::tls_variable_is_enabled();
-}
-
-void NonVariableTypeMode::set_enabled(bool enabled) {
-  impl::tls_variable_set_enabled(!enabled);
-}
 
 } // namespace c10
