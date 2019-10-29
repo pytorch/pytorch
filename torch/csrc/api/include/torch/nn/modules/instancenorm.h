@@ -8,7 +8,7 @@
 namespace torch {
 namespace nn {
 
-/// Base class for all (dimesnsion-specialized) instanceNorm modules
+/// Base class for all (dimension-specialized) instanceNorm modules
 template <typename Derived>
 class TORCH_API InstanceNormImpl : public torch::nn::BatchNormImpl {
  protected:
@@ -19,11 +19,9 @@ class TORCH_API InstanceNormImpl : public torch::nn::BatchNormImpl {
     : InstanceNormImpl(InstanceNormOptions(num_features)) {} 
   explicit InstanceNormImpl(const InstanceNormOptions& options_);
 
-
-
   Tensor forward(const Tensor& input);
   
-  /// The optons with which this `Module` was constructed.
+  /// The options with which this `Module` was constructed.
   InstanceNormOptions options;
 };
 
@@ -44,7 +42,6 @@ class TORCH_API InstanceNorm2dImpl : public InstanceNormImpl<InstanceNorm2dImpl>
 };
 
 TORCH_MODULE(InstanceNorm2d);
-
 
 class TORCH_API InstanceNorm3dImpl : public InstanceNormImpl<InstanceNorm3dImpl> {
  public:
