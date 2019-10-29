@@ -1,6 +1,4 @@
-#include <ATen/NativeFunctions.h>
-#include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/core/grad_mode.h>
+#include <ATen/ATen.h>
 #include <torch/detail/TensorDataContainer.h>
 
 namespace torch {
