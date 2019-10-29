@@ -492,7 +492,7 @@ inline IValue toIValue(
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
         py::str qualified_name = py::module::import("torch.jit")
-                                    .attr("_qualified_name")(obj.get_type());
+                                     .attr("_qualified_name")(obj.get_type());
         auto pyCu = get_python_cu();
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
         if (!classType) {
@@ -505,7 +505,7 @@ inline IValue toIValue(
         }
         res = toIValue(std::move(obj), classType);
       }
-      //check if the classType conform with the interface or not
+      // check if the classType conform with the interface or not
       std::stringstream why_not;
       if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
         throw py::cast_error(c10::str(
