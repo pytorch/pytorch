@@ -1264,6 +1264,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::Drop,
       at::onnx::Reshape,
       at::onnx::Shape,
+      prim::AutogradAnyNonZero,
       prim::AutogradAdd,
   };
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/variant.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/enum.h>
 #include <torch/types.h>

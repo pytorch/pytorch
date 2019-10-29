@@ -76,7 +76,7 @@ class TorchBenchmarkBase(object):
         @torch.jit.script
         def _jit_forward_graph(iters, place_holder):
             # type: (int, Tensor)
-            result = torch.jit.annotate(torch.Tensor, place_holder)
+            result = torch.jit.annotate(torch.Tensor, None)
             for _ in range(iters):
                 result = func(place_holder)
             return result
