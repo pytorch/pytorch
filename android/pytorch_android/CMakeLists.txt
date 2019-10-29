@@ -24,11 +24,8 @@ target_include_directories(pytorch PUBLIC
     ${libtorch_include_DIR}
 )
 
-set(BUILD_DIR ${CMAKE_SOURCE_DIR}/build)
-file(MAKE_DIRECTORY ${BUILD_DIR})
-
 set(fbjni_DIR ${CMAKE_CURRENT_LIST_DIR}/../libs/fbjni/)
-set(fbjni_BUILD_DIR ${BUILD_DIR}/fbjni/${ANDROID_ABI})
+set(fbjni_BUILD_DIR ${CMAKE_BINARY_DIR}/fbjni/${ANDROID_ABI})
 
 add_subdirectory(${fbjni_DIR} ${fbjni_BUILD_DIR})
 
