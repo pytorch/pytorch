@@ -53,7 +53,7 @@ def set_declaration_defaults(declaration):
 
 def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
     def exclude_arg(arg):
-        return arg.get('ignore_check') or arg['type'] == 'CONSTANT'
+        return arg['type'] == 'CONSTANT'
 
     def exclude_arg_with_self_check(arg):
         return exclude_arg(arg) or (remove_self and arg['name'] == 'self')
@@ -91,10 +91,10 @@ def filter_unique_options(options, allow_kwarg, type_to_signature, remove_self):
     return unique
 
 
-def sort_by_number_of_options(declaration, reverse=True):
-    def num_checked_args(option):
-        return sum(map(lambda a: not a.get('ignore_check', False), option['arguments']))
-    declaration['options'].sort(key=num_checked_args, reverse=reverse)
+def sort_by_number_of_args(declaration, reverse=True):
+    def num_args(option):
+        return len(option['arguments'])
+    declaration['options'].sort(key=num_args, reverse=reverse)
 
 
 class Function(object):

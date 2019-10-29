@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
 #include <ATen/core/Dict.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <memory>
 #include <sstream>
@@ -145,7 +146,7 @@ Value* TracingState::getValue(const IValue& var) {
       }
       return it->second;
     }
-    std::ostringstream oss; 
+    std::ostringstream oss;
     if (var.isFuture()) {
       oss << "Tried to trace Future or Object that the tracer was not aware of.";
     } else {
@@ -284,16 +285,19 @@ static void gatherParametersAndBuffers(
     Value* self_value,
     const script::Module& self) {
   Graph& g = *self_value->owningGraph();
-  
+
   state->setValue(self.module_object(), self_value);
 
-  for (script::Slot s : self.get_slots()) {
-    if (s.type()->isSubtypeOf(TensorType::get())) {
+  auto self_ty = self.type();
+  for (const script::NameValue& s : self.get_slots()) {
+    if (s.value.type()->isSubtypeOf(TensorType::get())) {
       addInput(
-          state, s.value(), s.type(), g.insertGetAttr(self_value, s.name()));
-    } else if (s.entity_type() == script::EntityType::MODULE) {
+          state, s.value, s.value.type(), g.insertGetAttr(self_value, s.name));
+    } else if (self_ty->is_module(self_ty->getAttributeSlot(s.name))) {
       gatherParametersAndBuffers(
-          state, g.insertGetAttr(self_value, s.name()), s.to_module());
+          state,
+          g.insertGetAttr(self_value, s.name),
+          script::Module(s.value.toObject()));
     }
   }
 }
@@ -303,7 +307,7 @@ static void gatherParametersAndBuffers(
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
 std::pair<std::shared_ptr<TracingState>, Stack> enter(
-    TypedStack inputs,
+    Stack inputs,
     script::Module* self) {
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
@@ -320,12 +324,10 @@ std::pair<std::shared_ptr<TracingState>, Stack> enter(
   }
 
   size_t i = 0;
-  auto input_types = inputs.types()->elements();
-  for (IValue& input : inputs.stack()) {
-    input = addInput(state,
-        input, input_types[i++], state->graph->addInput());
+  for (IValue& input : inputs) {
+    input = addInput(state, input, input.type(), state->graph->addInput());
   }
-  return std::make_pair(state, inputs.stack());
+  return std::make_pair(state, inputs);
 }
 
 // Exit a trace, treating 'outputs' as the outputs of the trace.  These
@@ -477,6 +479,14 @@ void addInputs(
     n->addInput(none);
   }
 }
+#ifdef BUILD_NAMEDTENSOR
+void addInputs(
+    Node* n,
+    const char* name,
+    c10::optional<at::DimnameList> value) {
+  TORCH_CHECK(false, "NYI: Named tensors are not supported with the tracer");
+}
+#endif
 void addInputs(
     Node* n,
     const char* name,

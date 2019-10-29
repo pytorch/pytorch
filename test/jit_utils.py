@@ -43,6 +43,10 @@ def execWrapper(code, glob, loc):
 def do_input_map(fn, input):
     return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
 
+def clear_class_registry():
+    torch._C._jit_clear_class_registry()
+    torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
+
 
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
@@ -84,7 +88,7 @@ class JitTestCase(TestCase):
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         self.clearHooks()
-        torch._C._jit_clear_class_registry()
+        clear_class_registry()
 
     def _isHookExceptionOk(self, e):
         se = str(e)
@@ -138,6 +142,7 @@ class JitTestCase(TestCase):
                 buffer_copy = buffer.getvalue()
 
                 code_files, debug_files = extract_files(buffer)
+
             except RuntimeError as e:
                 if not self._isHookExceptionOk(e):
                     raise
@@ -157,6 +162,9 @@ class JitTestCase(TestCase):
 
             for a, b in zip(code_files, code_files_2):
                 self.assertMultiLineEqual(a, b)
+
+            if isinstance(m, torch._C.ScriptModule):
+                self.assertTrue(torch._C._ivalue_tags_match(m, imported._c))
 
 
     def emitFunctionHook(self, func):
@@ -488,6 +496,24 @@ class JitTestCase(TestCase):
             results = func(*inputs, **kwargs)
         return results
 
+    def checkModule(self, nn_module, args):
+        """
+        Check that a nn.Module's results in Script mode match eager and that it
+        can be exported
+        """
+        sm = torch.jit.script(nn_module)
+
+        with freeze_rng_state():
+            eager_out = nn_module(*args)
+
+        with freeze_rng_state():
+            script_out = sm(*args)
+
+        self.assertEqual(eager_out, script_out)
+        self.assertExportImportModule(sm, args)
+
+        return sm
+
 @contextmanager
 def enable_profiling_mode():
     torch._C._jit_set_profiling_mode(True)
@@ -557,3 +583,12 @@ def enable_cpu_fuser_if(cond):
                 return fn(*args, **kwargs)
             return wrapper
         return noop_fuser
+
+def get_forward(c):
+    return c._get_method('forward')
+
+def get_forward_graph(c):
+    return c._get_method('forward').graph
+
+def get_module_method(m, module, method):
+    return m._c._get_module(module)._get_method(method)

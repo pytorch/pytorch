@@ -23,13 +23,13 @@ install_ubuntu() {
                    rocfft \
                    miopen-hip \
                    rocblas \
-                   rocm-profiler \
-                   cxlactivitylogger \
                    hipsparse \
                    rocrand \
                    hipcub \
                    rocthrust \
-                   rccl
+                   rccl \
+                   rocprofiler-dev \
+                   roctracer-dev
 }
 
 install_centos() {
@@ -55,13 +55,13 @@ install_centos() {
                    rocfft \
                    miopen-hip \
                    rocblas \
-                   rocm-profiler \
-                   cxlactivitylogger \
                    hipsparse \
                    rocrand \
                    rccl \
                    hipcub \
-                   rocthrust
+                   rocthrust \
+                   rocprofiler-dev \
+                   roctracer-dev
 }
  
 # Install Python packages depending on the base OS

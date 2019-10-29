@@ -55,6 +55,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <functional>

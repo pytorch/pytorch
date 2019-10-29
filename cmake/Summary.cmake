@@ -127,7 +127,6 @@ function (caffe2_print_configuration_summary)
   if(${USE_DISTRIBUTED})
     message(STATUS "    USE_MPI             : ${USE_MPI}")
     message(STATUS "    USE_GLOO            : ${USE_GLOO}")
-    message(STATUS "    USE_GLOO_IBVERBS    : ${USE_GLOO_IBVERBS}")
   endif()
   message(STATUS "  BUILD_NAMEDTENSOR   : ${BUILD_NAMEDTENSOR}")
 
