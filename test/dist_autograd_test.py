@@ -105,6 +105,8 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
     return success
 
 
+# This function creates a dis atugorad context, run rpc_sync on the given ps,
+# and then blocks until the ps has verified the grads are correctly accumulated.
 def _run_trainer(rref_t1, t2, t2_grad, ps, rank_diff):
     with dist_autograd.context() as context_id:
         ret = rpc.rpc_sync(ps, my_rref_add, args=(rref_t1, t2))
@@ -812,6 +814,7 @@ class DistAutogradTest(object):
             args=(self_name, (3, 3))
         )
 
+        # kick off forward and backward pass on three other workers (trainers)
         rank_diffs = [1, 2, 3]
         futures = []
         for rank_diff in rank_diffs:
@@ -821,20 +824,23 @@ class DistAutogradTest(object):
                 args=(rref_t1, t2, t2.grad, self_name, rank_diff)
             ))
 
+        # check if the trainers have done with their backward pass
         for rank_diff in rank_diffs:
             self._check_rpc_done(rank_diff)
 
         # trainers are done and holding the context for verification
         accumulate_grad_func = None
         for rank_diff in rank_diffs:
+            # for each context, there should only be one send function, sending
+            # the result back to the trainer.
             ctx_id = ctx_ids[rank_diff]
             ctx = dist_autograd._retrieve_context(ctx_id)
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
 
+            # the result comes from a torch.add
             next_funcs = list(send_functions.values())[0].next_functions
             add_backward_fn = next_funcs[0][0]
-
             self.assertEqual("AddBackward0", add_backward_fn.name())
 
             # Verify the next two functions are the same recv backward function.
@@ -852,8 +858,10 @@ class DistAutogradTest(object):
                 next_funcs[1][0].name()
             )
 
+        # unblock trainers
         _set_rpc_done(None, 0)
 
+        # wait until all trainers are done
         for fut in futures:
             fut.wait()
 
