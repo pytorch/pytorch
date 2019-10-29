@@ -13,7 +13,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v1
         with:
-          python-version: 3.7.4
+          python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@master
@@ -28,7 +28,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v1
         with:
-          python-version: 3.7.4
+          python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@master
@@ -69,7 +69,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v1
         with:
-          python-version: 3.7.4
+          python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@master
@@ -84,7 +84,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v1
         with:
-          python-version: 3.7.4
+          python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@master
@@ -99,7 +99,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v1
         with:
-          python-version: 3.7.4
+          python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
         uses: actions/checkout@master
@@ -174,7 +174,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v1
         with:
-          python-version: 3.7.4
+          python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
         uses: actions/checkout@master
@@ -208,12 +208,11 @@ jobs:
       - name: Run clang-tidy
         run: |
           set -eux
-          BASE_BRANCH=master
-          if [[ $PR_TARGET ]]; then
-            git remote add upstream https://github.com/pytorch/pytorch
-            git fetch upstream "$PR_TARGET"
-            BASE_BRANCH="upstream/$PR_TARGET"
-          fi
+          git remote add upstream https://github.com/pytorch/pytorch
+          git fetch upstream "$GITHUB_BASE_REF"
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
 
           if [[ ! -d build ]]; then
             git submodule update --init --recursive
@@ -242,22 +241,21 @@ jobs:
           # The negative filters below are to exclude files that include onnx_pb.h or
           # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
           python tools/clang_tidy.py                  \
+            --verbose                                 \
             --paths torch/csrc/                       \
-            --diff "$BASE_BRANCH"                     \
+            --diff "$MERGE_BASE"                      \
             -g"-torch/csrc/jit/export.cpp"            \
             -g"-torch/csrc/jit/import.cpp"            \
             -g"-torch/csrc/jit/netdef_converter.cpp"  \
             "$@" > ${GITHUB_WORKSPACE}/clang-tidy-output.txt
 
           cat ${GITHUB_WORKSPACE}/clang-tidy-output.txt
-        env:
-          PR_TARGET: ${{ github.base_ref }}
       - name: Add annotations
         uses: suo/add-annotations-github-action@master
         with:
           check_name: 'clang-tidy'
           linter_output_path: 'clang-tidy-output.txt'
           commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) (?<errorCode>\[.*\])'
+          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorDesc>.*?) \[(?<errorCode>.*)\]'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
