@@ -5,6 +5,8 @@ from __future__ import unicode_literals
 
 
 import operator_benchmark as op_bench
+import benchmark_caffe2 as op_bench_c2
+from benchmark_caffe2 import Caffe2BenchmarkBase # noqa
 from caffe2.python import core 
 
 """Microbenchmarks for MatMul operator"""
@@ -31,7 +33,7 @@ mm_short_configs = op_bench.config_list(
 )
 
 
-class MatMulBenchmark(op_bench.Caffe2BenchmarkBase):
+class MatMulBenchmark(op_bench_c2.Caffe2BenchmarkBase):
     def init(self, M, N, K, trans_a, trans_b): 
         self.input_one = self.tensor([N, M]) if trans_a else self.tensor([M, N])
         self.input_two = self.tensor([K, N]) if trans_b else self.tensor([N, K])
@@ -46,7 +48,7 @@ class MatMulBenchmark(op_bench.Caffe2BenchmarkBase):
         return op
 
 
-op_bench.generate_c2_test(mm_long_configs + mm_short_configs, MatMulBenchmark)
+op_bench_c2.generate_c2_test(mm_long_configs + mm_short_configs, MatMulBenchmark)
 
 
 if __name__ == "__main__":

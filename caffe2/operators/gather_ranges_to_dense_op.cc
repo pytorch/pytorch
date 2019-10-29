@@ -74,10 +74,13 @@ are sorted by the corresponding KEY.
         "empty ranges or mismatched ranges is alarming.")
     .Arg(
         "max_empty_ratio",
-        "An crital log is triggered when ratio of empty ranges exceeds this.")
+        "An error log is triggered when ratio of empty ranges exceeds this.")
     .Arg(
         "max_mismatched_ratio",
         "An error is raised when ratio of mismatched ranges exceeds this.")
+    .Arg(
+        "log_every_n",
+        "A log is recorded only after an error is triggered every n times.")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);
