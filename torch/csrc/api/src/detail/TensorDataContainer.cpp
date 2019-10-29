@@ -1,3 +1,5 @@
+#include <ATen/NativeFunctions.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/grad_mode.h>
 #include <torch/detail/TensorDataContainer.h>
 
