@@ -156,11 +156,8 @@ Tensor BatchNormImplBase<D, Derived>::forward(const Tensor& input) {
       input,
       running_mean,
       running_var,
-      weight,
-      bias,
-      this->is_training() || !options.track_running_stats(),
-      exponential_average_factor,
-      options.eps());
+      BatchNormOptions().weight(weight).bias(bias).momentum(exponential_average_factor).eps(options.eps()),
+      this->is_training() || !options.track_running_stats());
 }
 
 void BatchNorm1dImpl::_check_input_dim(const Tensor& input) {
