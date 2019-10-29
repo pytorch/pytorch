@@ -62,7 +62,10 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       std::string name,
       const TypePtr& type,
       py::object pyFunction);
-  void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
+  void addModule(
+      std::string name,
+      const TypePtr& type,
+      std::shared_ptr<ConcreteModuleType> meta);
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
@@ -134,7 +137,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
         lhsSorted.begin(),
         lhsSorted.end(),
         [](const ModuleInfo& a, const ModuleInfo& b) {
-          return a.name < b.name;
+          return a.name_ < b.name_;
         });
 
     auto rhsSorted = rhs.modules_;
@@ -142,7 +145,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
         rhsSorted.begin(),
         rhsSorted.end(),
         [](const ModuleInfo& a, const ModuleInfo& b) {
-          return a.name < b.name;
+          return a.name_ < b.name_;
         });
 
     return lhsSorted == rhsSorted;
@@ -190,12 +193,18 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   };
 
   struct ModuleInfo {
-    std::string name;
-    std::shared_ptr<ConcreteModuleType> meta;
+    ModuleInfo(std::string name, std::shared_ptr<ConcreteModuleType> meta)
+        : name_(std::move(name)), meta_(std::move(meta)), type_(meta_->getJitType()) {}
 
+    ModuleInfo(std::string name, const TypePtr& type, std::shared_ptr<ConcreteModuleType> meta)
+        : name_(std::move(name)), meta_(std::move(meta)), type_(type) {}
     friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs) {
-      return *(lhs.meta) == *(rhs.meta);
+      return *(lhs.meta_) == *(rhs.meta_) && *(lhs.type_) == *(rhs.type_);
     }
+    std::string name_;
+    std::shared_ptr<ConcreteModuleType> meta_;
+    TypePtr type_;
+
   };
 
   // If true, this type will never compare equally to anything else. This is

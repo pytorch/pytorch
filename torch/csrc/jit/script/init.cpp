@@ -513,6 +513,12 @@ void initJitScriptBindings(PyObject* module) {
                 toIValue(std::move(value), self.type()->getAttribute(name));
             self.set_attribute(name, ivalue);
           })
+      .def("_setattr",
+          [](Module& self, const std::string& name, py::object value) {
+            auto ivalue =
+                toIValue(std::move(value), self.type()->getAttribute(name));
+            self.setattr(name, ivalue);
+          })
       .def("_set_parameter", &Module::set_parameter)
       .def("_get_parameter", &Module::get_parameter)
       .def("_get_buffer", &Module::get_buffer)

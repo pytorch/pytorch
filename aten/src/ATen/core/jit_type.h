@@ -1349,7 +1349,6 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
 
 
-
 /**
  * User Defined Types
  */

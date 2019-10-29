@@ -184,6 +184,23 @@ struct TORCH_API Module {
     return module_object()->setAttr(name, v);
   }
 
+  void setattr(const std::string& name, IValue v) {
+    size_t slot = module_object()->type()->getAttributeSlot(name);
+    const TypePtr& expected = module_object()->type()->getAttribute(slot);
+    // TODO: give better error message when subtyping check fails, and python_str
+    // of expected and v.type() are just mangled names of the same nn.module.
+    TORCH_CHECK(
+        v.type()->isSubtypeOf(expected),
+        "Expected a value of type '",
+        expected->python_str(),
+        "' for field '",
+        name,
+        "', but found '",
+        v.type()->python_str(),
+        "'");
+    module_object()->setSlot(slot, std::move(v));
+  }
+
   autograd::Variable get_buffer(const std::string& name) const {
     return autograd::as_variable_ref(get_attribute(name).toTensor());
   }

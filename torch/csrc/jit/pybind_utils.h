@@ -456,32 +456,41 @@ inline IValue toIValue(
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
-      // 1. create a bare ivalue
-      const size_t numAttrs = classType->numAttributes();
-      auto cu = classType->compilation_unit();
-      auto userObj = c10::ivalue::Object::create(
-          c10::StrongTypePtr(cu, classType), numAttrs);
+      c10::intrusive_ptr<c10::ivalue::Object> userObj;
+      if (auto mod = script::as_module(py::cast<py::object>(obj))) {
+        // if obj is already a ScriptModule, just return its ivalue
+        userObj = mod.value().module_object();
+      } else {
+        // 1. create a bare ivalue
+        const size_t numAttrs = classType->numAttributes();
+        auto cu = classType->compilation_unit();
+        userObj = c10::ivalue::Object::create(
+            c10::StrongTypePtr(cu, classType), numAttrs);
 
-      // 2. copy all the contained types
-      for (size_t slot = 0; slot < numAttrs; slot++) {
-        const auto& attrType = classType->getAttribute(slot);
-        const auto& attrName = classType->getAttributeName(slot);
+        // 2. copy all the contained types
+        for (size_t slot = 0; slot < numAttrs; slot++) {
+          const auto& attrType = classType->getAttribute(slot);
+          const auto& attrName = classType->getAttributeName(slot);
 
-        const auto& contained = py::getattr(obj, attrName.c_str());
-        userObj->setSlot(slot, toIValue(contained, attrType));
+          const auto& contained = py::getattr(obj, attrName.c_str());
+          userObj->setSlot(slot, toIValue(contained, attrType));
+        }
       }
       return userObj;
     }
     case TypeKind::InterfaceType: {
       auto interfaceType = type->expect<InterfaceType>();
-      // When converting an pyobj to an interface, we inspect the value
-      // to found the compiled TorchScript class, check if it conform
-      // with the interface or not, and then create a ivalue::Object
-      // from that class type.
+      // When converting an pyobj to an interface, we check if rhs
+      // is module or normal torchscript class, get the type and ivalue
+      // from them correspondingly.
       c10::ClassTypePtr classType = nullptr;
+      IValue res;
       if (auto mod = script::as_module(py::cast<py::object>(obj))) {
         classType = mod.value().type();
+        res = mod.value().module_object();
       } else {
+        // We inspect the value to found the compiled TorchScript class
+        // and then create a ivalue::Object from that class type.
         py::str qualified_name = py::module::import("torch.jit")
                                     .attr("_qualified_name")(obj.get_type());
         auto pyCu = get_python_cu();
@@ -494,8 +503,9 @@ inline IValue toIValue(
               "a TorchScript compatible type, did you forget to",
               "turn it into a user defined TorchScript class?"));
         }
+        res = toIValue(std::move(obj), classType);
       }
-
+      //check if the classType conform with the interface or not
       std::stringstream why_not;
       if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
         throw py::cast_error(c10::str(
@@ -506,7 +516,7 @@ inline IValue toIValue(
             "\n",
             why_not.str()));
       }
-      return toIValue(std::move(obj), classType);
+      return res;
     }
     case TypeKind::NumberType: {
       if (THPDtype_Check(obj.ptr())) {

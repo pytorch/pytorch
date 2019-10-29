@@ -75,47 +75,44 @@ def infer_raw_concrete_type(nn_module):
 
     class_annotations = getattr(nn_module, '__annotations__', {})
 
-    added_names = set()
-    for name, item in nn_module._parameters.items():
-        if item is None:
-            # TODO special case: parameters can be None. The JIT assumes
-            # parameters are Tensor types, so in this case just add it as a
-            # attribute.
-            # The "correct" fix here is to add the parameter as a NoneType
-            # attribute, but NoneType refinemenet is currently wonky
-            continue
-        assert isinstance(item, torch.Tensor)
-        attr_type = torch._C._jit_try_infer_type(item)
-        concrete_type.add_attribute(name, attr_type, True)
-        added_names.add(name)
-
-    for name, item in nn_module._modules.items():
+    # try to infer the type from type annotation or from the object itself
+    def infer_type(name, item):
         if name in class_annotations:
             attr_type = torch.jit.annotations.ann_to_type(class_annotations[name])
-            # check if it's an module iterface type otherwise error out
-            if isinstance(attr_type, torch._C.InterfaceType) and attr_type.isModule():
-                concrete_type.add_attribute(name, attr_type, False)
-            else:
-                raise RuntimeError("Trying to assign the submodule {} to an attribute "
-                                   "that is not an module interface type.".format(name))
+        elif isinstance(item, torch.jit.Attribute):
+            attr_type = torch.jit.annotations.ann_to_type(item.type)
+        else:
+            attr_type = torch._C._jit_try_infer_type(item)
+        return attr_type
 
-            continue
+    added_names = set()
 
+    def add_params_or_buffers(tensor_list, is_param=True):
+        for name, item in tensor_list.items():
+            if item is None:
+                # TODO special case: parameters can be None. The JIT assumes
+                # parameters are Tensor types, so in this case just add it as a
+                # attribute.
+                # The "correct" fix here is to add the parameter as a NoneType
+                # attribute, but NoneType refinemenet is currently wonky
+                continue
+            assert isinstance(item, torch.Tensor)
+            attr_type = infer_type(name, item)
+            concrete_type.add_attribute(name, attr_type, is_param)
+            added_names.add(name)
+
+    add_params_or_buffers(nn_module._parameters, is_param=True)
+    add_params_or_buffers(nn_module._buffers, is_param=False)
+
+    for name, item in nn_module._modules.items():
         sub_concrete_type = concrete_type_store.get_or_create_concrete_type(item)
-        concrete_type.add_module(name, sub_concrete_type)
-        added_names.add(name)
+        attr_type = infer_type(name, item)
+        if attr_type is None:
+            # normal module jit type derived from sub_concrete_module_type
+            attr_type = sub_concrete_type.jit_type
 
-    for name, item in nn_module._buffers.items():
-        if item is None:
-            # TODO special case: parameters can be None. The JIT assumes
-            # parameters are Tensor types, so in this case just add it as a
-            # attribute
-            # The "correct" fix here is to add the parameter as a NoneType
-            # attribute, but NoneType refinemenet is currently wonky
-            continue
-        assert isinstance(item, torch.Tensor)
-        attr_type = torch._C._jit_try_infer_type(item)
-        concrete_type.add_attribute(name, attr_type, False)
+        concrete_type.add_module(name, attr_type, sub_concrete_type)
+
         added_names.add(name)
 
     # populate constants_set
@@ -210,15 +207,8 @@ def infer_raw_concrete_type(nn_module):
                 item)
             continue
 
-        # If we got here, this is a regular "data" attribute. Try to infer to
-        # the type and add it to the concrete type
-        if name in class_annotations:
-            attr_type = torch.jit.annotations.ann_to_type(class_annotations[name])
-        elif isinstance(item, torch.jit.Attribute):
-            attr_type = torch.jit.annotations.ann_to_type(item.type)
-        else:
-            attr_type = torch._C._jit_try_infer_type(item)
-
+        # If we got here, this is a regular "data" attribute, Add it to the concrete type
+        attr_type = infer_type(name, item)
         if attr_type is not None:
             concrete_type.add_attribute(name, attr_type, False)
         else:
@@ -351,15 +341,11 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
         for name, (attr_type, is_param) in concrete_type.get_attributes().items():
             orig_value = getattr(nn_module, name)
+            if isinstance(orig_value, torch.jit.Attribute):
+                orig_value = orig_value.value
 
             if is_param:
                 cpp_module._register_parameter(name, orig_value, False)
-            elif isinstance(orig_value, torch.jit.Attribute):
-                cpp_module._register_attribute(name, attr_type, orig_value.value)
-            elif isinstance(orig_value, Module):
-                scripted = recursive_script(orig_value)
-                cpp_module._register_module(name, scripted._c)
-                script_module._modules[name] = scripted
             else:
                 cpp_module._register_attribute(name, attr_type, orig_value)
 
