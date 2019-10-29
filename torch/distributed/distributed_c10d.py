@@ -1180,7 +1180,6 @@ def all_gather_object(object, group=group.WORLD, async_op=False):
 
     all_gather(tensor_list, max_size_tensor, group=group, async_op=async_op)
     # unpickle the tensors back into objects.
-    # update
     objects = [_tensor_to_object(tensor, object_size) for object_size, tensor in zip(object_size_list, tensor_list)]
     return objects
 
