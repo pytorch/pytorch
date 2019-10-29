@@ -830,7 +830,7 @@ TEST_F(ModulesTest, Fold) {
 
 TEST_F(ModulesTest, Unfold) {
   {
-    Unfold model(UnfoldOptions(UnfoldOptions({2, 2}).padding(1).stride(2)));
+    Unfold model(UnfoldOptions({2, 2}).padding(1).stride(2));
     auto input = torch::arange(2, 14, torch::requires_grad()).view({1, 2, 2, 3});
     auto output = model(input);
     auto expected = torch::tensor(
