@@ -22,6 +22,27 @@ constexpr int PARENT_IDX = 5; // index of parent in the tuple
 // NB: if more fields are added, make sure this field is also bumped
 constexpr int RFD_TUPLE_SIZE = 6; // number of RRefForkData fields in py::tuple
 
+template <typename T>
+T& unwrapAutogradMessage(
+    const Message& message,
+    std::unique_ptr<RpcCommandBase>& response) {
+  if (message.type() == MessageType::FORWARD_AUTOGRAD_RESP) {
+    auto& rpcWithAutograd =
+        static_cast<autograd::RpcWithAutograd&>(*response);
+
+    // Attach 'recv' autograd function.
+    addRecvRpcBackward(
+        rpcWithAutograd.autogradMetadata(),
+        rpcWithAutograd.tensors(),
+        rpcWithAutograd.fromWorkerId());
+
+    auto& wrappedRpc = rpcWithAutograd.wrappedRpc();
+    return static_cast<T&>(wrappedRpc);
+  } else {
+    return static_cast<T&>(*response);
+  }
+}
+
 } // namespace
 
 std::atomic<local_id_t> RRefContext::nextLocalId_{0};
@@ -149,23 +170,8 @@ std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
   futureResponse->addCallback([future](const Message& message) {
     RRefContext::handleException(message);
     auto response = deserializeResponse(message);
-    if (message.type() == MessageType::FORWARD_AUTOGRAD_RESP) {
-      auto& rpcWithAutograd =
-          static_cast<autograd::RpcWithAutograd&>(*response);
-
-      // Attach 'recv' autograd function.
-      addRecvRpcBackward(
-          rpcWithAutograd.autogradMetadata(),
-          rpcWithAutograd.tensors(),
-          rpcWithAutograd.fromWorkerId());
-
-      auto& wrappedRpc = rpcWithAutograd.wrappedRpc();
-      auto& rfr = static_cast<ScriptRRefFetchRet&>(wrappedRpc);
-      future->markCompleted(rfr.values().front());
-    } else {
-      auto& rfr = static_cast<ScriptRRefFetchRet&>(*response);
-      future->markCompleted(rfr.values().front());
-    }
+    auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
+    future->markCompleted(rfr.values().front());
   });
   return future;
 }
@@ -187,23 +193,8 @@ std::shared_ptr<ivalue::Future> UserRRef<py::object>::toHere() {
   futureResponse->addCallback([future](const Message& message) {
     RRefContext::handleException(message);
     auto response = deserializeResponse(message);
-    if (message.type() == MessageType::FORWARD_AUTOGRAD_RESP) {
-      auto& rpcWithAutograd =
-          static_cast<autograd::RpcWithAutograd&>(*response);
-
-      // Attach 'recv' autograd function.
-      addRecvRpcBackward(
-          rpcWithAutograd.autogradMetadata(),
-          rpcWithAutograd.tensors(),
-          rpcWithAutograd.fromWorkerId());
-
-      auto& wrappedRpc = rpcWithAutograd.wrappedRpc();
-      auto& rfr = static_cast<PythonRRefFetchRet&>(wrappedRpc);
-      future->markCompleted(c10::ivalue::Tuple::create(rfr.values()));
-    } else {
-      auto& rfr = static_cast<PythonRRefFetchRet&>(*response);
-      future->markCompleted(c10::ivalue::Tuple::create(rfr.values()));
-    }
+    auto& rfr = unwrapAutogradMessage<PythonRRefFetchRet>(message, response);
+    future->markCompleted(c10::ivalue::Tuple::create(rfr.values()));
   });
   return future;
 }
