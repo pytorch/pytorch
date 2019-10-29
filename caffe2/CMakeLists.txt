@@ -386,6 +386,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/bailout_graph.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/clear_undefinedness.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/constant_propagation.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/constant_pooling.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/common_subexpression_elimination.cpp
@@ -575,6 +576,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pixelshuffle.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/upsampling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/named_any.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp

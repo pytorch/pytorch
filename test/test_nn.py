@@ -889,7 +889,7 @@ class TestNN(NNTestCase):
             # Negative stride check
             module = nn.Conv1d(in_channels=3, out_channels=6, kernel_size=3, stride=-1, bias=True).to(dtype)
             input = torch.randn(1, 3, 4).to(dtype)
-            with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
 
     def test_mismatch_shape_conv2d(self):
@@ -918,7 +918,13 @@ class TestNN(NNTestCase):
             # Negative stride check
             module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=-1, bias=True).to(dtype)
             input = torch.randn(1, 3, 4, 4).to(dtype)
-            with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
+                module(input)
+
+            # Zero stride check
+            module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=0, bias=True).to(dtype)
+            input = torch.randn(1, 3, 4, 4).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
 
     def test_invalid_conv3d(self):
@@ -930,7 +936,7 @@ class TestNN(NNTestCase):
             # Negative stride check
             module = torch.nn.Conv3d(1, 1, kernel_size=3, stride=-2)
             input = torch.empty(1, 1, 4, 4, 4)
-            with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
 
     def _test_alpha_dropout(self, cls, input):
