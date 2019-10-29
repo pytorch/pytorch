@@ -462,7 +462,6 @@ class DistAutogradTest(object):
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
                 rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1))
         # the thread's context id should be cleaned up
-        print(context_id)
         with self.assertRaises(RuntimeError):
             dist_autograd._retrieve_context(context_id)
         # check that all contexts have been cleaned up.
@@ -724,10 +723,8 @@ class DistAutogradTest(object):
             # We let node 2 fail and ensure the contexts on the other nodes are
             # cleaned up after the timeout.
             if self.rank != 2:
-                print(context_id)
                 with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id: "):
                     dist_autograd._retrieve_context(context_id)
-                print("worked")
 
     @dist_init(setup_model_parallel=True)
     def test_backward_without_context(self):

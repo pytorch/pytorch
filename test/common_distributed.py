@@ -204,9 +204,6 @@ class MultiProcessTestCase(TestCase):
         start_time = time.time()
         for p in self.processes:
             p.join(timeout)
-        for i,p in enumerate(self.processes):
-            print('Process {} exited with exit code {} '.format(i,
-              p.exitcode))
         elapsed_time = time.time() - start_time
         if fn in self.skip_return_code_checks:
             self._check_no_test_errors(elapsed_time)

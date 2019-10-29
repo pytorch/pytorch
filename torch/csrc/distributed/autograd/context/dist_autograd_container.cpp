@@ -28,16 +28,12 @@ DistAutogradContainer::DistAutogradContainer()
   cleanupContextTimeout = std::chrono::seconds(600);
   terminateWatchdog_.store(false);
   cleanupWatchdogThread_ = std::thread(&DistAutogradContainer::cleanupContextWatchdog, this);
-  LOG(ERROR) << getWorkerId() << "- watchdog thread created\n";
-  /* creation_time = std::chrono::high_resolution_clock::now(); */
 }
 
 DistAutogradContainer::~DistAutogradContainer() {
-  LOG(ERROR) << getWorkerId() << "- destructor called\n";
   terminateWatchdog_.store(true);
   cleanupWatchdogCV_.notify_one();
   cleanupWatchdogThread_.join();
-  LOG(ERROR) << getWorkerId() << "- thread joined\n";
 }
 DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
   std::lock_guard<std::mutex> guard(dist_container_init_lock_);
@@ -105,9 +101,6 @@ DistAutogradContext& DistAutogradContainer::getOrCreateContext(
                           std::forward_as_tuple(context_id, std::chrono::high_resolution_clock::now()))
                       .first->second;
   auto& context = std::get<0>(pair);
-  auto now = std::chrono::high_resolution_clock::now();
-  auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - std::get<1>(autograd_context_.at(context_id)));
-  LOG(ERROR) << getWorkerId() << "- insertion, new size: " << autograd_context_.size() << " context_id: " << context_id << " time: " << diff.count() << " getcreate\n";
   return context;
 }
 
@@ -131,9 +124,6 @@ const DistAutogradContext& DistAutogradContainer::newContext() {
                           std::forward_as_tuple(next_context_id_, std::chrono::high_resolution_clock::now()))
                       .first->second;
   auto& context = std::get<0>(pair);
-  auto now = std::chrono::high_resolution_clock::now();
-  auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - std::get<1>(autograd_context_.at(next_context_id_)));
-  LOG(ERROR) << getWorkerId() << "- insertion, new size: " << autograd_context_.size() << " context_id: " << next_context_id_ << " time: " << diff.count() << " insert\n";
   current_context_id_ = next_context_id_++;
   return context;
 }
@@ -153,8 +143,7 @@ DistAutogradContext& DistAutogradContainer::currentContext() {
   TORCH_CHECK(
       it != autograd_context_.end(),
       "Couldn't find autograd context "
-      "data for current autograd context id."
-      "Worker Id: ", getWorkerId());
+      "data for current autograd context id");
   return std::get<0>(it->second);
 }
 
@@ -203,33 +192,22 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
 }
 
 void DistAutogradContainer::cleanupContextWatchdog() {
-  /* LOG(ERROR) << getWorkerId() << "- scheduled again! watchdog: " << terminateWatchdog_.load() <<  "\n"; */
   while (!terminateWatchdog_.load()) {
     {
       std::lock_guard<std::mutex> guard(autograd_context_lock_);
-      /* LOG(ERROR) << getWorkerId() << "- got inside\n"; */
-      /* if (autograd_context_.empty()) { */
-      /*   LOG(ERROR) << getWorkerId() << "- nothing to loop thru\n"; */
-      /* } */
       for (auto it = autograd_context_.begin(); it != autograd_context_.end();) {
         auto now = std::chrono::high_resolution_clock::now();
-        /* LOG(ERROR) << getWorkerId() << "- candidate id " << it->first << "\n"; */
         auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - std::get<1>(it->second));
-        /* LOG(ERROR) << getWorkerId() << "- curr time: " << diff.count() << "\n"; */
         if (diff >= cleanupContextTimeout) {
-          /* LOG(ERROR) << getWorkerId() << "- cleared timeout!\n"; */
-          LOG(ERROR) << getWorkerId() << "- DELETING " << it->first << "\n";
           auto context_id = it->first;
           it = autograd_context_.erase(it);
           if (current_context_id_ == context_id) {
             current_context_id_ = kInvalidContextId;
           }
-          LOG(ERROR) << getWorkerId() << "- queue size post-deletion is " << autograd_context_.size() << "\n";
         }
       }
     }
   }
-  LOG(ERROR) << getWorkerId() << "- Waiting for destruction\n";
   std::unique_lock<std::mutex> guard(cleanupWatchdogCVMutex_);
   cleanupWatchdogCV_.wait_for(
       guard,
