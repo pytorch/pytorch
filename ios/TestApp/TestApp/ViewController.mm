@@ -7,8 +7,7 @@
 
 @end
 
-@implementation ViewController {
-}
+@implementation ViewController
 
 - (void)viewDidLoad {
   [super viewDidLoad];
@@ -19,29 +18,20 @@
   NSDictionary* config = [NSJSONSerialization JSONObjectWithData:configData
                                                          options:NSJSONReadingAllowFragments
                                                            error:&err];
-
   if (err) {
     NSLog(@"Parse config.json failed!");
     return;
   }
-  [Benchmark setup:config];
-  [self runBenchmark];
-}
 
-- (void)runBenchmark {
-  self.textView.text = @"Start benchmarking...\n";
   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-    NSString* text = [Benchmark run];
-    dispatch_async(dispatch_get_main_queue(), ^{
-      self.textView.text = [self.textView.text stringByAppendingString:text];
-    });
-  });
-}
-
-- (IBAction)reRun:(id)sender {
-  self.textView.text = @"";
-  dispatch_async(dispatch_get_main_queue(), ^{
-    [self runBenchmark];
+    if ([Benchmark setup:config]) {
+      NSString* text = [Benchmark run];
+      dispatch_async(dispatch_get_main_queue(), ^{
+        self.textView.text = text;
+      });
+    } else {
+      NSLog(@"Setup benchmark config failed!");
+    }
   });
 }
 

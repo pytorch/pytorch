@@ -1,6 +1,4 @@
 #include <test/cpp/jit/test_utils.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/clear_undefinedness.h>
 
 namespace torch {
 namespace jit {
@@ -39,7 +37,7 @@ std::pair<tensor_list, tensor_list> runGradient(
   static const auto as_tensorlist = [](const Stack& stack) {
     return fmap(stack, [](const IValue& i) { return i.toTensor(); });
   };
-  ClearUndefinedness(grad_spec.df);
+
   Code f_code{grad_spec.f}, df_code{grad_spec.df};
   InterpreterState f_interpreter{f_code}, df_interpreter{df_code};
 
