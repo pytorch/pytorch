@@ -73,7 +73,9 @@ class DistributedSampler(Sampler):
         return iter(indices)
 
     def __len__(self):
-        return self.num_samples
+        if self.padding:
+            return self.num_samples
+        return self._dataset_length
 
     def set_rank(self, rank):
         assert rank >= 0, 'rank must be >= 0'
