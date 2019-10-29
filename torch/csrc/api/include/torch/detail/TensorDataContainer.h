@@ -253,7 +253,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
     }
   }
  private:
-  void fill_tensor(at::Tensor& tensor) const {
+  void fill_tensor(at::Tensor tensor) const {
     if (is_scalar()) {
       TORCH_INTERNAL_ASSERT(
         tensor.dim() == 0,
