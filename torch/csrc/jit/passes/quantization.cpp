@@ -145,7 +145,10 @@ class InsertObserversHelper {
   // Values that are the output of GetAttr[name="bias"] and they
   // will be propagated through the function call hierarchy
   std::unordered_set<Value*> bias_values_;
-  // Unique id generator for observer module
+  // Unique id generator for observer module, used for generating
+  // unique observer names when we insert observer module, we
+  // record the current unique id used to avoid incrementing from 0
+  // every time to find a unique id.
   int uid_ = 0;
 };
 
