@@ -1,6 +1,8 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/ArrayRef.h>
+#include <ATen/Tensor.h>
+#include <c10/core/TensorOptions.h>
 
 #include <initializer_list>
 
