@@ -1,3 +1,4 @@
+#include <ATen/core/grad_mode.h>
 #include <torch/detail/TensorDataContainer.h>
 
 namespace torch {
