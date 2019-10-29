@@ -6,13 +6,14 @@
 #include <torch/csrc/distributed/rpc/types.h>
 
 #include <algorithm>
+#include <cctype>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
 // A globally unique ID to identify an RpcAgent
-struct WorkerInfo {
+struct TORCH_API WorkerInfo {
   WorkerInfo(std::string name, int id)
       : WorkerInfo(std::move(name), (worker_id_t)id) {
     TORCH_CHECK(
@@ -50,7 +51,7 @@ struct WorkerInfo {
 // will invoke the given ``RequestCallback`` to process received requests. It
 // should immediately become ready to serve request and accept response after
 // construction.
-class RpcAgent {
+class TORCH_API RpcAgent {
  public:
   // `WorkerInfo` is the globally unique identifier for this RpcAgent instance.
   // It contains a ``name_`` field and an ``id_`` field. ``name_`` is the
@@ -62,6 +63,9 @@ class RpcAgent {
   // ``RpcAgent`` base class makes no assumption on the thread-safeness of the
   // ``RequestCallback``. ``RpcAgent`` implementations need to make sure that
   // its threading model conform to ``RequestCallback``'s requirement.
+  // NB: RpcAgent implementations should not start serving requests until
+  // ``start()`` is called, as there could be other contexts that have not been
+  // initialized yet at this time.
   RpcAgent(WorkerInfo id, std::unique_ptr<RequestCallback> cb);
 
   virtual ~RpcAgent();
@@ -97,10 +101,22 @@ class RpcAgent {
   // all ``RpcAgent``s reach this method and send all pending messages.
   virtual void sync() = 0;
 
+  // start accepting requests
+  virtual void start() {}
+
+  // Set the default rpc agent.
+  static void setDefaultRpcAgent(std::shared_ptr<RpcAgent> defaultRpcAgent);
+
+  // Retrieve the default rpc agent.
+  static std::shared_ptr<RpcAgent> getDefaultRpcAgent();
+
  protected:
   const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
+
+ private:
+  static std::shared_ptr<RpcAgent> defaultRpcAgent_;
 };
 
 } // namespace rpc
