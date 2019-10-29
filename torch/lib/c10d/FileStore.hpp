@@ -43,8 +43,6 @@ class FileStore : public Store {
   std::unordered_map<std::string, std::vector<uint8_t>> cache_;
 
   std::mutex activeFileOpLock_;
-  std::condition_variable activeFileOpCv_;
-  int32_t activeFileOps_ = 0;
 };
 
 } // namespace c10d

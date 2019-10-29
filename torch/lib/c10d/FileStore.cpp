@@ -184,38 +184,6 @@ class File {
   int fd_;
 };
 
-// RAII helper to limit concurrent ops from us to 1.
-class OneActiveOpLock {
- public:
-  explicit OneActiveOpLock(
-      std::mutex& lock,
-      std::condition_variable& cv,
-      int32_t& count)
-      : lock_(lock), cv_(cv), count_(count) {
-    std::unique_lock<std::mutex> l(lock_);
-    cv_.wait(l, [&] { return count_ == 0; });
-    ++count_;
-  }
-  ~OneActiveOpLock() {
-    release();
-  }
-  void release() {
-    if (!released_) {
-      std::unique_lock<std::mutex> l(lock_);
-      --count_;
-      l.unlock();
-      cv_.notify_one();
-      released_ = true;
-    }
-  }
-
- private:
-  std::mutex& lock_;
-  std::condition_variable& cv_;
-  int32_t& count_;
-  bool released_{false};
-};
-
 off_t refresh(
     File& file,
     off_t pos,
@@ -264,7 +232,7 @@ FileStore::~FileStore() {
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   std::string regKey = regularPrefix_ + key;
-  OneActiveOpLock op(activeFileOpLock_, activeFileOpCv_, activeFileOps_);
+  std::unique_lock l(activeFileOpLock_);
   File file(path_, O_RDWR | O_CREAT, timeout_);
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
@@ -276,14 +244,14 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   const auto start = std::chrono::steady_clock::now();
   while (true) {
-    OneActiveOpLock op(activeFileOpLock_, activeFileOpCv_, activeFileOps_);
+    std::unique_lock l(activeFileOpLock_);
     File file(path_, O_RDONLY, timeout_);
     auto lock = file.lockShared();
     auto size = file.size();
     if (cache_.count(regKey) == 0 && size == pos_) {
       // No new entries; release the shared lock and sleep for a bit
       lock.unlock();
-      op.release();
+      l.unlock();
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
@@ -302,7 +270,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
 }
 
 int64_t FileStore::addHelper(const std::string& key, int64_t i) {
-  OneActiveOpLock op(activeFileOpLock_, activeFileOpCv_, activeFileOps_);
+  std::unique_lock l(activeFileOpLock_);
   File file(path_, O_RDWR | O_CREAT, timeout_);
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_);
@@ -329,7 +297,7 @@ int64_t FileStore::add(const std::string& key, int64_t i) {
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {
-  OneActiveOpLock op(activeFileOpLock_, activeFileOpCv_, activeFileOps_);
+  std::unique_lock l(activeFileOpLock_);
   File file(path_, O_RDONLY, timeout_);
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_);
