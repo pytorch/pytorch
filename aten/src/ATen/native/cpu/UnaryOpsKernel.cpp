@@ -16,6 +16,7 @@
 #include <ATen/native/UnaryOps.h>
 
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/cpu/zmath.h>
 #include <ATen/native/Math.h>
 
 
@@ -29,10 +30,10 @@ namespace {
 using namespace vec256;
 
 static void sigmoid_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sigmoid_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sigmoid_cpu", [&]() {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return (1 / (1 + std::exp((-a)))); },
+        [=](scalar_t a) -> scalar_t { return ((scalar_t)(1) / ((scalar_t)(1) + std::exp((-a)))); },
         [=](Vec256<scalar_t> a) {
           a = Vec256<scalar_t>((scalar_t)(0)) - a;
           a = a.exp();
@@ -53,11 +54,47 @@ uint8_t abs_impl(uint8_t v) {
 }
 
 static void abs_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "abs_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "abs_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return abs_impl(a); },
         [=](Vec256<scalar_t> a) { return a.abs(); });
+  });
+}
+
+static void angle_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "angle_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return angle_impl(a); },
+        [=](Vec256<scalar_t> a) { return a.angle(); });
+  });
+}
+
+static void real_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "real_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return real_impl(a); },
+        [=](Vec256<scalar_t> a) { return a.real(); });
+  });
+}
+
+static void imag_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "imag_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return imag_impl(a); },
+        [=](Vec256<scalar_t> a) { return a.imag(); });
+  });
+}
+
+static void conj_kernel(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "conj_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a) -> scalar_t { return conj_impl(a); },
+        [=](Vec256<scalar_t> a) { return a.conj(); });
   });
 }
 
@@ -100,7 +137,7 @@ static void logical_not_kernel(TensorIterator& iter) {
 }
 
 static void reciprocal_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "reciprocal_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "reciprocal_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return decltype(a)(1.0) / a; },
@@ -109,7 +146,7 @@ static void reciprocal_kernel(TensorIterator& iter) {
 }
 
 static void neg_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "neg_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "neg_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return -a; },
@@ -141,7 +178,7 @@ static void sign_kernel(TensorIterator& iter){
 }
 
 static void sinh_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sinh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::sinh(a); });
@@ -149,7 +186,7 @@ static void sinh_kernel(TensorIterator& iter) {
 }
 
 static void cosh_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "cosh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "cosh_cpu", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); });
@@ -181,33 +218,36 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
 }
 
 static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "clamp_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "clamp_cpu", [&]() {
+    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
     auto min = min_scalar.to<scalar_t>();
     auto max = max_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return a < min ? min : (a > max ? max : a); },
+     [=](scalar_t a) -> scalar_t { return zabs_(a) < zabs_(min) ? min : (zabs_(a) > zabs_(max) ? max : a); },
      [=](Vec256<scalar_t> a) { return vec256::clamp(a, min_vec, max_vec); });
   });
 }
 
 static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "clamp_max_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "clamp_max_cpu", [&]() {
+    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
     auto max = max_scalar.to<scalar_t>();
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return a > max ? max : a; },
+     [=](scalar_t a) -> scalar_t { return zabs_(a) > zabs_(max) ? max : a; },
      [=](Vec256<scalar_t> a) { return vec256::clamp_max(a, max_vec); });
   });
 }
 
 static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "clamp_min_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "clamp_min_cpu", [&]() {
+    ztype<scalar_t>::value_t (*zabs_)(scalar_t) = zabs;
     auto min = min_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return a < min ? min : a; },
+     [=](scalar_t a) -> scalar_t { return zabs_(a) < zabs_(min) ? min : a; },
      [=](Vec256<scalar_t> a) { return vec256::clamp_min(a, min_vec); });
   });
 }
@@ -272,7 +312,7 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator* gen) {
 #endif
 
 static void rsqrt_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t {
@@ -315,12 +355,47 @@ static void rsqrt_kernel(TensorIterator& iter) {
   }                                                                           \
   REGISTER_DISPATCH(op##_stub, &op##_kernel)
 
+#define IMPLEMENT_COMPLEX_KERNEL(dispatchtypes, op)                             \
+  static void op##_kernel(TensorIterator& iter) {                             \
+    TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), op##_vml_cpu, [&]() {\
+      iter.serial_for_each(                                                   \
+          [&](char** data_, const int64_t* strides, int64_t n) {              \
+            scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
+            scalar_t* in_data = reinterpret_cast<scalar_t*>(data_[1]);        \
+            int64_t out_stride = strides[0] / sizeof(scalar_t);               \
+            int64_t in_stride = strides[1] / sizeof(scalar_t);                \
+            if (out_stride == 1 && in_stride == 1) {                          \
+              vml::v##op(out_data, in_data, n);                               \
+            } else {                                                          \
+              static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);     \
+              for (int64_t i = 0; i < n; i += WIDTH) {                        \
+                scalar_t buffer[WIDTH];                                       \
+                int64_t width = WIDTH;                                        \
+                width = std::min(width, n - i);                               \
+                for (int64_t j = 0; j < width; j++)                           \
+                  buffer[j] = in_data[in_stride * (i + j)];                   \
+                vml::v##op(buffer, buffer, width);                            \
+                for (int64_t j = 0; j < width; j++)                           \
+                  out_data[out_stride * (i + j)] = buffer[j];                 \
+              }                                                               \
+            }                                                                 \
+          },                                                                  \
+          {0, iter.numel()});                                                 \
+    });                                                                       \
+  }                                                                           \
+  REGISTER_DISPATCH(op##_stub, &op##_kernel)
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
+REGISTER_DISPATCH(angle_stub, &angle_kernel);
+REGISTER_DISPATCH(real_stub, &real_kernel);
+REGISTER_DISPATCH(imag_stub, &imag_kernel);
+REGISTER_DISPATCH(conj_stub, &conj_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
@@ -338,29 +413,29 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
 
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, asin)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, atan)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, ceil)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, cos)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, acos)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, asin)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, atan)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, ceil)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, cos)
 // IMPLEMENT_FLOAT_KERNEL(FLOATING, cosh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erf)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erfc)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erfinv)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, exp)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, exp)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, expm1)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, floor)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, log)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, log10)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, floor)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, log)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, log10)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log2)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, round)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, sin)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, round)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, sin)
 // IMPLEMENT_FLOAT_KERNEL(FLOATING, sinh)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, sqrt)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, tan)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, tanh)
-IMPLEMENT_FLOAT_KERNEL(FLOATING, trunc)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, sqrt)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, tan)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, tanh)
+IMPLEMENT_COMPLEX_KERNEL(FLOATING, trunc)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, lgamma)
 
 }} // namespace at::native

@@ -191,7 +191,6 @@ class Conv2d(torch.nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
-        # type: (Tuple[int, int, Tuple[int, int], Tuple[int, int], Tuple[int, int], Tuple[int, int], bool, int, int, str, Tensor, Optional[Tensor], float, int, bool])  # noqa
         self.in_channels = state[0]
         self.out_channels = state[1]
         self.kernel_size = state[2]
@@ -222,9 +221,9 @@ class Conv2d(torch.nn.Module):
                 mod.weight, mod.bias = \
                     fuse_conv_bn_weights(mod.weight, mod.bias, mod.running_mean,
                                          mod.running_var, mod.eps, mod.gamma, mod.beta)
-            assert hasattr(mod, 'observer'), 'Input QAT module must have observer attached'
-            weight_observer = mod.weight_fake_quant
-            activation_observer = mod.observer
+            assert hasattr(mod, 'activation_post_process'), 'Input QAT module must have observer attached'
+            weight_post_process = mod.weight_fake_quant
+            activation_post_process = mod.activation_post_process
         else:
             assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
                 cls._FLOAT_MODULE.__name__
@@ -232,15 +231,15 @@ class Conv2d(torch.nn.Module):
             # workaround for sequential, ConvReLU2d should probably
             # inherit from Conv2d instead
             if type(mod) == nni.ConvReLU2d:
-                activation_observer = mod[1].observer
+                activation_post_process = mod[1].activation_post_process
                 mod = mod[0]
             else:
-                activation_observer = mod.observer
-            weight_observer = mod.qconfig.weight()
-            weight_observer(mod.weight)
-        act_scale, act_zp = activation_observer.calculate_qparams()
-        assert weight_observer.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
-        qweight = _quantize_weight(mod.weight.float(), weight_observer)
+                activation_post_process = mod.activation_post_process
+            weight_post_process = mod.qconfig.weight()
+            weight_post_process(mod.weight)
+        act_scale, act_zp = activation_post_process.calculate_qparams()
+        assert weight_post_process.dtype == torch.qint8, 'Weight observer must have a dtype of qint8'
+        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)

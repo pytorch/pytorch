@@ -43,6 +43,10 @@ def execWrapper(code, glob, loc):
 def do_input_map(fn, input):
     return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
 
+def clear_class_registry():
+    torch._C._jit_clear_class_registry()
+    torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
+
 
 class JitTestCase(TestCase):
     _do_cuda_memory_leak_check = True
@@ -84,7 +88,7 @@ class JitTestCase(TestCase):
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         self.clearHooks()
-        torch._C._jit_clear_class_registry()
+        clear_class_registry()
 
     def _isHookExceptionOk(self, e):
         se = str(e)
@@ -237,9 +241,9 @@ class JitTestCase(TestCase):
         perform_assert(graph, kind, len(nodes), num_kind_nodes,
                        consider_subgraphs)
 
-    def assertExpectedONNXGraph(self, trace, *args, **kwargs):
-        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
-        self.assertExpectedGraph(trace, *args, **kwargs)
+    def assertExpectedONNXGraph(self, g, *args, **kwargs):
+        g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
+        self.assertExpectedGraph(g, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
         if isinstance(trace, torch._C.Graph):
