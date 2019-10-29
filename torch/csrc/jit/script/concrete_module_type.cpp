@@ -152,7 +152,7 @@ void ConcreteModuleType::addModule(
     const TypePtr& type,
     std::shared_ptr<ConcreteModuleType> meta) {
   TORCH_INTERNAL_ASSERT(!jitType_);
-    modules_.emplace_back(ModuleInfo{name, type, meta});
+  modules_.emplace_back(ModuleInfo{std::move(name), type, std::move(meta)});
 }
 
 void ConcreteModuleType::addOverload(
