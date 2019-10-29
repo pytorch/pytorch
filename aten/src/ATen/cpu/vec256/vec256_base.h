@@ -13,7 +13,6 @@
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
 #include <ATen/native/cpu/zmath.h>
-#include <c10/util/TypeCast.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -682,7 +681,8 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 # pragma unroll
 #endif
   for (int64_t i = 0; i < n; i++) {
-    *dst = c10::static_cast_with_inter_type<dst_T>(*src);
+    *dst = static_cast<dst_T>(
+        static_cast<at::native::inter_copy_type_t<dst_T>>(*src));
     src++;
     dst++;
   }
