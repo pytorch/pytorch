@@ -115,7 +115,7 @@ int64_t _version(const Tensor & self) {
 Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
   if (!self.is_leaf() && !_requires_grad) {
     throw std::runtime_error(
-      autograd::utils::requires_grad_leaf_error(requires_grad)
+      autograd::utils::requires_grad_leaf_error(_requires_grad)
     );
   }
   return self.set_requires_grad(_requires_grad);

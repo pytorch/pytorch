@@ -21,9 +21,10 @@ The TestApp is currently being used as a dummy app by Circle CI for nightly jobs
 The benchmark folder contains two scripts that help you setup the benchmark project. The `setup.rb` does the heavy-lifting jobs of setting up the XCode project, whereas the `trace_model.py` is a Python script that you can tweak to generate your model for benchmarking. Simply follow the steps below to setup the project
 
 1. In the PyTorch root directory, run `BUILD_PYTORCH_MOBILE=1 IOS_ARCH=arm64 ./scripts/build_ios.sh` to generate the custom build from **Master** branch
-2. Navigate to the `benchmark` folder, run `python trace_model.py` to get your model generated.
-3. In the same directory, run `ruby setup.rb` to setup the XCode project.
-4. Open the `TestApp.xcodeproj`, you're ready to go.
+2. Navigate to the `benchmark` folder, run `python trace_model.py` to generate your model.
+3. In the same directory, open `config.json`. Those are the input parameters you can tweak.
+4. Again, in the same directory, run `ruby setup.rb` to setup the XCode project.
+5. Open the `TestApp.xcodeproj`, you're ready to go.
 
 The benchmark code is written in C++, see `benchmark.mm` for more details.
 
@@ -35,13 +36,13 @@ For those who want to do perf testing but don't want touch XCode, `bootstrap.sh`
 2. A valid provisioning profile for code signing
 3. A valid team identifier
 
-To run the script, simply type the command below and make sure your phone is unlocked and connected via USB. 
+To run the script, simply type the command below and make sure your phone is connected via USB. 
 
 ```shell
-./bootstrap -t ${TEAM_ID} -p ${PROVISIONING_PROFILE}
+./bootstrap
 ```
 
-The benchmark log will be displayed on the screen.
+Open the app on your device, the benchmark result will be displayed on the screen.
 
 > Note This requires ios-deploy to be installed. Please have a look at [ios-deploy](https://github.com/ios-control/ios-deploy). To quickly install it, use `npm -g i ios-deploy`
 
