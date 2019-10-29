@@ -22,14 +22,30 @@ bootstrap() {
     XCODE_PROJ_PATH="./TestApp.xcodeproj"
     XCODE_TARGET="TestApp"
     XCODE_BUILD="./build"
-    if [ -d ${XCODE_BUILD} ]; then
+    if [ ! -f "./.config" ]; then 
+        touch .config
+        echo "" >> .config
+    else
+        source .config
+    fi
+    if [ -z "${TEAM_ID}" ]; then 
+        reply=$(bash -c 'read -r -p "Team Id:" tmp; echo $tmp')
+        TEAM_ID="${reply}"
+        echo "TEAM_ID=${TEAM_ID}" >> .config
+    fi
+    if [ -z "${PROFILE}" ]; then 
+        reply=$(bash -c 'read -r -p "Provisioning Profile:" tmp; echo $tmp')
+        PROFILE="${reply}"
+        echo "PROFILE=${PROFILE}" >> .config
+    fi
+    if [ -d "${XCODE_BUILD}" ]; then
         echo "found the old XCode build, remove it"
-        rm -rf ${XCODE_BUILD}
+        rm -rf "${XCODE_BUILD}"
     fi 
-    cd ${BENCHMARK_DIR}
+    cd "${BENCHMARK_DIR}"
     echo "Generating model"
     python trace_model.py
-    ruby setup.rb -t ${TEAM_ID}
+    ruby setup.rb -t "${TEAM_ID}"
     cd ..
     #run xcodebuild
     if ! [ -x "$(command -v xcodebuild)" ]; then
@@ -76,8 +92,5 @@ case $option in
 esac
 shift 
 done
-
-echo TEAM_ID = "${TEAM_ID}"
-echo PROFILE = "${PROFILE}"
 
 bootstrap
