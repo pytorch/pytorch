@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
-#include <torch/nn/cloneable.h>
+#include <torch/nn/modules/_functions.h>
 #include <torch/nn/functional/normalization.h>
 #include <torch/nn/options/normalization.h>
 #include <torch/nn/pimpl.h>
@@ -51,6 +51,27 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(LayerNorm);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CrossMapLRN2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class TORCH_API CrossMapLRN2dImpl : public torch::nn::Cloneable<CrossMapLRN2dImpl> {
+ public:
+  explicit CrossMapLRN2dImpl(int64_t size)
+      : CrossMapLRN2dImpl(CrossMapLRN2dOptions(size)) {}
+  explicit CrossMapLRN2dImpl(const CrossMapLRN2dOptions& options_)
+      : options(options_) {}
+
+  void reset() override;
+
+  /// Pretty prints the `CrossMapLRN2d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  torch::Tensor forward(torch::Tensor& input);
+
+  CrossMapLRN2dOptions options;
+};
+
+TORCH_MODULE(CrossMapLRN2d);
 
 } // namespace nn
 } // namespace torch

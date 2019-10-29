@@ -31,5 +31,18 @@ struct TORCH_API LayerNormOptions {
   TORCH_ARG(bool, elementwise_affine) = true;
 };
 
+/// Options for the CrossMapLRN2d module.
+struct TORCH_API CrossMapLRN2dOptions {
+  CrossMapLRN2dOptions(int64_t size);
+
+  TORCH_ARG(int64_t, size);
+
+  TORCH_ARG(double, alpha) = 1e-4;
+
+  TORCH_ARG(double, beta) = 0.75;
+
+  TORCH_ARG(int64_t, k) = 1;
+};
+
 } // namespace nn
 } // namespace torch

@@ -229,6 +229,7 @@ def add_torch_libs():
         "torch/csrc/api/src/nn/modules/rnn.cpp",
         "torch/csrc/api/src/nn/modules/container/functional.cpp",
         "torch/csrc/api/src/nn/modules/container/named_any.cpp",
+        "torch/csrc/api/src/nn/modules/_functions.cpp"
         "torch/csrc/api/src/nn/options/activation.cpp",
         "torch/csrc/api/src/nn/options/batchnorm.cpp",
         "torch/csrc/api/src/nn/options/normalization.cpp",

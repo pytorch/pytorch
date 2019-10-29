@@ -41,5 +41,20 @@ void LayerNormImpl::pretty_print(std::ostream& stream) const {
 torch::Tensor LayerNormImpl::forward(const Tensor& input) {
   return F::layer_norm(input, options, weight, bias);
 }
+
+void CrossMapLRN2dImpl::reset() {}
+
+void CrossMapLRN2dImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::CrossMapLRN2d(" << options.size()
+         << ", alpha=" << options.alpha()
+         << ", beta=" << options.beta()
+         << ", k=" << options.k()
+         << ")";
+}
+
+torch::Tensor CrossMapLRN2dImpl::forward(torch::Tensor& input) {
+  return cross_map_lrn2d::apply(Variable(input), options.size(), options.alpha(), options.beta(), options.k());
+}
 } // namespace nn
 } // namespace torch
