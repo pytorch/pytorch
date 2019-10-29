@@ -1188,8 +1188,10 @@ TEST_F(FunctionalTest, BatchNorm1d) {
   auto variance = torch::rand(5);
   auto weight = torch::ones({num_features});
   auto bias = torch::zeros({num_features});
-  auto output = F::batch_norm(input, mean, variance, weight, bias, false,
-                              momentum, eps);
+  auto output = F::batch_norm(
+    input, mean, variance,
+    BatchNormOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
+    /*training=*/false);
   auto expected = (input - mean) / torch::sqrt(variance + eps);
   ASSERT_TRUE(output.allclose(expected));
 }
