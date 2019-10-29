@@ -76,7 +76,7 @@ struct python_error : public std::exception {
       Py_XINCREF(value);
       PyObject* pyStr = PyObject_Str(value);
       if (pyStr != Py_None && pyStr != nullptr) {
-        PyObject* str = PyUnicode_AsEncodedString(pyStr, "utf-8", "~E~");
+        PyObject* str = PyUnicode_AsEncodedString(pyStr, "utf-8", "strict");
         const auto& ret = PyBytes_AS_STRING(str);
         Py_XDECREF(pyStr);
         Py_XDECREF(str);
