@@ -154,6 +154,21 @@ TH_API void THNN_(LogSigmoid_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
           THTensor *buffer);           // [BUFFER]
 
+TH_API void THNN_(SoftMarginCriterion_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *output,
+          int64_t reduction);
+
+TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *target,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int64_t reduction);
+
 TH_API void THNN_(MSECriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -167,42 +182,6 @@ TH_API void THNN_(MSECriterion_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           int64_t reduction);
-
-TH_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *output,
-          THTensor *isTarget,
-          int64_t reduction);
-TH_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *isTarget,
-          int64_t reduction);
-
-TH_API void THNN_(MultiMarginCriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *output,
-          int64_t reduction,
-          int p,
-          THTensor* weights,      // [OPTIONAL]
-          accreal margin);
-TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t reduction,
-          int p,
-          THTensor *weights,      // [OPTIONAL]
-          accreal margin);
 
 TH_API void THNN_(RReLU_updateOutput)(
           THNNState *state,
@@ -234,20 +213,6 @@ TH_API void THNN_(Sigmoid_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *output);
-
-TH_API void THNN_(SmoothL1Criterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *output,
-          int64_t reduction);
-TH_API void THNN_(SmoothL1Criterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t reduction);
 
 TH_API void THNN_(SoftPlus_updateOutput)(
           THNNState *state,

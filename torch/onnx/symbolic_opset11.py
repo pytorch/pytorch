@@ -26,7 +26,7 @@ def clamp(g, self, min, max):
     dtype = self.type().scalarType()
 
     def _cast_if_not_none(tensor, dtype):
-        if tensor is not None and not tensor.node().mustBeNone():
+        if tensor is not None and not sym_help._is_none(tensor):
             return g.op("Cast", tensor, to_i=sym_help.cast_pytorch_to_onnx[dtype])
         else:
             return tensor
@@ -48,17 +48,14 @@ def pixel_shuffle(g, self, upscale_factor):
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, align_corners=None):
         align_corners = sym_help._maybe_get_scalar(align_corners)
-        output_size = sym_help._maybe_get_const(output_size, 'is')
-        if sym_help._is_value(output_size):
-            offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.int64))
-            output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
-            output_size = g.op("Concat", offsets, output_size, axis_i=0)
-        else:
-            output_size = [1 if i < 2 else output_size[-(dim - i)] for i in range(0, dim)]
-            output_size = g.op("Constant", value_t=torch.tensor(output_size))
         coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \
             else "align_corners" if align_corners else "pytorch_half_pixel"
         empty_tensor = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+        input_size = input.type().sizes()
+        input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
+        output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
+        output_size = g.op("Concat", input_size, output_size, axis_i=0)
+
         return g.op("Resize",
                     input,
                     empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
@@ -79,6 +76,49 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
 
+
+def __interpolate(g, input, size, scale_factor, mode, align_corners):
+    mode = sym_help._maybe_get_const(mode, 's')
+    if 'linear' in mode:
+        mode = 'linear'
+    if 'cubic' in mode:
+        mode = 'cubic'
+    align_corners = sym_help._maybe_get_const(align_corners, 'b')
+    align_corners = False if sym_help._is_none(align_corners) else align_corners
+    coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
+        else "align_corners" if align_corners else "pytorch_half_pixel"
+    # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+    roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+
+    if not sym_help._is_none(size) :
+        input_size = input.type().sizes()
+        input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
+        is_scalar = ((sym_help._maybe_get_const(size, 't').dim() == 0))
+        if is_scalar:
+            size = unsqueeze(g, size, 0)
+            size = [size for i in range(input.type().dim() - 2)]
+            size = g.op("Concat", *size, axis_i=0)
+        size = g.op("Concat", input_size, size, axis_i=0)
+        scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+        return g.op("Resize",
+                    input,
+                    roi,
+                    scales,
+                    size,
+                    coordinate_transformation_mode_s=coordinate_transformation_mode,
+                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                    mode_s=mode,  # nearest, linear, or cubic
+                    nearest_mode_s="floor")
+    else:  # if not sym_help._is_none(scales)
+        scales = sym_help._interpolate_get_scales(g, scale_factor, input.type().dim())
+        return g.op("Resize",
+                    input,
+                    roi,
+                    scales,
+                    coordinate_transformation_mode_s=coordinate_transformation_mode,
+                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                    mode_s=mode,  # nearest, linear, or cubic
+                    nearest_mode_s="floor")  # only valid when mode="nearest"
 
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
@@ -106,6 +146,27 @@ def cumsum(g, self, dim, dtype=None):
     return csum
 
 
+def masked_select(g, self, mask):
+    from torch.onnx.symbolic_opset9 import nonzero, expand_as
+    index = nonzero(g, expand_as(g, mask, self))
+    return g.op('GatherND', self, index)
+
+
+def masked_scatter(g, self, mask, source):
+    from torch.onnx.symbolic_opset9 import nonzero, expand_as, view, size
+    index = nonzero(g, expand_as(g, mask, self))
+    # NOTE: source can have more elements than needed.
+    # It could also have arbitrary shape.
+    # This is not supported by ONNX::ScatterND, so we need to flatten and slice source tensor.
+    source = view(g, source, torch.LongTensor([-1]))
+    source = sym_help._slice_helper(g, source,
+                                    axes=torch.LongTensor([0]),
+                                    starts=torch.LongTensor([0]),
+                                    ends=size(g, index, torch.LongTensor([0])),
+                                    dynamic_slice=True)
+    return g.op('ScatterND', self, index, source)
+
+
 @parse_args('v', 'i', 'i', 'i')
 def _unique2(g, self, sorted, return_inverse, return_counts):
     u, indices, inverse_indices, counts = g.op("Unique", self, sorted_i=sorted, outputs=4)
@@ -130,6 +191,47 @@ def sort(g, self, dim, decending, out=None):
 
 def round(g, self):
     return g.op("Round", self)
+
+
+def det(g, self):
+    return g.op("Det", self)
+
+
+def arange(g, *args):
+    def _get_arange_dtype(dtype):
+        dtype = sym_help._maybe_get_const(dtype, 'i')
+        return dtype
+
+    if len(args) == 5:
+        # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[1])
+        type, end, start, step = sym_help._arange_cast_helper(g, end=args[0], dtype=dtype)
+        start_default = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[type]))
+        delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[type]))
+        arange_tensor = g.op("Range", start_default, end, delta_default)
+    elif len(args) == 6:
+        # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[2])
+        type, end, start, step = sym_help._arange_cast_helper(g, start=args[0], end=args[1], dtype=dtype)
+        delta_default = g.op("Constant", value_t=torch.tensor(1, dtype=sym_help.scalar_type_to_pytorch_type[type]))
+        arange_tensor = g.op("Range", start, end, delta_default)
+    elif len(args) == 7:
+        # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
+        dtype = _get_arange_dtype(args[3])
+        type, end, start, step = sym_help._arange_cast_helper(g, start=args[0], end=args[1], step=args[2], dtype=dtype)
+        arange_tensor = g.op("Range", start, end, step)
+    else:
+        raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
+    return arange_tensor
+
+
+@parse_args('v', 'i')
+def _dim_arange(g, like, dim):
+    like_shape = g.op('Shape', like)
+    stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("_caffe2::Range", stop)
+    return arange(g, stop, 4, None, None, None)
 
 
 def size(g, self, dim):

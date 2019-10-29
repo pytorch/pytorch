@@ -43,6 +43,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &RpcAgent::sync,
               py::call_guard<py::gil_scoped_release>());
 
+  auto pyFuture = shared_ptr_class_<PyFuture>(module, "Future")
+                      .def(
+                          "wait",
+                          &PyFuture::wait,
+                          py::call_guard<py::gil_scoped_release>());
+
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef")
           .def(
@@ -71,6 +77,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
                 return PyRRef::unpickle(t);
               }));
 
+  // future.wait() should not be called after join_rpc(), e.g., pythonRpcHandler
+  // is cleaned up in join_rpc(), after join_rpc(), python objects returned
+  // from rpc python call can not be resolved.
   auto futureMessage =
       shared_ptr_class_<FutureMessage>(module, "FutureMessage")
           .def(
@@ -110,6 +119,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   module.def("_destroy_rref_context", []() {
     RRefContext::getInstance().destroyInstance();
+  });
+
+  module.def("_cleanup_python_rpc_handler", []() {
+    PythonRpcHandler::getInstance().cleanup();
   });
 
   module.def(

@@ -16,7 +16,7 @@ struct softPlusupdateOutput_functor
 
   __device__ void operator()(T *output, const T *input) const {
     T betain = beta * (*input);
-    *output = ((betain) > threshold) ? *input : (1/beta) * log1p(exp(betain));
+    *output = ((betain) > threshold) ? *input : (1/beta) * static_cast<T>(log1p(exp(betain)));
   }
 };
 
