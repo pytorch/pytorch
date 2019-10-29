@@ -110,17 +110,16 @@ class AmpScaler(object):
             return outputs * self._scale.to(device=outputs.device, non_blocking=True)
 
         # Invoke the more complex machinery only if we're treating multiple outputs.
-        per_device_scale = None
+        stash = [None]  # trick to hold a reference that can be overwritten at any level of the recursion below.
 
         def apply_scale(val):
-            nonlocal per_device_scale
             if isinstance(val, torch.Tensor):
                 assert val.is_cuda
                 if self._scale is None:
                     self._scale = torch.full((1,), self._init_scale, dtype=torch.float32, device=val.device)
-                if per_device_scale is None:
-                    per_device_scale = _MultiDeviceReplicator(self._scale)
-                return val * per_device_scale.get(val.device)
+                if stash[0] is None:
+                    stash[0] = _MultiDeviceReplicator(self._scale)
+                return val * stash[0].get(val.device)
             elif isinstance(val, container_abcs.Iterable):
                 return type(val)(apply_scale(v) for v in val)
             else:
