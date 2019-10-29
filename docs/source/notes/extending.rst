@@ -13,8 +13,7 @@ Extending :mod:`torch.autograd`
 Adding operations to :mod:`~torch.autograd` requires implementing a new
 :class:`Function` subclass for each operation. Recall that :class:`Function` s
 are what :mod:`~torch.autograd` uses to compute the results and gradients, and
-encode the operation history. Every new function requires you to implement 2
-methods:
+encode the operation history. Every new function requires you to implement 2 methods:
 
 - :meth:`~Function.forward` - the code that performs the operation. It can take
   as many arguments as you want, with some of them being optional, if you
@@ -38,6 +37,20 @@ methods:
   objects, you can return :class:`python:None`. Also, if you have optional
   arguments to :meth:`~Function.forward` you can return more gradients than there
   were inputs, as long as they're all :any:`python:None`.
+
+.. note::
+
+  It's the user's responsibility to use the special functions in the forward's `ctx`
+  properly in order to ensure that the new :class:`Function` works properly with
+  the autograd engine.
+
+  - :meth:`~torch.autograd.function._ContextMethodMixin.save_for_backward` must be
+    used when saving input or ouput of the forward to be used later in the backward.
+  - :meth:`~torch.autograd.function._ContextMethodMixin.mark_dirty` must be used to
+    marked any input that is modified inplace by the forward function.
+  - :meth:`~torch.autograd.function._ContextMethodMixin.mark_non_differentiable` must
+    be used to tell the engine if an output is not differentiable.
+
 
 Below you can find code for a ``Linear`` function from :mod:`torch.nn`, with
 additional comments::
