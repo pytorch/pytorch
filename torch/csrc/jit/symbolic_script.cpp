@@ -923,11 +923,11 @@ const std::vector<std::string> functions = {
 
             return torch.log2(self), backward
 
-        def rand_like(self, *, memory_format: Optional[int]):
+        def rand_like(self):
             def backward(grad_output):
                 return None
 
-            return torch.rand_like(self, memory_format=memory_format), backward
+            return torch.rand_like(self), backward
 
         def reciprocal(self):
             result = torch.reciprocal(self)
