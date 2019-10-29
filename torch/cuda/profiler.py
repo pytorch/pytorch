@@ -1,4 +1,3 @@
-import ctypes
 import tempfile
 import contextlib
 from . import cudart, check_error

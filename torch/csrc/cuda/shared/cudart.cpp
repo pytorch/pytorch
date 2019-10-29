@@ -1,7 +1,11 @@
 #include <torch/csrc/utils/pybind.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
+#ifndef __HIP_PLATFORM_HCC__
 #include <cuda_profiler_api.h>
+#else
+#include <hip/hip_runtime_api.h>
+#endif
 
 namespace torch { namespace cuda { namespace shared {
 
