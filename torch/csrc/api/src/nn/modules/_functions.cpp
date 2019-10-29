@@ -14,8 +14,6 @@ Variable cross_map_lrn2d::forward(
   ctx->saved_data["alpha"] = alpha;
   ctx->saved_data["beta"] = beta;
   ctx->saved_data["k"] = k;
-  /// ctx->saved_data["_backend"] = nullptr;
-  /// ctx->saved_data[""]
 
   TORCH_CHECK(input.dim() == 4);
 
