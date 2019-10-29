@@ -715,8 +715,6 @@ class DistAutogradTest(object):
 
     @dist_init(clean_shutdown=False)
     def test_context_cleanup_timeout(self):
-        global known_context_ids
-        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
             dist_autograd._setContextCleanupTimeout(2)
             t1 = torch.rand((3, 3), requires_grad=True)
@@ -725,11 +723,9 @@ class DistAutogradTest(object):
             time.sleep(15)
             # We let node 2 fail and ensure the contexts on the other nodes are
             # cleaned up after the timeout.
-            if self.rank == 2:
-                pass
-            else:
+            if self.rank != 2:
                 print(context_id)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id: "):
                     dist_autograd._retrieve_context(context_id)
                 print("worked")
 
