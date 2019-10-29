@@ -1,3 +1,4 @@
+#include<c10/core/ScalarType.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
@@ -22,7 +23,7 @@ static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   // this will be efficient (no reordering of the data will occur)
   // because the first transpose will make the tensor contiguous,
   // and cloning a contiguous tensor is fast.
-  auto result = src.transpose(-2, -1).clone();
+  auto result = src.transpose(-2, -1).clone(at::MemoryFormat::Contiguous);
   result.transpose_(-2, -1);
   return result;
 }
@@ -61,7 +62,7 @@ static inline int64_t batchCountTrilTriu(const Tensor& batched_matrices) {
 /* Checks a necessary property for the triu and tril implementations, hence the name.
  * Here batch contiguity is checked for tensors with greater than 4 dimensions.
  * Contiguous tensors and tensors with less than 3 dimensions pass this check
- */ 
+ */
 static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor& tensor, bool allow_zero_stride) {
   // Complete contiguity is the most desired property, which is why
   // we return true if the tensor is contiguous
@@ -135,7 +136,7 @@ static inline void squareCheckInputs(const Tensor& self) {
  * Given a vector of int64_t infos, obtained after a batch operations,
  * this function checks if the computation over all these batches has been
  * successful (info = 0) or not, and report in case of the latter.
- */ 
+ */
 static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* name) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
@@ -282,9 +283,9 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     U_empty = at::empty_strided(sizes, strides, input.options());
   } else {
     // NB: U_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation) 
+    // (which is the driver routine for the divide and conquer SVD operation)
     // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
+    // moves the inputs between devices internally.
     U_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
   }
 
@@ -296,25 +297,26 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     VT_empty = at::empty(sizes, input.options());
   } else {
     // NB: VT_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation) 
+    // (which is the driver routine for the divide and conquer SVD operation)
     // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-    // moves the inputs between devices internally. 
+    // moves the inputs between devices internally.
     VT_empty = at::empty(sizes, input.options().device(at::kCPU));
   }
 
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);
   Tensor S_empty;
+  ScalarType dtype = toValueType(typeMetaToScalarType(input.dtype()));
   if (!input.is_cuda()) {
-    S_empty = at::empty(sizes, input.options());
+    S_empty = at::empty(sizes, input.options().dtype(dtype));
   } else {
     // NB: S_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
-    // (which is the driver routine for the divide and conquer SVD operation) 
+    // (which is the driver routine for the divide and conquer SVD operation)
     // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
     // moves the inputs between devices internally. 
-    S_empty = at::empty(sizes, input.options().device(at::kCPU));
+    S_empty = at::empty(sizes, input.options().dtype(dtype).device(at::kCPU));
   }
-  return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);  
+  return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
 }
 
 // Function used instead of .to so that the original strides are retained
