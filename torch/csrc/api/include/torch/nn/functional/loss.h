@@ -140,7 +140,7 @@ inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
     options.reduction() == Reduction::None ||
     options.reduction() == Reduction::Mean ||
     options.reduction() == Reduction::Sum,
-    options.reduction() + " is not valid"
+    options.reduction(), " is not valid"
   );
   return torch::poisson_nll_loss(input, target, options.log_input(),
     options.full(), options.eps(), options.reduction());
