@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
@@ -243,7 +244,7 @@ void initJITBindings(PyObject* module) {
             Stack stack;
             stack.reserve(inputs.size()); // captures?
             for (auto& obj : inputs) {
-              stack.push_back(toIValue(obj));
+              stack.push_back(toTypeInferredIValue(obj));
             }
             ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
             arg_spec_creator.specializeTypes(*graph, spec);
@@ -253,7 +254,7 @@ void initJITBindings(PyObject* module) {
             auto g_inputs = graph->inputs();
             for (size_t i = 0; i < inputs.size(); ++i) {
               if (stack[i].isTensor()) {
-                g_inputs[i]->setType(incompleteInferTypeFrom(stack[i]));
+                g_inputs[i]->setType(stack[i].type());
               }
             }
             PropagateInputShapes(graph);
@@ -263,6 +264,11 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
       .def("_jit_pass_inline", Inline)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
+      .def(
+          "_jit_pass_lower_graph",
+          [](std::shared_ptr<Graph>& graph, const script::Module& self) {
+            return LowerGraph(*graph, self.module_object());
+          })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
           "_jit_pass_constant_propagation",
@@ -314,12 +320,23 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph> g,
              py::tuple args,
              const std::string& unqualified_op_name) {
-            auto stack = toStack(args);
+            auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def(
           "_jit_set_profiling_mode",
-          [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
+          [](bool profiling_flag) {
+            bool oldState = getProfilingMode();
+            getProfilingMode() = profiling_flag;
+            return oldState;
+          })
+      .def(
+          "_jit_set_profiling_executor",
+          [](bool profiling_flag) {
+            bool oldState = getExecutorMode();
+            getExecutorMode() = profiling_flag;
+            return oldState;
+          })
       .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
@@ -535,7 +552,7 @@ void initJITBindings(PyObject* module) {
         // Convert the output of the user-supplied funciton to IValue. The type
         // information of this IValue is used both to record the correct type in
         // the trace.
-        output_ivalue = toIValue(py_func_output);
+        output_ivalue = toTypeInferredIValue(py_func_output);
         Value* out_val = jit::tracer::getValueTrace(output_ivalue);
         body_block->registerOutput(out_val);
         node_output =
@@ -556,7 +573,7 @@ void initJITBindings(PyObject* module) {
 
       return PythonFutureWrapper(retval);
     } else {
-      auto result = toIValue(f(*args_tup));
+      auto result = toTypeInferredIValue(f(*args_tup));
       auto retval = c10::make_intrusive<c10::ivalue::Future>(result.type());
       retval->markCompleted(std::move(result));
       return PythonFutureWrapper(retval);

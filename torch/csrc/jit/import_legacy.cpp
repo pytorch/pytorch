@@ -51,7 +51,8 @@ class ScriptModuleDeserializer final {
             [this](const std::string& qualifier) {
               return findSourceInArchiveFromQualifier(
                   *reader_, export_prefix_, qualifier);
-            }) {}
+            },
+            reader_->version()) {}
 
   script::Module LEGACY_deserialize();
 
@@ -271,7 +272,11 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
   const auto atoms = c10::QualifiedName(module_def.name()).atoms();
   const size_t numPushed = atoms.size();
   for (const auto& atom : atoms) {
-    LEGACY_moduleStack_.emplace_back(atom);
+    auto is_digits = [](const std::string& str) {
+      return std::all_of(str.begin(), str.end(), ::isdigit);
+    };
+    auto sanitized = is_digits(atom) ? std::string("_") + atom : atom;
+    LEGACY_moduleStack_.emplace_back(sanitized);
   }
   auto module = script::Module(
       c10::QualifiedName(LEGACY_moduleStack_), compilation_unit_);
@@ -344,17 +349,17 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
         LEGACY_pickled_ivalues_.at(module_def.get_state_attribute_id()));
   }
 
-  for (const auto& slot : module.get_attributes()) {
+  for (const script::NameValue& slot : module.get_attributes()) {
     // Verify that all the non-optional attributes have been initialized
     // TODO: Issue #20497
-    if (slot.type()->kind() != TypeKind::OptionalType) {
+    if (slot.value.type()->kind() != TypeKind::OptionalType) {
       TORCH_CHECK(
-          !slot.value().isNone(),
+          !slot.value.isNone(),
           "The field '",
-          slot.name(),
+          slot.name,
           "' was left unitialized after __setstate__, but expected a ",
           "value of type '",
-          slot.type()->python_str(),
+          slot.value.type()->python_str(),
           "'");
     }
   }
