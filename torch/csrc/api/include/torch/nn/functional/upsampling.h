@@ -98,7 +98,7 @@ inline Tensor interpolate(const Tensor& input, InterpolateOptions options) {
         false,
         "Input Error: Only 3D, 4D and 5D input Tensors supported "
         "(got ", input.dim(), "D) for the modes: nearest | linear | bilinear | bicubic | trilinear "
-        "(got ", c10::visit(enumtype::enum_name{}, options.mode()), ")");
+        "(got ", enumtype::get_enum_name(options.mode()), ")");
   }
 }
 
