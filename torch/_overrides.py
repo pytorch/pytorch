@@ -166,7 +166,35 @@ _wrapped_func_source = textwrap.dedent("""
 def torch_function_dispatch(dispatcher, module=None, verify=True):
     """Decorator for adding dispatch with the __torch_function__ protocol.
 
-    See for example ``torch/functional.py`` for usage examples.
+    If you define a function in Python and would like to permit user-defined
+    tensor-like types to override it using __torch_function__, please apply this
+    decorator on this function together with a custom dispatcher that indicates
+    which arguments should be checked for the presence of __torch_function__.
+
+    Suppose we'd like to apply this function to torch.frob, which has the
+    following definition:
+
+        def frob(input, bias, option=None):
+            return input + bias
+
+    We'd need to define a dispatcher for frob that has the same signature and
+    returns the elements of the signature that should be checked for
+    `__torch_function__`. If any of the arguments has a `__torch_function__`
+    attribute, that function will be called to handle custom dispatch. Assuming
+    that `bias` can be a tensor-like, our dispatcher would look like:
+
+        def _frob_dispatcher(input, bias, option=None):
+            return (input, bias)
+
+    The dispatcher must return an iterable, so return a single-element tuple if
+    only one argument should be checked. We would then modify the original
+    definition for torch.frob to look like:
+
+        @torch_function_dispatch(_frob_dispatcher)
+        def frob(input, bias, option=None):
+             return input + bias
+
+    See ``torch/functional.py`` for more usage examples.
 
     Parameters
     ----------
