@@ -10,7 +10,7 @@ inline Tensor one_hot(const Tensor& tensor, int64_t num_classes = -1) {
   return torch::one_hot(tensor, num_classes);
 }
 
-inline Tensor embedding(const Tensor& input, Tensor weight, EmbeddingOptions options) {
+inline Tensor embedding(const Tensor& input, Tensor weight, EmbeddingOptions options = {}) {
   if (options.padding_idx() != c10::nullopt) {
     if (*options.padding_idx() > 0) {
       TORCH_CHECK(*options.padding_idx() < weight.size(0), "Padding_idx must be within num_embeddings");
