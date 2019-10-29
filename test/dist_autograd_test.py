@@ -46,15 +46,19 @@ def _torch_ones(sizes, requires_grad=False):
     return torch.ones(sizes, requires_grad=requires_grad)
 
 
+# creates an owner rref on the given dst, and the rref holds a torch.ones tensor
+# of the given size.
 def _create_ones_rref_on(dst, sizes):
     return rpc.remote(
         dst,
         _torch_ones,
         args=(sizes,),
-        kwargs={"requires_grad":True}
+        kwargs={"requires_grad": True}
     )
 
 
+# This method must be called on the rref owner, and verifies that the grad of
+# rref tensor equals to the given grad.
 def _compare_owner_value(context_id, rref, grad):
     grads = dist_autograd.get_gradients(context_id)
     return torch.equal(grads[rref.local_value().wait()], grad)
@@ -67,6 +71,10 @@ def my_py_add(t1, t2):
 def my_rref_add(rref_t1, t2):
     ret = torch.add(rref_t1.local_value().wait(), t2)
     return ret
+
+
+def my_nested_rref_add(dst, rref_t1, t2):
+    return rpc.rpc_sync(dst, my_rref_add, args=(rref_t1, t2))
 
 
 def my_py_nested_call(t1, t2, dst, world_size, hops):
@@ -708,7 +716,6 @@ class DistAutogradTest(object):
 
         self.assertEqual(ngrads, len(grads))
 
-
     @dist_init
     def test_backward_simple(self):
         # Run the same code locally and with dist autograd and verify gradients
@@ -723,7 +730,12 @@ class DistAutogradTest(object):
                 ret = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
                 local_grads = ret if ret else local_grads
 
-    def _test_backward_rref(self, dst):
+    # The current rank first creates a tensor on the rref_owner, and then passes
+    # the rref with another tensor to the callee to run either my_rref_add or
+    # my_nested_rref_add, depending on whether the callee is the rref owner.
+    # The grad of tensor lives on the current rank, and the grad of the rref
+    # tensor lives on the rref owner.
+    def _test_backward_rref(self, callee, rref_owner):
         local_grads = None
         t1 = torch.ones((3, 3), requires_grad=True)
         t2 = torch.zeros((3, 3), requires_grad=True)
@@ -732,12 +744,20 @@ class DistAutogradTest(object):
         local_ret.sum().backward()
         with dist_autograd.context() as context_id:
             rref_t1 = rpc.remote(
-                dst,
+                rref_owner,
                 _torch_ones,
                 args=((3, 3),),
-                kwargs={"requires_grad":True}
+                kwargs={"requires_grad": True}
             )
-            rref = rpc.remote(dst, my_rref_add, args=(rref_t1, t2))
+
+            if callee == rref_owner:
+                rref = rpc.remote(callee, my_rref_add, args=(rref_t1, t2))
+            else:
+                rref = rpc.remote(
+                    callee,
+                    my_nested_rref_add,
+                    args=(rref_owner, rref_t1, t2)
+                )
             ret = rref.to_here().wait()
             dist_autograd.backward([ret.sum()])
 
@@ -746,10 +766,10 @@ class DistAutogradTest(object):
             self.assertIn(t2, grads)
             self.assertEqual(grads[t2], t2.grad)
 
-            # verify grads on callee
+            # verify grads on rref owner
             self.assertTrue(
                 rpc.rpc_sync(
-                    dst,
+                    rref_owner,
                     _compare_owner_value,
                     args=(context_id, rref_t1, t1.grad)
                 )
@@ -757,12 +777,22 @@ class DistAutogradTest(object):
 
     @dist_init
     def test_backward_rref(self):
-        self._test_backward_rref("worker{}".format(self._next_rank()))
+        callee = "worker{}".format(self._next_rank())
+        rref_owner = callee
+        self._test_backward_rref(callee, rref_owner)
 
     @dist_init
     def test_backward_rref_multi(self):
         if self.rank > 0:
-            self._test_backward_rref("worker0")
+            callee = "worker0"
+            rref_owner = callee
+            self._test_backward_rref(callee, rref_owner)
+
+    @dist_init
+    def test_backward_rref_nested(self):
+        callee = "worker{}".format((self.rank + 1) % self.world_size)
+        rref_owner = "worker{}".format((self.rank + 2) % self.world_size)
+        self._test_backward_rref(callee, rref_owner)
 
     @dist_init
     def test_backward_rref_multi_user(self):
@@ -794,7 +824,6 @@ class DistAutogradTest(object):
         for rank_diff in rank_diffs:
             self._check_rpc_done(rank_diff)
 
-
         # trainers are done and holding the context for verification
         accumulate_grad_func = None
         for rank_diff in rank_diffs:
@@ -819,7 +848,8 @@ class DistAutogradTest(object):
             else:
                 accumulate_grad_func = next_funcs[0][0]
             self.assertEqual(
-                "torch::distributed::autograd::RecvRpcBackward", next_funcs[1][0].name()
+                "torch::distributed::autograd::RecvRpcBackward",
+                next_funcs[1][0].name()
             )
 
         _set_rpc_done(None, 0)

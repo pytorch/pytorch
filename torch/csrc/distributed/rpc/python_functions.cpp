@@ -163,6 +163,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
   auto pythonUDFCall = c10::guts::make_unique<PythonUDFCall>(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
+
   return sendMessageWithAutograd(
       agent, dst, std::move(*pythonUDFCall).toMessage());
 }
@@ -184,8 +185,14 @@ PyRRef pyRemotePythonUdf(
       userRRef->rrefId().toIValue(),
       userRRef->forkId().toIValue());
 
+  // set forceGradRecording to true as even if the args does not contain any
+  // tensor, the return value might still contain tensors.
   auto fm = sendMessageWithAutograd(
-      agent, dst, std::move(*pythonRemoteCall).toMessage());
+      agent,
+      dst,
+      std::move(*pythonRemoteCall).toMessage(),
+      true /*forceGradRecording*/
+  );
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
