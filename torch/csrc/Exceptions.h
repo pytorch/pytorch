@@ -69,6 +69,23 @@ struct python_error : public std::exception {
     }
   }
 
+  virtual const char* what() const noexcept override {
+    // Retrieve the error message from the value.
+    if (value != nullptr && value != Py_None) {
+      AutoGIL gil;
+      Py_XINCREF(value);
+      PyObject* pyStr = PyObject_Str(value);
+      if (pyStr != Py_None && pyStr != nullptr) {
+        PyObject* str = PyUnicode_AsEncodedString(pyStr, "utf-8", "~E~");
+        const auto& ret = PyBytes_AS_STRING(str);
+        Py_XDECREF(pyStr);
+        Py_XDECREF(str);
+        return ret;
+      }
+    }
+    return "";
+  }
+
   /** Saves the exception so that it can be re-thrown on a different thread */
   inline void persist() {
     if (type) return; // Don't overwrite exceptions
