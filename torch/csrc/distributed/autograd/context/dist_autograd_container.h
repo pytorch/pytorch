@@ -108,7 +108,7 @@ class TORCH_API DistAutogradContainer {
   int16_t worker_id_;
 
   // Map from autograd_context_id to DistAutogradContext.
-  std::unordered_map<int64_t, DistAutogradContext> autograd_context_;
+  std::unordered_map<int64_t, std::tuple<DistAutogradContext, std::chrono::time_point<std::chrono::high_resolution_clock>>> autograd_context_;
 
   // Queue to store DistAutogradContext pointers and their creation time.
   std::queue<std::tuple<std::chrono::time_point<std::chrono::system_clock>, int64_t>> context_queue_;
@@ -139,7 +139,7 @@ class TORCH_API DistAutogradContainer {
   int64_t max_id_;
 
   /* std::chrono::time_point<std::chrono::system_clock> creation_time; */
-  std::chrono::time_point<std::chrono::high_resolution_clock> creation_time;
+  /* std::chrono::time_point<std::chrono::high_resolution_clock> creation_time; */
 };
 
 } // namespace autograd

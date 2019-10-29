@@ -29,7 +29,7 @@ DistAutogradContainer::DistAutogradContainer()
   terminateWatchdog_.store(false);
   cleanupWatchdogThread_ = std::thread(&DistAutogradContainer::cleanupContextWatchdog, this);
   LOG(ERROR) << getWorkerId() << "- watchdog thread created\n";
-  creation_time = std::chrono::high_resolution_clock::now();
+  /* creation_time = std::chrono::high_resolution_clock::now(); */
 }
 
 DistAutogradContainer::~DistAutogradContainer() {
@@ -88,17 +88,19 @@ DistAutogradContext& DistAutogradContainer::getOrCreateContext(
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   auto it = autograd_context_.find(context_id);
   if (it != autograd_context_.end()) {
-    return it->second;
+    return std::get<0>(it->second);
   }
 
-  auto& context = autograd_context_
+  auto& pair = autograd_context_
                       .emplace(
                           std::piecewise_construct,
                           std::forward_as_tuple(context_id),
-                          std::forward_as_tuple(context_id))
+                          std::forward_as_tuple(context_id, std::chrono::high_resolution_clock::now()))
                       .first->second;
-  context_queue_.push(std::make_tuple(std::chrono::system_clock::now(), context_id));
-  LOG(ERROR) << getWorkerId() << "- insertion, new size: " << context_queue_.size() << " context_id: " << context_id << " getcreate\n";
+  auto& context = std::get<0>(pair);
+  auto now = std::chrono::high_resolution_clock::now();
+  auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - std::get<1>(autograd_context_.at(context_id)));
+  LOG(ERROR) << getWorkerId() << "- insertion, new size: " << autograd_context_.size() << " context_id: " << context_id << " time: " << diff.count() << " getcreate\n";
   return context;
 }
 
@@ -115,14 +117,16 @@ const DistAutogradContext& DistAutogradContainer::newContext() {
   // Check for overflow into workerId_ section.
   TORCH_INTERNAL_ASSERT(next_context_id_ < max_id_);
 
-  auto& context = autograd_context_
+  auto& pair = autograd_context_
                       .emplace(
                           std::piecewise_construct,
                           std::forward_as_tuple(next_context_id_),
-                          std::forward_as_tuple(next_context_id_))
+                          std::forward_as_tuple(next_context_id_, std::chrono::high_resolution_clock::now()))
                       .first->second;
-  context_queue_.push(std::make_tuple(std::chrono::system_clock::now(), next_context_id_));
-  LOG(ERROR) << getWorkerId() << "- insertion, new size: " << context_queue_.size() << " context_id: " << next_context_id_ << " insert\n";
+  auto& context = std::get<0>(pair);
+  auto now = std::chrono::high_resolution_clock::now();
+  auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - std::get<1>(autograd_context_.at(next_context_id_)));
+  LOG(ERROR) << getWorkerId() << "- insertion, new size: " << autograd_context_.size() << " context_id: " << next_context_id_ << " time: " << diff.count() << " insert\n";
   current_context_id_ = next_context_id_++;
   return context;
 }
@@ -144,7 +148,7 @@ DistAutogradContext& DistAutogradContainer::currentContext() {
       "Couldn't find autograd context "
       "data for current autograd context id."
       "Worker Id: ", getWorkerId());
-  return it->second;
+  return std::get<0>(it->second);
 }
 
 void DistAutogradContainer::releaseContextIfPresent(int64_t context_id) {
@@ -173,7 +177,7 @@ void DistAutogradContainer::releaseContext(int64_t context_id) {
 void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
   // notify other workers to clean up their contexts.
   auto workerIds =
-      autograd_context_.find(context_id)->second.getKnownWorkerIds();
+      std::get<0>(autograd_context_.find(context_id)->second).getKnownWorkerIds();
   auto agent = rpc::RpcAgent::getDefaultRpcAgent();
   for (const auto& worker_id : workerIds) {
     agent->send(
@@ -192,28 +196,41 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
 }
 
 void DistAutogradContainer::cleanupContextWatchdog() {
-  LOG(ERROR) << getWorkerId() << "- scheduled again!\n";
+  LOG(ERROR) << getWorkerId() << "- scheduled again! watchdog: " << terminateWatchdog_.load() <<  "\n";
   std::this_thread::sleep_for(kContextTimeout);
   while (!terminateWatchdog_.load()) {
     {
       std::lock_guard<std::mutex> guard(autograd_context_lock_);
-      for (auto& pair : autograd_context_) {
+      LOG(ERROR) << getWorkerId() << "- got inside\n";
+      if (autograd_context_.empty()) {
+        LOG(ERROR) << getWorkerId() << "- nothing to loop thru\n";
+      }
+      for (auto it = autograd_context_.begin(); it != autograd_context_.end();) {
         auto now = std::chrono::high_resolution_clock::now();
-        auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - creation_time);
-        LOG(ERROR) << diff.count() << "\n";
-        LOG(ERROR) << kContextTimeout.count() << "\n";
-        if (diff >= kContextTimeout) {
+        LOG(ERROR) << getWorkerId() << "- candidate id " << it->first << "\n";
+        auto diff = std::chrono::duration_cast<std::chrono::seconds>(now - std::get<1>(it->second));
+        LOG(ERROR) << getWorkerId() << "- curr time: " << diff.count() << "\n";
+        /* LOG(ERROR) << getWorkerId() << "- " << kContextTimeout.count() << "\n"; */
+        if (diff >= kContextTimeout) { // && autograd_context_.find(pair.first) != autograd_context_.end()) {
           // TODO: see if you can just invoke destructor
-          eraseContextIdAndReset(pair.first);
-          LOG(ERROR) << getWorkerId() << "- DELETING " << pair.first << "\n";
+          LOG(ERROR) << getWorkerId() << "- cleared timeout!\n";
+          LOG(ERROR) << getWorkerId() << "- DELETING " << it->first << "\n";
+          /* eraseContextIdAndReset(pair.first); */
+          auto context_id = it->first;
+          it = autograd_context_.erase(it);
+          if (current_context_id_ == context_id) {
+            // Reset the thread_local current context id, since it is no longer valid.
+            current_context_id_ = kInvalidContextId;
+          }
           LOG(ERROR) << getWorkerId() << "- queue size post-deletion is " << autograd_context_.size() << "\n";
         }
       }
     }
     // CV stuff
-    std::unique_lock<std::mutex> lock(cleanupWatchdogCVMutex_);
+    LOG(ERROR) << "Waiting for destruction\n";
+    std::unique_lock<std::mutex> guard(cleanupWatchdogCVMutex_);
     cleanupWatchdogCV_.wait_for(
-        lock,
+        guard,
         std::chrono::seconds(60),
         [&]() -> bool { return terminateWatchdog_.load(); });
   }
@@ -245,7 +262,7 @@ DistAutogradContext& DistAutogradContainer::retrieveContext(
       autograd_context_.find(context_id) != autograd_context_.end(),
       "Could not find autograd context with id: ",
       context_id);
-  return autograd_context_.at(context_id);
+  return std::get<0>(autograd_context_.at(context_id));
 }
 
 int64_t DistAutogradContainer::getMaxId() {

@@ -721,7 +721,7 @@ class DistAutogradTest(object):
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
 
-            time.sleep(10)
+            time.sleep(15)
             # We let node 2 fail and ensure the contexts on the other nodes are
             # cleaned up after the timeout.
             if self.rank == 2:
