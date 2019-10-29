@@ -449,9 +449,10 @@ endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
 FOREACH(HEADER  ${INSTALL_HEADERS})
-  string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
+  string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "ATen/" HEADER_SUB ${HEADER})
+  string(REPLACE "${Caffe2_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
   GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
-  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
+  INSTALL(FILES ${HEADER} DESTINATION "${AT_INSTALL_INCLUDE_DIR}/${DIR}")
 ENDFOREACH()
 
 # TODO: Install hip_generated_h when we have it

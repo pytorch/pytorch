@@ -709,16 +709,20 @@ Caffe2Ops Caffe2Backend::CreateGather(
   std::vector<std::string> inputs;
   inputs.emplace_back(node.input(0));
   inputs.emplace_back(node.input(1));
-
-  auto axis = onnx_node->attributes.get<int64_t>("axis", 0L);
-  caffe2::Argument arg_axis;
-  arg_axis.set_name("axis");
-  arg_axis.set_i(axis);
-
   std::vector<std::string> outputs;
   outputs.emplace_back(node.output(0));
 
-  BuildOperator(c2_op, "Gather", inputs, outputs, {arg_axis});
+  auto axis = onnx_node->attributes.get<int64_t>("axis", 0L);
+  if (axis == 0) {
+    BuildOperator(c2_op, "Gather", inputs, outputs);
+  } else if (axis == 1) {
+    BuildOperator(c2_op, "BatchGather", inputs, outputs);
+  } else {
+    CAFFE_THROW(
+        "Caffe2 only supports Gather with axis being 0 or 1, ",
+        "whereas axis is ",
+        axis);
+  }
 
   return ret;
 }
