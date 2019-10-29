@@ -47,14 +47,14 @@ class DistributedSampler(Sampler):
         self.epoch = 0
 
         if dataset is None and length is None:
-            raise RuntimeError("Either :attr:`dataset` or :attr:`length` must be specified (not `None`)")
+            raise RuntimeError("Either 'dataset' or 'length' must be specified (not `None`)")
 
         if isinstance(length, int) and length > 0:
             self._dataset_length = length
         elif length is None:
             self._dataset_length = len(dataset)
         else:
-            raise RuntimeError("When specified, :attr:`length` must be a strictly positive integer")
+            raise RuntimeError("When specified, 'length' must be a strictly positive integer")
 
         self.num_samples = int(math.ceil(self._dataset_length * 1.0 / self.num_replicas))
         self.total_size = self.num_samples * self.num_replicas
