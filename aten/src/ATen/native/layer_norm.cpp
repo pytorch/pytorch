@@ -27,7 +27,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
   LayerNormKernel(kCPU, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
-  return std::make_tuple(Y, mean, rstd);
+  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
@@ -41,7 +41,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
   LayerNormKernel(kCUDA, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
-  return std::make_tuple(Y, mean, rstd);
+  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
@@ -67,7 +67,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   }
   LayerNormBackwardKernel(
       kCPU, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-  return std::make_tuple(dX, dgamma, dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
@@ -93,7 +93,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   }
   LayerNormBackwardKernel(
       kCUDA, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-  return std::make_tuple(dX, dgamma, dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 Tensor layer_norm(
