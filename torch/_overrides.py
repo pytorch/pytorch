@@ -1,7 +1,14 @@
 """
-Preliminary implementation of __torch_function__
+Python implementation of __torch_function__
 
-TODO: rewrite this in C++ for performance.
+While most of the torch API and handling for __torch_function__ happens
+at the C++ level, some of the torch API is written in Python so we need
+python-level handling for __torch_function__ overrides as well. The main
+developer-facing functionality in this file is the
+torch_function_dispatch decorator. This function can be applied to
+python functions in the torch.functional module to enable
+__torch_function__ overrides for that function. See the examples in the
+docstrings for torch_function_dispatch for details.
 
 NOTE: heavily inspired by NumPy's ``__array_function__`` (see:
 https://github.com/pytorch/pytorch/issues/24015 and
@@ -33,7 +40,7 @@ from .tensor import Tensor
 
 _TENSOR_ONLY = [Tensor]
 
-def get_overloaded_types_and_args(relevant_args):
+def _get_overloaded_types_and_args(relevant_args):
     """Returns a list of arguments on which to call __torch_function__.
 
     Parameters
@@ -82,7 +89,7 @@ def get_overloaded_types_and_args(relevant_args):
     return overloaded_types, overloaded_args
 
 
-def implement_torch_function(
+def _implement_torch_function(
         implementation, public_api, relevant_args, args, kwargs):
     """Implement a function with checks for __torch_function__ overrides.
 
@@ -113,7 +120,7 @@ def implement_torch_function(
 
     """
     # Check for __torch_function__ methods.
-    types, overloaded_args = get_overloaded_types_and_args(relevant_args)
+    types, overloaded_args = _get_overloaded_types_and_args(relevant_args)
     # Short-cut for common cases: no overload or only Tensor overload
     # (directly or with subclasses that do not override __torch_function__).
     if (not overloaded_args or types == _TENSOR_ONLY):
@@ -135,7 +142,7 @@ def implement_torch_function(
                     .format(func_name, list(map(type, overloaded_args))))
 
 
-def verify_matching_signatures(implementation, dispatcher):
+def _verify_matching_signatures(implementation, dispatcher):
     """Verify that a dispatcher function has the right signature."""
     implementation_spec = getargspec(implementation)
     dispatcher_spec = getargspec(dispatcher)
@@ -207,7 +214,7 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
     """
     def decorator(implementation):
         if verify:
-            verify_matching_signatures(implementation, dispatcher)
+            _verify_matching_signatures(implementation, dispatcher)
 
         if docs_from_dispatcher:
             add_docstring(implementation, dispatcher.__doc__)
@@ -225,7 +232,7 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
             'implementation': implementation,
             'dispatcher': dispatcher,
             'functools': functools,
-            'implement_torch_function': implement_torch_function,
+            'implement_torch_function': _implement_torch_function,
         }
         _six.exec_(source_object, scope)
 
