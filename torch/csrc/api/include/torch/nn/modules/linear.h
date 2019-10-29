@@ -35,7 +35,8 @@ TORCH_MODULE(Identity);
 /// Applies a linear transformation with optional bias.
 class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
  public:
-  LinearImpl(int64_t in, int64_t out) : LinearImpl(LinearOptions(in, out)) {}
+  LinearImpl(int64_t in_features, int64_t out_features)
+    : LinearImpl(LinearOptions(in_features, out_features)) {}
   explicit LinearImpl(const LinearOptions& options_);
 
   void reset() override;
@@ -53,7 +54,7 @@ class TORCH_API LinearImpl : public Cloneable<LinearImpl> {
   /// The learned weight.
   Tensor weight;
 
-  /// The learned bias. If `with_bias` is false in the `options`, this tensor is
+  /// The learned bias. If `bias` is false in the `options`, this tensor is
   /// undefined.
   Tensor bias;
 };

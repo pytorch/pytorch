@@ -30,28 +30,33 @@ LinearImpl::LinearImpl(const LinearOptions& options_) : options(options_) {
 }
 
 void LinearImpl::reset() {
-  weight =
-      register_parameter("weight", torch::empty({options.out(), options.in()}));
-  if (options.with_bias()) {
-    bias = register_parameter("bias", torch::empty(options.out()));
+  weight = register_parameter("weight",
+    torch::empty({options.out_features(), options.in_features()}));
+  if (options.bias()) {
+    bias = register_parameter("bias", torch::empty(options.out_features()));
+  } else {
+    bias = register_parameter("bias", {}, /*requires_grad=*/false);
   }
 
-  const auto stdv = 1.0 / std::sqrt(weight.size(1));
-  NoGradGuard no_grad;
-  for (auto& p : this->parameters()) {
-    p.uniform_(-stdv, stdv);
+  torch::nn::init::kaiming_uniform_(weight, std::sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+  if (bias.defined()) {
+    int64_t fan_in, fan_out;
+    std::tie(fan_in, fan_out) =
+      torch::nn::init::_calculate_fan_in_and_fan_out(weight);
+    const auto bound = 1 / std::sqrt(fan_in);
+    torch::nn::init::uniform_(bias, -bound, bound);
   }
 }
 
 void LinearImpl::pretty_print(std::ostream& stream) const {
-  stream << std::boolalpha << "torch::nn::Linear(in=" << options.in()
-         << ", out=" << options.out() << ", with_bias=" << options.with_bias()
-         << ")";
+  stream << std::boolalpha
+         << "torch::nn::Linear(in_features=" << options.in_features()
+         << ", out_features=" << options.out_features()
+         << ", bias=" << options.bias() << ")";
 }
 
 Tensor LinearImpl::forward(const Tensor& input) {
-  AT_ASSERT(!options.with_bias() || bias.defined());
-  return torch::linear(input, weight, bias);
+  return F::linear(input, weight, bias);
 }
 
 // ============================================================================

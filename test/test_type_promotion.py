@@ -201,7 +201,7 @@ class TestTypePromotion(TestCase):
 
         self.assertRaisesRegex(RuntimeError, "Boolean alpha only supported",
                                lambda: torch.add(1, 1, alpha=True))
-        self.assertEquals(torch.add(torch.tensor(True), torch.tensor(True), True), torch.tensor(True))
+        self.assertEqual(torch.add(torch.tensor(True), torch.tensor(True), True), torch.tensor(True))
 
     def test_create_bool_tensors(self):
         expected = torch.tensor([0], dtype=torch.int64, device=self.device)
@@ -346,6 +346,33 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.promote_types(torch.float, torch.int), torch.float)
         self.assertEqual(torch.promote_types(torch.float, torch.double), torch.double)
         self.assertEqual(torch.promote_types(torch.int, torch.uint8), torch.int)
+
+    def test_promote_self(self):
+        for dtype in torch.testing.get_all_dtypes():
+            self.assertEqual(torch.promote_types(dtype, dtype), dtype)
+
+    def test_indexing(self):
+        a = torch.ones(5, 2, dtype=torch.double)
+        b = torch.zeros(5, dtype=torch.int)
+
+        # lambda cannot contain assignment
+        def f():
+            a[:, [1]] = b.unsqueeze(-1)
+        # https://github.com/pytorch/pytorch/issues/28010
+        self.assertRaisesRegex(RuntimeError, 'expected dtype',
+                               lambda: f())
+
+        # https://github.com/pytorch/pytorch/issues/27824
+        tmp = torch.ones(9, 9, dtype=torch.float, device=self.device)
+        mask = torch.ones(10, 10, dtype=torch.uint8, device=self.device)
+        result = tmp + mask[1:, 1:]
+        expected = torch.full([9, 9], 2., dtype=torch.float, device=self.device).fill_(2.)
+        self.assertEqual(result, expected)
+
+    def test_transpose(self):
+        # https://github.com/pytorch/pytorch/issues/28502
+        a = torch.tensor([[True, True], [False, True]])
+        self.assertEqual(a.t() == 0, a.t() == False)  # noqa: E712
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):

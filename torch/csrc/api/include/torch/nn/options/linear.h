@@ -9,13 +9,15 @@ namespace nn {
 
 /// Options for the `Linear` module.
 struct TORCH_API LinearOptions {
-  LinearOptions(int64_t in, int64_t out);
-  /// The number of input features (columns of the input matrix).
-  TORCH_ARG(int64_t, in);
-  /// The number of output features to produce (columns of the output matrix).
-  TORCH_ARG(int64_t, out);
-  /// Whether to learn and add a bias after the linear transformation.
-  TORCH_ARG(bool, with_bias) = true;
+  LinearOptions(int64_t in_features, int64_t out_features);
+  /// size of each input sample
+  TORCH_ARG(int64_t, in_features);
+
+  /// size of each output sample
+  TORCH_ARG(int64_t, out_features);
+
+  /// If set to false, the layer will not learn an additive bias. Default: true
+  TORCH_ARG(bool, bias) = true;
 };
 
 // ============================================================================
