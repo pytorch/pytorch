@@ -356,7 +356,7 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.broadcast_tensors, lambda *tensors: -1),
     (torch.cartesian_prod, lambda *tensors: -1),
     (torch.cat, lambda tensors, dim=0, out=None: -1),
-    (torch.cdist, lambda x1, c2, p=2: -1),
+    (torch.cdist, lambda x1, c2, p=2, compute_mode=None: -1),
     (torch.ceil, lambda input, out=None: -1),
     (torch.celu, lambda input, alhpa=1., inplace=False: -1),
     (torch.chain_matmul, lambda *matrices: -1),
