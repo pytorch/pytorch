@@ -10,14 +10,22 @@ https://www.numpy.org/neps/nep-0018-array-function-protocol.html
 
 """
 
-import collections
 import functools
 import textwrap
 from . import _six
+if _six.PY3:
+    from inspect import getfullargspec
+    import collections
+    ArgSpec = collections.namedtuple('ArgSpec', 'args varargs keywords defaults')
+
+    def getargspec(func):
+        spec = getfullargspec(func)
+        return ArgSpec(spec.args, spec.varargs, spec.varkw, spec.defaults)
+else:
+    from inspect import getargspec
 
 # TODO: PyTorch does not have a hard dependency on NumPy, so we need
 #       to vendor this code.
-from numpy.compat._inspect import getargspec
 from numpy.core.multiarray import add_docstring
 
 from .tensor import Tensor
@@ -127,12 +135,10 @@ def implement_torch_function(
                     .format(func_name, list(map(type, overloaded_args))))
 
 
-ArgSpec = collections.namedtuple('ArgSpec', 'args varargs keywords defaults')
-
 def verify_matching_signatures(implementation, dispatcher):
     """Verify that a dispatcher function has the right signature."""
-    implementation_spec = ArgSpec(*getargspec(implementation))
-    dispatcher_spec = ArgSpec(*getargspec(dispatcher))
+    implementation_spec = getargspec(implementation)
+    dispatcher_spec = getargspec(dispatcher)
 
     if (implementation_spec.args != dispatcher_spec.args or
         implementation_spec.varargs != dispatcher_spec.varargs or
