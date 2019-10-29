@@ -73,7 +73,7 @@ Tensor BatchNormImpl::pure_forward(
       mean,
       variance,
       is_training(),
-      options.momentum(),
+      options.momentum().value(),
       options.eps(),
       torch::cuda::cudnn_is_available());
 }
