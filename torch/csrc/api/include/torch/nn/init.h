@@ -1,12 +1,15 @@
 #pragma once
 
+#include <c10/util/variant.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/enum.h>
 #include <torch/types.h>
 
 namespace torch {
 namespace nn {
 namespace init {
 
+// This enum class is deprecated and will be removed in 1.5
 enum class Nonlinearity {
   Linear,
   Conv1D,
@@ -21,7 +24,33 @@ enum class Nonlinearity {
   LeakyReLU
 };
 
+// This enum class is deprecated and will be removed in 1.5
 enum class FanMode { FanIn, FanOut };
+
+using NonlinearityType = c10::variant<
+  enumtype::kLinear,
+  enumtype::kConv1D,
+  enumtype::kConv2D,
+  enumtype::kConv3D,
+  enumtype::kConvTranspose1D,
+  enumtype::kConvTranspose2D,
+  enumtype::kConvTranspose3D,
+  enumtype::kSigmoid,
+  enumtype::kTanh,
+  enumtype::kReLU,
+  enumtype::kLeakyReLU,
+
+  // Support for this enum class is deprecated and will be removed in 1.5.
+  Nonlinearity
+>;
+
+using FanModeType = c10::variant<
+  enumtype::kFanIn,
+  enumtype::kFanOut,
+
+  // Support for this enum class is deprecated and will be removed in 1.5.
+  FanMode
+>;
 
 } // namespace init
 } // nn
@@ -30,7 +59,7 @@ namespace nn {
 namespace init {
 
 /// Return the recommended gain value for the given nonlinearity function.
-TORCH_API double calculate_gain(Nonlinearity nonlinearity, double param = 0.01);
+TORCH_API double calculate_gain(NonlinearityType nonlinearity, double param = 0.01);
 
 /// Fills the given `tensor` with the provided `value` in-place, and returns it.
 /// No gradient will be recorded for this operation.
@@ -83,8 +112,8 @@ TORCH_API Tensor uniform_(Tensor tensor, double low = 0, double high = 1);
 TORCH_API Tensor kaiming_normal_(
     Tensor tensor,
     double a = 0,
-    FanMode mode = torch::nn::init::FanMode::FanIn,
-    Nonlinearity nonlinearity = torch::nn::init::Nonlinearity::LeakyReLU);
+    FanModeType mode = torch::kFanIn,
+    NonlinearityType nonlinearity = torch::kLeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Delving deep into rectifiers: Surpassing human-level
@@ -94,8 +123,8 @@ TORCH_API Tensor kaiming_normal_(
 TORCH_API Tensor kaiming_uniform_(
     Tensor tensor,
     double a = 0,
-    FanMode mode = torch::nn::init::FanMode::FanIn,
-    Nonlinearity nonlinearity = torch::nn::init::Nonlinearity::LeakyReLU);
+    FanModeType mode = torch::kFanIn,
+    NonlinearityType nonlinearity = torch::kLeakyReLU);
 
 /// Fills the input `Tensor` with values according to the method
 /// described in "Understanding the difficulty of training deep feedforward
@@ -113,6 +142,8 @@ TORCH_API Tensor xavier_uniform_(Tensor tensor, double gain = 1.0);
 /// Fills the given `tensor` with zeros.
 /// No gradient will be recorded for this operation.
 TORCH_API Tensor zeros_(Tensor tensor);
+
+TORCH_API std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(const Tensor& tensor);
 
 } // namespace init
 } // namespace nn

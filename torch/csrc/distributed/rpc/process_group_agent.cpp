@@ -190,6 +190,7 @@ void ProcessGroupAgent::join() {
   send(allWorkerInfo_[dst], std::move(shutdownMsg));
   threadPool_.waitWorkComplete();
   listenerThread_.join();
+  PythonRpcHandler::getInstance().cleanup();
 }
 
 bool ProcessGroupAgent::hasPendingMessage() {
@@ -300,29 +301,8 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
   threadPool_.run(std::bind(
       [&](const SendWork& work) {
-        std::string serializedPayload = serialize(work.message_);
-
-        std::vector<torch::Tensor> preamble = {torch::tensor(
-            {(int64_t)pg_->getRank(),
-             (int64_t)serializedPayload.length(),
-             (int64_t)work.message_.type()},
-            {torch::kLong})};
-
-        // ProcessGroup is not thread-safe when sending with the same tag, hence
-        // the lock
-        std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> pendingSends;
-        const auto& dst = work.to_.id_;
-
-        if (work.message_.isShutdown()) {
-          pendingSends.reserve(1);
-          {
-            std::lock_guard<std::mutex> guard(sendMutexes_[dst]);
-            pendingSends.emplace_back(
-                pg_->send(preamble, dst, dst /* channelTag */));
         try {
-          std::stringstream ss;
-          serialize(work.message_, ss);
-          std::string serializedPayload = ss.str();
+          std::string serializedPayload = serialize(work.message_);
 
           std::vector<torch::Tensor> preamble = {torch::tensor(
               {(int64_t)pg_->getRank(),
@@ -370,7 +350,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         } catch (...) {
           if (work.message_.isRequest()) {
             auto exceptionMsg = rpc::createException(
-                work.message_, "Unknown exception occured.");
+                work.message_, "Unknown exception occurred.");
             markFutureWithMessage(work.message_.id(), exceptionMsg);
           }
         }

@@ -24,19 +24,24 @@ enum MessageType {
   // RRef related internal messages
   SCRIPT_RREF_FETCH_CALL = 7, // A UserRRef<IValue> fetches value from owner
   PYTHON_RREF_FETCH_CALL = 8, // A UserRRef<py::object> fetches value from owner
-  RREF_FETCH_RET = 9, // An OwnerRRef sends value to user
-  RREF_USER_DELETE = 10, // A UserRRef tells the owner to deref
-  RREF_FORK_REQUEST = 11, // A child UserRRef tells the owner about itself
-  RREF_CHILD_ACCEPT = 12, // A child UserRRef tells parent that owner knows it
-  RREF_ACK = 13, // ACK to internal RRef messages
+  SCRIPT_RREF_FETCH_RET = 9, // An OwnerRRef sends ivalue to user
+  PYTHON_RREF_FETCH_RET = 10, // An OwnerRRef sends py::object to user
+  RREF_USER_DELETE = 11, // A UserRRef tells the owner to deref
+  RREF_FORK_REQUEST = 12, // A child UserRRef tells the owner about itself
+  RREF_CHILD_ACCEPT = 13, // A child UserRRef tells parent that owner knows it
+  RREF_ACK = 14, // ACK to internal RRef messages
 
   // Messages with autograd info
-  FORWARD_AUTOGRAD_REQ = 14,
-  FORWARD_AUTOGRAD_RESP = 15,
+  FORWARD_AUTOGRAD_REQ = 15,
+  FORWARD_AUTOGRAD_RESP = 16,
 
   // Messages to propagate gradients on the backward pass.
-  BACKWARD_AUTOGRAD_REQ = 16,
-  BACKWARD_AUTOGRAD_RESP = 17,
+  BACKWARD_AUTOGRAD_REQ = 17,
+  BACKWARD_AUTOGRAD_RESP = 18,
+
+  // Messages to tell workers to clean up their autograd context.
+  CLEANUP_AUTOGRAD_CONTEXT_REQ = 19,
+  CLEANUP_AUTOGRAD_CONTEXT_RESP = 20,
 
   // Other internal message types
   SHUTDOWN = 50,
@@ -86,11 +91,12 @@ class TORCH_API Message final {
 
   // Destructively retrieves the payload.
   std::vector<char>&& movePayload() &&;
+  std::vector<torch::Tensor>&& moveTensors() &&;
 
   const std::vector<char>& payload() const;
   std::vector<torch::Tensor>& tensors();
   const std::vector<torch::Tensor>& tensors() const;
-  const MessageType& type() const;
+  MessageType type() const;
 
   bool isRequest() const;
   bool isResponse() const;
