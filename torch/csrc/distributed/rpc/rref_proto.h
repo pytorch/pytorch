@@ -68,18 +68,35 @@ class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
 };
 
 // OwnerRRef uses this message to send the RRef value to a remote UserRRef
-class TORCH_API RRefFetchRet final : public RpcCommandBase {
+class TORCH_API RRefFetchRet : public RpcCommandBase {
  public:
-  explicit RRefFetchRet(std::vector<at::IValue> values)
-      : values_(std::move(values)) {}
+  RRefFetchRet(std::vector<at::IValue> values, MessageType type)
+      : values_(std::move(values)), type_(type) {}
 
   const std::vector<at::IValue>& values();
-
   Message toMessage() && override;
-  static std::unique_ptr<RRefFetchRet> fromMessage(const Message& message);
 
  private:
   std::vector<at::IValue> values_;
+  const MessageType type_;
+};
+
+class TORCH_API ScriptRRefFetchRet final : public RRefFetchRet {
+ public:
+  explicit ScriptRRefFetchRet(std::vector<at::IValue> values)
+      : RRefFetchRet(std::move(values), MessageType::SCRIPT_RREF_FETCH_RET) {}
+
+  static std::unique_ptr<ScriptRRefFetchRet> fromMessage(
+      const Message& message);
+};
+
+class TORCH_API PythonRRefFetchRet final : public RRefFetchRet {
+ public:
+  explicit PythonRRefFetchRet(std::vector<at::IValue> values)
+      : RRefFetchRet(std::move(values), MessageType::PYTHON_RREF_FETCH_RET) {}
+
+  static std::unique_ptr<PythonRRefFetchRet> fromMessage(
+      const Message& message);
 };
 
 // UserRRef (regardless it's the creator or not) uses this message to notiify

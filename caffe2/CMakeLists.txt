@@ -354,6 +354,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/record_function.cpp
+    ${TORCH_SRC_DIR}/csrc/autograd/record_function_ops.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
     ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
@@ -481,37 +482,41 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/engine/dist_engine.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/autograd_metadata.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_call.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_resp.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
-      ${TORCH_SRC_DIR}/csrc/distributed/rpc/utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
+    if (USE_DISTRIBUTED)
+      list(APPEND TORCH_SRCS
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_container.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/context/dist_autograd_context.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/engine/dist_engine.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/recvrpc_backward.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/functions/sendrpc_backward.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/autograd_metadata.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_call.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_udf_resp.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/utils.cpp
+      )
+    endif()
   endif()
 
   if (USE_CUDA)
@@ -567,6 +572,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/fold.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/loss.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/padding.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pixelshuffle.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
@@ -582,6 +588,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/padding.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/rnn.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/vision.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp

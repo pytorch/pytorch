@@ -13,6 +13,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
 #include <ATen/native/cpu/zmath.h>
+#include <c10/util/TypeCast.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -81,8 +82,8 @@ public:
   // Also, technically according to the C++ standard, we don't have to define
   // a constexpr variable if we never odr-use it.  But it seems that some
   // versions GCC/Clang have buggy determinations on whether or not an
-  // identifier is odr-used or not, and in any case it's hard to tel if
-  // a variabe is odr-used or not.  So best to just cut the probem at the root.
+  // identifier is odr-used or not, and in any case it's hard to tell if
+  // a variable is odr-used or not.  So best to just cut the probem at the root.
   static constexpr int size() {
     return 32 / sizeof(T);
   }
@@ -681,8 +682,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 # pragma unroll
 #endif
   for (int64_t i = 0; i < n; i++) {
-    *dst = static_cast<dst_T>(
-        static_cast<at::native::inter_copy_type_t<dst_T>>(*src));
+    *dst = c10::static_cast_with_inter_type<dst_T>(*src);
     src++;
     dst++;
   }

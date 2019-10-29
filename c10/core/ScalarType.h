@@ -166,6 +166,10 @@ struct ScalarTypeToCPPType<c10::ScalarType::Long> {
   _(c10::quint8, QUInt8)         \
   _(c10::qint32, QInt32)
 
+#define AT_FORALL_COMPLEX_TYPES(_)             \
+  _(std::complex<float>, ComplexFloat)         \
+  _(std::complex<double>, ComplexDouble)
+
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #define DEFINE_CASE(ctype, name) \
   case ScalarType::name:         \
@@ -322,6 +326,17 @@ static inline bool isSignedType(ScalarType t) {
 
 static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
+}
+
+static inline ScalarType toValueType(ScalarType t) {
+  switch (t) {
+    case ScalarType::ComplexFloat:
+      return ScalarType::Float;
+    case ScalarType::ComplexDouble:
+      return ScalarType::Double;
+    default:
+      return t;
+  }
 }
 
 // see tensor_attributes.rst for detailed explanation and examples
