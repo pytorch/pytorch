@@ -17,8 +17,8 @@ Microbenchmarks for the softmax operators.
 # Configs for softmax ops
 softmax_configs_short = op_bench.config_list(
     attrs=[
-        [4, 3, 128, 128],
-        [8, 3, 256, 256],
+        [4, 3, 256, 256],
+        [8, 3, 512, 512],
     ],
     attr_names=[
         'N', 'C', 'H', 'W'
