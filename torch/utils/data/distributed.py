@@ -25,7 +25,11 @@ class DistributedSampler(Sampler):
             If `None`, length is calculated as `len(dataset)` (default: `None`)
             Must be greater than 0 when :attr:`dataset` is a `IterableDataset`
         padding (bool, optional): If `True`, the returned lists will be padded to have the same length
-            (default: `True`)
+            Padding is done by adding (duplicate) indices from the beggining of the index list
+            into the end of it in a circular fashion. (default: `True`)
+
+    .. note::
+        Regardless of :attr:`padding` value, :meth:`__len__` will return `ceil(dataset length / num_replicas)`
     """
 
     def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True, length=None, padding=True):
@@ -42,9 +46,15 @@ class DistributedSampler(Sampler):
         self.rank = rank
         self.epoch = 0
 
-        self._dataset_length = length
-        if not isinstance(length, int) or length <= 0:
+        if dataset is None and length is None:
+            raise RuntimeError("Either :attr:`dataset` or :attr:`length` must be specified (not `None`)")
+
+        if isinstance(length, int) and length > 0:
+            self._dataset_length = length
+        elif length is None:
             self._dataset_length = len(dataset)
+        else:
+            raise RuntimeError("When specified, :attr:`length` must be a strictly positive integer")
 
         self.num_samples = int(math.ceil(self._dataset_length * 1.0 / self.num_replicas))
         self.total_size = self.num_samples * self.num_replicas
@@ -73,9 +83,7 @@ class DistributedSampler(Sampler):
         return iter(indices)
 
     def __len__(self):
-        if self.padding:
-            return self.num_samples
-        return self._dataset_length
+        return self.num_samples
 
     def set_rank(self, rank):
         assert rank >= 0, 'rank must be >= 0'
