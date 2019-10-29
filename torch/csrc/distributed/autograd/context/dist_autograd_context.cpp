@@ -1,3 +1,5 @@
+#include <functional>
+
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
 #include <c10/util/Exception.h>
 
@@ -94,6 +96,14 @@ void DistAutogradContext::setGraphTask(
 
 void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
+  futureMessage->addCallback([this](const rpc::Message& message) {
+    if (message.type() == rpc::MessageType::EXCEPTION) {
+      // If we have an error, let the local autograd engine know about it.
+      std::runtime_error err(
+          std::string(message.payload().begin(), message.payload().end()));
+      graphTask_->set_exception(std::make_exception_ptr(err), nullptr);
+    }
+  });
   std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
 }
