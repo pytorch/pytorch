@@ -26,29 +26,29 @@ BatchNormImpl::BatchNormImpl(const BatchNormOptions& options_) : options(options
 void BatchNormImpl::reset() {
   if (options.affine()) {
     weight = register_parameter(
-        "weight", torch::empty({options.features()}).uniform_());
-    bias = register_parameter("bias", torch::zeros({options.features()}));
+        "weight", torch::empty({options.num_features()}).uniform_());
+    bias = register_parameter("bias", torch::zeros({options.num_features()}));
   }
 
-  if (options.stateful()) {
+  if (options.track_running_stats()) {
     running_mean =
-        register_buffer("running_mean", torch::zeros({options.features()}));
+        register_buffer("running_mean", torch::zeros({options.num_features()}));
     running_var =
-        register_buffer("running_var", torch::ones({options.features()}));
+        register_buffer("running_var", torch::ones({options.num_features()}));
   }
 }
 
 void BatchNormImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
-         << "torch::nn::BatchNorm(features=" << options.features()
+         << "torch::nn::BatchNorm(num_features=" << options.num_features()
          << ", eps=" << options.eps() << ", momentum=" << options.momentum()
-         << ", affine=" << options.affine() << ", stateful=" << options.stateful()
+         << ", affine=" << options.affine() << ", track_running_stats=" << options.track_running_stats()
          << ")";
 }
 
 Tensor BatchNormImpl::forward(const Tensor& input) {
   TORCH_CHECK(
-      options.stateful(),
+      options.track_running_stats(),
       "Calling BatchNorm::forward is only permitted when "
       "the 'stateful' option is true (was false). "
       "Use BatchNorm::pure_forward instead.");

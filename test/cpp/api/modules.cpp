@@ -986,7 +986,7 @@ TEST_F(ModulesTest, BatchNormStateful) {
   BatchNorm bn(5);
 
   // Is stateful by default.
-  ASSERT_TRUE(bn->options.stateful());
+  ASSERT_TRUE(bn->options.track_running_stats());
 
   ASSERT_TRUE(bn->running_mean.defined());
   ASSERT_EQ(bn->running_mean.dim(), 1);
@@ -1008,7 +1008,7 @@ TEST_F(ModulesTest, BatchNormStateful) {
   ASSERT_EQ(bn->bias.size(0), 5);
 }
 TEST_F(ModulesTest, BatchNormStateless) {
-  BatchNorm bn(BatchNormOptions(5).stateful(false).affine(false));
+  BatchNorm bn(BatchNormOptions(5).track_running_stats(false).affine(false));
 
   ASSERT_FALSE(bn->running_mean.defined());
   ASSERT_FALSE(bn->running_var.defined());
@@ -2063,7 +2063,7 @@ TEST_F(ModulesTest, PrettyPrintFunctional) {
 TEST_F(ModulesTest, PrettyPrintBatchNorm) {
   ASSERT_EQ(
       c10::str(BatchNorm(
-          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).stateful(
+          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(
               true))),
       "torch::nn::BatchNorm(features=4, eps=0.5, momentum=0.1, affine=false, stateful=true)");
 }
