@@ -320,7 +320,7 @@ TORCH_MODULE(TripletMarginLoss);
 /// sequence. CTCLoss sums over the probability of possible alignments of input
 /// to target, producing a loss value which is differentiable with respect
 /// to each input node. The alignment of input to target is assumed
-/// to be “many-to-one”, which limits the length of the target sequence
+/// to be "many-to-one", which limits the length of the target sequence
 /// such that it must be less than or equal to the input length.
 struct TORCH_API CTCLossImpl : public Cloneable<CTCLossImpl> {
 

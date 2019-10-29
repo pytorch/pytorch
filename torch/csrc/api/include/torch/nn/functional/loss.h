@@ -140,7 +140,7 @@ inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
     options.reduction() == Reduction::None ||
     options.reduction() == Reduction::Mean ||
     options.reduction() == Reduction::Sum,
-    options.reduction() + " is not valid"
+    options.reduction(), " is not valid"
   );
   return torch::poisson_nll_loss(input, target, options.log_input(),
     options.full(), options.eps(), options.reduction());
@@ -157,7 +157,7 @@ inline Tensor binary_cross_entropy_with_logits(
   );
 
   return torch::binary_cross_entropy_with_logits(input, target,
-    options.weight(), options.pos_weight(), get_enum(options.reduction()));
+    options.weight(), options.pos_weight(), options.reduction());
 }
 
 } // namespace functional
