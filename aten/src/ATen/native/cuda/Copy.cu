@@ -15,7 +15,7 @@ namespace native {
 using namespace at::cuda;
 
 // device-to-device copy, does type conversion
-static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
+void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   int64_t numel = iter.numel();
 
   // We can memcpy the memory if both tensors have the same type AND both
