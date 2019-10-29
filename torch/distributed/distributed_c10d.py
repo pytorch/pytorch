@@ -1146,31 +1146,41 @@ def all_gather_multigpu(output_tensor_lists,
 
 def all_gather_object(object, group=group.WORLD, async_op=False):
     """
-    Performs all_gather on a picklable object.
+    Gathers picklable objects from the whole group and returns a list to each caller.
+    Arguments:
+        object (Any): Object to be broadcast from the current process. Must be picklable, or the function will fail with an AttributeError.
+        group (ProcessGroup, optional): The process group to work on
+        async_op (bool, optional): Whether this op should be an async op
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        List[Any] if not async_op, a list of the objects broadcast by each process. Element i will correspond to the object process i broadcasted.
+        None, if not part of the group.
     """
     if _rank_not_in_group(group):
         return
-    _check_default_pg()
+    if group == GroupMember.WORLD:
+        _check_default_pg()
 
-    byte_tensor, size = _object_to_tensor(object)
+    local_tensor, local_size = _object_to_tensor(object)
 
     group_size = torch.distributed.get_world_size(group=group)
     object_size_list = [torch.LongTensor([0]) for _ in range(group_size)]
 
     # collect the object sizes from all the tensors
-    all_gather(object_size_list, size, group=group)
+    all_gather(object_size_list, local_size, group=group)
 
     # create the list of output tensors needed for all_gather
     max_object_size = max(object_size_list)
     tensor_list = [torch.ByteTensor(size=(max_object_size,)) for _ in range(group_size)]
 
-    if size != max_object_size:
-        # all tensors input into gather should be of the same size, so pad the local tensor if it is not the max size.
-        padding = torch.ByteTensor(size=(max_object_size - size,))
-        byte_tensor = torch.cat((byte_tensor, padding), dim=0)
+    # allocate a tensor of max size, and copy byte tensor into it.
+    max_size_tensor = torch.ByteTensor(size=(max_object_size,))
+    max_size_tensor[:local_size[0]] = local_tensor
 
-    all_gather(tensor_list, byte_tensor, group=group, async_op=async_op)
+    all_gather(tensor_list, max_size_tensor, group=group, async_op=async_op)
     # unpickle the tensors back into objects.
+    # update
     objects = [_tensor_to_object(tensor, object_size) for object_size, tensor in zip(object_size_list, tensor_list)]
     return objects
 
