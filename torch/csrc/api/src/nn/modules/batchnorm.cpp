@@ -41,7 +41,7 @@ void BatchNormImpl::reset() {
 void BatchNormImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
          << "torch::nn::BatchNorm(num_features=" << options.num_features()
-         << ", eps=" << options.eps() << ", momentum=" << options.momentum()
+         << ", eps=" << options.eps() << ", momentum=" << options.momentum().value()
          << ", affine=" << options.affine() << ", track_running_stats=" << options.track_running_stats()
          << ")";
 }
