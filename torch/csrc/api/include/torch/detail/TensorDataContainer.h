@@ -80,10 +80,10 @@ struct TensorDataContainer {
       scalar_type_(at::ScalarType::Undefined),
       type_(TensorDataContainerType::InitList) {}
 #define TENSOR(T, S) \
-  TensorDataContainer(T value) :
-      sizes_(),
-      scalar_type_(at::k##S),
-      type_(TensorDataContainerType::Scalar),
+  TensorDataContainer(T value) : \
+      sizes_(), \
+      scalar_type_(at::k##S), \
+      type_(TensorDataContainerType::Scalar), \
       scalar_(value) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
