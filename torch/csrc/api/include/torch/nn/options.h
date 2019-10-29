@@ -12,3 +12,4 @@
 #include <torch/nn/options/vision.h>
 #include <torch/nn/options/rnn.h>
 #include <torch/nn/options/pixelshuffle.h>
+#include <torch/nn/options/upsampling.h>
