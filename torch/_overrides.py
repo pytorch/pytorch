@@ -31,10 +31,6 @@ if _six.PY3:
 else:
     from inspect import getargspec
 
-# TODO: PyTorch does not have a hard dependency on NumPy, so we need
-#       to vendor this code.
-from numpy.core.multiarray import add_docstring
-
 from .tensor import Tensor
 
 
@@ -167,8 +163,7 @@ _wrapped_func_source = textwrap.dedent("""
             implementation, {name}, relevant_args, args, kwargs)
     """)
 
-def torch_function_dispatch(dispatcher, module=None, verify=True,
-                            docs_from_dispatcher=False):
+def torch_function_dispatch(dispatcher, module=None, verify=True):
     """Decorator for adding dispatch with the __torch_function__ protocol.
 
     See for example ``torch/functional.py`` for usage examples.
@@ -191,10 +186,6 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
         if the dispatcher's signature needs to deviate for some particular
         reason, e.g., because the function has a signature like
         ``func(*args, **kwargs)``.
-    docs_from_dispatcher : bool, optional
-        If True, copy docs from the dispatcher function onto the dispatched
-        function, rather than from the implementation. This is useful for
-        functions defined in C, which otherwise don't have docstrings.
 
     Returns
     -------
@@ -215,9 +206,6 @@ def torch_function_dispatch(dispatcher, module=None, verify=True,
     def decorator(implementation):
         if verify:
             _verify_matching_signatures(implementation, dispatcher)
-
-        if docs_from_dispatcher:
-            add_docstring(implementation, dispatcher.__doc__)
 
         # Equivalently, we could define this function directly instead of using
         # exec. This version has the advantage of giving the helper function a
