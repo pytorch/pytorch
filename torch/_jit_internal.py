@@ -141,12 +141,7 @@ def can_compile_class(cls):
     if is_ignored_fn(cls):
         return False
     names = cls.__dict__
-    # '__abstractmethods__' errors when accessed as an AttributeError, so
-    # exit before calling getattr below. This can occur in a type object or class
-    # with an abstract method, in either case we cannot compile it as a class
-    if '__abstractmethods__' in names:
-        return False
-    fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name))]
+    fns = [getattr(cls, name) for name in names if inspect.isroutine(getattr(cls, name, None))]
     has_code = [hasattr(fn, '__code__') for fn in fns]
     return all(has_code)
 
