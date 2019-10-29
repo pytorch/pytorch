@@ -69,8 +69,7 @@ TORCH_MODULE(Linear);
 /// A placeholder for Flatten operator
 class TORCH_API FlattenImpl : public Cloneable<FlattenImpl> {
  public:
-  FlattenImpl(int64_t start_dim, int64_t end_dim) : FlattenImpl(FlattenOptions(start_dim, end_dim)) {}
-  explicit FlattenImpl(const FlattenOptions& options_);
+  explicit FlattenImpl(const FlattenOptions& options_ = {});
 
   void reset() override;
 

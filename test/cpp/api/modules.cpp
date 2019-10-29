@@ -278,13 +278,13 @@ TEST_F(ModulesTest, Flatten) {
   ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
 
   // Testing with optional arguments start_dim and end_dim
-  Flatten flatten(2, 3);
+  Flatten flatten_optional_dims(FlattenOptions().start_dim(2).end_dim(3));
   input = torch::tensor({
     {{{1, 2}, {3, 4}}, {{5, 6}, {7, 8}}},
     {{{9, 10}, {11, 12}}, {{13, 14}, {15, 16}}}
-   }, torch::requires_grad()) // Tensor with sizes (2, 2, 2, 2)
+   }, torch::requires_grad()); // Tensor with sizes (2, 2, 2, 2)
 
-  output = flatten->forward(input);
+  output = flatten_optional_dims->forward(input);
   expected = torch::tensor({
     {{1, 2, 3, 4}, {5, 6, 7, 8}},
     {{9, 10, 11, 12}, {13, 14, 15, 16}}
@@ -1572,7 +1572,8 @@ TEST_F(ModulesTest, PrettyPrintIdentity) {
 }
 
 TEST_F(ModulesTest, PrettyPrintFlatten) {
-  ASSERT_EQ(c10::str(Flatten(2, 4)), "torch::nn::Flatten(start_dim=2, end_dim=4)");
+  ASSERT_EQ(c10::str(Flatten()), "torch::nn::Flatten()");
+  ASSERT_EQ(c10::str(Flatten(FlattenOptions().start_dim(2).end_dim(4))), "torch::nn::Flatten()");
 }
 
 TEST_F(ModulesTest, PrettyPrintLinear) {
