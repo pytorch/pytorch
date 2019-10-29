@@ -485,11 +485,11 @@ void testEvalModeForLoadedModule() {
     return; // The module file to load is not generated in Sandcastle
   std::string module_path = "dropout_model.pt";
   torch::jit::script::Module module = torch::jit::load(module_path);
-  AT_ASSERT(module.get_module("dropout").is_training());
+  AT_ASSERT(module.attr("dropout").toModule().is_training());
   module.eval();
-  AT_ASSERT(!module.get_module("dropout").is_training());
+  AT_ASSERT(!module.attr("dropout").toModule().is_training());
   module.train();
-  AT_ASSERT(module.get_module("dropout").is_training());
+  AT_ASSERT(module.attr("dropout").toModule().is_training());
 }
 
 // test a few features that are not directly used in schemas yet
@@ -964,8 +964,8 @@ void testModuleConversion() {
 
     m.to(at::kCUDA);
     m.to(at::kCPU);
-    AT_ASSERT(m.get_parameter("foo").device().is_cpu());
-    AT_ASSERT(m.get_buffer("bar").device().is_cpu());
+    AT_ASSERT(m.attr("foo").toTensor().device().is_cpu());
+    AT_ASSERT(m.attr("bar").toTensor().device().is_cpu());
   }
   {
     // test cpu to cuda for params and buffers
@@ -973,8 +973,8 @@ void testModuleConversion() {
     m.register_buffer("bar", torch::ones({}));
 
     m.to(at::kCUDA);
-    AT_ASSERT(m.get_parameter("foo").device().is_cuda());
-    AT_ASSERT(m.get_buffer("bar").device().is_cuda());
+    AT_ASSERT(m.attr("foo").toTensor().device().is_cuda());
+    AT_ASSERT(m.attr("bar").toTensor().device().is_cuda());
   }
 }
 

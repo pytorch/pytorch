@@ -291,7 +291,7 @@ static void gatherParametersAndBuffers(
   state->setValue(self.module_object(), self_value);
 
   auto self_ty = self.type();
-  for (const script::NameValue& s : self.get_slots()) {
+  for (const script::NameValue& s : self.named_attributes(/*recurse=*/false)) {
     if (s.value.type()->isSubtypeOf(TensorType::get())) {
       addInput(
           state, s.value, s.value.type(), g.insertGetAttr(self_value, s.name));
