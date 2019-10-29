@@ -1953,35 +1953,6 @@ TEST_F(ModulesTest, ConstantPad3d) {
   }
 }
 
-TEST_F(ModulesTest, cross_map_lrn2d) {
-  torch::autograd::Variable input = torch::arange(27, torch::TensorOptions().dtype(torch::kFloat32).requires_grad(true)).view({1, 3, 3, 3});
-  auto output = cross_map_lrn2d::apply(input, 3, 1e-4, 0.75, 1);
-  auto expected = torch::tensor({{{{0.00000000, 0.99748236, 1.99377260},
-                                   {2.98857600, 3.98159900, 4.97255200},
-                                   {5.96114540, 6.94709600, 7.93011900}},
-                                  {{8.90993900, 9.88603400, 10.85780050},
-                                   {11.82483300, 12.78673300, 13.74311400},
-                                   {14.69359700, 15.63781200, 16.57540100}},
-                                  {{17.81987800, 18.78346400, 19.74145500},
-                                   {20.69345700, 21.63908600, 22.57797200},
-                                   {23.50975400, 24.43408000, 25.35061300}}}}, torch::kFloat32);
-  /// forward function check
-  ASSERT_TRUE(output.allclose(expected));
-  
-  output.sum().backward();
-  expected = torch::tensor({{{{0.99797980, 0.99743265, 0.99668777},
-                              {0.99574596, 0.99460834, 0.99327630},
-                              {0.99175130, 0.99003524, 0.98812973}},
-                             {{0.98603710, 0.98323830, 0.98011166},
-                              {0.97666150, 0.97289260, 0.96881014},
-                              {0.96441970, 0.95972740, 0.95473950}},
-                             {{0.96625674, 0.96083605, 0.95501430},
-                              {0.94879940, 0.94219960, 0.93522390},
-                              {0.92788180, 0.92018300, 0.91213800}}}}, torch::kFloat32);
-  /// backward function check
-  ASSERT_TRUE(input.grad().allclose(expected));
-}
-
 TEST_F(ModulesTest, CrossMapLRN2d) {
   /// size 3, default options
   auto input = torch::arange(9, torch::kFloat32).view({1, 1, 3, 3}).requires_grad_(true);
