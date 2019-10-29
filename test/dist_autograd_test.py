@@ -4,21 +4,70 @@ import time
 import unittest
 
 import torch
+import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-from dist_utils import INIT_METHOD_TEMPLATE, dist_init
+from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
+from torch.distributed.rpc import RpcBackend
 
 import threading
 
-prev_rank_rpc_done = False
-prev_rank_context_id = 0
+# Right now we test up to 3-layer nested rpc calls.
+# rpc_done[1] and ctx_ids[1] represent rpc is done in prev rank, and context id
+# sent from prev rank respectively.
+# rpc_done[2] and ctx_ids[2] represents for prev of prev rank.
+# rpc_done[3] and ctx_ids[3] represents for prev of prev of prev rank.
+# rpc_done[0] and ctx_ids[0] represents for current rank, but mostly not used.
+rpc_done = [False, False, False, False]
+ctx_ids = [-1, -1, -1, -1]
+
+known_context_ids = []
 
 
-def _set_rpc_done(context_id):
-    global prev_rank_rpc_done
-    global prev_rank_context_id
-    prev_rank_rpc_done = True
-    prev_rank_context_id = context_id
+# Send rpc done info and context_id to
+# dst_rank = (self.rank + rank_distance) % self.world_size
+# we don't need a lock here since the GIL is held while executing remote
+# python UDFs, so access is serialized across several workers.
+def _set_rpc_done(ctx_id, rank_distance):
+    global rpc_done
+    global ctx_ids
+    global known_context_ids
+    rpc_done[rank_distance] = True
+    ctx_ids[rank_distance] = ctx_id
+    known_context_ids.append(ctx_id)
+
+
+def my_py_add(t1, t2):
+    return torch.add(t1, t2)
+
+
+def my_py_nested_call(t1, t2, dst, world_size, hops):
+    next_dst = (dst + 1) % world_size
+    if hops > 0:
+        return rpc.rpc_sync("worker{}".format(next_dst), my_py_nested_call,
+                            args=(t1, t2, next_dst, world_size, hops - 1))
+    else:
+        return rpc.rpc_sync("worker{}".format(next_dst), torch.add, args=(t1, t2))
+
+# after dist autograd context is cleaned up, it should be cleaned up on other
+# nodes. This helper allows timeout_seconds for those RPCs to be completed, and
+# ensures that all the contexts have been cleaned up in that timeframe.any
+def _all_contexts_cleaned_up(timeout_seconds=10):
+    global known_context_ids
+    start = time.time()
+    context_id_to_raised = {}
+    while time.time() - start < timeout_seconds:
+        for context_id in known_context_ids:
+            try:
+                dist_autograd._retrieve_context(context_id)
+            except RuntimeError:
+                context_id_to_raised[context_id] = True
+        if len(context_id_to_raised) == len(known_context_ids):
+            break
+    # all contexts have been cleaned up if trying to retrieve any context resulted in a RuntimeError.
+    success = len(context_id_to_raised) == len(known_context_ids) and all(context_id_to_raised.values())
+    return success
+
 
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
@@ -63,17 +112,20 @@ class DistAutogradTest(object):
             self.dst_rank = (self.rank + 1) % self.world_size
         return self.dst_rank
 
+    def _check_rpc_done(self, rank_distance):
+        while not rpc_done[rank_distance]:
+            time.sleep(0.1)
+            pass
+
     @property
     def world_size(self):
         return 4
 
     @property
     def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(
-            file_name=self.file_name, rank=self.rank, world_size=self.world_size
-        )
+        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_autograd_context(self):
         # Verify max possible id.
         max_auto_increment = 281474976710655
@@ -99,7 +151,7 @@ class DistAutogradTest(object):
             ):
                 dist_autograd._retrieve_context(context_id)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_nested_context(self):
         with dist_autograd.context() as context_id:
             # Nested contexts not supported.
@@ -107,77 +159,133 @@ class DistAutogradTest(object):
                 with dist_autograd.context() as context_id:
                     pass
 
-    @dist_init
-    def test_autograd_functions(self):
+    # For current context, this rank sends t1 and t2 tensors to dst_rank,
+    # then get t3 = torch.add(t1, t2) result tensor.
+    # For the current context in this rank, it expects graph like this:
+    #  send function:
+    #              rpcSendBackward
+    #                  /          \
+    #  t1.AccumulateGrad         t2.AccumulateGrad
+    #
+    #  recv function:
+    #
+    #            |
+    #          t3.rpcRecvBackward
+    #
+    def _verify_graph_for_first_rpc_call(self, send_function, recv_function, t1, t2, ret):
+        # Retrieve the next functions in the graph.
+        next_funcs = send_function.next_functions
+        self.assertEqual(2, len(next_funcs))
+
+        # We should now hit t1 and t2 in the autograd graph.
+        self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[0][0].name())
+        self.assertEqual(t1, next_funcs[0][0].variable)
+        self.assertEqual(0, next_funcs[0][1])
+        self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[1][0].name())
+        self.assertEqual(t2, next_funcs[1][0].variable)
+        self.assertEqual(0, next_funcs[1][1])
+
+        # Test recv functions.
+        self.assertEqual(ret.grad_fn, recv_function)
+
+    # For a context passed from previous nested chain calls, this rank
+    # receives two tensors t1 and t2, executes torch.add(t1, t2) and sends
+    # result tensor t3 back.
+    # For this context in this rank, it expects graph like this:
+    #  send and recv functions:
+    #       rpcSendBackward
+    #           |
+    #          t3.AddBackward0
+    #          /             \
+    # t1.recvRpcBackward    t2.recvRpcBackward
+    def _verify_graph_for_rpc_call_exec(self, send_function):
+        # Verify next function is AddBackward0
+        next_funcs = send_function.next_functions
+        self.assertEqual(1, len(next_funcs))
+        add_backward_fn = next_funcs[0][0]
+        self.assertEqual("AddBackward0", add_backward_fn.name())
+
+        # Verify the next two functions are the same recv backward function.
+        next_funcs = add_backward_fn.next_functions
+        self.assertEqual(2, len(next_funcs))
+        self.assertEqual(
+            "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
+        )
+        self.assertEqual(
+            "torch::distributed::autograd::RecvRpcBackward", next_funcs[1][0].name()
+        )
+        self.assertEqual(next_funcs[0][0], next_funcs[1][0])
+
+    # For a context passed from previous nested chain calls, this rank
+    # receives two tensors t1 and t2, forwards t1 and t2 tensors using
+    # nested rpc call to next dst. In return route, receive result tensor t3
+    # from next dst and forwarding t3 back to previous calls.
+    # For this context in this rank, it expects graph like this:
+    #  send and recv functions for receving and forwarding t1 and t2:
+    #       rpcSendBackward
+    #          /          \
+    # t1.recvRpcBackward    t2.recvRpcBackward
+    #  send and recv functions for receiving and forwarding t3:
+    #       rpcSendBackward
+    #             |
+    #           t3.recvRpcBackward
+    def _verify_graph_for_nested_rpc_call(self, ctx):
+        send_functions = ctx._send_functions()
+        self.assertEqual(2, len(send_functions))
+
+        # For send function when making nest rpc call,
+        # next functions of the send function are two recv functions
+        # for recevied two tensors from previous call
+        next_funcs = list(send_functions.values())[0].next_functions
+        self.assertEqual(2, len(next_funcs))
+        self.assertEqual(
+            "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
+        )
+        self.assertEqual(
+            "torch::distributed::autograd::RecvRpcBackward", next_funcs[1][0].name()
+        )
+        self.assertEqual(next_funcs[0][0], next_funcs[1][0])
+
+
+        # For send function when returning resonpose to previous call
+        # next function of the send function is the recv function
+        # for received tensor result returned from nested call
+        next_funcs = list(send_functions.values())[1].next_functions
+        self.assertEqual(1, len(next_funcs))
+        self.assertEqual(
+            "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
+        )
+
+    def _test_graph(self, fn):
         dst_rank = (self.rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
-            ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
-            rpc.rpc_sync(
-                "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
-            )
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), fn, args=(t1, t2))
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         _set_rpc_done, args=(context_id, 1))
 
-            # Get send function.
+            # Verify graph for current context id.
             ctx = dist_autograd._current_context()
             self.assertEqual(context_id, ctx._context_id())
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
-
-            # Ensure that the destination workerId is recorded on this context.
-            worker_ids = ctx._known_worker_ids()
-            self.assertEqual(len(worker_ids), 1)
-            self.assertEqual(dst_rank, worker_ids[0])
-
-            # Retrieve the next functions in the graph.
-            next_funcs = list(send_functions.values())[0].next_functions
-            self.assertEqual(2, len(next_funcs))
-
-            # We should now hit t1 and t2 in the autograd graph.
-            self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[0][0].name())
-            self.assertEqual(t1, next_funcs[0][0].variable)
-            self.assertEqual(0, next_funcs[0][1])
-            self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[1][0].name())
-            self.assertEqual(t2, next_funcs[1][0].variable)
-            self.assertEqual(0, next_funcs[1][1])
-
-            # Test recv functions.
             recv_functions = ctx._recv_functions()
             self.assertEqual(1, len(recv_functions))
-            self.assertEqual(ret.grad_fn, list(recv_functions.values())[0])
-
-            # We should have send/recv functions from the previous rank, get all
-            # contexts in this node to find them.
+            self._verify_graph_for_first_rpc_call(list(send_functions.values())[0],
+                                                  list(recv_functions.values())[0],
+                                                  t1, t2, ret)
 
             # Wait for the prev rank to be done with rpc.
-            while not prev_rank_rpc_done:
-                time.sleep(0.1)
-                pass
-
-            # Now verify the autograd graph.
-            ctx = dist_autograd._retrieve_context(prev_rank_context_id)
-
-            # Get the send function.
+            self._check_rpc_done(1)
+            # Verify graph for previous context id.
+            ctx = dist_autograd._retrieve_context(ctx_ids[1])
             send_functions = ctx._send_functions()
             self.assertEqual(1, len(send_functions))
-
-            # Verify next function is AddBackward0
-            next_funcs = list(send_functions.values())[0].next_functions
-            self.assertEqual(1, len(next_funcs))
-            add_backward_fn = next_funcs[0][0]
-            self.assertEqual("AddBackward0", add_backward_fn.name())
-
-            # Verify the next two functions are the same recv backward function.
-            next_funcs = add_backward_fn.next_functions
-            self.assertEqual(2, len(next_funcs))
-            self.assertEqual(
-                "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
-            )
-            self.assertEqual(
-                "torch::distributed::autograd::RecvRpcBackward", next_funcs[1][0].name()
-            )
-            self.assertEqual(next_funcs[0][0], next_funcs[1][0])
-
+            self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
+            # this barrier is needed so one worker does not clean up their
+            # autograd context before another worker tries to access it.
+            dist.barrier()
 
         # autograd context should be cleaned up by now.
         with self.assertRaises(RuntimeError):
@@ -187,7 +295,129 @@ class DistAutogradTest(object):
         with self.assertRaises(RuntimeError):
             ctx = dist_autograd._current_context()
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
+    def test_graph_for_builtin_call(self):
+        self._test_graph(torch.add)
+
+    @dist_init(setup_model_parallel=True)
+    def test_graph_for_python_call(self):
+        self._test_graph(my_py_add)
+
+    # 3-layer nested calls
+    @dist_init(setup_model_parallel=True)
+    def test_graph_for_py_nested_call(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=True)
+            t2 = torch.zeros(3, 3, requires_grad=True)
+            nest_dst_rank = (dst_rank + 1) % self.world_size
+            ret = rpc.rpc_sync("worker{}".format(dst_rank),
+                               my_py_nested_call, args=(t1, t2, dst_rank, self.world_size, 1))
+            for rd in [1, 2, 3]:
+                rpc.rpc_sync("worker{}".format((self.rank + rd) % self.world_size),
+                             _set_rpc_done, args=(context_id, rd))
+
+            # For self.rank, it has 4 graphs to verify
+            # One is for current context id when this rank send first rpc call.
+            # Second one is for prev context id when this rank make 1st nested
+            # call.
+            # Third one is for prev prev context id when this rank make
+            # 2nd nested call.
+            # Last one is for prev prev prev context id when this rank
+            # execute the torch.add() operator.
+
+            # Verify first graph for current context id.
+            ctx = dist_autograd._current_context()
+            self.assertEqual(context_id, ctx._context_id())
+            send_functions = ctx._send_functions()
+            self.assertEqual(1, len(send_functions))
+            recv_functions = ctx._recv_functions()
+            self.assertEqual(1, len(recv_functions))
+            self._verify_graph_for_first_rpc_call(list(send_functions.values())[0],
+                                                  list(recv_functions.values())[0],
+                                                  t1, t2, ret)
+
+            # Verify second graph for 1st nested call.
+            self._check_rpc_done(1)
+            ctx = dist_autograd._retrieve_context(ctx_ids[1])
+            self._verify_graph_for_nested_rpc_call(ctx)
+
+            # Verify third graph for 2nd nested call.
+            self._check_rpc_done(2)
+            ctx = dist_autograd._retrieve_context(ctx_ids[2])
+            self._verify_graph_for_nested_rpc_call(ctx)
+
+            # verify last graph for rpc call execution.
+            self._check_rpc_done(3)
+            ctx = dist_autograd._retrieve_context(ctx_ids[3])
+            send_functions = ctx._send_functions()
+            self.assertEqual(1, len(send_functions))
+            self._verify_graph_for_rpc_call_exec(list(send_functions.values())[0])
+            # this barrier is needed so one worker does not clean up their
+            # autograd context before another worker tries to access it.
+            dist.barrier()
+
+    # Rank0->Rank1->Rank0
+    @dist_init(setup_model_parallel=True)
+    def test_graph_for_py_nested_call_itself(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=True)
+            t2 = torch.zeros(3, 3, requires_grad=True)
+            ret = rpc.rpc_sync("worker{}".format(dst_rank),
+                               my_py_nested_call,
+                               args=(t1, t2, (self.rank - 1 + self.world_size) % self.world_size, self.world_size, 0))
+            rpc.rpc_sync("worker{}".format((self.rank + 1) % self.world_size),
+                         _set_rpc_done, args=(context_id, 1))
+
+            # For self.rank, it has 2 graphs to verify.
+            # One is for current context id when this rank send first rpc
+            # call and execute the torch.add() operator.
+            # Another one is for prev context id when this rank make
+            # nested call.
+            ctx = dist_autograd._current_context()
+            self.assertEqual(context_id, ctx._context_id())
+            send_functions = ctx._send_functions()
+            self.assertEqual(2, len(send_functions))
+            recv_functions = ctx._recv_functions()
+            self.assertEqual(2, len(recv_functions))
+            self._verify_graph_for_first_rpc_call(list(send_functions.values())[0],
+                                                  list(recv_functions.values())[1],
+                                                  t1, t2, ret)
+            self._verify_graph_for_rpc_call_exec(list(send_functions.values())[1])
+
+            # Verify two pairs of send and recv functions for nested
+            # call
+            self._check_rpc_done(1)
+            ctx = dist_autograd._retrieve_context(ctx_ids[1])
+            self._verify_graph_for_nested_rpc_call(ctx)
+            # this barrier is needed so one worker does not clean up their
+            # autograd context before another worker tries to access it.
+            dist.barrier()
+
+    @dist_init(setup_model_parallel=True)
+    def test_no_graph_with_tensors_not_require_grad(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=False)
+            t2 = torch.zeros(3, 3, requires_grad=False)
+            ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         _set_rpc_done, args=(context_id, 1))
+
+            ctx = dist_autograd._current_context()
+            send_functions = ctx._send_functions()
+            self.assertEqual(len(send_functions), 0)
+            recv_functions = ctx._recv_functions()
+            self.assertEqual(len(recv_functions), 0)
+
+            # Wait for the prev rank to be done with rpc.
+            self._check_rpc_done(1)
+            # prev context id is not passed over as tensors do not require grads
+            with self.assertRaises(RuntimeError):
+                ctx = dist_autograd._retrieve_context(ctx_ids[1])
+
+    @dist_init(setup_model_parallel=True)
     def test_rpc_complex_args(self):
         with dist_autograd.context() as context_id:
             num_tensors = 10
@@ -220,7 +450,41 @@ class DistAutogradTest(object):
             dst_rank = (self.rank + 1) % self.world_size
             self.assertEqual(worker_ids[0], dst_rank)
 
-    @dist_init
+
+    @dist_init(setup_model_parallel=True)
+    def test_context_cleanup_many_workers(self):
+        dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=True)
+            t2 = torch.zeros(3, 3, requires_grad=True)
+            for dst_rank in dst_ranks:
+                ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+                rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1))
+        # the thread's context id should be cleaned up
+        with self.assertRaises(RuntimeError):
+            dist_autograd._retrieve_context(context_id)
+        # check that all contexts have been cleaned up.
+        success = _all_contexts_cleaned_up()
+        self.assertTrue(success)
+
+    @dist_init(setup_model_parallel=True)
+    def test_context_cleanup_nested_rpc(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        nested_dst_rank = (dst_rank + 1) % self.world_size
+        with dist_autograd.context() as context_id:
+            t1 = torch.ones(3, 3, requires_grad=True)
+            t2 = torch.zeros(3, 3, requires_grad=True)
+            rpc.rpc_sync("worker{}".format(dst_rank),
+                         my_py_nested_call, args=(t1, t2, dst_rank, self.world_size, 0))
+            # tell next worker and nested next worker to store this context id
+            # so we can verify that it has been cleaned up
+            rpc.rpc_sync("worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1))
+            rpc.rpc_sync("worker{}".format(nested_dst_rank), _set_rpc_done, args=(context_id, 2))
+        dist.barrier()  # let all nodes finish sending their RPCs
+        success = _all_contexts_cleaned_up()
+        self.assertTrue(success)
+
+    @dist_init(setup_model_parallel=True)
     def test_worker_ids_recorded(self):
         dst_ranks = {rank for rank in range(self.world_size) if rank != self.rank}
         with dist_autograd.context() as context_id:
@@ -229,9 +493,9 @@ class DistAutogradTest(object):
             t1 = torch.ones(3, 3, requires_grad=False)
             t2 = torch.zeros(3, 3, requires_grad=False)
             for dst_rank in dst_ranks:
-                ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
+                rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
                 rpc.rpc_sync(
-                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
+                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
             # no worker ids should be recorded.
             ctx = dist_autograd._current_context()
@@ -244,14 +508,14 @@ class DistAutogradTest(object):
             for dst_rank in dst_ranks:
                 ret = rpc.rpc_sync("worker{}".format(dst_rank), torch.add, args=(t1, t2))
                 rpc.rpc_sync(
-                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id,)
+                    "worker{}".format(dst_rank), _set_rpc_done, args=(context_id, 1)
                 )
             # all worker_ids in dst_ranks should be recorded.
             worker_ids = ctx._known_worker_ids()
             self.assertEqual(len(worker_ids), len(dst_ranks))
             self.assertEqual(set(worker_ids), dst_ranks)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_error_in_context(self):
         with dist_autograd.context() as context_id:
             t1 = torch.rand(3, 3, requires_grad=True)
@@ -288,7 +552,7 @@ class DistAutogradTest(object):
         self.assertEqual(ngrads, len(grads))
 
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_simple(self):
         # Run the same code locally and with dist autograd and verify gradients
         # are same.
@@ -301,7 +565,7 @@ class DistAutogradTest(object):
                 loss = ret.sum()
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_multiple_round_trips(self):
         local_grads = None
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -323,7 +587,7 @@ class DistAutogradTest(object):
 
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2, t3, t4, t5)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_different_tensor_dims(self):
         local_grads = None
         t1 = torch.rand((4, 6), requires_grad=True)
@@ -339,7 +603,7 @@ class DistAutogradTest(object):
 
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2, t2, t3, t4)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_unused_tensors(self):
         local_grads = None
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -353,7 +617,7 @@ class DistAutogradTest(object):
                 loss = val.sum()
                 local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2, t3)
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_multiple_output_tensors(self):
         local_grads = None
         t = torch.rand((10, 2), requires_grad=True)
@@ -385,7 +649,7 @@ class DistAutogradTest(object):
             dist_autograd.backward([val.sum()])
 
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_unused_send_function(self):
         # Run the test in a thread which would never finish.
         t = threading.Thread(target=self._run_test_backward_unused_send_function_in_thread)
@@ -396,12 +660,15 @@ class DistAutogradTest(object):
         # Verify thread is still alive (indicating backward hasn't completed yet).
         self.assertTrue(t.is_alive())
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_autograd_engine_error(self):
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
-            t3 = SimulateBackwardError.apply(t1)
+
+            # Perform some ops before error simulation.
+            tmp = (t1 + t2) * (t1 + t2)
+            t3 = SimulateBackwardError.apply(tmp)
 
             # Run multiple round trips across different nodes and verify the
             # original node receives an error thrown on a node deep in the chain.
@@ -418,8 +685,9 @@ class DistAutogradTest(object):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @dist_init
-    @unittest.skip("Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
+    @unittest.skipIf(TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP,
+                     "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
+    @dist_init(clean_shutdown=False)
     def test_backward_node_failure(self):
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
@@ -428,18 +696,22 @@ class DistAutogradTest(object):
             res = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.add,
                                args=(t1, t2))
 
-            if self.rank == 0:
+            # Wait for all RPCs to be done.
+            dist.barrier()
+
+            # Kill all odd rank nodes.
+            if self.rank % 2 == 0:
                 # Wait a bit for all other nodes to die.
-                time.sleep(3)
-                with self.assertRaises(RuntimeError):
+                time.sleep(5)
+                with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
                     dist_autograd.backward([res.sum()])
             else:
-                # Kill all other nodes.
-                sys.exit(0)
+                # Exit all other nodes.
+                pass
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_without_context(self):
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
@@ -449,7 +721,7 @@ class DistAutogradTest(object):
                                args=(t1, t2))
             dist_autograd.backward([res.sum()])
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_without_rpc(self):
         dst_rank = self.rank
         with dist_autograd.context() as context_id:
@@ -465,7 +737,7 @@ class DistAutogradTest(object):
             self.assertEqual(torch.ones(3, 3), grads[t1])
             self.assertEqual(torch.ones(3, 3), grads[t2])
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_invalid_args(self):
         with dist_autograd.context() as context_id:
 
@@ -487,7 +759,7 @@ class DistAutogradTest(object):
                 t = torch.rand(1, requires_grad=True)
                 dist_autograd.backward([t])
 
-    @dist_init
+    @dist_init(setup_model_parallel=True)
     def test_backward_multiple_roots(self):
         local_grads = None
         t1 = torch.rand((3, 3), requires_grad=True)
@@ -500,6 +772,17 @@ class DistAutogradTest(object):
                 r4 = self._exec_func(exec_mode, torch.div, t1, t2).sum()
 
                 local_grads = self._verify_backwards(exec_mode, [r1, r2, r3, r4], context_id, local_grads, t1, t2)
+
+    @dist_init
+    def test_backward_different_dtypes(self):
+        local_grads = None
+        t1 = torch.rand((3, 3), requires_grad=True, dtype=torch.float32)
+        t2 = torch.rand((3, 3), requires_grad=True, dtype=torch.float64)
+        for exec_mode in [ExecMode.LOCAL, ExecMode.REMOTE]:
+            with dist_autograd.context() as context_id:
+                loss = self._exec_func(exec_mode, torch.add, t1, t2).sum()
+
+                local_grads = self._verify_backwards(exec_mode, [loss], context_id, local_grads, t1, t2)
 
 
 if __name__ == '__main__':

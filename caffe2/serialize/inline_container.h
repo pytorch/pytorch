@@ -121,6 +121,7 @@ class CAFFE2_API PyTorchStreamReader final {
   istream_read_func(void* pOpaque, uint64_t file_ofs, void* pBuf, size_t n);
   std::unique_ptr<mz_zip_archive> ar_;
   std::string archive_name_;
+  std::string archive_name_plus_slash_;
   std::unique_ptr<ReadAdapterInterface> in_;
   int64_t version_;
 };

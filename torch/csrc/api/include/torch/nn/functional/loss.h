@@ -10,21 +10,30 @@ inline Tensor l1_loss(
     const Tensor& input,
     const Tensor& target,
     const L1LossOptions& options = {}) {
-  return torch::l1_loss(input, target, options.reduction());
+  return torch::l1_loss(
+    input,
+    target,
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor kl_div(
     const Tensor& input,
     const Tensor& target,
     const KLDivLossOptions& options = {}) {
-  return torch::kl_div(input, target, options.reduction());
+  return torch::kl_div(
+    input,
+    target,
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor mse_loss(
     const Tensor& input,
     const Tensor& target,
     const MSELossOptions& options = {}) {
-  return torch::mse_loss(input, target, options.reduction());
+  return torch::mse_loss(
+    input,
+    target,
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor binary_cross_entropy(
@@ -32,7 +41,10 @@ inline Tensor binary_cross_entropy(
     const Tensor& target,
     const BCELossOptions& options = {}) {
   return torch::binary_cross_entropy(
-      input, target, options.weight(), options.reduction());
+      input,
+      target,
+      options.weight(),
+      enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor hinge_embedding_loss(
@@ -40,7 +52,10 @@ inline Tensor hinge_embedding_loss(
     const Tensor& target,
     const HingeEmbeddingLossOptions& options = {}) {
   return torch::hinge_embedding_loss(
-      input, target, options.margin(), options.reduction());
+      input,
+      target,
+      options.margin(),
+      enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor multi_margin_loss(
@@ -58,7 +73,7 @@ inline Tensor multi_margin_loss(
     options.p(),
     options.margin(),
     options.weight(),
-    options.reduction()
+    enumtype::reduction_get_enum(options.reduction())
   );
 }
 
@@ -68,21 +83,31 @@ inline Tensor cosine_embedding_loss(
     const Tensor& target,
     const CosineEmbeddingLossOptions& options) {
   return torch::cosine_embedding_loss(
-      input1, input2, target, options.margin(), options.reduction());
+    input1,
+    input2,
+    target,
+    options.margin(),
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
     const Tensor& target,
     const MultiLabelMarginLossOptions& options = {}) {
-  return torch::multilabel_margin_loss(input, target, options.reduction());
+  return torch::multilabel_margin_loss(
+    input,
+    target,
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
     const SoftMarginLossOptions& options = {}) {
-  return torch::soft_margin_loss(input, target, options.reduction());
+  return torch::soft_margin_loss(
+    input,
+    target,
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor multilabel_soft_margin_loss(
@@ -98,15 +123,18 @@ inline Tensor multilabel_soft_margin_loss(
 
   Tensor ret;
 
-  if (options.reduction() == torch::Reduction::None) {
-      ret = loss;
-  } else if (options.reduction() == torch::Reduction::Mean) {
-      ret = loss.mean();
-  } else if (options.reduction() == torch::Reduction::Sum) {
-      ret = loss.sum();
+  if (c10::get_if<enumtype::kNone>(&options.reduction())) {
+    ret = loss;
+  } else if (c10::get_if<enumtype::kMean>(&options.reduction())) {
+    ret = loss.mean();
+  } else if (c10::get_if<enumtype::kSum>(&options.reduction())) {
+    ret = loss.sum();
   } else {
-      ret = input;
-      TORCH_INTERNAL_ASSERT(true, options.reduction(), " is not valid");
+    ret = input;
+    TORCH_INTERNAL_ASSERT(
+      false,
+      enumtype::get_enum_name(options.reduction()),
+      " is not valid");
   }
   return ret;
 }
@@ -124,7 +152,7 @@ inline Tensor triplet_margin_loss(
       options.p(),
       options.eps(),
       options.swap(),
-      options.reduction());
+      enumtype::reduction_get_enum(options.reduction()));
 }
 
 } // namespace functional
