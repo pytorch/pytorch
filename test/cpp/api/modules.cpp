@@ -1018,7 +1018,7 @@ TEST_F(ModulesTest, BatchNormStateless) {
   ASSERT_THROWS_WITH(
       bn(torch::ones({2, 5})),
       "Calling BatchNorm::forward is only permitted "
-      "when the 'stateful' option is true (was false). "
+      "when the 'track_running_stats' option is true (was false). "
       "Use BatchNorm::pure_forward instead.");
 }
 

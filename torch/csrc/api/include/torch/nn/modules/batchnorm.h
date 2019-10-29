@@ -25,8 +25,8 @@ namespace nn {
 /// \endrst
 class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
  public:
-  explicit BatchNormImpl(int64_t features)
-      : BatchNormImpl(BatchNormOptions(features)) {}
+  explicit BatchNormImpl(int64_t num_features)
+      : BatchNormImpl(BatchNormOptions(num_features)) {}
   explicit BatchNormImpl(const BatchNormOptions& options_);
 
   void reset() override;
@@ -37,7 +37,7 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
   /// Applies batch normalization on the `input` using the stored mean and
   /// variance.
   ///
-  /// The module must be constructed with `stateful = true` when calling this
+  /// The module must be constructed with `track_running_stats = true` when calling this
   /// method, as the module will otherwise not store running statistics. If you
   /// want to supply the mean and variance yourself, use `pure_forward`.
   Tensor forward(const Tensor& input);
@@ -61,11 +61,11 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
   Tensor bias;
 
   /// The running mean.
-  /// Only defined if the `stateful` option was `true` upon construction.
+  /// Only defined if the `track_running_stats` option was `true` upon construction.
   Tensor running_mean;
 
   /// The running variance.
-  /// Only defined if the `stateful` option was `true` upon construction.
+  /// Only defined if the `track_running_stats` option was `true` upon construction.
   Tensor running_var;
 };
 

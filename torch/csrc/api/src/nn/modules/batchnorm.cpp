@@ -50,7 +50,7 @@ Tensor BatchNormImpl::forward(const Tensor& input) {
   TORCH_CHECK(
       options.track_running_stats(),
       "Calling BatchNorm::forward is only permitted when "
-      "the 'stateful' option is true (was false). "
+      "the 'track_running_stats' option is true (was false). "
       "Use BatchNorm::pure_forward instead.");
   return pure_forward(input, running_mean, running_var);
 }
