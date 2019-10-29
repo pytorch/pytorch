@@ -8,14 +8,14 @@ namespace torch {
 namespace jit {
 namespace detail {
 
-struct DifferentiableGraphBackward : public autograd::Node {
-  DifferentiableGraphBackward(GraphExecutor executor): executor(std::move(executor)) {}
-  std::string toString() {
-    return executor.graph()->toString();
-  }
+struct DifferentiableGraphBackwardImpl;
 
+struct DifferentiableGraphBackward : public autograd::Node {
+  virtual std::string toString() const;
+  DifferentiableGraphBackward(GraphExecutor executor, size_t input_size, size_t capture_size);
+  std::shared_ptr<DifferentiableGraphBackwardImpl> pImpl;
 protected:
-  GraphExecutor executor;
+  virtual autograd::variable_list apply(autograd::variable_list&& inputs) override;
 };
 
 GraphExecutor* getGradExecutor(Operation& op);
