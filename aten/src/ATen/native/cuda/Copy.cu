@@ -8,7 +8,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <THC/THC.h>
-#include <c10/util/TypeCast.h>
 
 namespace at {
 namespace native {
@@ -18,7 +17,7 @@ using namespace at::cuda;
 template <typename dst_t, typename src_t>
 void copy_kernel_impl(TensorIterator& iter) {
   gpu_kernel(iter, []GPU_LAMBDA(src_t x) -> dst_t {
-    return c10::static_cast_with_inter_type<dst_t>(x);
+    return static_cast<dst_t>(static_cast<native::inter_copy_type_t<dst_t>>(x));
   });
 }
 
