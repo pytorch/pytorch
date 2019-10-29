@@ -21,7 +21,7 @@ static inline int64_t batchCountTrilTriu(const Tensor& batched_matrices) {
 /* Checks a necessary property for the triu and tril implementations, hence the name.
  * Here batch contiguity is checked for tensors with greater than 4 dimensions.
  * Contiguous tensors and tensors with less than 3 dimensions pass this check
- */ 
+ */
 static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor& tensor, bool allow_zero_stride) {
   // Complete contiguity is the most desired property, which is why
   // we return true if the tensor is contiguous
