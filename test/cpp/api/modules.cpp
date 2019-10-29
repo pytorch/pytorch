@@ -1036,6 +1036,20 @@ TEST_F(ModulesTest, BatchNormPureForward) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(ModulesTest, BatchNormLegacyWarning) {
+  std::stringstream buffer;
+  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
+
+  BatchNorm bn(5);
+
+  ASSERT_EQ(
+    count_substr_occurrences(
+      buffer.str(),
+      "torch::nn::BatchNorm module is deprecated"
+    ),
+  1);
+}
+
 TEST_F(ModulesTest, BatchNorm1dStateful) {
   BatchNorm1d bn(BatchNorm1dOptions(5));
 
@@ -2261,7 +2275,7 @@ TEST_F(ModulesTest, PrettyPrintHardtanh) {
     "torch::nn::Hardtanh(min_val=-1, max_val=1)");
   ASSERT_EQ(c10::str(Hardtanh(
       HardtanhOptions().min_val(-42.42).max_val(0.42).inplace(true))),
-    "torch::nn::Hardtanh(min_val=-42.42, max_val=0., inplace=true)");
+    "torch::nn::Hardtanh(min_val=-42.42, max_val=0.42, inplace=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLeakyReLU) {

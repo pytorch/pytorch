@@ -88,6 +88,8 @@ class TORCH_API BatchNormImplBase : public torch::nn::Cloneable<Derived> {
 
   Tensor forward(const Tensor& input);
 
+  void reset_running_stats();
+
   void reset() override;
 
   /// Pretty prints the `BatchNorm{1,2,3}d` module into the given `stream`.

@@ -1,5 +1,5 @@
-#include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/functional/batchnorm.h>
+#include <torch/nn/modules/batchnorm.h>
 
 #include <torch/cuda.h>
 #include <torch/types.h>
@@ -85,10 +85,19 @@ BatchNormImplBase<D, Derived>::BatchNormImplBase(const BatchNormBaseOptions& opt
 }
 
 template <size_t D, typename Derived>
+void BatchNormImplBase<D, Derived>::reset_running_stats() {
+  if (options.track_running_stats()) {
+    running_mean.zero_();
+    running_var.fill_(1);
+    num_batches_tracked.zero_();
+  }
+}
+
+template <size_t D, typename Derived>
 void BatchNormImplBase<D, Derived>::reset() {
   if (options.affine()) {
-    weight = this->register_parameter("weight", torch::ones({options.num_features()}));
-    bias = this->register_parameter("bias", torch::zeros({options.num_features()}));
+    weight = this->register_parameter("weight", torch::empty({options.num_features()}));
+    bias = this->register_parameter("bias", torch::empty({options.num_features()}));
   } else {
     weight = this->register_parameter("weight", Tensor());
     bias = this->register_parameter("bias", Tensor());
@@ -102,12 +111,19 @@ void BatchNormImplBase<D, Derived>::reset() {
     running_var = this->register_buffer("running_var", Tensor());
     num_batches_tracked = this->register_buffer("num_batches_tracked", Tensor());
   }
+
+  reset_running_stats();
+  if (options.affine()) {
+    torch::nn::init::ones_(weight);
+    torch::nn::init::zeros_(bias);
+  }
 }
 
 template <size_t D, typename Derived>
 void BatchNormImplBase<D, Derived>::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
          << "torch::nn::BatchNorm" << D << "d("
+         << options.num_features() << ", "
          << "eps=" << options.eps() << ", "
          << "momentum=" << options.momentum().value() << ", "
          << "affine=" << options.affine() << ", "
@@ -128,9 +144,9 @@ Tensor BatchNormImplBase<D, Derived>::forward(const Tensor& input) {
   if (this->is_training() && options.track_running_stats()) {
     if (num_batches_tracked.defined()) {
       num_batches_tracked += 1;
-      if (options.momentum() == c10::nullopt) {
+      if (options.momentum() == c10::nullopt) {  // use cumulative moving average
         exponential_average_factor = 1.0 / num_batches_tracked.item<double>();
-      } else {
+      } else {  // use exponential moving average
         exponential_average_factor = options.momentum().value();
       }
     }
