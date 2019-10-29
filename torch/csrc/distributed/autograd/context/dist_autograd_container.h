@@ -77,6 +77,7 @@ class TORCH_API DistAutogradContainer {
   // Clear current context id
   void clearCurrentContext();
 
+  // Sets the timeout after which DistAutogradContexts will be cleaned up
   void setCleanupContextTimeout(int64_t newTimeout);
 
  private:
@@ -118,10 +119,10 @@ class TORCH_API DistAutogradContainer {
   // Thread running the cleanupContextWatchdog
   std::thread cleanupWatchdogThread_;
 
-  // Condition Variable to control watchdog thread's wait time
+  // Condition Variable to control watchdog thread's wait time.
   std::condition_variable cleanupWatchdogCV_;
 
-  // CV Mutex
+  // Mutex for the cleanupWatchdog thread's condition variable.
   std::mutex cleanupWatchdogCVMutex_;
 
   // Whether or not the container has been initialized appropriately.
@@ -137,13 +138,12 @@ class TORCH_API DistAutogradContainer {
   // Autograd message id to identify unique send/recv autograd function pairs.
   std::atomic<int64_t> next_autograd_message_id_;
 
+  // Set Timeout after which watchdog thread will clean up
+  // DistAutogradContexts.
   std::chrono::duration<int64_t> cleanupContextTimeout;
 
   // Maximum allowed value for autograd_context_id or autograd_message_id.
   int64_t max_id_;
-
-  /* std::chrono::time_point<std::chrono::system_clock> creation_time; */
-  /* std::chrono::time_point<std::chrono::high_resolution_clock> creation_time; */
 };
 
 } // namespace autograd
