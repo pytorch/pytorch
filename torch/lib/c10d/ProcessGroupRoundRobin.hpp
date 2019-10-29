@@ -21,7 +21,7 @@ class ProcessGroupRoundRobin final : public ProcessGroup {
   explicit ProcessGroupRoundRobin(
       std::vector<std::shared_ptr<ProcessGroup>> processGroups);
 
-  virtual ~ProcessGroupRoundRobin();
+  ~ProcessGroupRoundRobin() override;
 
   std::shared_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
