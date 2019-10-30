@@ -58,7 +58,7 @@ class TestFuser(JitTestCase):
             graph = diff_graphs[0].g('Subgraph')
 
         allowed_nodes = {'prim::Constant', 'prim::FusionGroup', 'prim::BailoutTemplate',
-                         'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
+                         'prim::BailOut', 'prim::TupleConstruct', 'aten::size', 'aten::_size_if_not_equal', "prim::BroadcastSizes"} | set(except_for)
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
                         'got {}'.format(graph))
         self.assertTrue([node.kind() for node in graph.nodes()].count('prim::FusionGroup') == 1)

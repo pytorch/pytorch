@@ -299,8 +299,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
   TORCH_INTERNAL_ASSERT(unspecialized_graph_->inputs().size() == hash.size());
   if (grad_executors_.count(hash) == 0) {
 
+    GRAPH_DEBUG("creating a specialized copy for ", this);
     std::shared_ptr<Graph> spec_copy = unspecialized_graph_->copy();
-    
     for (auto i = 0; i < hash.size(); i++) {
       auto input_type = spec_copy->inputs().at(i);
       bool defined = hash[i];

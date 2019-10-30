@@ -114,9 +114,11 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
       ? needsGradientInProfilingMode(copy->block())
       : needsGradient(copy);
   if (needs_gradient) {
+    GRAPH_DEBUG(this, " needs gradients");
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
+    GRAPH_DEBUG(" diff_nodes' size is ", diff_nodes.size());
     for (Node *dnode : diff_nodes) {
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
