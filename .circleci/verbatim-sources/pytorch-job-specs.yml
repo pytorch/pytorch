@@ -143,7 +143,6 @@ jobs:
             cd c:/
             choco install -y 7zip curl
             choco install cmake --installargs 'ADD_CMAKE_TO_PATH=User'
-            # choco upgrade -y visualstudio2019community
             curl -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
             7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
             cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
@@ -159,7 +158,7 @@ jobs:
             .jenkins/pytorch/win-build.sh
 
   pytorch_windows_test:
-    executor: windows-gpu
+    executor: windows-nvidia-gpu
     environment:
       BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
       SCCACHE_BUCKET: "ossci-compiler-cache"
