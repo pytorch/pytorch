@@ -1931,7 +1931,7 @@ TEST_F(ModulesTest, Upsampling3D) {
 }
 
 TEST_F(ModulesTest, CTCLoss) {
-  CTCLoss loss {CTCLossOptions().reduction(at::Reduction::Reduction::None)};
+  CTCLoss loss {CTCLossOptions().reduction(torch::kNone)};
   const auto target_lengths = torch::tensor({0, 0, 0});
   const auto input_lengths = torch::tensor({50, 50, 50});
   const auto targets =
@@ -1951,29 +1951,25 @@ TEST_F(ModulesTest, PoissonNLLLoss) {
   const auto target = torch::tensor({1., 2., 3.});
   const auto component_wise_loss = torch::exp(input) - target * input;
   {
-    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(Reduction::None)};
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kNone)};
     ASSERT_TRUE(torch::allclose(
       component_wise_loss,
       loss->forward(input, target)
     ));
   }
   {
-    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(Reduction::Sum)};
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kSum)};
     ASSERT_TRUE(torch::allclose(
       torch::sum(component_wise_loss),
       loss->forward(input, target)
     ));
   }
   {
-    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(Reduction::Mean)};
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kMean)};
     ASSERT_TRUE(torch::allclose(
       torch::mean(component_wise_loss),
       loss->forward(input, target)
     ));
-  }
-  {
-    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(Reduction::END)};
-    ASSERT_THROWS_WITH(loss->forward(input, target), "not valid");
   }
 }
 
@@ -2807,13 +2803,13 @@ TEST_F(ModulesTest, PrettyPrintCTCLoss) {
   ASSERT_EQ(c10::str(CTCLoss()), "torch::nn::CTCLoss()");
   ASSERT_EQ(c10::str(CTCLoss(
     CTCLossOptions().blank(42).zero_infinity(false)
-      .reduction(at::Reduction::Reduction::Sum))), "torch::nn::CTCLoss()");
+      .reduction(torch::kSum))), "torch::nn::CTCLoss()");
 }
 
 TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
   ASSERT_EQ(c10::str(PoissonNLLLoss()), "torch::nn::PoissonNLLLoss()");
   ASSERT_EQ(c10::str(PoissonNLLLoss(
     PoissonNLLLossOptions().log_input(false).full(true).eps(0.42)
-    .reduction(at::Reduction::Reduction::Sum))),
+    .reduction(torch::kSum))),
     "torch::nn::PoissonNLLLoss()");
 }

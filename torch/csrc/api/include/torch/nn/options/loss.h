@@ -178,10 +178,12 @@ struct TORCH_API TripletMarginLossOptions {
 
 /// Options for The Connectionist Temporal Classification loss functional and module.
 struct TORCH_API CTCLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
   /// blank label. Default `0`.
   TORCH_ARG(int64_t, blank) = 0;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
   /// Whether to zero infinite losses and the associated gradients.
   /// Default: `false`. Infinite losses mainly occur when the inputs are
   /// too short to be aligned to the targets.
@@ -192,6 +194,8 @@ struct TORCH_API CTCLossOptions {
 
 /// Options for PoissonNLLLoss functional and module.
 struct TORCH_API PoissonNLLLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
   /// if true the loss is computed as `exp(input) - target * input`,
   /// if false the loss is `input - target * log(input + eps)`.
   TORCH_ARG(bool, log_input) = true;
@@ -202,7 +206,7 @@ struct TORCH_API PoissonNLLLossOptions {
   /// Default: 1e-8
   TORCH_ARG(double, eps) = 1e-8;
   /// Specifies the reduction to apply to the output. Default: Mean
-  TORCH_ARG(Reduction::Reduction, reduction) = Reduction::Mean;
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
 
 } // namespace nn
