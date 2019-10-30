@@ -1397,6 +1397,8 @@ struct CAFFE2_API ClassType : public NamedType {
     return n.qualifiedName();
   }
 
+  const std::vector<Function*>& methods() const;
+
   TypePtr getAttribute(const std::string& name) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t pos = 0;
@@ -1413,6 +1415,11 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeTypes_[pos];
   }
 
+  size_t numAttributes() const {
+    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
+    return attributeNames_.size();
+  }
+
   const TypePtr& getAttribute(size_t slot) const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     AT_ASSERT(slot < attributeTypes_.size());
@@ -1425,16 +1432,25 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeNames_[slot];
   }
 
-  Function* getMethod(const std::string& name) const;
-  const std::vector<Function*>& methods() const;
-  void addMethod(Function* method);
+  // Add attribute \p NAME if it doesn't exist or verify that it has a
+  // compatible type otherwise.
+  size_t addOrCheckAttribute(
+      const std::string& name,
+      TypePtr ty,
+      bool is_parameter = false) {
+    auto slot_idx = findAttributeSlot(name);
+    if (!slot_idx) {
+      return addAttribute(name, ty, is_parameter);
+    }
 
-  std::shared_ptr<CompilationUnit> compilation_unit();
-  std::shared_ptr<const CompilationUnit> compilation_unit() const;
-
-  size_t numAttributes() const {
-    AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
-    return attributeNames_.size();
+    TORCH_CHECK(
+        is_parameter == this->is_parameter(*slot_idx),
+        "Parameter field mismatch for the field '",
+        name,
+        "'");
+    TypePtr atype = getAttribute(*slot_idx);
+    TORCH_CHECK(ty->isSubtypeOf(atype));
+    return *slot_idx;
   }
 
   // Attributes are stored in a specific slot at runtime for effiency.
@@ -1471,33 +1487,6 @@ struct CAFFE2_API ClassType : public NamedType {
         attributeNames_.cend();
   }
 
-  size_t addAttribute(
-      const std::string& name,
-      TypePtr type,
-      bool is_parameter = false);
-
-  // Add attribute \p NAME if it doesn't exist or verify that it has a
-  // compatible type otherwise.
-  size_t addOrCheckAttribute(
-      const std::string& name,
-      TypePtr ty,
-      bool is_parameter = false) {
-    auto slot_idx = findAttributeSlot(name);
-    if (!slot_idx) {
-      return addAttribute(name, ty, is_parameter);
-    }
-
-    TORCH_CHECK(
-        is_parameter == this->is_parameter(*slot_idx),
-        "Parameter field mismatch for the field '",
-        name,
-        "'");
-    TypePtr atype = getAttribute(*slot_idx);
-    TORCH_CHECK(ty->isSubtypeOf(atype));
-    return *slot_idx;
-  }
-
-
   at::ArrayRef<std::string> attributeNames() const {
     return attributeNames_;
   }
@@ -1505,14 +1494,6 @@ struct CAFFE2_API ClassType : public NamedType {
   at::ArrayRef<TypePtr> containedTypes() const override {
     return attributeTypes_;
   }
-
-  // generate a refined version of this class.
-  // It has the same name but the slot Types are subtypes of
-  // the original slots. It is only valid to refine a class type in a context
-  // where it is know that there are not assignments to the objects slots
-  // that would invalidate the refinement.
-  // These variants are not registered in the global class table.
-  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     auto ptr = ClassType::create(name(), compilation_unit_);
@@ -1543,7 +1524,30 @@ struct CAFFE2_API ClassType : public NamedType {
     return parameterSlots_->at(slot);
   }
 
+  size_t addAttribute(
+      const std::string& name,
+      TypePtr type,
+      bool is_parameter = false);
+
+  void addMethod(Function* method);
+  Function* getMethod(const std::string& name) const;
+
+#ifndef DECOUPLE_JIT
+  std::shared_ptr<CompilationUnit> compilation_unit();
+  std::shared_ptr<const CompilationUnit> compilation_unit() const;
+
+  // generate a refined version of this class.
+  // It has the same name but the slot Types are subtypes of
+  // the original slots. It is only valid to refine a class type in a context
+  // where it is know that there are not assignments to the objects slots
+  // that would invalidate the refinement.
+  // These variants are not registered in the global class table.
+  ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
+
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+
+#endif
+
   static const TypeKind Kind = TypeKind::ClassType;
 
  private:

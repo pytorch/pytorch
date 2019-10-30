@@ -248,6 +248,21 @@ static auto registry0 = torch::RegisterOperators().op(
     }
   })
 ).op(
+  "_aten::flatten.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
+  [](c10::OperatorKernel* kernel, Stack* stack) {
+  #ifdef USE_STATIC_DISPATCH
+     at::AutoNonVariableTypeMode non_var_type_mode(true);
+  #endif
+     auto result_ = at::flatten(
+         (std::move(peek(*stack, 0, 3))).toTensor(),
+         (std::move(peek(*stack, 1, 3))).toInt(),
+         (std::move(peek(*stack, 2, 3))).toInt()
+     );
+     drop(*stack, 3);
+     pack(*stack, std::move(result_));
+  })
+).op(
   "_aten::Int",
   torch::RegisterOperators::options().kernel(c10::TensorTypeId::CPUTensorId,
                                            [](at::Tensor a) -> int64_t {
@@ -286,4 +301,3 @@ static auto registry0 = torch::RegisterOperators().op(
   []() {
   })
 );
-
