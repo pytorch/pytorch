@@ -379,6 +379,7 @@ class DistAutogradTest(object):
     def test_graph_for_builtin_remote_call(self):
         self._test_graph(torch.add, ExecMode.REMOTE)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_graph_for_python_remote_call(self):
         self._test_graph(my_py_add, ExecMode.REMOTE)
@@ -851,6 +852,7 @@ class DistAutogradTest(object):
     #
     # These four test ps-trainer groups run on completely separate autograd
     # graphs, but they share the same set of underlying RpcAgents.
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28874")
     @dist_init
     def test_trainer_ps(self):
         local_grads = None
