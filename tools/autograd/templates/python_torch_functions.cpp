@@ -368,26 +368,6 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "_promote_types(ScalarType type1, ScalarType type2)",
-  });
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if(r.has_torch_function()){
-    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
-    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
-  }
-  if (r.idx == 0) {
-    ScalarType promoted = at::promoteTypes(r.scalartype(0), r.scalartype(1));
-    return torch::autograd::utils::wrap(torch::getDtype(promoted));
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 static Tensor dispatch_nonzero(const Tensor & self) {
   AutoNoGIL no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
