@@ -209,8 +209,8 @@ static void unfolded2d_copy(
               } else {
                 if (dW == 1) {
                   ix = 0 - padW + kw;
-                  lpad = fmaxf(0, padW - kw);
-                  rpad = fmaxf(0, padW - (kW - kw - 1));
+                  lpad = std::max<int64_t>(0, padW - kw);
+                  rpad = std::max<int64_t>(0, padW - (kW - kw - 1));
                   if (output_width - rpad - lpad <= 0) {
                     memset(
                         dst + (size_t)y * output_width,
