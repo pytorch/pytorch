@@ -269,9 +269,7 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    torch.jit._trace_module_map = {}
     outs = ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
-    torch.jit._trace_module_map = None
     return outs
 
 
@@ -892,11 +890,9 @@ def trace(func,
                              "Please use trace_module")
 
     name = _qualified_name(func)
-    torch.jit._trace_module_map = {}
     traced = torch._C._create_function_from_trace(name, func, example_inputs,
                                                   var_lookup_fn,
                                                   _force_outplace)
-    torch.jit._trace_module_map = None
 
     # Check the trace against new traces created from user-specified inputs
     if check_trace:
@@ -907,6 +903,7 @@ def trace(func,
 
     return traced
 
+_trace_module_map = None
 
 def trace_module(mod,
                  inputs,

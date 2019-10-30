@@ -505,13 +505,15 @@ class Module(object):
         tracing_state = torch._C._get_tracing_state()
         if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
             return self.forward(*input, **kwargs)
-        name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
-        if name:
-            tracing_state.push_scope(name)
+        recording_scopes = torch.jit._trace_module_map is not None
+        if recording_scopes:
+            name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
+            if name:
+                tracing_state.push_scope(name)
         try:
             result = self.forward(*input, **kwargs)
         finally:
-            if name:
+            if recording_scopes and name:
                 tracing_state.pop_scope()
         return result
 
