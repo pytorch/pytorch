@@ -80,28 +80,37 @@ struct python_error : public std::exception {
   }
 
   void build_message() {
-    // Retrieve the error message from the value if 'message' is not set.
+    // No errors should be set when we enter the function since PyErr_Fetch
+    // clears the error indicator.
+    TORCH_INTERNAL_ASSERT(!PyErr_Occurred());
+
+    // Default message.
+    message = "python_error";
+
+    // Try to retrieve the error message from the value.
     if (value != nullptr) {
       AutoGIL gil;
       Py_XINCREF(value);
       PyObject* pyStr = PyObject_Str(value);
-      TORCH_INTERNAL_ASSERT(pyStr != nullptr);
-
-      PyObject* encodedString =
-          PyUnicode_AsEncodedString(pyStr, "utf-8", "strict");
-      TORCH_INTERNAL_ASSERT(encodedString != nullptr);
-
-      char* bytes = PyBytes_AS_STRING(encodedString);
-      TORCH_INTERNAL_ASSERT(bytes != nullptr);
-
-      // Set the message.
-      message = std::string(bytes);
-      Py_XDECREF(pyStr);
-      Py_XDECREF(encodedString);
+      if (pyStr != nullptr) {
+        PyObject* encodedString =
+            PyUnicode_AsEncodedString(pyStr, "utf-8", "strict");
+        if (encodedString != nullptr) {
+          char* bytes = PyBytes_AS_STRING(encodedString);
+          if (bytes != nullptr) {
+            // Set the message.
+            message = std::string(bytes);
+          }
+          Py_XDECREF(encodedString);
+        }
+        Py_XDECREF(pyStr);
+      }
       Py_XDECREF(value);
-    } else {
-      message = "python_error";
     }
+
+    // Clear any errors since we don't want to propagate errors for functions
+    // that are trying to build a string for the error message.
+    PyErr_Clear();
   }
 
   /** Saves the exception so that it can be re-thrown on a different thread */
