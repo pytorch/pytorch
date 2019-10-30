@@ -900,17 +900,17 @@ bool Node::isNondeterministic() const {
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::rand_like(Tensor self, *, MemoryFormat? memory_format=contiguous_format) -> Tensor",
-      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
+      "aten::rand_like(Tensor self) -> Tensor",
+      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
       "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randint_like(Tensor self, int high, *, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int high) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
       "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randn_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randn_like(Tensor self) -> Tensor",
+      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
       "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
 
   if (nondeterministic_ops.find(this) == nullptr) {
@@ -1326,6 +1326,23 @@ void Node::removeFromList() {
   next->prev() = prev;
   this->next() = nullptr;
   this->prev() = nullptr;
+}
+
+Block* Node::findCommonAncestorBlockWith(Node* n) {
+  std::unordered_set<const Block*> seen_blocks_rhs;
+
+  for (Block* rhs_block = n->owningBlock(); rhs_block;
+       rhs_block = rhs_block->parentBlock()) {
+    seen_blocks_rhs.insert(rhs_block);
+  }
+
+  for (Block* lhs_block = owningBlock(); lhs_block;
+       lhs_block = lhs_block->parentBlock()) {
+    if (seen_blocks_rhs.count(lhs_block)) {
+      return lhs_block;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 inline const SourceRange& fakeRange() {

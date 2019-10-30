@@ -736,7 +736,9 @@ struct TORCH_API Node {
     return getAttr<TensorsAttr>(name);
   }
 
-private:
+  Block* findCommonAncestorBlockWith(Node* n);
+
+ private:
   void printAttrValue(std::ostream& out, const Symbol& name) const;
   void printAttributes(std::ostream &out, bool ignore_subgraph) const;
 
@@ -931,6 +933,13 @@ struct Block {
   // in src to look up its corresponding value
   TORCH_API void cloneFrom(Block* src, std::function<Value*(Value*)> value_map);
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
+
+  Block* parentBlock() {
+    if (!owningNode()) {
+      return nullptr;
+    }
+    return owningNode()->owningBlock();
+  }
 
  private:
   void reIndexTopology();
