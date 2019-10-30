@@ -1,7 +1,5 @@
 #pragma once
 
-#include <torch/nn/options/instancenorm.h>
-
 namespace torch {
 namespace nn {
 namespace functional {

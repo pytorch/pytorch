@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/nn/modules/batchnorm.h>
-#include <torch/nn/options/batchnorm.h>
 #include <torch/nn/options/instancenorm.h>
 #include <torch/nn/functional/instancenorm.h>
 
@@ -9,8 +8,8 @@ namespace torch {
 namespace nn {
 
 /// Base class for all (dimension-specialized) instanceNorm modules
-template <typename Derived>
-class TORCH_API InstanceNormImpl : public torch::nn::BatchNormImpl {
+template <size_t D, typename Derived, typename BatchNormDerived>
+class TORCH_API InstanceNormImpl : public torch::nn::BatchNormImplBase<D, BatchNormDerived> {
  protected:
   virtual void _check_input_dim(const Tensor& input) = 0;
 
@@ -25,32 +24,33 @@ class TORCH_API InstanceNormImpl : public torch::nn::BatchNormImpl {
   InstanceNormOptions options;
 };
 
-class TORCH_API InstanceNorm1dImpl : public InstanceNormImpl<InstanceNorm1dImpl> {
+class TORCH_API InstanceNorm1dImpl : public InstanceNormImpl<1, InstanceNorm1dImpl, BatchNorm1dImpl> {
  public:
-  using InstanceNormImpl<InstanceNorm1dImpl>::InstanceNormImpl;
+  using InstanceNormImpl<1, InstanceNorm1dImpl, BatchNorm1dImpl>::InstanceNormImpl;
  private:
   void _check_input_dim(const Tensor& input) override;
 };
 
 TORCH_MODULE(InstanceNorm1d);
 
-class TORCH_API InstanceNorm2dImpl : public InstanceNormImpl<InstanceNorm2dImpl> {
+/*
+class TORCH_API InstanceNorm2dImpl : public InstanceNormImpl<2, InstanceNorm2dImpl, BatchNorm2dImpl> {
  public:
-  using InstanceNormImpl<InstanceNorm2dImpl>::InstanceNormImpl;
+  using InstanceNormImpl<2, InstanceNorm2dImpl, BatchNorm2dImpl>::InstanceNormImpl;
  private:
   void _check_input_dim(const Tensor& input) override;
 };
 
 TORCH_MODULE(InstanceNorm2d);
 
-class TORCH_API InstanceNorm3dImpl : public InstanceNormImpl<InstanceNorm3dImpl> {
+class TORCH_API InstanceNorm3dImpl : public InstanceNormImpl<3, InstanceNorm3dImpl, BatchNorm3dImpl> {
  public:
-  using InstanceNormImpl<InstanceNorm3dImpl>::InstanceNormImpl;
+  using InstanceNormImpl<3, InstanceNorm3dImpl, BatchNorm3dImpl>::InstanceNormImpl;
  private:
   void _check_input_dim(const Tensor& input) override;
 };
 
 TORCH_MODULE(InstanceNorm3d);
-
+*/
 } // namespace nn
 } // namespace torch

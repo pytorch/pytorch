@@ -5,16 +5,21 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 
-template <typename Derived>
-InstanceNormImpl<Derived>::InstanceNormImpl(const InstanceNormOptions& options_)
-    :  BatchNormImpl(BatchNormOptions(options_.num_features())), options(options_) {}
+template <size_t D, typename Derived, typename BatchNormDerived>
+InstanceNormImpl<D, Derived, BatchNormDerived>::InstanceNormImpl(const InstanceNormOptions& options_)
+    : BatchNormImplBase<D, BatchNormDerived>(BatchNormOptions(options_.num_features())),
+    options(options_) {}
 
-template <typename Derived>
-Tensor InstanceNormImpl<Derived>::forward(const Tensor& input) {
+template <size_t D, typename Derived, typename BatchNormDerived>
+Tensor InstanceNormImpl<D, Derived, BatchNormDerived>::forward(const Tensor& input) {
   _check_input_dim(input);
-  return F::instance_norm(input, running_mean, running_var, weight, bias, this->is_training() ||
-      !options.track_running_stats(), options.momentum(), options.eps());
+  return F::instance_norm(input, this->running_mean, this->running_var, this->weight,
+      this->bias, this->is_training() || !options.track_running_stats(),
+      options.momentum(), options.eps());
 }
+
+//template <size_t D, typename Derived>
+//void InstanceNormImpl<D, Derived>::reset(){}
 
 void InstanceNorm1dImpl::_check_input_dim(const Tensor& input) {
   TORCH_CHECK( 
@@ -27,7 +32,7 @@ void InstanceNorm1dImpl::_check_input_dim(const Tensor& input) {
       input.dim() != 3, 
       "expected 3D input (got", input.dim(), "D input)");  
 }
-
+/*
 void InstanceNorm2dImpl::_check_input_dim(const Tensor& input) {
   TORCH_CHECK(
       input.dim() != 4, 
@@ -39,10 +44,11 @@ void InstanceNorm3dImpl::_check_input_dim(const Tensor& input) {
       input.dim() != 5, 
       "expected 5D input (got", input.dim(), "D input)");  
 }
-
-template class InstanceNormImpl<InstanceNorm1dImpl>;
-template class InstanceNormImpl<InstanceNorm2dImpl>;
-template class InstanceNormImpl<InstanceNorm3dImpl>;
-
+*/
+template class InstanceNormImpl<1, InstanceNorm1dImpl, BatchNorm1dImpl>;
+/*
+template class InstanceNormImpl<2, InstanceNorm2dImpl, BatchNorm2dImpl>;
+template class InstanceNormImpl<3, InstanceNorm3dImpl, BatchNorm3dImpl>;
+*/
 } // namespace nn
 } // namespace torch
