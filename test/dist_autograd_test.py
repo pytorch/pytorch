@@ -379,6 +379,7 @@ class DistAutogradTest(object):
     def test_graph_for_builtin_remote_call(self):
         self._test_graph(torch.add, ExecMode.REMOTE)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28885")
     @dist_init
     def test_graph_for_python_remote_call(self):
         self._test_graph(my_py_add, ExecMode.REMOTE)
