@@ -211,7 +211,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
 
   void pretty_print_recursive(std::ostream& stream) const {
     if (is_scalar()) {
-      AT_DISPATCH_ALL_TYPES_AND2(
+      AT_DISPATCH_ALL_TYPES_AND3(
           at::kBool,
           at::kHalf,
           at::kBFloat16,
@@ -229,7 +229,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
     } else if (is_tensor()) {
       stream << "{";
       for (int64_t i = 0; i < tensor_.sizes()[0]; i++) {
-        AT_DISPATCH_ALL_TYPES_AND2(
+        AT_DISPATCH_ALL_TYPES_AND3(
             at::kBool,
             at::kHalf,
             at::kBFloat16,
