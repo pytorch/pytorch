@@ -246,8 +246,8 @@ op_name = jit::Symbol::fromQualString("aten::${trace_name}");
 PRE_RECORD_TRACE = CodeTemplate("""\
 torch::jit::Node* node = nullptr;
 std::shared_ptr<jit::tracer::TracingState> tracer_state;
-if (jit::tracer::isTracing()) {
-  tracer_state = jit::tracer::getTracingState();
+if (C10_UNLIKELY(jit::tracer::isTracing())) {
+  tracer_state = std::move(jit::tracer::getTracingState());
   at::Symbol op_name;
   ${set_op_name}
   node = tracer_state->graph->create(op_name, /*num_outputs=*/0);
@@ -255,7 +255,6 @@ if (jit::tracer::isTracing()) {
   ${add_trace_inputs}
   tracer_state->graph->insertNode(node);
   ${inplace_guard}
-  jit::tracer::setTracingState(nullptr);
 }
 """)
 
@@ -266,7 +265,7 @@ jit::tracer::ensureUniqueIfOutOfPlaced("${name}", ${mutable_input});
 ADD_TRACE_INPUT = CodeTemplate("""jit::tracer::addInputs(node, "${name}", ${input});""")
 
 POST_RECORD_TRACE = CodeTemplate("""\
-if (tracer_state) {
+if (C10_UNLIKELY(tracer_state)) {
   jit::tracer::setTracingState(std::move(tracer_state));
   ${add_trace_outputs}
 }
