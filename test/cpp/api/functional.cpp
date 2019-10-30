@@ -1562,3 +1562,69 @@ TEST_F(FunctionalTest, Pad) {
     auto expected = torch::tensor({{{{0., 1., 0.}}}}, torch::kDouble);
   }
 }
+
+TEST_F(FunctionalTest, CTCLoss) {
+  { // test CTCLoss typechecks
+    const auto target_lengths = torch::tensor({30, 25, 20});
+    const auto input_lengths = torch::tensor({50, 50, 50});
+    const auto targets =
+      torch::randint(1, 15, {target_lengths.sum().item<int>()}, torch::kInt);
+    const auto log_probs = torch::randn({50, 3, 15}, torch::kFloat).log_softmax(2);
+
+    const auto _input_lengths = input_lengths.to(torch::kFloat);
+    ASSERT_THROWS_WITH(
+      F::ctc_loss(
+        log_probs, targets, _input_lengths, target_lengths),
+        "input_lengths must be integral");
+
+    const auto target_lengths_ = target_lengths.to(torch::kFloat);
+    ASSERT_THROWS_WITH(
+      F::ctc_loss(
+        log_probs, targets, input_lengths, target_lengths_),
+        "target_lengths must be integral");
+  }
+  { // test CTCLoss length checks
+    const auto target_lengths = torch::tensor({30, 25, 20});
+    const auto input_lengths = torch::tensor({50, 50, 50});
+    const auto targets = torch::randint(1, 15, {3, 29}, torch::kInt);
+    const auto log_probs = torch::randn({50, 3, 15}, torch::kFloat)
+      .log_softmax(2);
+    ASSERT_THROWS_WITH(
+      F::ctc_loss(
+        log_probs, targets, input_lengths, target_lengths),
+        "Expected tensor to have size at least 30 at dimension 1");
+  }
+  { // test CTCLoss empty target
+    {
+      const auto target_lengths = torch::tensor({0, 0, 0});
+      const auto input_lengths = torch::tensor({50, 50, 50});
+      const auto targets =
+        torch::randint(1, 15, at::IntArrayRef({0}), torch::kLong);
+      const auto log_probs =
+        torch::randn({50, 3, 15}, torch::kDouble).log_softmax(2);
+      const auto loss = F::ctc_loss(
+        log_probs, targets, input_lengths, target_lengths,
+        CTCLossOptions().reduction(torch::kNone));
+      ASSERT_TRUE(loss.ge(0).all().item<bool>());
+      ASSERT_TRUE(torch::allclose(
+        -log_probs.sum(0).slice(1, 0, 1).view_as(loss), loss));
+    }
+    {
+      const auto target_lengths = torch::tensor({0, 9, 0});
+      const auto input_lengths = torch::tensor({50, 50, 50});
+      const auto targets = torch::randint(1, 15, {9}, torch::kLong);
+      const auto log_probs =
+        torch::randn({50, 3, 15}, torch::kDouble).log_softmax(2);
+      const auto loss = F::ctc_loss(
+        log_probs, targets, input_lengths, target_lengths,
+        CTCLossOptions().reduction(torch::kNone));
+      ASSERT_TRUE(loss.ge(0).all().item<bool>());
+      ASSERT_TRUE(torch::allclose(
+          -log_probs.sum(0)
+            .index_select(0, torch::tensor({0, 2}, torch::kLong))
+            .slice(1, 0, 1).view({2}),
+          loss.index_select(0, torch::tensor({0, 2}, torch::kLong))
+      ));
+    }
+  }
+}

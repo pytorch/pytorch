@@ -1992,6 +1992,21 @@ TEST_F(ModulesTest, Upsampling3D) {
   }
 }
 
+TEST_F(ModulesTest, CTCLoss) {
+  CTCLoss loss {CTCLossOptions().reduction(torch::kNone)};
+  const auto target_lengths = torch::tensor({0, 0, 0});
+  const auto input_lengths = torch::tensor({50, 50, 50});
+  const auto targets =
+    torch::randint(1, 15, at::IntArrayRef({0}), torch::kLong);
+  const auto log_probs =
+    torch::randn({50, 3, 15}, torch::kDouble).log_softmax(2);
+  const auto output =
+    loss->forward(log_probs, targets, input_lengths, target_lengths);
+  ASSERT_TRUE(output.ge(0).all().item<bool>());
+  ASSERT_TRUE(torch::allclose(
+    -log_probs.sum(0).slice(1, 0, 1).view_as(output), output));
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -2834,4 +2849,11 @@ TEST_F(ModulesTest, PrettyPrintThreshold) {
   ASSERT_EQ(c10::str(Threshold(
       ThresholdOptions(42.42, 24.24).inplace(true))),
     "torch::nn::Threshold(threshold=42.42, value=24.24, inplace=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintCTCLoss) {
+  ASSERT_EQ(c10::str(CTCLoss()), "torch::nn::CTCLoss()");
+  ASSERT_EQ(c10::str(CTCLoss(
+    CTCLossOptions().blank(42).zero_infinity(false)
+      .reduction(torch::kSum))), "torch::nn::CTCLoss()");
 }
