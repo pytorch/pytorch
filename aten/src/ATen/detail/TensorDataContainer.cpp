@@ -2,9 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/grad_mode.h>
-#include <torch/detail/TensorDataContainer.h>
+#include <ATen/detail/TensorDataContainer.h>
 
-namespace torch {
+namespace at {
 
 namespace detail {
 
@@ -213,4 +213,4 @@ std::ostream& operator<<(std::ostream& stream, const TensorDataContainer& tensor
 
 } // namespace detail
 
-} // namespace torch
+} // namespace at

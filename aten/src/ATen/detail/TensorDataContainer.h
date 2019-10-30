@@ -6,7 +6,7 @@
 
 #include <initializer_list>
 
-namespace torch {
+namespace at {
 
 namespace detail {
 
@@ -138,4 +138,4 @@ std::ostream& operator<<(std::ostream& stream, const TensorDataContainer& tensor
 
 } // namespace detail
 
-} // namespace torch
+} // namespace at
