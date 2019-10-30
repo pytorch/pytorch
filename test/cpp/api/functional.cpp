@@ -873,6 +873,26 @@ TEST_F(FunctionalTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, LocalResponseNorm) {
+  const auto x = torch::arange(100, 118).resize_({3, 3, 2});
+  const auto y = F::local_response_norm(x, LocalResponseNormOptions(2));
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 2}));
+  const auto y_exp = torch::tensor(
+    {{{73.7788, 74.1462},
+      {60.1942, 60.3302},
+      {60.4609, 60.5865}},
+    {{75.8729, 76.2011},
+      {60.9331, 61.0390},
+      {61.1403, 61.2370}},
+    {{77.7387, 78.0303},
+      {61.5011, 61.5807},
+      {61.6563, 61.7279}}},
+    torch::kFloat
+  );
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+}
+
 TEST_F(FunctionalTest, Linear) {
   {
     const auto x = torch::arange(100, 118).resize_({3, 3, 2});
@@ -1186,12 +1206,35 @@ TEST_F(FunctionalTest, SoftplusDefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-TEST_F(FunctionalTest, Unfold) {
-  auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
-  auto output = F::unfold(input, UnfoldOptions({2, 4}).padding(1).stride(2));
-  auto expected_sizes = std::vector<int64_t>({2, 16, 6});
+TEST_F(FunctionalTest, Fold) {
+  auto input = torch::ones({1, 3 * 2 * 2, 2}, torch::kDouble);
+  auto output = F::fold(input, FoldOptions({3, 2}, {2, 2}));
+  auto expected = torch::tensor(
+      {{{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+        {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+        {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}}}},
+      torch::kDouble);
 
-  ASSERT_EQ(output.sizes(), expected_sizes);
+  ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 3, 3, 2}));
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, Unfold) {
+  auto input = torch::arange(0, 12, torch::kDouble).view({1, 2, 2, 3});
+  auto output = F::unfold(input, UnfoldOptions({2, 2}).padding(1).stride(2));
+  auto expected = torch::tensor(
+      {{{0.0, 0.0, 0.0, 4.0},
+        {0.0, 0.0, 3.0, 5.0},
+        {0.0, 1.0, 0.0, 0.0},
+        {0.0, 2.0, 0.0, 0.0},
+        {0.0, 0.0, 0.0, 10.0},
+        {0.0, 0.0, 9.0, 11.0},
+        {0.0, 7.0, 0.0, 0.0},
+        {6.0, 8.0, 0.0, 0.0}}},
+      torch::kDouble);
+
+  ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 8, 4}));
+  ASSERT_TRUE(output.allclose(expected));
 }
 
 TEST_F(FunctionalTest, Softshrink) {

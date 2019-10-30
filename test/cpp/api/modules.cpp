@@ -813,6 +813,47 @@ TEST_F(ModulesTest, Linear) {
   }
 }
 
+TEST_F(ModulesTest, LocalResponseNorm) {
+  {
+    LocalResponseNorm model(LocalResponseNormOptions(2));
+    const auto x = torch::arange(100, 136, torch::requires_grad()).reshape({2, 3, 3, 2});
+    auto y = model(x);
+    const auto y_exp = torch::tensor(
+      {{{{73.7788, 74.1462},
+          {74.5031, 74.8572},
+          {75.2010, 75.5420}},
+
+         {{61.6057, 61.7227},
+          {61.8347, 61.9418},
+          {62.0441, 62.1418}},
+
+         {{62.2349, 62.3235},
+          {62.4077, 62.4877},
+          {62.5635, 62.6353}}},
+
+        {{{79.3915, 79.6491},
+          {79.8978, 80.1446},
+          {80.3827, 80.6190}},
+
+         {{63.0317, 63.0742},
+          {63.1135, 63.1496},
+          {63.1826, 63.2126}},
+
+         {{63.2396, 63.2637},
+          {63.2850, 63.3036},
+          {63.3195, 63.3328}}}},
+      torch::kFloat
+    );
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(y.ndimension(), 4);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(y.sizes(), x.sizes());
+    ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+  }
+}
+
 TEST_F(ModulesTest, LayerNorm) {
   LayerNorm model(LayerNormOptions({2, 2}).eps(2e-5));
   auto x = torch::randn({2, 2}, torch::requires_grad());
@@ -848,31 +889,52 @@ TEST_F(ModulesTest, Bilinear) {
 }
 
 TEST_F(ModulesTest, Fold) {
-  Fold model(FoldOptions({4, 5}, {2, 2}));
-  auto x = torch::randn({1, 3 * 2 * 2, 12}, torch::requires_grad());
-  auto y = model(x);
-  torch::Tensor s = y.sum();
+  {
+    Fold model(FoldOptions({3, 2}, {2, 2}));
+    auto input = torch::ones({1, 3 * 2 * 2, 2}, torch::requires_grad());
+    auto output = model(input);
+    auto expected = torch::tensor(
+        {{{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+          {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+          {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}}}},
+        torch::kFloat);
+    auto s = output.sum();
+    s.backward();
 
-  s.backward();
-  ASSERT_EQ(y.ndimension(), 4);
-  ASSERT_EQ(s.ndimension(), 0);
-  ASSERT_EQ(y.size(0), 1);
-  ASSERT_EQ(y.size(1), 3);
-  ASSERT_EQ(y.size(2), 4);
-  ASSERT_EQ(y.size(3), 5);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 3, 3, 2}));
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    // input wrong dimension
+    Fold model(FoldOptions({8, 8}, {3, 3}));
+    ASSERT_THROWS_WITH(
+        model(torch::randn({1, 3, 16, 16})),
+        "Input Error: Only 3D input Tensors are supported (got 4D)");
+  }
 }
 
 TEST_F(ModulesTest, Unfold) {
   {
-    Unfold model(UnfoldOptions({2, 4}));
-    auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
+    Unfold model(UnfoldOptions({2, 2}).padding(1).stride(2));
+    auto input = torch::arange(2, 14, torch::requires_grad()).view({1, 2, 2, 3});
     auto output = model(input);
-    auto expected_sizes = std::vector<int64_t>({2, 16, 3});
+    auto expected = torch::tensor(
+        {{{0.0, 0.0, 0.0, 6.0},
+          {0.0, 0.0, 5.0, 7.0},
+          {0.0, 3.0, 0.0, 0.0},
+          {2.0, 4.0, 0.0, 0.0},
+          {0.0, 0.0, 0.0, 12.0},
+          {0.0, 0.0, 11.0, 13.0},
+          {0.0, 9.0, 0.0, 0.0},
+          {8.0, 10.0, 0.0, 0.0}}},
+        torch::kFloat);
     auto s = output.sum();
     s.backward();
 
-    ASSERT_EQ(output.sizes(), expected_sizes);
     ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 8, 4}));
+    ASSERT_TRUE(output.allclose(expected));
   }
   {
     // input wrong dimension
@@ -2460,6 +2522,15 @@ TEST_F(ModulesTest, PrettyPrintUpsample) {
       "torch::nn::Upsample(scale_factor=[0.5, 1.5], mode=kBilinear)");
 }
 
+TEST_F(ModulesTest, PrettyPrintFold) {
+  ASSERT_EQ(
+      c10::str(Fold(FoldOptions({2, 2}, {5, 5}))),
+      "torch::nn::Fold(output_size=[2, 2], kernel_size=[5, 5], dilation=[1, 1], padding=[0, 0], stride=[1, 1])");
+  ASSERT_EQ(
+      c10::str(Fold(FoldOptions({8, 8}, {3, 3}).dilation(2).padding({2, 1}).stride(2))),
+      "torch::nn::Fold(output_size=[8, 8], kernel_size=[3, 3], dilation=[2, 2], padding=[2, 1], stride=[2, 2])");
+}
+
 TEST_F(ModulesTest, PrettyPrintUnfold) {
   ASSERT_EQ(
       c10::str(Unfold(torch::IntArrayRef({2, 4}))),
@@ -2629,6 +2700,15 @@ TEST_F(ModulesTest, PrettyPrintLayerNorm) {
       ASSERT_EQ(
         c10::str(LayerNorm(LayerNormOptions({2, 2}).elementwise_affine(false).eps(2e-5))),
           "torch::nn::LayerNorm([2, 2], eps=2e-05, elementwise_affine=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintLocalResponseNorm) {
+  ASSERT_EQ(
+    c10::str(LocalResponseNorm(LocalResponseNormOptions(2))),
+      "torch::nn::LocalResponseNorm(2, alpha=0.0001, beta=0.75, k=1)");
+  ASSERT_EQ(
+    c10::str(LocalResponseNorm(LocalResponseNormOptions(2).alpha(0.0002).beta(0.85).k(2.))),
+      "torch::nn::LocalResponseNorm(2, alpha=0.0002, beta=0.85, k=2)");
 }
 
 TEST_F(ModulesTest, PrettyPrintEmbedding) {
