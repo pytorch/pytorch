@@ -27,6 +27,11 @@ namespace torch {
 /// support it in the future by iterating over all sub-lists to find
 /// the largest data type that can represent all of the elements, or by using
 /// variadic templates.
+///
+/// NOTE: C++ `torch::tensor` by default gives a double tensor, which is
+/// different from Python `torch.tensor` that gives a float tensor by default.
+/// We are going to fix this discrepancy.
+/// Tracking issue: https://github.com/pytorch/pytorch/issues/28902
 inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {}) {
   return autograd::make_variable(
     tensor_data_container.convert_to_tensor(options),

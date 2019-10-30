@@ -14,6 +14,15 @@ struct TensorDataContainer;
 
 inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer& tensor_data_container);
 
+// FIXME: There is no `operator<<` overload for `at::kBFloat16` type,
+// and we need to convert it to `float` type using `operator float()` function
+// defined in `c10/util/BFloat16.h`.
+// Tracking issue: https://github.com/pytorch/pytorch/issues/28845
+inline std::ostream& operator<<(std::ostream& stream, c10::BFloat16 value) {
+  stream << static_cast<float>(value);
+  return stream;
+}
+
 // We use `TensorDataContainer` to support converting the following data container types
 // into the equivalent Tensor:
 //
@@ -34,11 +43,11 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer&
 //
 // `torch::tensor({{1}, {2}})`
 //
-// Here is the code path that it goes through:
+// this will call into the `torch::tensor` function:
 //
-// `at::Tensor tensor(detail::TensorDataContainer tensor_data_container)`
+// `at::Tensor tensor(detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {})`
 //
-// which calls:
+// the compiler will first try to convert `{{1}, {2}}` to `TensorDataContainer` type:
 //
 // `TensorDataContainer({{1}, {2}})`
 //
@@ -62,15 +71,6 @@ inline std::ostream& operator<<(std::ostream& stream, const TensorDataContainer&
 // `TensorDataContainer(1)`
 //
 // Now it matches `TensorDataContainer(int value)`, which stores `1` as a scalar value. All is good.
-//
-// Note that `torch::tensor({{1}, {2}})` can also match another previously existing function overload:
-// `torch::tensor(at::ArrayRef<int> values)`, because `{1}` and `{2}` can be treated as
-// a list-initialization of an `int` value. However, this will produce a Tensor with sizes `{2}`,
-// but we actually want a Tensor with sizes `{2, 1}`. In order to avoid matching this function overload,
-// we removed the function overload and moved the ability to convert `at::ArrayRef<T>`
-// (and similarly `std::vector<T>`) into `TensorDataContainer`, and since for braced-init-list the
-// `TensorDataContainer(std::initializer_list<TensorDataContainer>)` constructor is always preferred
-// over all other constructors, it will take the `std::initializer_list` path and all is good again.
 struct TensorDataContainer {
   // NOTE: For tensors with zero-size dimensions (e.g. `torch::tensor({{}, {}})`),
   // the innermost empty braced-init-list `{}` matches the default constructor of
@@ -211,20 +211,14 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
 
   void pretty_print_recursive(std::ostream& stream) const {
     if (is_scalar()) {
-      // NOTE: There is no `operator<<` overload for `at::kBFloat16` type,
-      // and we need to convert it to `float` type using `operator float()` function
-      // defined in c10/util/BFloat16.h.
-      if (scalar_type_ == at::ScalarType::BFloat16) {
-        stream << static_cast<float>(scalar_.to<c10::BFloat16>());
-      } else {
-        AT_DISPATCH_ALL_TYPES_AND2(
-            at::kBool,
-            at::kHalf,
-            scalar_type_,
-            "TensorDataContainer_pretty_print_scalar", [&] {
-          stream << scalar_.to<scalar_t>();
-        });
-      }
+      AT_DISPATCH_ALL_TYPES_AND2(
+          at::kBool,
+          at::kHalf,
+          at::kBFloat16,
+          scalar_type_,
+          "TensorDataContainer_pretty_print_scalar", [&] {
+        stream << scalar_.to<scalar_t>();
+      });
     } else if (is_init_list()) {
       stream << "{";
       for (const TensorDataContainer* it = init_list_.begin(); it != init_list_.end(); it++) {
@@ -235,20 +229,14 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
     } else if (is_tensor()) {
       stream << "{";
       for (int64_t i = 0; i < tensor_.sizes()[0]; i++) {
-        // NOTE: There is no `operator<<` overload for `at::kBFloat16` type,
-        // and we need to convert it to `float` type using `operator float()` function
-        // defined in c10/util/BFloat16.h.
-        if (scalar_type_ == at::ScalarType::BFloat16) {
-          stream << static_cast<float>(tensor_[i].item<c10::BFloat16>());
-        } else {
-          AT_DISPATCH_ALL_TYPES_AND2(
-              at::kBool,
-              at::kHalf,
-              scalar_type_,
-              "TensorDataContainer_pretty_print_tensor_item", [&] {
-            stream << tensor_[i].item<scalar_t>();
-          });
-        }
+        AT_DISPATCH_ALL_TYPES_AND2(
+            at::kBool,
+            at::kHalf,
+            at::kBFloat16,
+            scalar_type_,
+            "TensorDataContainer_pretty_print_tensor_item", [&] {
+          stream << tensor_[i].item<scalar_t>();
+        });
       }
       stream << "}";
     } else {
