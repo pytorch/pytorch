@@ -28,6 +28,7 @@ inline Tensor from_blob(
     IntArrayRef strides,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
+  AutoNonVariableTypeMode guard;
   auto device = globalContext().getDeviceFromPtr(data, options.device().type());
   if (options.device().has_index()) {
     TORCH_CHECK(
