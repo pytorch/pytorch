@@ -181,7 +181,11 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
     return scalar_type_;
   }
 
-  at::Tensor convert_to_tensor(const at::TensorOptions& options) const {
+  at::Tensor convert_to_tensor(at::TensorOptions options) const {
+    if (!options.has_dtype()) {
+      options = options.dtype(tensor_data_container.scalar_type());
+    }
+
     if (is_scalar()) {
       at::AutoNonVariableTypeMode non_var_type_mode(true);
       return at::scalar_tensor(scalar_, options.is_variable(false));

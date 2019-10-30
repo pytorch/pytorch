@@ -29,7 +29,7 @@ namespace torch {
 /// variadic templates.
 inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {}) {
   return autograd::make_variable(
-    tensor_data_container.convert_to_tensor(options.has_dtype() ? options : options.dtype(tensor_data_container.scalar_type())),
+    tensor_data_container.convert_to_tensor(options),
     options.requires_grad());
 }
 
