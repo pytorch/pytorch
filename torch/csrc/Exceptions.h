@@ -80,12 +80,12 @@ struct python_error : public std::exception {
   }
 
   void build_message() {
+    // Ensure we have the GIL.
+    AutoGIL gil;
+
     // No errors should be set when we enter the function since PyErr_Fetch
     // clears the error indicator.
     TORCH_INTERNAL_ASSERT(!PyErr_Occurred());
-
-    // We should be holding the GIL.
-    TORCH_INTERNAL_ASSERT(PyGILState_Check() == 1)
 
     // Default message.
     message = "python_error";
