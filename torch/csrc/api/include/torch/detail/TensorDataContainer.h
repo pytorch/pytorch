@@ -265,7 +265,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
       tensor.fill_(scalar_);
     } else if (is_init_list()) {
       TORCH_INTERNAL_ASSERT(
-        tensor.sizes()[0] == init_list_.size(),
+        tensor.sizes()[0] == (int64_t)init_list_.size(),
         "Expected a Tensor with size ",
         init_list_.size(),
         " in its first dimension, but got Tensor with size ",
