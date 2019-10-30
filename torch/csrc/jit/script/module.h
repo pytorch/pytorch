@@ -242,12 +242,14 @@ struct TORCH_API Module {
 
   module_list children() const; // direct modules
   named_module_list named_children() const;
-  module_list modules() const;
+  module_list modules() const; // all modules, including this one, recursively
   named_module_list named_modules() const;
 
+  // all tensors involved in gradient optimization
   parameter_list parameters(bool recurse = true) const;
   named_parameter_list named_parameters(bool recurse = true) const;
 
+  // all members of the object, similar to iterating over dir(obj) in python
   attribute_list attributes(bool recurse = true) const;
   named_attribute_list named_attributes(bool recurse = true) const;
 
@@ -393,32 +395,39 @@ struct TORCH_API Module {
 
 namespace detail {
 
-struct Frame {
+struct SlotCursor {
   Module module_;
   int64_t i_; // slot offset, -1 indicates the module itself
 };
 
 } // namespace detail
 
-// this iterator for the slot list defined below has a position in the list i_
-// and an optional field type_ that if present
-// restricts iteration to only the slots of module_ that
-// have EntityType *type_. This allows it to return, e.g.
-// only the parameter slots.
-// The template parameter allows us to use the same implementation for a list
-// that returns Module via template specialization of the operator* method.
+// This iterator allows the (optionally recursive) enumeration of
+// the  members of a Module. It performs a depth-first pre-order
+// traversal of the module. The Policy template parameter determines
+// which slots of the object should be include. For instance,
+// when iterating parameters, we return the parameter tensors,
+// but skip modules, buffers, and other attributes.
+// See ModulePolicy for comments about Policy object's API.
 template <typename Policy>
 struct TORCH_API slot_iterator_impl {
-  using Frame = detail::Frame;
+  using SlotCursor = detail::SlotCursor;
   using value_type = typename Policy::value_type;
-  slot_iterator_impl(Module root, bool recurse, bool return_module)
-      : frames_({Frame{root, return_module ? -1 : 0}}), recurse_(recurse) {
+  slot_iterator_impl(
+      Module root,
+      bool recurse, // if true, do a depth-first search, otherwise, just look at
+                    // slots of root
+      bool return_module) // if true include root itself as the first thing
+                          // visited (used in modules())
+      : cursors_({SlotCursor{root, return_module ? -1 : 0}}),
+        recurse_(recurse) {
+    // advance iterator to first valid element (or the end, if empty)
     while_not_valid_next();
   }
   // empty frame_, represents end of iteration
   slot_iterator_impl() : recurse_(false) {}
   value_type operator*() const {
-    return Policy::create(frames_, cur());
+    return Policy::create(cursors_, cur());
   }
   value_type operator->() const {
     return **this;
@@ -436,14 +445,18 @@ struct TORCH_API slot_iterator_impl {
   }
 
  private:
+  // return_module() is a corner case where instead of returning a submodule
+  // of root, we are return root itself, because we are iterating modules(),
+  // which contains the root module itself.
+  // It is represented with a single Frame whose index is -1.
   bool return_module() const {
     return top().i_ == -1;
   }
-  const Frame& top() const {
-    return frames_.back();
+  const SlotCursor& top() const {
+    return cursors_.back();
   }
-  Frame& top() {
-    return frames_.back();
+  SlotCursor& top() {
+    return cursors_.back();
   }
   IValue cur() const {
     return return_module() ? top().module_.module_object()
@@ -451,50 +464,69 @@ struct TORCH_API slot_iterator_impl {
   }
 
   // advance to the next slot in a depth first pre-order traversal of the
-  // modules slots.
-  // invariant: !frames_.empty()
+  // modules slots. This function does not guarentee the next slot is a
+  // valid element of the iteration. That is done by valid().
+  // invariant: !cursors_.empty()
   void next() {
+    // we just returned the module itself, advance i_ to 0 so we are now
+    // at the first slot of the module.
     if (return_module()) {
       ++top().i_;
       return;
     }
-    if (top().i_ >= top().module_.num_slots()) {
-      frames_.pop_back();
+    // the last traversal action advanced beyond the number of slots in the
+    // module so continue the iteration in the parent.
+    if (top().i_ >= int64_t(top().module_.num_slots())) {
+      cursors_.pop_back();
+      if (!cursors_.empty()) {
+        ++top().i_;
+      }
       return;
     }
+    // if the current thing is a module, we have to scan it for recursive
+    // traversals. We do this by adding a new frame to track the traversal.
     if (recurse_ &&
         top().module_.module_object()->type()->is_module(top().i_)) {
-      Frame new_frame{cur().toModule(), 0};
-      ++top().i_;
-      frames_.emplace_back(std::move(new_frame));
+      cursors_.emplace_back(SlotCursor{cur().toModule(), 0});
       return;
     }
+    // common case: advance to the next slot.
     ++top().i_;
   }
+  // is the current position of the iterator a valid one?
+  // otherwise, we have to continue advancing.
   bool valid() const {
-    return top().i_ < top().module_.num_slots() &&
+    return top().i_ < int64_t(top().module_.num_slots()) &&
         Policy::valid(top().module_.module_object()->type(), top().i_);
   }
   void while_not_valid_next() {
-    while (!frames_.empty() && !return_module() && !valid()) {
+    // advance iteration until we are either at the end (cursors_.empty())
+    // or in a valid state. return_module() is a special case,
+    // and is always considered valid, regardless of Policy, because it is
+    // it is only true when we are iterating modules.
+    while (!cursors_.empty() && !return_module() && !valid()) {
       next();
     }
   }
   void next_valid() {
-    if (frames_.empty()) {
+    // avoid crashing if this is empty
+    if (cursors_.empty()) {
       return;
     }
+    // advance to next element, which is maybe not valid
     next();
     while_not_valid_next();
   }
 
-  std::vector<Frame> frames_;
+  std::vector<SlotCursor> cursors_;
   bool recurse_;
 
   friend inline bool operator!=(
       const slot_iterator_impl<Policy>& a,
       const slot_iterator_impl<Policy>& b) {
-    return (a.frames_.empty() != b.frames_.empty());
+    // we are finished iteration when we have no more iteration Frames.
+    // end is always an empty iterator with no frames.
+    return (a.cursors_.empty() != b.cursors_.empty());
   }
 };
 
@@ -545,20 +577,35 @@ struct TORCH_API slot_list_impl {
 
 namespace detail {
 
+// slot_iterator_impl always iterate over all the slots in a module,
+// the Policy template argument determines slots should be returned and their
+// types
 struct ModulePolicy {
+  // the type of the value being returned
   using value_type = Module;
-  static value_type create(const std::vector<detail::Frame>& frames, IValue v) {
+
+  // the logic for creating the type being returned, given the raw IValue
+  // of that object.
+  static value_type create(
+      const std::vector<detail::SlotCursor>& cursors,
+      IValue v) {
     return Module(std::move(v).toObject());
   }
+  // is slot i in typ something that this iterator should return, otherwise,
+  // we skip it.
   static bool valid(const ClassTypePtr& typ, size_t i) {
     return typ->is_module(i);
   }
+  // are we going to return everything? If so, we can optimize the calculate
+  // of the size of the list.
   static constexpr bool all_slots = false;
 };
 
 struct ParameterPolicy {
   using value_type = at::Tensor;
-  static value_type create(const std::vector<detail::Frame>& frames, IValue v) {
+  static value_type create(
+      const std::vector<detail::SlotCursor>& cursors,
+      IValue v) {
     return std::move(v).toTensor();
   }
   static bool valid(const ClassTypePtr& typ, size_t i) {
@@ -569,7 +616,9 @@ struct ParameterPolicy {
 
 struct BufferPolicy {
   using value_type = at::Tensor;
-  static value_type create(const std::vector<detail::Frame>& frames, IValue v) {
+  static value_type create(
+      const std::vector<detail::SlotCursor>& cursors,
+      IValue v) {
     return std::move(v).toTensor();
   }
   static bool valid(const ClassTypePtr& typ, size_t i) {
@@ -581,7 +630,9 @@ struct BufferPolicy {
 
 struct AttributePolicy {
   using value_type = IValue;
-  static value_type create(const std::vector<detail::Frame>& frames, IValue v) {
+  static value_type create(
+      const std::vector<detail::SlotCursor>& frames,
+      IValue v) {
     return v;
   }
   static bool valid(const ClassTypePtr& typ, size_t i) {
@@ -590,10 +641,15 @@ struct AttributePolicy {
   static constexpr bool all_slots = true;
 };
 
+// take a Policy object, and make a version of it that returns the slot.
+// along with the fully qualified name of that slot. This is used for the named_
+// variants like named_parameters().
 template <typename Policy>
 struct NamedPolicy {
   using value_type = Named<typename Policy::value_type>;
-  static value_type create(const std::vector<detail::Frame>& frames, IValue v) {
+  static value_type create(
+      const std::vector<detail::SlotCursor>& frames,
+      IValue v) {
     std::string name;
     if (frames.size() == 1) {
       name = (frames.back().i_ == -1) ? "" : nameFragment(frames.back());
@@ -615,7 +671,7 @@ struct NamedPolicy {
   static constexpr bool all_slots = Policy::all_slots;
 
  private:
-  static std::string nameFragment(const detail::Frame& f) {
+  static std::string nameFragment(const detail::SlotCursor& f) {
     return f.module_.type()->getAttributeName(f.i_);
   }
 };

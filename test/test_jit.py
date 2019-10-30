@@ -3858,6 +3858,73 @@ def foo(x):
                 o2 = cu.f()
             self.assertEqual(o1, o2)
 
+    def test_cpp_module_iterator(self):
+        a = nn.Module()
+        a.name = 'a'
+        a.p = nn.Parameter(torch.rand(3, 4))
+        a.foo = nn.Module()
+        a.foo.name = 'foo'
+        a.foo.register_buffer('b', torch.rand(1, 1))
+        a.foo.bar = nn.Module()
+        a.foo.bar.name = 'bar'
+        a.foo.bar.an_int = 4
+        a.another = nn.Module()
+        a.another.name = 'another'
+        sa = torch.jit.script(a)
+        result = torch._C._jit_debug_module_iterators(sa._c)
+
+        def replace(e):
+            if e is a.p:
+                return 'P'
+            elif e is a.foo.b:
+                return 'B'
+            elif isinstance(e, torch._C.ScriptModule):
+                return e._get_attribute('name')
+
+            return e
+        for k, v in result.items():
+            for i in range(len(v)):
+                if isinstance(v[i], tuple):
+                    n, v2 = v[i]
+                    v[i] = (n, replace(v2))
+                else:
+                    v[i] = replace(v[i])
+        expected = {'buffers': [],
+                    'buffers_r': ['B'],
+                    'children': ['foo', 'another'],
+                    'modules': ['a', 'foo', 'bar', 'another'],
+                    'named_attributes': [('training', True),
+                                         ('p', 'P'),
+                                         ('name', 'a'),
+                                         ('foo', 'foo'),
+                                         ('another', 'another')],
+                    'named_attributes_r': [('training', True),
+                                           ('p', 'P'),
+                                           ('name', 'a'),
+                                           ('foo', 'foo'),
+                                           ('foo.training', True),
+                                           ('foo.b', 'B'),
+                                           ('foo.name', 'foo'),
+                                           ('foo.bar', 'bar'),
+                                           ('foo.bar.training', True),
+                                           ('foo.bar.an_int', 4),
+                                           ('foo.bar.name', 'bar'),
+                                           ('another', 'another'),
+                                           ('another.training', True),
+                                           ('another.name', 'another')],
+                    'named_buffers': [],
+                    'named_buffers_r': [('foo.b', 'B')],
+                    'named_children': [('foo', 'foo'), ('another', 'another')],
+                    'named_modules': [('', 'a'),
+                                      ('foo', 'foo'),
+                                      ('foo.bar', 'bar'),
+                                      ('another', 'another')],
+                    'named_parameters': [('p', 'P')],
+                    'named_parameters_r': [('p', 'P')],
+                    'parameters': ['P'],
+                    'parameters_r': ['P']}
+        self.assertEqual(expected, result)
+
     def test_tracing_hooks(self):
         class Net(nn.Module):
             def __init__(self):

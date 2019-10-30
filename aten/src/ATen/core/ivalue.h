@@ -328,6 +328,7 @@ struct CAFFE2_API IValue final {
   const ivalue::Object& toObjectRef() const;
 
   torch::jit::script::Module toModule() const;
+  bool isModule() const;
 
   // None
   bool isNone() const {

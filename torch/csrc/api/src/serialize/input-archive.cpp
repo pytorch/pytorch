@@ -29,7 +29,11 @@ bool InputArchive::try_read(
   if (!module_.hasattr(key)) {
     return false;
   }
-  auto read_tensor = module_.attr(key).toTensor();
+  auto iv = module_.attr(key);
+  if (!iv.isTensor()) {
+    return false;
+  }
+  auto read_tensor = iv.toTensor();
   // clang-format on
   if (tensor.defined()) {
     torch::NoGradGuard guard;
@@ -59,7 +63,11 @@ bool InputArchive::try_read(const std::string& key, InputArchive& archive) {
   if (!module_.hasattr(key)) {
     return false;
   }
-  archive.module_ = module_.attr(key).toModule();
+  auto iv = module_.attr(key);
+  if (!iv.isModule()) {
+    return false;
+  }
+  archive.module_ = iv.toModule();
   return true;
 }
 

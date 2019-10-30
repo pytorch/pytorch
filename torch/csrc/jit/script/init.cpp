@@ -512,6 +512,49 @@ static bool has_generic(Module& self, const std::string& name) {
   return slot_dict_impl<Policy>(self.module_object()).contains(name);
 }
 
+template <typename T>
+py::list debugMakeList(const T& list) {
+  py::list result;
+  for (auto elem : list) {
+    result.append(py::cast(elem));
+  }
+  return result;
+}
+template <typename T>
+py::list debugMakeNamedList(const T& list) {
+  py::list result;
+  for (auto elem : list) {
+    result.append(py::cast(std::make_pair(elem.name, elem.value)));
+  }
+  return result;
+}
+
+static py::dict _jit_debug_module_iterators(Module& module) {
+  py::dict result;
+  result["children"] = debugMakeList(module.children());
+  result["named_children"] = debugMakeNamedList(module.named_children());
+  result["modules"] = debugMakeList(module.modules());
+  result["named_modules"] = debugMakeNamedList(module.named_modules());
+
+  result["parameters"] = debugMakeList(module.parameters(false));
+  result["named_parameters"] =
+      debugMakeNamedList(module.named_parameters(false));
+  result["parameters_r"] = debugMakeList(module.parameters(true));
+  result["named_parameters_r"] =
+      debugMakeNamedList(module.named_parameters(true));
+
+  result["buffers"] = debugMakeList(module.buffers(false));
+  result["named_buffers"] = debugMakeNamedList(module.named_buffers(false));
+  result["buffers_r"] = debugMakeList(module.buffers(true));
+  result["named_buffers_r"] = debugMakeNamedList(module.named_buffers(true));
+
+  result["named_attributes"] =
+      debugMakeNamedList(module.named_attributes(false));
+  result["named_attributes_r"] =
+      debugMakeNamedList(module.named_attributes(true));
+  return result;
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -640,6 +683,19 @@ void initJitScriptBindings(PyObject* module) {
                 method_name, graph);
             self.type()->addMethod(fn);
             didFinishEmitModule(self);
+          })
+      .def(
+          "_debug_dump_iterators",
+          [](Module& self) {
+            py::dict result;
+            py::list modules;
+            for (auto elem : self.modules()) {
+              modules.append(py::cast(elem));
+            }
+            py::list named_modules;
+            for (auto elem : self.named_modules()) {
+              modules.append(py::cast(std::make_pair(elem.name, elem.value)));
+            }
           })
       .def(
           "get_debug_state",
@@ -948,6 +1004,7 @@ void initJitScriptBindings(PyObject* module) {
         return StrongFunctionPtr(std::move(cu), fn);
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);
+  m.def("_jit_debug_module_iterators", _jit_debug_module_iterators);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())

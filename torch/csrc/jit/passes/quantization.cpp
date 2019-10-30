@@ -709,16 +709,17 @@ static std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
   return std::make_tuple(new_w, new_b);
 }
 
+static bool hastensor(script::Module& m, const char* name) {
+  return m.hasattr(name) && m.attr(name).isTensor();
+}
+
 static bool tryExtractingConvBNParameters(
     script::Module& conv,
     script::Module& bn,
     ConvBNParameters& r) {
-  if (!conv.hasattr("weight") || !bn.hasattr("weight") || !bn.hasattr("bias")) {
-    return false;
-  }
-  if (!bn.hasattr("running_mean") || !bn.hasattr("running_var") ||
-      !bn.attr("running_mean").isTensor() ||
-      !bn.attr("running_var").isTensor()) {
+  if (!hastensor(conv, "weight") || !hastensor(bn, "weight") ||
+      !hastensor(bn, "bias") || !hastensor(bn, "running_mean") ||
+      !hastensor(bn, "running_var")) {
     return false;
   }
 
@@ -987,7 +988,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       auto w = module.attr("weight").toTensor().data();
       auto w_quant = at::quantize_per_tensor(w, w_scale, w_zero_point, w_dtype);
       c10::optional<at::Tensor> b = c10::nullopt;
-      if (module.hasattr("bias")) {
+      if (hastensor(module, "bias")) {
         b = module.attr("bias").toTensor().data();
       }
       script::Module wrapper_module = packed_params_module.clone();

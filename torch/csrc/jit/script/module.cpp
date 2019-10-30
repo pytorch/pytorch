@@ -418,5 +418,8 @@ namespace c10 {
 torch::jit::script::Module IValue::toModule() const {
   return torch::jit::script::Module(toObject());
 }
+bool IValue::isModule() const {
+  return isObject() && toObjectRef().type()->is_module();
+}
 
 } // namespace c10
