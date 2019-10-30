@@ -139,7 +139,7 @@ static auto get_tensor_torch_function() -> PyObject*
   return method;
 }
 
-// checks if `overloaded_args[]` has args with `__torch_function__`
+// checks if obj has a __torch_function__ implementation
 static auto check_has_torch_function(PyObject* obj) -> bool
 {
   PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
@@ -149,20 +149,21 @@ static auto check_has_torch_function(PyObject* obj) -> bool
   return false;
 }
 
-/*
-* is_exact flag was introduced when __torch_function__ support was added.
-*
-* When the function signatures are created during parse(), is_exact ensures
-* that the subTensors are checked later after checking for  __torch_function__
-* overload on the obj. This ensures that there is minimal overload when we
-* don't have overloaded SubTensor(s).
-*/
-
-auto FunctionParameter::check(PyObject* obj, bool is_exact=true) -> bool
+auto FunctionParameter::check(PyObject* obj, bool is_exact_class=true) -> bool
 {
+  // Checks that an argument is a tensor or convertible to a tensor.
+  //
+  // If is_exact_class is true, and obj is a tensor or tensor subclass, returns
+  // true if obj is a Tensor and false if obj is a subclass.
+  //
+  // When the function signatures are checked during parse(), is_exact_class
+  // ensures that the subclasses of Tensor are checked after checking whether
+  // __torch_function__ is defined on an argument. This ensures that when we are
+  // passed a subclass of Tensor that does *not* have __torch_function__ defined
+  // the only overhead is checking for __torch_function__.
   switch (type_) {
     case ParameterType::TENSOR: {
-      if(is_exact){
+      if(is_exact_class){
         return THPVariable_CheckExact(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
       }
       else{
@@ -179,7 +180,7 @@ auto FunctionParameter::check(PyObject* obj, bool is_exact=true) -> bool
       if (THPUtils_checkDouble(obj)) {
         return true;
       }
-      if(is_exact){
+      if(is_exact_class){
         if (THPVariable_CheckExact(obj)) {
           auto& var = ((THPVariable*)obj)->cdata;
           return !var.requires_grad() && var.dim() == 0;
@@ -197,7 +198,7 @@ auto FunctionParameter::check(PyObject* obj, bool is_exact=true) -> bool
       if (THPUtils_checkLong(obj)) {
         return true;
       }
-      if(is_exact){
+      if(is_exact_class){
         if (THPVariable_CheckExact(obj)) {
           auto& var = ((THPVariable*)obj)->cdata;
           return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
@@ -561,11 +562,8 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     return false;
   }
 
-  bool new_class = true;
-  int arg_index = 0;
   int i = 0;
-  int j;
-  int num_overloaded_args = 0;
+  int num_args_with_torch_function = 0;
   for (auto& param : params) {
     PyObject* obj = nullptr;
     bool is_kwd = false;
@@ -597,12 +595,15 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         missing_args(*this, i);
       }
       return false;
-    // check for Tensor type.
-    } else if (param.check(obj)) {  // NOLINT
+    } else if (param.check(obj, /*is_exact_class=*/true)) {  // NOLINT
       dst[i++] = obj;
-    // XXX: the Variable check is necessary because sizes become tensors when
-    // tracer is enabled. This behavior easily leads to ambiguities, and we
-    // should avoid having complex signatures that make use of it...
+      // obj is a Tensor and not a subclass of Tensor, we check for Tensor
+      // subclasses and Tensor-like duck types with __torch_function__ defined
+      // below and then Tensor subclasses with no __torch_function__ below that.
+      //
+      // XXX: the Variable check is necessary because sizes become tensors when
+      // tracer is enabled. This behavior easily leads to ambiguities, and we
+      // should avoid having complex signatures that make use of it...
     } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
                THPUtils_checkIndex(obj)) {
       // take all positional arguments as this parameter
@@ -611,39 +612,59 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       arg_pos = nargs;
       continue;
     } else if (check_has_torch_function(obj)) {
-      // Collects arguments with __torch_function__ and
-      // in the order in which they should be tried (i.e., skipping redundant types).
-      // by checking for subclasses
       dst[i++] = obj;
-      for (j = 0; j < num_overloaded_args; j++) {
+      // obj has a __torch_function__ implementation and may either be a
+      // subclass of Tensor or a Tensor-like duck type. We may need to append
+      // this object to the overloaded_args array, which tracks all of the
+      // arguments with distinct __torch_function__ implementations we've seen
+      // so far.
+      //
+      // If this is the first argument we've seen with __torch_function__
+      // defined, so we unconditionall add obj to the overloaded_args array.
+      //
+      // If we've already seen arguments with __torch_function__ defined, then
+      // we first need to check if obj is the same type as any of the previous
+      // arguments with __torch_function__ defined. If so, we can ignore obj
+      // since we already have an entry in overloaded_args with the same
+      // __torch_function__ implementation.
+      //
+      // If it's a different type, we then need to check if it's a subclass of one
+      // of the types we've already seen. If so, we need to replace the entry in
+      // overloaded_args for the superclass instance with obj.
+      bool class_not_seen_yet = true;
+      for (int j = 0; j < num_args_with_torch_function; j++) {
         if (Py_TYPE(obj) == Py_TYPE(overloaded_args[j])) {
-          new_class = false;
+          // obj is the same type as another parameter we've seen in a prior
+          // iteration of the loop over parameters so we already have an entry
+          // with the proper __torch_function__ implementation to call, so skip
+          // this parameter
+          class_not_seen_yet = false;
           break;
         }
       }
-      if (new_class) {
-        PyObject *method = get_torch_function(obj);
+      if (class_not_seen_yet) {
+        int arg_index = num_args_with_torch_function;
 
-        if (method != nullptr) {
-          int arg_index;
-
-          arg_index = num_overloaded_args;
-
-          for (j = 0; j < num_overloaded_args; j++) {
-            PyObject *other_type;
-            other_type = (PyObject *)Py_TYPE(overloaded_args[j]);
-            if (PyObject_IsInstance(obj, other_type)) {
-              arg_index = j;
-              break;
-            }
+        for (int j = 0; j < num_args_with_torch_function; j++) {
+          PyObject *other_type;
+          other_type = (PyObject *)Py_TYPE(overloaded_args[j]);
+          if (PyObject_IsInstance(obj, other_type)) {
+            // obj is a subclass of another object we've seen already so its
+            // __torch_function__ should be called first, therefore we insert it
+            // into overloaded_args before the superclass
+            arg_index = j;
+            break;
           }
-          pyobject_array_insert(overloaded_args, num_overloaded_args, arg_index, obj);
-          ++num_overloaded_args;
         }
+        // add object to overloaded_args. If it's a subclass of another class we've already seen
+        // it will be inserted before the superclass, otherwise it will be inserted at the end
+        // of the array
+        pyobject_array_insert(overloaded_args, num_args_with_torch_function, arg_index, obj);
+        num_args_with_torch_function++;
       }
-    } else if (param.check(obj, false)) {
-    // check for subclass of Tensor type when it is not overloaded with a __torch_function__.
+    } else if (param.check(obj, /*is_exact_class=*/false)) {
       dst[i++] = obj;
+      // obj is a subclass of Tensor but it is not overloaded with a __torch_function__.
     } else if (raise_exception) {
       if (is_kwd) {
         // foo(): argument 'other' must be str, not int
