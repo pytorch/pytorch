@@ -27,7 +27,7 @@ namespace torch {
 /// support it in the future by iterating over all sub-lists to find
 /// the largest data type that can represent all of the elements, or by using
 /// variadic templates.
-inline at::Tensor tensor(at::detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {}) {
+inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {}) {
   return autograd::make_variable(
     tensor_data_container.convert_to_tensor(options.has_dtype() ? options : options.dtype(tensor_data_container.scalar_type())),
     options.requires_grad());
