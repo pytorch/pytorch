@@ -1,4 +1,5 @@
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorNames.h>
 #include <ATen/core/EnableNamedTensor.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <bitset>
@@ -311,43 +312,13 @@ static bool are_distinct(DimnameList batch_dims, DimnameList feature_dims) {
   return true;
 }
 
-// Let batch_dims = everything except for the last two dimensions
-//     feature_dims = the last two dims of the tensor.
-// This function checks that names of batch_dims of one tensor are distinct
-// from the feature dimensions of another tensor.
-//
-// For example,
-// Tensor[N, A, B] @ Tensor[None, N, A] -> Misaligned because N (a batch dim of
-// the first tensor) appears in a non-batch dimension in the second tensor.
-//
-// Tensor[N, A, B1] @ Tensor[N, B2] -> Misaligned! The user may have intended
-// to batch multiply matrices of size [A, B1] with vectors of size [B2]
-// but instead matmul treats it as batch multiplying matrices of size [A, B1]
-// with matrices of size [N, B2]. In this case, we're able to warn the user.
-static void check_batch_and_feature_dims_are_distinct(
-    DimnameList self_names,
-    DimnameList other_names) {
-  auto self_batch_dims = batch_dims(self_names);
-  auto self_feature_dims = feature_dims(self_names);
-  auto other_batch_dims = batch_dims(other_names);
-  auto other_feature_dims = feature_dims(other_names);
-
-  TORCH_CHECK(are_distinct(self_batch_dims, other_feature_dims),
-      "Misaligned dims when batch matrix multiplying Tensor", self_names,
-      " and Tensor", other_names, ": there is overlap between the feature dims ",
-      "of the second tensor (", other_feature_dims,
-      ") and the batch dims of the first tensor (", self_batch_dims,
-      "). Please ensure batch dims are not present in the feature dims.");
-
-  TORCH_CHECK(are_distinct(other_batch_dims, self_feature_dims),
-      "Misaligned dims when batch matrix multiplying Tensor", self_names,
-      " and Tensor", other_names, ": there is overlap between the feature dims ",
-      "of the first tensor (", self_feature_dims,
-      ") and the batch dims of the second tensor (", other_batch_dims,
-      "). Please ensure batch dims are not present in the feature dims.");
+static int64_t num_batch_dims(DimnameList names) {
+  if (names.size() <= 2) {
+    return 0;
+  }
+  return names.size() - 2;
 }
 
-// Compute the outnames of torch.matmul(A, B).
 static std::vector<Dimname> compute_matmul_outnames(
     DimnameList self_names,
     DimnameList other_names) {
@@ -355,37 +326,17 @@ static std::vector<Dimname> compute_matmul_outnames(
       "both arguments to matmul need to be at least 1D, but they are ",
       self_names.size(), "D and ", other_names.size(), "D");
 
-  check_batch_and_feature_dims_are_distinct(self_names, other_names);
+  const auto wrapped_self_names = TensorNames(self_names, 0, num_batch_dims(self_names));
+  const auto wrapped_other_names = TensorNames(other_names, 0, num_batch_dims(other_names));
 
-  // The approach is to
-  // (1) compute the outnames of the matrix multiplication on the feature dims.
-  // (2) compute the outnames of the batch dimensions, after broadcasting
-  // (3) concatenate the batch outnames and matrix multiply outnames.
-
-  // Step 1: Compute outnames of matrix multiplication
-  // Let N >= 2.
-  // if ND @ ND we matrix multiply the last two dimensions of both tensors.
-  // if ND @ 1D, it is a batch matrix (last two dims of first tensor) - vector multiply
-  // if 1D @ ND, it is a batch vector - matrix (last two dims of second tensor) multiply
-  // In all cases, we are contracting the last dimension of the first tensor
-  // with the first non-batch dimension of the second tensor.
-  auto self_feature_dims = feature_dims(self_names);
-  auto mm_outnames = compute_dot_product_outnames(
-      self_feature_dims,
-      /*tensor_dotted_dim=*/self_feature_dims.size() - 1, // last dim
-      feature_dims(other_names),
-      /*other_dotted_dim=*/0);
-
-  // Step 2: Figure out the outnames of the batch dimensions.
-  std::vector<Dimname> result;
-  auto self_batch_dims = batch_dims(self_names);
-  auto other_batch_dims = batch_dims(other_names);
-  if (self_batch_dims.empty() && other_batch_dims.empty()) {
-    result = mm_outnames;
-  } else {
-    result = unify_from_right(self_batch_dims, other_batch_dims);
-    result.insert(result.end(), mm_outnames.begin(), mm_outnames.end());
+  auto working_names = wrapped_self_names.unifyFromRight(wrapped_other_names, "matmul");
+  if (self_names.size() >= 2) {
+    working_names.append(TensorName(self_names, -2));
   }
+  if (other_names.size() >= 2) {
+    working_names.append(TensorName(other_names, -1));
+  }
+  const auto result = working_names.toDimnameVec();
 
   check_feature_names_are_distinct(self_names, other_names, result);
   return result;
