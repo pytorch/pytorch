@@ -25,9 +25,7 @@ void testHelper(std::string prefix = "") {
   {
     c10d::HashStore hashStore;
     c10d::PrefixStore store(prefix, hashStore);
-    std::thread th([&]() {
-      c10d::test::set(store, "key0", "value0");
-    });
+    std::thread th([&]() { c10d::test::set(store, "key0", "value0"); });
     c10d::test::check(store, "key0", "value0");
     th.join();
   }
