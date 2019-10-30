@@ -496,12 +496,15 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   }
 
   if (THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
-    // `THTensor_compute_stride` returns the proper strides to use if viewable.
-    // NB: Even though we have stride here, we do not just call `as_strided`
-    //     on `self` because the backward for `as_strided` is not as efficient
-    //     as `view` (since it is meant to handle general cases), and 
-    //     `THTensor_compute_stride` is quite cheap anyways.
-    return at::_unsafe_view(self, shape);
+    // `THTensor_compute_stride` returns the proper strides to use if this 
+    // `reshape` can be just a view.
+    //
+    // NB: Even though we have viewable geometry and the target strides here,
+    //     we do not just call `as_strided` on `self` because the backward
+    //     for `as_strided` is not as efficient as `view` (since the former
+    //     is meant to handle general cases). We will redo `THTensor_compute_stride`
+    //     in `view` but that is quite cheap anyways.
+    return at::view(self, shape);
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
