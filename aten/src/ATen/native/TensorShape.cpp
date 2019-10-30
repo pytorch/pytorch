@@ -495,8 +495,13 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     return at::_mkldnn_reshape(self, shape);
   }
 
-  if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
-    return self.as_strided(shape, *stride);
+  if (THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
+    // `THTensor_compute_stride` returns the proper strides to use if viewable.
+    // NB: Even though we have stride here, we do not just call `as_strided`
+    //     on `self` because the backward for `as_strided` is not as efficient
+    //     as `view` (since it is meant to handle general cases), and 
+    //     `THTensor_compute_stride` is quite cheap anyways.
+    return at::_unsafe_view(self, shape);
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
