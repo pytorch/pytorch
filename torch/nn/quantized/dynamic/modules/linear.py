@@ -17,8 +17,6 @@ class Linear(nnq.Linear):
                          shape :math:`(\text{out\_features}, \text{in\_features})`.
         bias (Tensor): the non-learnable bias of the module of shape :math:`(\text{out\_features})`.
                 If :attr:`bias` is ``True``, the values are initialized to zero.
-        scale: `scale` parameter of weight Quantized Tensor, type: double
-        zero_point: `zero_point` parameter for weight Quantized Tensor, type: long
 
     Examples::
 
