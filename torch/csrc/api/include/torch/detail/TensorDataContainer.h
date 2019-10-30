@@ -273,7 +273,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
         " in its first dimension");
       size_t index = 0;
       for (const auto& elem : init_list_) {
-        Tensor slice = tensor[index];
+        at::Tensor slice = tensor[index];
         elem.fill_tensor(slice);
         index++;
       }
