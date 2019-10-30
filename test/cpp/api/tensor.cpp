@@ -493,37 +493,37 @@ TEST(TensorTest, TensorCtorPreservesInitListDtype) {
 TEST(TensorTest, PrettyPrintTensorDataContainer) {
   {
     ASSERT_EQ(
-      c10::str(at::detail::TensorDataContainer(1.1)),
+      c10::str(torch::detail::TensorDataContainer(1.1)),
       "1.1");
   }
   {
     ASSERT_EQ(
-      c10::str(at::detail::TensorDataContainer({1.1, 2.2})),
+      c10::str(torch::detail::TensorDataContainer({1.1, 2.2})),
       "{1.1, 2.2}");
   }
   {
     ASSERT_EQ(
-      c10::str(at::detail::TensorDataContainer({{1, 2}, {3, 4}})),
+      c10::str(torch::detail::TensorDataContainer({{1, 2}, {3, 4}})),
       "{{1, 2}, {3, 4}}");
   }
   {
     ASSERT_EQ(
-      c10::str(at::detail::TensorDataContainer({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
+      c10::str(torch::detail::TensorDataContainer({{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}})),
       "{{{{{{{{1.1, 2.2, 3.3}}}}}, {{{{{4.4, 5.5, 6.6}}}}}, {{{{{7.7, 8.8, 9.9}}}}}}}}");
   }
   {
     ASSERT_EQ(
-      c10::str(at::detail::TensorDataContainer({{{{{{{{{{1}}}}}}}}}})),
+      c10::str(torch::detail::TensorDataContainer({{{{{{{{{{1}}}}}}}}}})),
       "{{{{{{{{{{1}}}}}}}}}}");
   }
   {
     ASSERT_EQ(
-      c10::str(at::detail::TensorDataContainer({{{{{{{{{{}}}}}}}}}})),
+      c10::str(torch::detail::TensorDataContainer({{{{{{{{{{}}}}}}}}}})),
       "{{{{{{{{{{}}}}}}}}}}");
   }
   {
     ASSERT_EQ(
-      c10::str(at::detail::TensorDataContainer({{{{{{{{{{1, 2}}}}}}}}}})),
+      c10::str(torch::detail::TensorDataContainer({{{{{{{{{{1, 2}}}}}}}}}})),
       "{{{{{{{{{{1, 2}}}}}}}}}}");
   }
 }
@@ -531,26 +531,26 @@ TEST(TensorTest, PrettyPrintTensorDataContainer) {
 TEST(TensorTest, TensorDataContainerCallingAccessorOfWrongType) {
   {
     ASSERT_THROWS_WITH(
-      at::detail::TensorDataContainer(1.1).init_list(),
+      torch::detail::TensorDataContainer(1.1).init_list(),
       "Can only call `init_list()` on a TensorDataContainer that has `is_init_list() == true`");
     ASSERT_THROWS_WITH(
-      at::detail::TensorDataContainer(1.1).tensor(),
+      torch::detail::TensorDataContainer(1.1).tensor(),
       "Can only call `tensor()` on a TensorDataContainer that has `is_tensor() == true`");
   }
   {
     ASSERT_THROWS_WITH(
-      at::detail::TensorDataContainer({1.1, 2.2}).scalar(),
+      torch::detail::TensorDataContainer({1.1, 2.2}).scalar(),
       "Can only call `scalar()` on a TensorDataContainer that has `is_scalar() == true`");
     ASSERT_THROWS_WITH(
-      at::detail::TensorDataContainer({1.1, 2.2}).tensor(),
+      torch::detail::TensorDataContainer({1.1, 2.2}).tensor(),
       "Can only call `tensor()` on a TensorDataContainer that has `is_tensor() == true`");
   }
   {
     ASSERT_THROWS_WITH(
-      at::detail::TensorDataContainer(at::ArrayRef<double>({1.1, 2.2})).scalar(),
+      torch::detail::TensorDataContainer(at::ArrayRef<double>({1.1, 2.2})).scalar(),
       "Can only call `scalar()` on a TensorDataContainer that has `is_scalar() == true`");
     ASSERT_THROWS_WITH(
-      at::detail::TensorDataContainer(at::ArrayRef<double>({1.1, 2.2})).init_list(),
+      torch::detail::TensorDataContainer(at::ArrayRef<double>({1.1, 2.2})).init_list(),
       "Can only call `init_list()` on a TensorDataContainer that has `is_init_list() == true`");
   }
 }
