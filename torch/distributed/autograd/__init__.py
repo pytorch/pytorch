@@ -44,7 +44,8 @@ def backward(roots):
     We accumulate the gradients in the appropriate "autograd context id" on each
     of the nodes. The autograd context id used is the current autograd context
     id of this node when backward() is called. If there is no valid autograd
-    context id, we throw an error.
+    context id, we throw an error. You can retrieve the accumulated gradients
+    using the ``get_gradients`` API.
 
     Arguments:
         roots: List of tensors which represent the roots of the autograd
@@ -58,3 +59,27 @@ def backward(roots):
         >>      dist_autograd.backward(loss)
     '''
     _backward(roots)
+
+
+def get_gradients(context_id):
+    '''
+    Retrieves a map from Tensor to the appropriate gradient for that Tensor
+    accumulated in the provided context_id as part of the distributed autograd
+    backward pass.
+
+    Arguments:
+        context_id: The autograd context id for which we should retrieve the
+            gradients.
+
+    Example::
+        >> import torch.distributed.autograd as dist_autograd
+        >> with dist_autograd.context() as context_id:
+        >>      t1 = torch.rand((3, 3), requires_grad=True)
+        >>      t2 = torch.rand((3, 3), requires_grad=True)
+        >>      loss = t1 + t2
+        >>      dist_autograd.backward([loss.sum()])
+        >>      grads = dist_autograd.get_gradients(context_id)
+        >>      print (grads[t1])
+        >>      print (grads[t2])
+    '''
+    return _get_gradients(context_id)

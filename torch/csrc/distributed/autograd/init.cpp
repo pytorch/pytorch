@@ -113,7 +113,7 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
       },
       py::call_guard<py::gil_scoped_release>());
 
-  module.def("get_gradients", [](int64_t contextId) {
+  module.def("_get_gradients", [](int64_t contextId) {
     const auto& autogradContext =
         DistAutogradContainer::getInstance().retrieveContext(contextId);
     return torch::jit::toPyObject(IValue(autogradContext.getGradients()));
