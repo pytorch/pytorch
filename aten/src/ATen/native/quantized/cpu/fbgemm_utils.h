@@ -1,10 +1,11 @@
 #pragma once
 
-#include <c10/core/QScheme.h>
-#include <ATen/Tensor.h>
 #ifdef USE_FBGEMM
 #include "fbgemm/Fbgemm.h"
 #include "fbgemm/QuantUtils.h"
+
+#include <ATen/Tensor.h>
+#include <c10/core/QScheme.h>
 
 // The struct for the packed weight matrix (PackBMatrix) and the corresponding
 // column offsets used for the fully connect layer, which are both prepared in
@@ -24,8 +25,9 @@ struct FBGEMM_API PackedLinearWeight {
   c10::QScheme q_scheme;
 };
 
+template <int kSpatialDim = 2>
 struct FBGEMM_API PackedConvWeight {
-  std::unique_ptr<fbgemm::PackWeightsForConv<2>> w;
+  std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w;
   c10::optional<at::Tensor> bias;
   std::vector<int32_t> col_offsets;
   std::vector<int64_t> kernel;
@@ -54,5 +56,54 @@ inline void convert_int8_uint8(
         static_cast<uint8_t>(static_cast<int32_t>(src_int8[i]) + 128);
   }
 }
+
+namespace at {
+namespace native {
+namespace fbgemm_utils {
+
+template <int kSpatialDim = 2>
+fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
+    int N,
+    int C,
+    int M,
+    const std::vector<int>& image_shape,
+    int groups,
+    const std::vector<int>& kernels,
+    const std::vector<int>& strides,
+    const std::vector<int>& pads,
+    const std::vector<int>& dilations);
+
+// TODO: Remove functions below when ChannelsLast3d is ready.
+Tensor MakeStridedQTensorCPU(
+    const IntArrayRef& sizes,
+    const IntArrayRef& strides,
+    const TensorOptions& options,
+    QuantizerPtr quantizer);
+
+Tensor MakeEmptyAffineQuantizedChannelsLast3dTensor(
+    int64_t N,
+    int64_t C,
+    int64_t D,
+    int64_t H,
+    int64_t W,
+    const TensorOptions& options,
+    double scale,
+    int64_t zero_point);
+
+Tensor MakeEmptyPerChannelAffineQuantizedChannelsLast3dTensor(
+    int64_t N,
+    int64_t C,
+    int64_t D,
+    int64_t H,
+    int64_t W,
+    const TensorOptions& options,
+    const Tensor& scales,
+    const Tensor& zero_points);
+
+Tensor ConvertToChannelsLast3dTensor(const Tensor& src);
+
+} // namespace fbgemm_utils
+} // namespace native
+} // namespace at
 
 #endif // USE_FBGEMM
