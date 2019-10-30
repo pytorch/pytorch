@@ -102,7 +102,7 @@ void MultiMarginLossImpl::reset() {
 void MultiMarginLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::MultiMarginLoss(p=" << options.p()
          << ", margin=" << options.margin() << ", weight=" << options.weight()
-         << ", reduction=" << options.reduction() << ")";
+         << ", reduction=" << enumtype::get_enum_name(options.reduction()) << ")";
 }
 
 Tensor MultiMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
