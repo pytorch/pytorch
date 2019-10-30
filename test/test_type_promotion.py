@@ -138,39 +138,41 @@ class TestTypePromotion(TestCase):
         f_dtypes = [torch.float, torch.double]
         f_dtypes = f_dtypes if self.device == 'cpu' else f_dtypes + [torch.half]
         i_dtypes = [torch.int, torch.long]
-        for f in ['add', 'sub', 'rsub', 'mul', 'div']:
+        for func in [torch.add, torch.sub, torch.rsub, torch.mul, torch.div]:
             for dtype1 in f_dtypes:
                 for dtype2 in (f_dtypes + i_dtypes):
                     x = torch.ones(10, requires_grad=True, dtype=dtype1, device=self.device)
                     y = torch.ones(10, dtype=dtype2, device=self.device)
-
-                    func = getattr(torch, f)
                     func(x, y).sum().backward()
 
-    # verifies that a.add(b) is the same as a.to(b.dtype).add(b) in cases
-    # where that should hold.
+    # verifies that torch.<op>(a, b) is the same as 
+    # torch.<op>(a.to(common_dtype), b.to(common_dtype)) in cases where that should hold.
     def test_many_promotions(self):
-        from_to = {
-            torch.float16: torch.float32,
-            torch.half: torch.float16,
-            torch.int: torch.long,
-            torch.uint8: torch.long,
-            torch.uint8: torch.float,
-            torch.int: torch.float,
-            torch.int: torch.double,
-            torch.int16: torch.long,
-            torch.float16: torch.double,
-            torch.bool: torch.long,
-            torch.bool: torch.float
-        }
+        for dt1 in torch.testing.get_all_math_dtypes(self.device):
+            for dt2 in torch.testing.get_all_math_dtypes(self.device):
+                for op in [torch.add, torch.sub, torch.mul, torch.div]:
+                    for contiguous in [True, False]:
 
-        for k, v in from_to.items():
-            a = torch.rand([3, 3], device=self.device).to(k)  # no _th_uniform for half on cpu.
-            b = torch.rand([3, 3], device=self.device).to(v)
-            c = a.add(b)
-            d = a.to(v).add(b)
-            self.assertEqual(c.dtype, d.dtype, message='from {} to {}'.format(k, v))
-            self.assertEqual(c, d, message='from {} to {}'.format(k, v))
+                        common_dtype = torch.promote_types(dt1, dt2)
+
+                        if op == torch.sub and common_dtype != torch.bool:
+                            # Subtraction, the `-` operator, with a bool tensor is not supported.
+                            continue
+
+                        a = torch.rand([20, 20], device=self.device).to(dt1)  # no _th_uniform for half on cpu.
+                        b = torch.rand([20, 20], device=self.device).to(dt2)
+                        # test ops with non-contiguous tensors
+                        if not contiguous:
+                            a = a.t()
+                            b = b.t()
+                        self.assertEqual(a.is_contiguous(), contiguous)
+                        self.assertEqual(b.is_contiguous(), contiguous)
+                        # ensure no div-by-zero
+                        b[b == 0] = 5
+                        c = op(a, b)
+                        d = op(a.to(common_dtype), b.to(common_dtype))
+                        self.assertEqual(c.dtype, d.dtype, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
+                        self.assertEqual(c, d, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
 
     def test_non_promoting_ops(self):
         x = torch.ones(4, dtype=torch.double)
