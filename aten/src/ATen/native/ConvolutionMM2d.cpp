@@ -94,8 +94,10 @@ static inline void conv2d_shape_check(
       kernel_width,
       "). Kernel size can't be greater than actual input size");
 
-  const int64_t output_height = div_rtn<int64_t>(exact_input_height - kernel_height, stride_height) + 1;
-  const int64_t output_width = div_rtn<int64_t>(exact_input_width - kernel_width, stride_width) + 1;
+  const int64_t output_height =
+      div_rtn<int64_t>(exact_input_height - kernel_height, stride_height) + 1;
+  const int64_t output_width =
+      div_rtn<int64_t>(exact_input_width - kernel_width, stride_width) + 1;
 
   TORCH_CHECK(
       output_width >= 1 && output_height >= 1,
@@ -274,14 +276,9 @@ void conv2d_backward_out_cpu_template(
         pad_width);
   } else {
     const int64_t batch_size = input.size(0);
-    //at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      
-      // ## AKo: If addmm_() is called inside at::parallel_for the following error is generated
-      // for executions on background threads:
-      // "Expected object of type Variable but found type torch.DoubleTensor for argument #2 'mat1'""
-      // I first thought I had to disable auto-grad but placing at::NoGradGuard had no effect.
-      
-      int64_t start = 0, end = batch_size;
+    at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+      AutoNonVariableTypeMode guard;
+
       for (int64_t t = start; t < end; t++) {
         Tensor grad_input_t = grad_input[t];
         Tensor grad_output_t = grad_output[t];
@@ -299,7 +296,7 @@ void conv2d_backward_out_cpu_template(
             pad_height,
             pad_width);
       }
-    //});
+    });
   }
 }
 
