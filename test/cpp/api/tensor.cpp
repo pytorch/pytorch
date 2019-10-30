@@ -136,7 +136,7 @@ TEST(TensorTest, ToDoesNotCopyWhenOptionsAreAllTheSame) {
   }
 }
 
-TEST(TensorTest, ContainsCorrectValueForSingleValue) {
+TEST(TensorTest, AtTensorCtorScalar) {
   auto tensor = at::tensor(123);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kInt);
@@ -151,9 +151,14 @@ TEST(TensorTest, ContainsCorrectValueForSingleValue) {
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 123.456));
+
+  tensor = at::tensor(123, at::dtype(at::kFloat)) + 0.5;
+  ASSERT_EQ(tensor.numel(), 1);
+  ASSERT_EQ(tensor.dtype(), at::kFloat);
+  ASSERT_TRUE(almost_equal(tensor[0], 123.5));
 }
 
-TEST(TensorTest, ContainsCorrectValuesForManyValues) {
+TEST(TensorTest, AtTensorCtorSingleDim) {
   auto tensor = at::tensor({1, 2, 3});
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kInt);
@@ -175,15 +180,39 @@ TEST(TensorTest, ContainsCorrectValuesForManyValues) {
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
+  tensor = at::tensor({1.1, 2.2, 3.3}, at::dtype(at::kInt));
+  ASSERT_EQ(tensor.numel(), 3);
+  ASSERT_EQ(tensor.dtype(), at::kInt);
+  ASSERT_EQ(tensor.layout(), at::kStrided);
+  ASSERT_TRUE(exactly_equal(tensor[0], 1));
+  ASSERT_TRUE(exactly_equal(tensor[1], 2));
+  ASSERT_TRUE(exactly_equal(tensor[2], 3));
+
   tensor = at::tensor(std::vector<double>({1.5, 2.25, 3.125}));
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), at::kDouble);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
+
+  std::vector<int> v = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  auto tensor = at::tensor(v);
+  ASSERT_EQ(tensor.numel(), v.size());
+  ASSERT_EQ(tensor.dtype(), at::kInt);
+  for (size_t i = 0; i < v.size(); ++i) {
+    ASSERT_TRUE(exactly_equal(tensor[i], v.at(i)));
+  }
+
+  std::vector<double> w = {1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 10.0};
+  tensor = at::tensor(w);
+  ASSERT_EQ(tensor.numel(), w.size());
+  ASSERT_EQ(tensor.dtype(), at::kDouble);
+  for (size_t i = 0; i < w.size(); ++i) {
+    ASSERT_TRUE(almost_equal(tensor[i], w.at(i)));
+  }
 }
 
-TEST(TensorTest, ContainsCorrectValueForSingleValueVariable) {
+TEST(TensorTest, TorchTensorCtorScalar) {
   auto tensor = torch::tensor(123);
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
@@ -221,7 +250,7 @@ TEST(TensorTest, ContainsCorrectValueForSingleValueVariable) {
   ASSERT_TRUE(almost_equal(tensor[0], true));
 }
 
-TEST(TensorTest, TensorCtorSingleDim) {
+TEST(TensorTest, TorchTensorCtorSingleDim) {
   auto tensor = torch::tensor({1, 2, 3});
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
@@ -294,7 +323,7 @@ TEST(TensorTest, TensorCtorSingleDim) {
   ASSERT_TRUE(exactly_equal(tensor[2], true));
 }
 
-TEST(TensorTest, TensorCtorMultiDim) {
+TEST(TensorTest, TorchTensorCtorMultiDim) {
   {
     auto tensor = torch::tensor({{1, 2}});
     ASSERT_EQ(tensor.dtype(), torch::kInt);
@@ -414,7 +443,7 @@ TEST(TensorTest, TensorCtorMultiDim) {
   }
 }
 
-TEST(TensorTest, TensorCtorMultiDim_CUDA) {
+TEST(TensorTest, TorchTensorCtorMultiDim_CUDA) {
   {
     auto tensor = torch::tensor(
       {{{{{{{{1.0, 2.0, 3.0}}}}}, {{{{{4.0, 5.0, 6.0}}}}}, {{{{{7.0, 8.0, 9.0}}}}}}}},
@@ -429,7 +458,7 @@ TEST(TensorTest, TensorCtorMultiDim_CUDA) {
   }
 }
 
-TEST(TensorTest, TensorCtorZeroSizedDim) {
+TEST(TensorTest, TorchTensorCtorZeroSizedDim) {
   {
     auto tensor = torch::tensor({});
     ASSERT_EQ(tensor.numel(), 0);
@@ -481,7 +510,7 @@ TEST(TensorTest, TensorCtorZeroSizedDim) {
   }
 }
 
-TEST(TensorTest, TensorCtorPreservesInitListDtype) {
+TEST(TensorTest, TorchTensorCtorPreservesInitListDtype) {
   ASSERT_EQ(torch::tensor({1, 2, 3}).dtype(), torch::kInt);
   ASSERT_EQ(torch::tensor({{1, 2, 3}}).dtype(), torch::kInt);
   ASSERT_EQ(torch::tensor({1., 2., 3.}).dtype(), torch::kDouble);
@@ -566,39 +595,6 @@ TEST(TensorTest, TensorDataContainerCallingAccessorOfWrongType) {
       torch::detail::TensorDataContainer(at::ArrayRef<double>({1.1, 2.2})).init_list(),
       "Can only call `init_list()` on a TensorDataContainer that has `is_init_list() == true`");
   }
-}
-
-TEST(TensorTest, ContainsCorrectValuesWhenConstructedFromVector) {
-  std::vector<int> v = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-  auto tensor = at::tensor(v);
-  ASSERT_EQ(tensor.numel(), v.size());
-  ASSERT_EQ(tensor.dtype(), at::kInt);
-  for (size_t i = 0; i < v.size(); ++i) {
-    ASSERT_TRUE(exactly_equal(tensor[i], v.at(i)));
-  }
-
-  std::vector<double> w = {1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 10.0};
-  tensor = at::tensor(w);
-  ASSERT_EQ(tensor.numel(), w.size());
-  ASSERT_EQ(tensor.dtype(), at::kDouble);
-  for (size_t i = 0; i < w.size(); ++i) {
-    ASSERT_TRUE(almost_equal(tensor[i], w.at(i)));
-  }
-}
-
-TEST(TensorTest, UsesOptionsThatAreSupplied) {
-  auto tensor = at::tensor(123, at::dtype(at::kFloat)) + 0.5;
-  ASSERT_EQ(tensor.numel(), 1);
-  ASSERT_EQ(tensor.dtype(), at::kFloat);
-  ASSERT_TRUE(almost_equal(tensor[0], 123.5));
-
-  tensor = at::tensor({1.1, 2.2, 3.3}, at::dtype(at::kInt));
-  ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.dtype(), at::kInt);
-  ASSERT_EQ(tensor.layout(), at::kStrided);
-  ASSERT_TRUE(exactly_equal(tensor[0], 1));
-  ASSERT_TRUE(exactly_equal(tensor[1], 2));
-  ASSERT_TRUE(exactly_equal(tensor[2], 3));
 }
 
 TEST(TensorTest, FromBlob) {
