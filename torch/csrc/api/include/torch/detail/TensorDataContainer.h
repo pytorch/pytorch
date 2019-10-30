@@ -256,7 +256,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
     }
   }
  private:
-  void fill_tensor(at::Tensor&& tensor) const {
+  void fill_tensor(at::Tensor& tensor) const {
     if (is_scalar()) {
       TORCH_INTERNAL_ASSERT(
         tensor.dim() == 0,
@@ -273,7 +273,8 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
         " in its first dimension");
       size_t index = 0;
       for (const auto& elem : init_list_) {
-        elem.fill_tensor(tensor[index]);
+        Tensor slice = tensor[index];
+        elem.fill_tensor(slice);
         index++;
       }
     } else if (is_tensor()) {
