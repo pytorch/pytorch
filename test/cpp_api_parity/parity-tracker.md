@@ -105,7 +105,7 @@ torch.nn.PairwiseDistance|Yes|No
 torch.nn.L1Loss|Yes|No
 torch.nn.MSELoss|Yes|No
 torch.nn.CrossEntropyLoss|No|No
-torch.nn.CTCLoss|No|No
+torch.nn.CTCLoss|Yes|No
 torch.nn.NLLLoss|No|No
 torch.nn.PoissonNLLLoss|No|No
 torch.nn.KLDivLoss|Yes|No
