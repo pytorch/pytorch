@@ -8272,6 +8272,8 @@ class TestTorchDeviceType(TestCase):
                  torch.int64,
                  torch.int32,
                  torch.int16]
+        if self.device_type == 'cuda':  # 'cpu' and 'xla' do not support half
+            types.append(torch.half)
 
         # This won't test for 256bit instructions, since we usually
         # only work on 1 cacheline (1024bit) at a time and these
@@ -10995,7 +10997,7 @@ class TestTorchDeviceType(TestCase):
             ("acos", doubles, True, True, 'cpu'),
             ("acos", doubles, False, True, 'cuda'),
             ("asin", doubles, True, True, 'cpu'),
-            ("asin", doubles, False, True, 'cuda'),
+            ("asin", doubles, True, True, 'cuda'),
             ("atan", doubles, True, True, 'cpu'),
             ("atan", doubles, False, True, 'cuda'),
             ("bitwise_not", ints, True, True, 'cpu'),
@@ -11038,7 +11040,7 @@ class TestTorchDeviceType(TestCase):
             ("rsqrt", positives, True, True, 'cpu'),
             ("rsqrt", positives, True, True, 'cuda'),
             ("sin", doubles, True, True, 'cpu'),
-            ("sin", doubles, False, True, 'cuda'),
+            ("sin", doubles, True, True, 'cuda'),
             ("sinh", doubles, True, True, 'cpu'),
             ("sinh", doubles, False, True, 'cuda'),
             ("sigmoid", doubles, True, True, 'cpu'),

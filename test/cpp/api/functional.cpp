@@ -131,7 +131,7 @@ TEST_F(FunctionalTest, SoftMarginLossNoReduction) {
   auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output =
-      F::soft_margin_loss(input, target, torch::Reduction::None);
+      F::soft_margin_loss(input, target, torch::kNone);
   auto expected = torch::tensor({2.1269281, 0.01814993, 0.3132617, 3.0485873}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -144,7 +144,7 @@ TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
-  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::Reduction::None).weight(weight);
+  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight);
   auto output =
       F::multilabel_soft_margin_loss(input, target, options);
   auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
@@ -491,7 +491,7 @@ TEST_F(FunctionalTest, MultiLabelMarginLossNoReduction) {
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = F::multilabel_margin_loss(
-    input, target, torch::Reduction::None);
+    input, target, torch::kNone);
   auto expected = torch::tensor({0.8500}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -873,6 +873,26 @@ TEST_F(FunctionalTest, LayerNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
+TEST_F(FunctionalTest, LocalResponseNorm) {
+  const auto x = torch::arange(100, 118).resize_({3, 3, 2});
+  const auto y = F::local_response_norm(x, LocalResponseNormOptions(2));
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 2}));
+  const auto y_exp = torch::tensor(
+    {{{73.7788, 74.1462},
+      {60.1942, 60.3302},
+      {60.4609, 60.5865}},
+    {{75.8729, 76.2011},
+      {60.9331, 61.0390},
+      {61.1403, 61.2370}},
+    {{77.7387, 78.0303},
+      {61.5011, 61.5807},
+      {61.6563, 61.7279}}},
+    torch::kFloat
+  );
+  ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
+}
+
 TEST_F(FunctionalTest, Linear) {
   {
     const auto x = torch::arange(100, 118).resize_({3, 3, 2});
@@ -1186,12 +1206,35 @@ TEST_F(FunctionalTest, SoftplusDefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-TEST_F(FunctionalTest, Unfold) {
-  auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
-  auto output = F::unfold(input, UnfoldOptions({2, 4}).padding(1).stride(2));
-  auto expected_sizes = std::vector<int64_t>({2, 16, 6});
+TEST_F(FunctionalTest, Fold) {
+  auto input = torch::ones({1, 3 * 2 * 2, 2}, torch::kDouble);
+  auto output = F::fold(input, FoldOptions({3, 2}, {2, 2}));
+  auto expected = torch::tensor(
+      {{{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+        {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+        {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}}}},
+      torch::kDouble);
 
-  ASSERT_EQ(output.sizes(), expected_sizes);
+  ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 3, 3, 2}));
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, Unfold) {
+  auto input = torch::arange(0, 12, torch::kDouble).view({1, 2, 2, 3});
+  auto output = F::unfold(input, UnfoldOptions({2, 2}).padding(1).stride(2));
+  auto expected = torch::tensor(
+      {{{0.0, 0.0, 0.0, 4.0},
+        {0.0, 0.0, 3.0, 5.0},
+        {0.0, 1.0, 0.0, 0.0},
+        {0.0, 2.0, 0.0, 0.0},
+        {0.0, 0.0, 0.0, 10.0},
+        {0.0, 0.0, 9.0, 11.0},
+        {0.0, 7.0, 0.0, 0.0},
+        {6.0, 8.0, 0.0, 0.0}}},
+      torch::kDouble);
+
+  ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 8, 4}));
+  ASSERT_TRUE(output.allclose(expected));
 }
 
 TEST_F(FunctionalTest, Softshrink) {
@@ -1264,6 +1307,33 @@ TEST_F(FunctionalTest, Threshold) {
       }
     }
   }
+}
+
+TEST_F(FunctionalTest, BatchNorm1d) {
+  int num_features = 5;
+  double eps = 1e-05;
+  double momentum = 0.1;
+
+  auto input = torch::randn({2, 5});
+  auto mean = torch::randn(5);
+  auto variance = torch::rand(5);
+  auto weight = torch::ones({num_features});
+  auto bias = torch::zeros({num_features});
+  auto output = F::batch_norm(
+    input, mean, variance,
+    BatchNormOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
+    /*training=*/false);
+  auto expected = (input - mean) / torch::sqrt(variance + eps);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, BatchNorm1dDefaultOptions) {
+  auto input = torch::randn({2, 5});
+  auto mean = torch::randn(5);
+  auto variance = torch::rand(5);
+  auto output = F::batch_norm(input, mean, variance);
+  auto expected = (input - mean) / torch::sqrt(variance + 1e-5);
+  ASSERT_TRUE(output.allclose(expected));
 }
 
 TEST_F(FunctionalTest, Interpolate) {

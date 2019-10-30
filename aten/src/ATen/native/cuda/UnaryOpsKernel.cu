@@ -32,6 +32,14 @@ void logical_not_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void asin_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "asin_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::asin(a);
+    });
+  });
+}
+
 void ceil_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "ceil_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -158,6 +166,22 @@ void sign_kernel_cuda(TensorIterator& iter){
     }
 }
 
+void sin_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sin_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::sin(a);
+    });
+  });
+}
+
+void sinh_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sinh_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::sinh(a);
+    });
+  });
+}
+
 void sqrt_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sqrt_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -208,6 +232,7 @@ void lgamma_kernel_cuda(TensorIterator& iter) {
 
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
+REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
 REGISTER_DISPATCH(floor_stub, &floor_kernel_cuda);
@@ -219,6 +244,8 @@ REGISTER_DISPATCH(neg_stub, &neg_kernel_cuda);
 REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sign_stub, &sign_kernel_cuda);
+REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda);
+REGISTER_DISPATCH(sinh_stub, &sinh_kernel_cuda);
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
 REGISTER_DISPATCH(trunc_stub, &trunc_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
