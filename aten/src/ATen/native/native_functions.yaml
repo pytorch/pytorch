@@ -2348,15 +2348,12 @@
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _sin__cpu
-    CUDA: _sin__cuda
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _sin_out_cpu
-    CUDA: _sin_out_cuda
+    CPU: sin_out
+    CUDA: sin_out
 
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
