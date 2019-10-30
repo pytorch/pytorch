@@ -34,7 +34,7 @@ inline Tensor local_response_norm(
     const Tensor& input,
     const LocalResponseNormOptions& options) {
     auto dim = input.dim();
-    TORCH_CHECK( dim >=3 ,"Expected 3D or higher dimensionality input (got ",dim, " dimensions)");
+    TORCH_CHECK(dim >=3, "Expected 3D or higher dimensionality input (got ", dim, " dimensions)");
     auto div = input.mul(input).unsqueeze(1);
     if (dim == 3) {
       div = pad(div, PadOptions({0, 0, options.size() / 2, (options.size() - 1) / 2}));

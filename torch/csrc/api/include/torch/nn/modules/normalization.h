@@ -60,7 +60,7 @@ class TORCH_API LocalResponseNormImpl : public Cloneable<LocalResponseNormImpl> 
  public:
   LocalResponseNormImpl(int64_t size)
       : LocalResponseNormImpl(LocalResponseNormOptions(size)) {}
-  explicit LocalResponseNormImpl(const LocalResponseNormOptions & options_);
+  explicit LocalResponseNormImpl(const LocalResponseNormOptions& options_);
 
   Tensor forward(const Tensor& input);
 
