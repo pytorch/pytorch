@@ -1561,7 +1561,7 @@ TEST_F(FunctionalTest, CTCLoss) {
         torch::randn({50, 3, 15}, torch::kDouble).log_softmax(2);
       const auto loss = F::ctc_loss(
         log_probs, targets, input_lengths, target_lengths,
-        CTCLossOptions().reduction(at::Reduction::Reduction::None));
+        CTCLossOptions().reduction(torch::kNone));
       ASSERT_TRUE(loss.ge(0).all().item<bool>());
       ASSERT_TRUE(torch::allclose(
         -log_probs.sum(0).slice(1, 0, 1).view_as(loss), loss));
@@ -1574,7 +1574,7 @@ TEST_F(FunctionalTest, CTCLoss) {
         torch::randn({50, 3, 15}, torch::kDouble).log_softmax(2);
       const auto loss = F::ctc_loss(
         log_probs, targets, input_lengths, target_lengths,
-        CTCLossOptions().reduction(at::Reduction::Reduction::None));
+        CTCLossOptions().reduction(torch::kNone));
       ASSERT_TRUE(loss.ge(0).all().item<bool>());
       ASSERT_TRUE(torch::allclose(
           -log_probs.sum(0)
@@ -1595,15 +1595,13 @@ TEST_F(FunctionalTest, PoissonNLLLoss) {
     F::poisson_nll_loss(input, target)));
   ASSERT_TRUE(torch::allclose(component_wise_loss,
     F::poisson_nll_loss(input, target,
-    PoissonNLLLossOptions().reduction(Reduction::None))));
+    PoissonNLLLossOptions().reduction(torch::kNone))));
   ASSERT_TRUE(torch::allclose(torch::sum(component_wise_loss),
     F::poisson_nll_loss(input, target,
-    PoissonNLLLossOptions().reduction(Reduction::Sum))));
+    PoissonNLLLossOptions().reduction(torch::kSum))));
   ASSERT_TRUE(torch::allclose(torch::mean(component_wise_loss),
     F::poisson_nll_loss(input, target,
-    PoissonNLLLossOptions().reduction(Reduction::Mean))));
-  ASSERT_THROWS_WITH(F::poisson_nll_loss(input, target,
-    PoissonNLLLossOptions().reduction(Reduction::END)), "not valid");
+    PoissonNLLLossOptions().reduction(torch::kMean))));
 }
 
 TEST_F(FunctionalTest, BCEWithLogitsLoss) {

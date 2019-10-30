@@ -236,11 +236,13 @@ Tensor PoissonNLLLossImpl::forward(
 
 BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(
   const BCEWithLogitsLossOptions& options_) : options(options_) {
-    register_buffer("weight",options.weight());
-    register_buffer("pos_weight", options.pos_weight());
+  reset();
 }
 
-void BCEWithLogitsLossImpl::reset() {}
+void BCEWithLogitsLossImpl::reset() {
+  register_buffer("weight", options.weight());
+  register_buffer("pos_weight", options.pos_weight());
+}
 
 void BCEWithLogitsLossImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::BCEWithLogitsLoss()";

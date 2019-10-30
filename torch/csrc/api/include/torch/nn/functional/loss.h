@@ -212,19 +212,21 @@ inline Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets,
   const Tensor& input_lengths, const Tensor& target_lengths,
   const CTCLossOptions& options = {}) {
   return torch::ctc_loss(log_probs, targets, input_lengths, target_lengths,
-    options.blank(), options.reduction(), options.zero_infinity());
+    options.blank(), enumtype::reduction_get_enum(options.reduction()),
+    options.zero_infinity());
 }
 
 inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
                                const PoissonNLLLossOptions& options = {}) {
   TORCH_CHECK(
-    options.reduction() == Reduction::None ||
-    options.reduction() == Reduction::Mean ||
-    options.reduction() == Reduction::Sum,
-    options.reduction(), " is not valid"
+    c10::get_if<enumtype::kNone>(&options.reduction()) ||
+    c10::get_if<enumtype::kMean>(&options.reduction()) ||
+    c10::get_if<enumtype::kSum>(&options.reduction()),
+    enumtype::get_enum_name(options.reduction()), " is not valid"
   );
   return torch::poisson_nll_loss(input, target, options.log_input(),
-    options.full(), options.eps(), options.reduction());
+    options.full(), options.eps(),
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 inline Tensor binary_cross_entropy_with_logits(
@@ -238,7 +240,8 @@ inline Tensor binary_cross_entropy_with_logits(
   );
 
   return torch::binary_cross_entropy_with_logits(input, target,
-    options.weight(), options.pos_weight(), options.reduction());
+    options.weight(), options.pos_weight(),
+    enumtype::reduction_get_enum(options.reduction()));
 }
 
 } // namespace functional
