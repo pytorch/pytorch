@@ -1005,23 +1005,23 @@ graph(%x : Tensor,
         }
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
         assert len([x for x, _ in m._c._get_modules()
-                    if x.startswith('observer_for_')]) == 0, \
+                    if x.startswith('_observer_')]) == 0, \
             'Expected to have 0 observer submodules'
-        FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+        FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
                    .check('ClassType<Conv2d> = prim::GetAttr[name="conv"](%self)') \
                    .check_next('Tensor = prim::CallMethod[name="forward"]') \
-                   .check_not('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                   .check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
                    .run(str(get_forward_graph(m._c)))
         assert len([x for x, _ in m._c._get_module('conv')._get_modules()
-                    if x.startswith('observer_for_')]) == 3, \
+                    if x.startswith('_observer_')]) == 3, \
             'Expected to have 3 observer submodules'
-        FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
-                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
-                   .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
-                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+        FileCheck().check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                   .check_next('prim::CallMethod[name="forward"](%_observer_') \
+                   .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                   .check_next('prim::CallMethod[name="forward"](%_observer_') \
                    .check('Tensor = aten::conv2d') \
-                   .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
-                   .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+                   .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                   .check_next('prim::CallMethod[name="forward"](%_observer_') \
                    .run(str(m._c._get_module("conv")._get_method('conv2d_forward').graph))
 
     @_tmp_donotuse_dont_inline_everything
@@ -1044,17 +1044,17 @@ graph(%x : Tensor,
                 return self.sub(self.conv(x))
 
         def check_observed(s):
-            FileCheck().check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
-                       .check_next('prim::CallMethod[name="forward"](%observer_for_') \
-                       .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
-                       .check_next('prim::CallMethod[name="forward"](%observer_for_') \
-                       .check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
-                       .check_next('prim::CallMethod[name="forward"](%observer_for_') \
+            FileCheck().check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                       .check_next('prim::CallMethod[name="forward"](%_observer_') \
+                       .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                       .check_next('prim::CallMethod[name="forward"](%_observer_') \
+                       .check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                       .check_next('prim::CallMethod[name="forward"](%_observer_') \
                        .run(str(s))
 
         def check_not_observed(s):
-            FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
-                       .check_not('prim::CallMethod[name="forward"](%observer_for_') \
+            FileCheck().check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                       .check_not('prim::CallMethod[name="forward"](%_observer_') \
                        .run(str(s))
 
         m = torch.jit.script(M())
@@ -1118,15 +1118,15 @@ graph(%x : Tensor,
             }
             torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
             assert len([x for x, _ in m._c._get_modules()
-                        if x.startswith('observer_for_')]) == num_observers, \
+                        if x.startswith('_observer_')]) == num_observers, \
                 'Expected to have ' + str(num_observers) + ' observer submodules'
             c = FileCheck().check('ClassType<Conv2d> = prim::GetAttr[name="conv"]') \
                            .check_next('prim::CallMethod[name="forward"]') \
-                           .check_not('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
+                           .check_not('ClassType<Observer> = prim::GetAttr[name="_observer_') \
                            .check(relu_call)
             if num_observers == 1:
-                c = c.check('ClassType<Observer> = prim::GetAttr[name="observer_for_') \
-                     .check_next('prim::CallMethod[name="forward"](%observer_for_')
+                c = c.check('ClassType<Observer> = prim::GetAttr[name="_observer_') \
+                     .check_next('prim::CallMethod[name="forward"](%_observer_')
             c.run(str(get_forward_graph(m._c)))
             # TODO: add checks for conv and relu later, graph looks correct but this pr
             # has too many changes already
@@ -1153,8 +1153,9 @@ graph(%x : Tensor,
                 weight=weight_observer._c)
         }
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        assert m._c._get_module('conv')._get_module('observer_for_input.1')._get_attribute('dtype') != \
-            m._c._get_module('conv')._get_module('observer_for_weight.1')._get_attribute('dtype')
+        dtypes = set([obs._get_attribute('dtype') for x, obs in m._c._get_module('conv')._get_modules()
+                      if x.startswith('_observer_')])
+        assert len(dtypes) == 2, 'Expected to have 2 different types of dtype'
 
     @_tmp_donotuse_dont_inline_everything
     def test_insert_quant_dequant(self):
