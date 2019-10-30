@@ -237,6 +237,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
             "TensorDataContainer_pretty_print_tensor_item", [&] {
           stream << tensor_[i].item<scalar_t>();
         });
+        if (i != tensor_.sizes()[0] - 1) stream << ", ";
       }
       stream << "}";
     } else {

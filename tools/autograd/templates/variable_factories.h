@@ -30,7 +30,8 @@ namespace torch {
 ///
 /// NOTE: C++ `torch::tensor` by default gives a double tensor, which is
 /// different from Python `torch.tensor` that gives a float tensor by default.
-/// We are going to fix this discrepancy.
+/// We are going to fix this discrepancy by making `torch::tensor` give
+/// a float tensor by default.
 /// Tracking issue: https://github.com/pytorch/pytorch/issues/28902
 inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, const at::TensorOptions& options = {}) {
   return autograd::make_variable(
