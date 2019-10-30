@@ -131,7 +131,7 @@ TEST_F(FunctionalTest, SoftMarginLossNoReduction) {
   auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output =
-      F::soft_margin_loss(input, target, torch::Reduction::None);
+      F::soft_margin_loss(input, target, torch::kNone);
   auto expected = torch::tensor({2.1269281, 0.01814993, 0.3132617, 3.0485873}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -144,7 +144,7 @@ TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
-  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::Reduction::None).weight(weight);
+  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight);
   auto output =
       F::multilabel_soft_margin_loss(input, target, options);
   auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
@@ -491,7 +491,7 @@ TEST_F(FunctionalTest, MultiLabelMarginLossNoReduction) {
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = F::multilabel_margin_loss(
-    input, target, torch::Reduction::None);
+    input, target, torch::kNone);
   auto expected = torch::tensor({0.8500}, torch::kFloat);
   auto s = output.sum();
   s.backward();
@@ -1264,6 +1264,33 @@ TEST_F(FunctionalTest, Threshold) {
       }
     }
   }
+}
+
+TEST_F(FunctionalTest, BatchNorm1d) {
+  int num_features = 5;
+  double eps = 1e-05;
+  double momentum = 0.1;
+
+  auto input = torch::randn({2, 5});
+  auto mean = torch::randn(5);
+  auto variance = torch::rand(5);
+  auto weight = torch::ones({num_features});
+  auto bias = torch::zeros({num_features});
+  auto output = F::batch_norm(
+    input, mean, variance,
+    BatchNormOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
+    /*training=*/false);
+  auto expected = (input - mean) / torch::sqrt(variance + eps);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, BatchNorm1dDefaultOptions) {
+  auto input = torch::randn({2, 5});
+  auto mean = torch::randn(5);
+  auto variance = torch::rand(5);
+  auto output = F::batch_norm(input, mean, variance);
+  auto expected = (input - mean) / torch::sqrt(variance + 1e-5);
+  ASSERT_TRUE(output.allclose(expected));
 }
 
 TEST_F(FunctionalTest, Interpolate) {

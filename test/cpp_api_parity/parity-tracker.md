@@ -69,7 +69,7 @@ torch.nn.Softmax|Yes|No
 torch.nn.Softmax2d|Yes|No
 torch.nn.LogSoftmax|Yes|No
 torch.nn.AdaptiveLogSoftmaxWithLoss|No|No
-torch.nn.BatchNorm1d|No|No
+torch.nn.BatchNorm1d|Yes|No
 torch.nn.BatchNorm2d|No|No
 torch.nn.BatchNorm3d|No|No
 torch.nn.GroupNorm|No|No
@@ -93,7 +93,7 @@ torch.nn.TransformerDecoderLayer|No|No
 torch.nn.Identity|Yes|No
 torch.nn.Linear|Yes|No
 torch.nn.Bilinear|Yes|No
-torch.nn.Flatten|No|No
+torch.nn.Flatten|Yes|No
 torch.nn.Dropout|No|No
 torch.nn.Dropout2d|No|No
 torch.nn.Dropout3d|No|No
