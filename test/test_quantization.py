@@ -12,7 +12,7 @@ from torch.quantization import \
     quantize_dynamic, default_qconfig, default_debug_qconfig, default_qat_qconfig, \
     default_dynamic_qconfig, HistogramObserver, MinMaxObserver, PerChannelMinMaxObserver,\
     RecordingObserver, MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver, \
-    QuantWrapper
+    QuantWrapper, default_eval_fn
 
 from torch.quantization._quantize_script import quantize_script
 
