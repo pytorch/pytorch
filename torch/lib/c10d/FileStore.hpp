@@ -41,6 +41,10 @@ class FileStore : public Store {
 
   std::unordered_map<std::string, std::vector<uint8_t>> cache_;
 
+  // We employ a mutex to avoid multiple active file ops from a single
+  // instance of this class. We additionally employ file locking to
+  // protect against other accesses.
+  // This also protects cache_ and pos_.
   std::mutex activeFileOpLock_;
 };
 

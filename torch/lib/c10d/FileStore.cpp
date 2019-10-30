@@ -46,7 +46,8 @@ typename std::result_of<F()>::type syscall(F fn) {
 // RAII wrapper around flock(2)
 class Lock {
  public:
-  explicit Lock(int fd, int operation) : fd_(fd) {
+  Lock(int fd, int operation, std::unique_lock<std::mutex>&& activeOpLockHolder)
+      : fd_(fd), activeOpLockHolder_(std::move(activeOpLockHolder)) {
     flock(operation);
   }
 
@@ -59,6 +60,7 @@ class Lock {
   Lock(Lock&& other) noexcept {
     fd_ = other.fd_;
     other.fd_ = -1;
+    activeOpLockHolder_ = std::move(other.activeOpLockHolder_);
   }
 
   void unlock() {
@@ -66,10 +68,14 @@ class Lock {
       flock(LOCK_UN);
       fd_ = -1;
     }
+    if (activeOpLockHolder_) {
+      activeOpLockHolder_.unlock();
+    }
   }
 
  protected:
   int fd_;
+  std::unique_lock<std::mutex> activeOpLockHolder_;
 
   void flock(int operation) {
     auto rv = syscall(std::bind(::flock, fd_, operation));
@@ -82,7 +88,9 @@ class File {
   explicit File(
       const std::string& path,
       int flags,
-      std::chrono::milliseconds timeout) {
+      std::chrono::milliseconds timeout,
+      std::mutex& activeOpLock)
+      : activeOpLockHolder_(activeOpLock) {
     const auto start = std::chrono::steady_clock::now();
     while (true) {
       fd_ = syscall(std::bind(::open, path.c_str(), flags, 0644));
@@ -97,7 +105,9 @@ class File {
       if (timeout != c10d::Store::kNoTimeout && elapsed > timeout) {
         break;
       }
+      activeOpLockHolder_.unlock();
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      activeOpLockHolder_.lock();
     }
     SYSASSERT(fd_, "open(" + path + ")");
   }
@@ -107,11 +117,11 @@ class File {
   }
 
   Lock lockShared() {
-    return Lock(fd_, LOCK_SH);
+    return Lock(fd_, LOCK_SH, std::move(activeOpLockHolder_));
   }
 
   Lock lockExclusive() {
-    return Lock(fd_, LOCK_EX);
+    return Lock(fd_, LOCK_EX, std::move(activeOpLockHolder_));
   }
 
   off_t seek(off_t offset, int whence) {
@@ -182,6 +192,7 @@ class File {
 
  protected:
   int fd_;
+  std::unique_lock<std::mutex> activeOpLockHolder_;
 };
 
 off_t refresh(
@@ -232,8 +243,7 @@ FileStore::~FileStore() {
 
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   std::string regKey = regularPrefix_ + key;
-  std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDWR | O_CREAT, timeout_);
+  File file(path_, O_RDWR | O_CREAT, timeout_, activeFileOpLock_);
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
   file.write(regKey);
@@ -244,14 +254,12 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
   std::string regKey = regularPrefix_ + key;
   const auto start = std::chrono::steady_clock::now();
   while (true) {
-    std::unique_lock<std::mutex> l(activeFileOpLock_);
-    File file(path_, O_RDONLY, timeout_);
+    File file(path_, O_RDONLY, timeout_, activeFileOpLock_);
     auto lock = file.lockShared();
     auto size = file.size();
     if (cache_.count(regKey) == 0 && size == pos_) {
       // No new entries; release the shared lock and sleep for a bit
       lock.unlock();
-      l.unlock();
       const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::steady_clock::now() - start);
       if (timeout_ != kNoTimeout && elapsed > timeout_) {
@@ -270,8 +278,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
 }
 
 int64_t FileStore::addHelper(const std::string& key, int64_t i) {
-  std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDWR | O_CREAT, timeout_);
+  File file(path_, O_RDWR | O_CREAT, timeout_, activeFileOpLock_);
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_);
 
@@ -297,8 +304,7 @@ int64_t FileStore::add(const std::string& key, int64_t i) {
 }
 
 bool FileStore::check(const std::vector<std::string>& keys) {
-  std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDONLY, timeout_);
+  File file(path_, O_RDONLY, timeout_, activeFileOpLock_);
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_);
 
