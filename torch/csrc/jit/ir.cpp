@@ -1328,6 +1328,23 @@ void Node::removeFromList() {
   this->prev() = nullptr;
 }
 
+Block* Node::findCommonAncestorBlockWith(Node* n) {
+  std::unordered_set<const Block*> seen_blocks_rhs;
+
+  for (Block* rhs_block = n->owningBlock(); rhs_block;
+       rhs_block = rhs_block->parentBlock()) {
+    seen_blocks_rhs.insert(rhs_block);
+  }
+
+  for (Block* lhs_block = owningBlock(); lhs_block;
+       lhs_block = lhs_block->parentBlock()) {
+    if (seen_blocks_rhs.count(lhs_block)) {
+      return lhs_block;
+    }
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 inline const SourceRange& fakeRange() {
   static SourceRange range(std::make_shared<Source>(""), 0, 1);
   return range;
