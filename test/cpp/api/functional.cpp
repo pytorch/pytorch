@@ -1266,6 +1266,33 @@ TEST_F(FunctionalTest, Threshold) {
   }
 }
 
+TEST_F(FunctionalTest, BatchNorm1d) {
+  int num_features = 5;
+  double eps = 1e-05;
+  double momentum = 0.1;
+
+  auto input = torch::randn({2, 5});
+  auto mean = torch::randn(5);
+  auto variance = torch::rand(5);
+  auto weight = torch::ones({num_features});
+  auto bias = torch::zeros({num_features});
+  auto output = F::batch_norm(
+    input, mean, variance,
+    BatchNormOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
+    /*training=*/false);
+  auto expected = (input - mean) / torch::sqrt(variance + eps);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, BatchNorm1dDefaultOptions) {
+  auto input = torch::randn({2, 5});
+  auto mean = torch::randn(5);
+  auto variance = torch::rand(5);
+  auto output = F::batch_norm(input, mean, variance);
+  auto expected = (input - mean) / torch::sqrt(variance + 1e-5);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
 TEST_F(FunctionalTest, Interpolate) {
   {
     // 1D interpolation

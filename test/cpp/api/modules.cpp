@@ -1001,7 +1001,7 @@ TEST_F(ModulesTest, BatchNormStateful) {
   BatchNorm bn(5);
 
   // Is stateful by default.
-  ASSERT_TRUE(bn->options.stateful());
+  ASSERT_TRUE(bn->options.track_running_stats());
 
   ASSERT_TRUE(bn->running_mean.defined());
   ASSERT_EQ(bn->running_mean.dim(), 1);
@@ -1023,7 +1023,7 @@ TEST_F(ModulesTest, BatchNormStateful) {
   ASSERT_EQ(bn->bias.size(0), 5);
 }
 TEST_F(ModulesTest, BatchNormStateless) {
-  BatchNorm bn(BatchNormOptions(5).stateful(false).affine(false));
+  BatchNorm bn(BatchNormOptions(5).track_running_stats(false).affine(false));
 
   ASSERT_FALSE(bn->running_mean.defined());
   ASSERT_FALSE(bn->running_var.defined());
@@ -1033,7 +1033,7 @@ TEST_F(ModulesTest, BatchNormStateless) {
   ASSERT_THROWS_WITH(
       bn(torch::ones({2, 5})),
       "Calling BatchNorm::forward is only permitted "
-      "when the 'stateful' option is true (was false). "
+      "when the 'track_running_stats' option is true (was false). "
       "Use BatchNorm::pure_forward instead.");
 }
 
@@ -1049,6 +1049,71 @@ TEST_F(ModulesTest, BatchNormPureForward) {
   auto output = bn->pure_forward(input, mean, variance);
   auto expected = (input - mean) / torch::sqrt(variance + bn->options.eps());
   ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(ModulesTest, BatchNormLegacyWarning) {
+  std::stringstream buffer;
+  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
+
+  BatchNorm bn(5);
+
+  ASSERT_EQ(
+    count_substr_occurrences(
+      buffer.str(),
+      "torch::nn::BatchNorm module is deprecated"
+    ),
+  1);
+}
+
+TEST_F(ModulesTest, BatchNorm1dStateful) {
+  BatchNorm1d bn(BatchNorm1dOptions(5));
+
+  ASSERT_TRUE(bn->options.track_running_stats());
+
+  ASSERT_TRUE(bn->running_mean.defined());
+  ASSERT_EQ(bn->running_mean.dim(), 1);
+  ASSERT_EQ(bn->running_mean.size(0), 5);
+
+  ASSERT_TRUE(bn->running_var.defined());
+  ASSERT_EQ(bn->running_var.dim(), 1);
+  ASSERT_EQ(bn->running_var.size(0), 5);
+
+  ASSERT_TRUE(bn->num_batches_tracked.defined());
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 1);
+  ASSERT_EQ(bn->num_batches_tracked.size(0), 1);
+
+  ASSERT_TRUE(bn->options.affine());
+
+  ASSERT_TRUE(bn->weight.defined());
+  ASSERT_EQ(bn->weight.dim(), 1);
+  ASSERT_EQ(bn->weight.size(0), 5);
+
+  ASSERT_TRUE(bn->bias.defined());
+  ASSERT_EQ(bn->bias.dim(), 1);
+  ASSERT_EQ(bn->bias.size(0), 5);
+}
+
+TEST_F(ModulesTest, BatchNorm1dStateless) {
+  BatchNorm1d bn(BatchNorm1dOptions(5).track_running_stats(false).affine(false));
+
+  ASSERT_FALSE(bn->running_mean.defined());
+  ASSERT_FALSE(bn->running_var.defined());
+  ASSERT_FALSE(bn->num_batches_tracked.defined());
+  ASSERT_FALSE(bn->weight.defined());
+  ASSERT_FALSE(bn->bias.defined());
+}
+
+TEST_F(ModulesTest, BatchNorm1d) {
+  BatchNorm1d bn(BatchNorm1dOptions(5));
+  bn->eval();
+
+  auto input = torch::randn({2, 5}, torch::requires_grad());
+  auto output = bn->forward(input);
+  auto s = output.sum();
+  s.backward();
+  
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5})));
 }
 
 TEST_F(ModulesTest, Linear_CUDA) {
@@ -2303,9 +2368,17 @@ TEST_F(ModulesTest, PrettyPrintFunctional) {
 TEST_F(ModulesTest, PrettyPrintBatchNorm) {
   ASSERT_EQ(
       c10::str(BatchNorm(
-          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).stateful(
+          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(
               true))),
-      "torch::nn::BatchNorm(features=4, eps=0.5, momentum=0.1, affine=false, stateful=true)");
+      "torch::nn::BatchNorm(num_features=4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
+  ASSERT_EQ(
+      c10::str(BatchNorm1d(
+          BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false)
+          .track_running_stats(true))),
+      "torch::nn::BatchNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {
