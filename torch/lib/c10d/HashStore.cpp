@@ -12,9 +12,6 @@ namespace c10d {
 
 void HashStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   std::unique_lock<std::mutex> lock(m_);
-  if (map_.find(key) != map_.end()) {
-    throw std::runtime_error(("Key '" + key) + "' already set");
-  }
   map_[key] = data;
   cv_.notify_all();
 }
@@ -22,11 +19,14 @@ void HashStore::set(const std::string& key, const std::vector<uint8_t>& data) {
 std::vector<uint8_t> HashStore::get(const std::string& key) {
   std::unique_lock<std::mutex> lock(m_);
   auto it = map_.find(key);
-  if (it == map_.end()) {
-    return std::vector<uint8_t>();
+  if (it != map_.end()) {
+    return it->second;
   }
-
-  return it->second;
+  // Not found? Wait up to any Store timeout_.
+  lock.unlock();
+  wait({key}, timeout_);
+  lock.lock();
+  return map_[key];
 }
 
 void HashStore::wait(

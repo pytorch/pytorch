@@ -21,6 +21,17 @@ void testHelper(std::string prefix = "") {
     c10d::test::check(store, "key2", "value2");
   }
 
+  // get() waits up to timeout_.
+  {
+    c10d::HashStore hashStore;
+    c10d::PrefixStore store(prefix, hashStore);
+    std::thread th([&]() {
+      c10d::test::set(store, "key0", "value0");
+    });
+    c10d::test::check(store, "key0", "value0");
+    th.join();
+  }
+
   // Hammer on HashStore#add
   std::vector<std::thread> threads;
   const auto numThreads = 4;
