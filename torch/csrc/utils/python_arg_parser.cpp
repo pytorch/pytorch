@@ -669,7 +669,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
   }
   at::Tensor tensor;
   {
-    at::AutoNonVariableTypeMode guard_;
+    at::AutoNonVariableTypeMode guard;
     tensor = scalar_to_tensor(scalar);
     tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   }
