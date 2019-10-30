@@ -406,34 +406,7 @@ static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
   return self.nonzero_numpy();
 }
 
-static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "nonzero(Tensor input, *, Tensor out=None)|deprecated",
-    "nonzero(Tensor input, *, bool as_tuple)",
-  });
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if(r.has_torch_function()){
-    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
-    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
-  }
-  if (r.idx == 0) {
-    if (r.isNone(1)) {
-      return wrap(dispatch_nonzero(r.tensor(0)));
-    } else {
-      return wrap(dispatch_nonzero(r.tensor(0), r.tensor(1)));
-    }
-  } else {
-    if (r.toBool(1)) {
-      return wrap(dispatch_nonzero_numpy(r.tensor(0)));
-    } else {
-      return wrap(dispatch_nonzero(r.tensor(0)));
-    }
-  }
-  END_HANDLE_TH_ERRORS
-}
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs);
 
 static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
@@ -501,9 +474,9 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
   return ret;
 }
 
-// generated methods start here
+// generated forward declarations start here
 
-${py_methods}
+${py_signatures}
 
 static PyMethodDef torch_functions[] = {
   {"arange", (PyCFunction)(void(*)(void))THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
@@ -573,6 +546,43 @@ void initTorchFunctions(PyObject* module) {
   if (PyModule_AddObject(module, "_VariableFunctions", (PyObject*)&THPVariableFunctions) < 0) {
     throw python_error();
   }
+}
+
+// generated methods start here
+
+${py_methods}
+
+static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "nonzero(Tensor input, *, Tensor out=None)|deprecated",
+    "nonzero(Tensor input, *, bool as_tuple)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if(r.has_torch_function()){
+    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
+    PyObject* torch_api_function = PyObject_FastGetAttrString(
+        (PyObject*)&THPVariableFunctions, const_cast<char*>(r.get_func_name().data()));
+    return PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
+
+    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
+  }
+  if (r.idx == 0) {
+    if (r.isNone(1)) {
+      return wrap(dispatch_nonzero(r.tensor(0)));
+    } else {
+      return wrap(dispatch_nonzero(r.tensor(0), r.tensor(1)));
+    }
+  } else {
+    if (r.toBool(1)) {
+      return wrap(dispatch_nonzero_numpy(r.tensor(0)));
+    } else {
+      return wrap(dispatch_nonzero(r.tensor(0)));
+    }
+  }
+  END_HANDLE_TH_ERRORS
 }
 
 }} // namespace torch::autograd

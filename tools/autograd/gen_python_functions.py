@@ -89,6 +89,10 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 }
 """)
 
+PY_VARIABLE_FUNCTION_VARARGS_FORWARD_DECLARATION = CodeTemplate("""\
+static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs);
+""")
+
 # Check for __torch_function__ overrides
 PY_VARIABLE_FUNCTION_VARARGS = CodeTemplate("""\
 static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
@@ -103,7 +107,9 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 
   if(r.has_torch_function()){
     PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
-    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
+    PyObject* torch_api_function = PyObject_FastGetAttrString(
+        (PyObject*)&THPVariableFunctions, const_cast<char*>(r.get_func_name().data()));
+    return PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
   }
   ${declare_namedtuple_return_types}
   ${dispatch}
@@ -333,6 +339,7 @@ def get_type_default(declaration):
 
 def create_python_bindings(python_functions, has_self, is_module=False):
     """Generates Python bindings to ATen functions"""
+    py_signatures = []
     py_methods = []
     py_method_defs = []
     py_method_dispatch = []
@@ -794,6 +801,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if not is_module and not has_self:
             tmpl = PY_VARIABLE_FUNCTION_VARARGS
             env['flags'] += ' | METH_STATIC'
+            py_signatures.append(PY_VARIABLE_FUNCTION_VARARGS_FORWARD_DECLARATION.substitute(env))
 
         py_methods.append(tmpl.substitute(env))
         if name in BINARY_OP_NAMES:
@@ -805,6 +813,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         process_function(name, python_functions[name])
 
     return {
+        'py_signatures': py_signatures,
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
         'py_method_dispatch': py_method_dispatch,

@@ -127,7 +127,7 @@ def _implement_torch_function(
         # Use `public_api` instead of `implemenation` so __torch_function__
         # implementations can do equality/identity comparisons.
         result = overloaded_arg.__torch_function__(
-            public_api.__name__, args, kwargs)
+            public_api, args, kwargs)
 
         if result is not NotImplemented:
             return result

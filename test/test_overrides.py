@@ -29,7 +29,7 @@ def implements_diagonal(torch_function):
     """
     @functools.wraps(torch_function)
     def decorator(func):
-        HANDLED_FUNCTIONS_DIAGONAL[torch_function.__name__] = func
+        HANDLED_FUNCTIONS_DIAGONAL[torch_function] = func
         return func
     return decorator
 
@@ -123,7 +123,7 @@ def implements_sub(torch_function):
     "Register a torch function override for SubTensor"
     @functools.wraps(torch_function)
     def decorator(func):
-        HANDLED_FUNCTIONS_SUB[torch_function.__name__] = func
+        HANDLED_FUNCTIONS_SUB[torch_function] = func
         return func
     return decorator
 
@@ -169,7 +169,7 @@ def implements_sub_diagonal(torch_function):
     "Register a torch function override for SubDiagonalTensor"
     @functools.wraps(torch_function)
     def decorator(func):
-        HANDLED_FUNCTIONS_SUB_DIAGONAL[torch_function.__name__] = func
+        HANDLED_FUNCTIONS_SUB_DIAGONAL[torch_function] = func
         return func
     return decorator
 
@@ -205,7 +205,7 @@ def implements_tensor_like(torch_function):
     "Register a torch function override for TensorLike"
     @functools.wraps(torch_function)
     def decorator(func):
-        HANDLED_FUNCTIONS_TENSOR_LIKE[torch_function.__name__] = func
+        HANDLED_FUNCTIONS_TENSOR_LIKE[torch_function] = func
         return func
     return decorator
 
@@ -705,6 +705,7 @@ class TensorLike(object):
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS_TENSOR_LIKE:
+            breakpoint()
             return NotImplemented
         # In this case _torch_function_ should override TensorLike objects
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
