@@ -1071,7 +1071,7 @@ class TestDict(JitTestCase):
         self.assertEqual(fn(), {'ok': 10})
 
     def test_key_type(self):
-        with self.assertRaisesRegex(RuntimeError, "Expected key type 'None' to subtype"):
+        with self.assertRaisesRegex(RuntimeError, "but instead found type"):
             @torch.jit.script
             def fn(a):
                 # type: (Dict[str, int]) -> int

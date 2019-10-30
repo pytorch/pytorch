@@ -509,10 +509,11 @@ void IterableTree::addChild(
     if (child_len && static_len_) {
       // iterables run for the minimum length of all its leaves
       static_len_ = std::min(*child_len, *static_len_);
+    } else {
+      static_len_ = c10::nullopt;
     }
     emit_unrolled_ = emit_unrolled_ || child_unrolled;
   }
-
   children_.push_back(iter_value);
 }
 
