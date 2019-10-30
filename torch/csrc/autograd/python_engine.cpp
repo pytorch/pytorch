@@ -76,7 +76,10 @@ variable_list PythonEngine::execute_with_graph_task(
   try {
     return Engine::execute_with_graph_task(graph_task, graph_root);
   } catch (python_error& e) {
-    e.restore();
+    if (!PyErr_Occurred()) {
+      // Set the error indicator only if it is not set already.
+      e.restore();
+    }
     throw;
   }
 }

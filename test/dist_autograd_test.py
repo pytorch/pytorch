@@ -67,6 +67,22 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
     success = len(context_id_to_raised) == len(known_context_ids) and all(context_id_to_raised.values())
     return success
 
+def noop():
+    pass
+
+def wait_until_node_failure(rank):
+    '''
+        Loops until an RPC to the given rank doesn't fail. This is used to
+        indicate that the node has failed in unit tests.
+    '''
+    while True:
+        try:
+            rpc.rpc_sync("worker{}".format(rank), noop, args=())
+            time.sleep(0.1)
+        except Exception:
+            break
+
+
 
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
@@ -699,8 +715,11 @@ class DistAutogradTest(object):
 
             # Kill all odd rank nodes.
             if self.rank % 2 == 0:
-                # Wait a bit for all other nodes to die.
-                time.sleep(5)
+                # Wait for all other nodes to die.
+                for rank in range(self.world_size):
+                    if rank % 2 != 0:
+                        wait_until_node_failure(rank)
+
                 with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
@@ -822,7 +841,9 @@ class DistAutogradTest(object):
     def _nested_rpc_call_backward_error(t1, t2, dst):
         t1 = t1 * t2
         t2 = t1 + t2
-        res = rpc.rpc_sync('worker{}'.format(dst), DistAutogradTest._python_udf_with_backward_error, args=(t1, t2))
+        res = rpc.rpc_sync('worker{}'.format(dst),
+                           DistAutogradTest._python_udf_with_backward_error,
+                           args=(t1, t2))
         return torch.chain_matmul(t1, t2, res)
 
 
@@ -831,7 +852,9 @@ class DistAutogradTest(object):
         t1 = torch.rand((3, 3), requires_grad=True)
         t2 = torch.rand((3, 3), requires_grad=True)
         with dist_autograd.context() as context_id:
-            loss = rpc.rpc_sync('worker{}'.format(self._next_rank()), DistAutogradTest._nested_rpc_call_backward_error, args=(t1, t2, self._next_rank()))
+            loss = rpc.rpc_sync('worker{}'.format(self._next_rank()),
+                                DistAutogradTest._nested_rpc_call_backward_error,
+                                args=(t1, t2, self._next_rank()))
             with self.assertRaisesRegex(RuntimeError, 'Simulate error on backward pass'):
                 dist_autograd.backward([loss.sum()])
 
@@ -844,10 +867,10 @@ class DistAutogradTest(object):
     def _wait_backward_done():
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
-            pass
 
     @unittest.skipIf(TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP,
-                     "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
+                     "Skipping this test temporarily since ProcessGroupAgent " +
+                     "does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure_python_udf(self):
         with dist_autograd.context() as context_id:
@@ -866,8 +889,9 @@ class DistAutogradTest(object):
                 return
 
             if self.rank == 0:
-                # Wait a bit for rank 2 to die.
-                time.sleep(5)
+                # Wait for rank 2 to die.
+                wait_until_node_failure(2)
+
                 with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward([res.sum()])
@@ -899,7 +923,9 @@ class DistAutogradTest(object):
 
         # Now run distributed autograd.
         with dist_autograd.context() as context_id:
-            loss = rpc.rpc_sync('worker{}'.format(self._next_rank()), DistAutogradTest._nested_python_udf, args=(t1, t2, self._next_rank()))
+            loss = rpc.rpc_sync('worker{}'.format(self._next_rank()),
+                                DistAutogradTest._nested_python_udf,
+                                args=(t1, t2, self._next_rank()))
             dist_autograd.backward([loss.sum()])
 
             grads = dist_autograd.get_gradients(context_id)

@@ -3,9 +3,10 @@
 #include <exception>
 #include <string>
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/THP_export.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/utils/auto_gil.h>
 
 #define HANDLE_TH_ERRORS                                                       \
   try {
@@ -44,7 +45,11 @@ extern PyObject *THPException_FatalError;
 struct python_error : public std::exception {
   python_error() : type(nullptr), value(nullptr), traceback(nullptr) {}
 
-  python_error(const python_error &other) : type(other.type), value(other.value), traceback(other.traceback) {
+  python_error(const python_error& other)
+      : type(other.type),
+        value(other.value),
+        traceback(other.traceback),
+        message(other.message) {
     AutoGIL gil;
     Py_XINCREF(type);
     Py_XINCREF(value);
@@ -55,6 +60,7 @@ struct python_error : public std::exception {
     type = other.type;
     value = other.value;
     traceback = other.traceback;
+    message = std::move(other.message);
     other.type = nullptr;
     other.value = nullptr;
     other.traceback = nullptr;
@@ -70,20 +76,32 @@ struct python_error : public std::exception {
   }
 
   virtual const char* what() const noexcept override {
-    // Retrieve the error message from the value.
-    if (value != nullptr && value != Py_None) {
+    return message.c_str();
+  }
+
+  void build_message() {
+    // Retrieve the error message from the value if 'message' is not set.
+    if (value != nullptr) {
       AutoGIL gil;
       Py_XINCREF(value);
       PyObject* pyStr = PyObject_Str(value);
-      if (pyStr != Py_None && pyStr != nullptr) {
-        PyObject* str = PyUnicode_AsEncodedString(pyStr, "utf-8", "strict");
-        const auto& ret = PyBytes_AS_STRING(str);
-        Py_XDECREF(pyStr);
-        Py_XDECREF(str);
-        return ret;
-      }
+      TORCH_INTERNAL_ASSERT(pyStr != nullptr);
+
+      PyObject* encodedString =
+          PyUnicode_AsEncodedString(pyStr, "utf-8", "strict");
+      TORCH_INTERNAL_ASSERT(encodedString != nullptr);
+
+      char* bytes = PyBytes_AS_STRING(encodedString);
+      TORCH_INTERNAL_ASSERT(bytes != nullptr);
+
+      // Set the message.
+      message = std::string(bytes);
+      Py_XDECREF(pyStr);
+      Py_XDECREF(encodedString);
+      Py_XDECREF(value);
+    } else {
+      message = "python_error";
     }
-    return "";
   }
 
   /** Saves the exception so that it can be re-thrown on a different thread */
@@ -95,6 +113,7 @@ struct python_error : public std::exception {
     Py_XDECREF(value);
     Py_XDECREF(traceback);
     PyErr_Fetch(&type, &value, &traceback);
+    build_message();
   }
 
   /** Sets the current Python error from this exception */
@@ -111,6 +130,9 @@ struct python_error : public std::exception {
   PyObject* type;
   PyObject* value;
   PyObject* traceback;
+
+  // Message to return to the user when 'what()' is invoked.
+  std::string message;
 };
 
 #ifdef _THP_CORE
