@@ -89,7 +89,7 @@ YAML_SOURCES = [
     File("binary_update_htmls.yml"),
     File("binary-build-tests.yml"),
     File("workflows.yml"),
-    File("windows-build-test"),
+    File("windows-build-test.yml"),
     Listgen(pytorch_build_definitions.get_workflow_jobs, 3),
     File("workflows-pytorch-macos-builds.yml"),
     File("workflows-pytorch-android-gradle-build.yml"),
