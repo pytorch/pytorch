@@ -183,7 +183,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
 
   at::Tensor convert_to_tensor(at::TensorOptions options) const {
     if (!options.has_dtype()) {
-      options = options.dtype(tensor_data_container.scalar_type());
+      options = options.dtype(scalar_type_);
     }
 
     if (is_scalar()) {
