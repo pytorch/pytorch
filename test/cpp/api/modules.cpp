@@ -2127,12 +2127,12 @@ TEST_F(ModulesTest, BCEWithLogitsLoss) {
     const auto pos_weight = torch::tensor({1., 1.});
 
     const auto out1 = BCEWithLogitsLoss()(output, target);
-    // ASSERT_TRUE(torch::isfinite(out1).all().item()); TODO(isfinite)
+    ASSERT_TRUE(torch::isfinite(out1).all().item<bool>());
 
     const auto out2 = BCEWithLogitsLoss(
       BCEWithLogitsLossOptions().pos_weight(pos_weight)
     )(output, target);
-    // ASSERT_TRUE(torch::isfinite(out2).all().item()); TODO(isfinite)
+    ASSERT_TRUE(torch::isfinite(out2).all().item<bool>());
   }
 }
 
