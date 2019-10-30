@@ -278,12 +278,10 @@ void conv2d_backward_out_cpu_template(
     const int64_t batch_size = input.size(0);
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       AutoNonVariableTypeMode guard;
-
       for (int64_t t = start; t < end; t++) {
         Tensor grad_input_t = grad_input[t];
         Tensor grad_output_t = grad_output[t];
         Tensor fgrad_input_t = fgrad_input[t];
-
         conv2d_backward_update_grad_input_frame(
             grad_input_t,
             grad_output_t,
@@ -490,11 +488,11 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv2d_forward_out_cpu(
     output.resize_({batch_size, n_output_plane, output_height, output_width});
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-      for (auto t = start; t < end; t++) {
+      AutoNonVariableTypeMode guard;
+      for (int64_t t = start; t < end; t++) {
         Tensor input_t = self[t];
         Tensor output_t = output[t];
         Tensor finput_t = finput[t];
-
         conv2d_update_output_frame(
             input_t,
             output_t,
