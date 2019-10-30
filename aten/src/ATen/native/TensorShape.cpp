@@ -504,7 +504,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     //     for `as_strided` is not as efficient as that of `view` (since the
     //     former is meant to handle general cases). We will redo a
     //     `THTensor_compute_stride` in `view` but that is quite cheap anyways.
-    return at::view(self, shape);
+    return self.view(shape);
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
