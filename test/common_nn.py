@@ -1835,12 +1835,6 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
-        constructor=wrap_functional(F.interpolate, size=None, scale_factor=2., mode='nearest'),
-        input_size=(2048, 256, 8, 8),
-        fullname='interpolate_nearest_2d_launch_configs_grid',
-        pickle=False,
-    ),
-    dict(
         constructor=wrap_functional(F.interpolate, size=2, scale_factor=None, mode='nearest'),
         input_size=(1, 128, 1, 1),
         fullname='interpolate_nearest_2d_launch_configs',
