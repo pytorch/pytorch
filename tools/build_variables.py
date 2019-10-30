@@ -298,7 +298,6 @@ def add_torch_libs():
         "torch/csrc/distributed/rpc/rref.cpp",
         "torch/csrc/distributed/rpc/rref_context.cpp",
         "torch/csrc/jit/init.cpp",
-        "torch/csrc/jit/grad_executor.cpp",
         "torch/csrc/jit/passes/inline_fork_wait.cpp",
         "torch/csrc/jit/passes/onnx.cpp",
         "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",

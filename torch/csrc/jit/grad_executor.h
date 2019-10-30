@@ -10,7 +10,7 @@ namespace detail {
 
 struct DifferentiableGraphBackwardImpl;
 
-struct DifferentiableGraphBackward : public autograd::Node {
+struct TORCH_API DifferentiableGraphBackward : public autograd::Node {
   virtual std::string toString() const;
   DifferentiableGraphBackward(GraphExecutor executor, size_t input_size, size_t capture_size);
   std::shared_ptr<DifferentiableGraphBackwardImpl> pImpl;
