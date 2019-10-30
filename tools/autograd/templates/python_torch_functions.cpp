@@ -410,22 +410,11 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "numel(Tensor input)",
-  }, /*traceable=*/false);
+static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs);
 
-  ParsedArgs<1> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
+// generated forward declarations start here
 
-  if (r.idx == 0) {
-    return wrap(r.tensor(0).numel());
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
+${py_signatures}
 
 // Wrapper converts a raised TypeError into returning NotImplemented
 // Used to implement binary arithmetic operators
@@ -439,10 +428,6 @@ static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, P
   }
   return ret;
 }
-
-// generated forward declarations start here
-
-${py_signatures}
 
 static PyMethodDef torch_functions[] = {
   {"arange", (PyCFunction)(void(*)(void))THPVariable_arange, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
@@ -553,4 +538,29 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "numel(Tensor input)",
+  }, /*traceable=*/false);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
+    PyObject* torch_api_function = PyObject_FastGetAttrString(
+        (PyObject*)&THPVariableFunctions, const_cast<char*>(r.get_func_name().data()));
+    return PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
+
+    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
+  }
+
+  if (r.idx == 0) {
+    return wrap(r.tensor(0).numel());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 }} // namespace torch::autograd

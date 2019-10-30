@@ -656,7 +656,6 @@ TENSOR_LIKE_OVERRIDES = tuple(t[0] for t in TENSOR_LIKE_TORCH_IMPLEMENTATIONS)
 # TODO make these functions overridable
 TENSOR_LIKE_SKIP_TESTS = (
     torch.sparse_coo_tensor,
-    torch.numel,
 )
 
 def generate_tensor_like_torch_implementations():
