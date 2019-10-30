@@ -2651,7 +2651,7 @@ class _TestTorchMixin(object):
 
     def test_put_(self):
         def check(dst, idx, value):
-            expected = dst.clone().view(-1).index_copy_(
+            expected = dst.clone(memory_format=torch.contiguous_format).view(-1).index_copy_(
                 0, idx.contiguous().view(-1), value.contiguous().view(-1))
             expected = expected.view_as(dst)
             dst.put_(idx, value)
@@ -8272,6 +8272,8 @@ class TestTorchDeviceType(TestCase):
                  torch.int64,
                  torch.int32,
                  torch.int16]
+        if self.device_type == 'cuda':  # 'cpu' and 'xla' do not support half
+            types.append(torch.half)
 
         # This won't test for 256bit instructions, since we usually
         # only work on 1 cacheline (1024bit) at a time and these
@@ -11295,6 +11297,7 @@ class TestTorchDeviceType(TestCase):
 
         self.assertEqual((0, 0), fn(torch.addmm, (0, 0), (0, 0), (0, 0)).shape)
         self.assertEqual((5, 6), fn(torch.addmm, (5, 6), (5, 0), (0, 6)).shape)
+        self.assertEqual((0, 1), fn(torch.addmm, (1, ), (0, 17), (17, 1)).shape)
 
         # mv, addmv
         self.assertEqual((0,), fn(torch.mv, (0, 0), (0,)).shape)
@@ -12493,7 +12496,7 @@ class TestTorchDeviceType(TestCase):
         else:
             check_sum_all(torch.tensor([True, False, True], dtype=torch.bool, device=device))
 
-    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn, compare_data=True):
+    def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn, compare_data=True, default_is_preserve=False):
         nhwc = input_generator_fn(device)
         # nhwc is not memory dense, but looks like channels last
         nhwc = nhwc[:, :, ::2, ::2]
@@ -12514,8 +12517,13 @@ class TestTorchDeviceType(TestCase):
 
         nhwc = input_generator_fn(device)
         clone = transformation_fn(nhwc)
-        self.assertTrue(clone.is_contiguous())
-        self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
+
+        if default_is_preserve:
+            self.assertFalse(clone.is_contiguous())
+            self.assertTrue(clone.is_contiguous(memory_format=torch.channels_last))
+        else:
+            self.assertTrue(clone.is_contiguous())
+            self.assertFalse(clone.is_contiguous(memory_format=torch.channels_last))
         if compare_data:
             self.assertEqual(nhwc, clone)
 
@@ -12551,7 +12559,7 @@ class TestTorchDeviceType(TestCase):
         def transformation_fn(tensor, **kwargs):
             return tensor.clone(**kwargs)
 
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn)
+        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, True)
 
     @onlyCPU
     @dtypes(torch.double)
@@ -12573,33 +12581,6 @@ class TestTorchDeviceType(TestCase):
 
         def transformation_fn(tensor, **kwargs):
             return torch.empty_like(tensor, **kwargs)
-
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
-
-    def test_memory_format_full_like_strides(self, device):
-        def input_generator_fn(device):
-            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
-
-        def transformation_fn(tensor, **kwargs):
-            return torch.full_like(tensor, 7, **kwargs)
-
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
-
-    def test_memory_format_ones_like_strides(self, device):
-        def input_generator_fn(device):
-            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
-
-        def transformation_fn(tensor, **kwargs):
-            return torch.ones_like(tensor, **kwargs)
-
-        self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
-
-    def test_memory_format_rand_like_strides(self, device):
-        def input_generator_fn(device):
-            return torch.randn((10, 3, 32, 32), device=device, dtype=torch.float32).contiguous(memory_format=torch.channels_last)
-
-        def transformation_fn(tensor, **kwargs):
-            return torch.rand_like(tensor, **kwargs)
 
         self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, compare_data=False)
 
@@ -14170,6 +14151,50 @@ def generate_tensor_op_tests(cls):
         caller(cls, *test)
 
 
+tensor_binary_ops = [
+    '__lt__', '__le__',
+    '__gt__', '__ge__',
+    '__eq__', '__ne__',
+
+    '__add__', '__radd__', '__iadd__',
+    '__sub__', '__rsub__', '__isub__',
+    '__mul__', '__rmul__', '__imul__',
+    '__matmul__', '__rmatmul__', '__imatmul__',
+    '__truediv__', '__rtruediv__', '__itruediv__',
+    '__floordiv__', '__rfloordiv__', '__ifloordiv__',
+    '__mod__', '__rmod__', '__imod__',
+    '__divmod__', '__rdivmod__', '__idivmod__',
+    '__pow__', '__rpow__', '__ipow__',
+    '__lshift__', '__rlshift__', '__ilshift__',
+    '__rshift__', '__rrshift__', '__irshift__',
+    '__and__', '__rand__', '__iand__',
+    '__xor__', '__rxor__', '__ixor__',
+    '__or__', '__ror__', '__ior__',
+]
+
+
+# Test that binary math operations return NotImplemented for unknown types.
+def generate_not_implemented_tests(cls):
+    class UnknownType:
+        pass
+
+    for op in tensor_binary_ops:
+        @dtypes(*_types)
+        def test(self, device, dtype):
+            # Generate the inputs
+            tensor = _small_2d(dtype, device)
+
+            # Runs the tensor op on the device
+            result = getattr(tensor, op)(UnknownType())
+            self.assertEqual(result, NotImplemented)
+
+        test_name = "test_{}_not_implemented".format(op)
+        assert not hasattr(cls, test_name), "{0} already in {1}".format(
+            test_name, cls.__name__)
+
+        setattr(cls, test_name, test)
+
+
 class TestTensorDeviceOps(TestCase):
     pass
 
@@ -14183,6 +14208,7 @@ class TestTorch(TestCase, _TestTorchMixin):
 # pytest will fail.
 add_neg_dim_tests()
 generate_tensor_op_tests(TestTensorDeviceOps)
+generate_not_implemented_tests(TestTorchDeviceType)
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 instantiate_device_type_tests(TestTensorDeviceOps, globals(), except_for='cpu')
