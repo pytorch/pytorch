@@ -434,41 +434,49 @@ TEST(TensorTest, TensorCtorZeroSizedDim) {
     auto tensor = torch::tensor({});
     ASSERT_EQ(tensor.numel(), 0);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({0}));
+    ASSERT_EQ(tensor.dtype(), torch::kFloat);
+    ASSERT_FALSE(tensor.requires_grad());
   }
   {
     auto tensor = torch::tensor({{}, {}});
     ASSERT_EQ(tensor.numel(), 0);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({2, 0}));
+    ASSERT_EQ(tensor.dtype(), torch::kFloat);
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
     auto tensor = torch::tensor({{{}, {}}});
     ASSERT_EQ(tensor.numel(), 0);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 2, 0}));
+    ASSERT_EQ(tensor.dtype(), torch::kFloat);
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
     auto tensor = torch::tensor({{{}}});
     ASSERT_EQ(tensor.numel(), 0);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 0}));
+    ASSERT_EQ(tensor.dtype(), torch::kFloat);
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
     auto tensor = torch::tensor({{{{{{{{}}}}}}}});
     ASSERT_EQ(tensor.numel(), 0);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 1, 1, 1, 1, 1, 0}));
+    ASSERT_EQ(tensor.dtype(), torch::kFloat);
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
     auto tensor = torch::tensor({{{{{{{{}}}}, {{{{}}}}}}}});
     ASSERT_EQ(tensor.numel(), 0);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 1, 2, 1, 1, 1, 0}));
+    ASSERT_EQ(tensor.dtype(), torch::kFloat);
     ASSERT_FALSE(tensor.requires_grad());
   }
   {
     auto tensor = torch::tensor({{{{{{{{{{}}}}}}}}}});
     ASSERT_EQ(tensor.numel(), 0);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 1, 1, 1, 1, 1, 1, 1, 1, 0}));
+    ASSERT_EQ(tensor.dtype(), torch::kFloat);
     ASSERT_FALSE(tensor.requires_grad());
   }
 }
