@@ -2357,15 +2357,9 @@
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _sinh__cpu
-    CUDA: _sinh__cuda
 
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _sinh_out_cpu
-    CUDA: _sinh_out_cuda
 
 - func: detach(Tensor self) -> Tensor
   use_c10_dispatcher: full
