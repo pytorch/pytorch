@@ -1206,12 +1206,35 @@ TEST_F(FunctionalTest, SoftplusDefaultOptions) {
   ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
-TEST_F(FunctionalTest, Unfold) {
-  auto input = torch::randn({2, 2, 4, 4}, torch::requires_grad());
-  auto output = F::unfold(input, UnfoldOptions({2, 4}).padding(1).stride(2));
-  auto expected_sizes = std::vector<int64_t>({2, 16, 6});
+TEST_F(FunctionalTest, Fold) {
+  auto input = torch::ones({1, 3 * 2 * 2, 2}, torch::kDouble);
+  auto output = F::fold(input, FoldOptions({3, 2}, {2, 2}));
+  auto expected = torch::tensor(
+      {{{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+        {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
+        {{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}}}},
+      torch::kDouble);
 
-  ASSERT_EQ(output.sizes(), expected_sizes);
+  ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 3, 3, 2}));
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, Unfold) {
+  auto input = torch::arange(0, 12, torch::kDouble).view({1, 2, 2, 3});
+  auto output = F::unfold(input, UnfoldOptions({2, 2}).padding(1).stride(2));
+  auto expected = torch::tensor(
+      {{{0.0, 0.0, 0.0, 4.0},
+        {0.0, 0.0, 3.0, 5.0},
+        {0.0, 1.0, 0.0, 0.0},
+        {0.0, 2.0, 0.0, 0.0},
+        {0.0, 0.0, 0.0, 10.0},
+        {0.0, 0.0, 9.0, 11.0},
+        {0.0, 7.0, 0.0, 0.0},
+        {6.0, 8.0, 0.0, 0.0}}},
+      torch::kDouble);
+
+  ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 8, 4}));
+  ASSERT_TRUE(output.allclose(expected));
 }
 
 TEST_F(FunctionalTest, Softshrink) {
