@@ -77,7 +77,7 @@ struct TensorDataContainer {
   // the innermost `TensorDataContainer`.
   TensorDataContainer() :
       sizes_({0}),
-      scalar_type_(at::ScalarType::Undefined),
+      scalar_type_(at::kFloat),
       type_(TensorDataContainerType::InitList) {}
 #define TENSOR(T, S) \
   TensorDataContainer(T value) : \
