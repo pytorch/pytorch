@@ -8,7 +8,6 @@ import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 from dist_utils import INIT_METHOD_TEMPLATE, dist_init, TEST_CONFIG
-from torch.distributed.rpc import RpcBackend
 
 import threading
 
@@ -258,6 +257,18 @@ class DistAutogradTest(object):
 
     def _test_graph(self, fn):
         dst_rank = (self.rank + 1) % self.world_size
+
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
@@ -307,6 +318,18 @@ class DistAutogradTest(object):
     @dist_init(setup_model_parallel=True)
     def test_graph_for_py_nested_call(self):
         dst_rank = (self.rank + 1) % self.world_size
+
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
@@ -361,6 +384,18 @@ class DistAutogradTest(object):
     @dist_init(setup_model_parallel=True)
     def test_graph_for_py_nested_call_itself(self):
         dst_rank = (self.rank + 1) % self.world_size
+
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
         with dist_autograd.context() as context_id:
             t1 = torch.ones(3, 3, requires_grad=True)
             t2 = torch.zeros(3, 3, requires_grad=True)
@@ -469,6 +504,17 @@ class DistAutogradTest(object):
 
     @dist_init(setup_model_parallel=True)
     def test_context_cleanup_nested_rpc(self):
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
         dst_rank = (self.rank + 1) % self.world_size
         nested_dst_rank = (dst_rank + 1) % self.world_size
         with dist_autograd.context() as context_id:
@@ -685,10 +731,22 @@ class DistAutogradTest(object):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @unittest.skipIf(TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP,
+    @unittest.skip("Using sleep to simulate syncronization is flaky")
+    @unittest.skipIf(TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure(self):
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+
         with dist_autograd.context() as context_id:
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
@@ -702,7 +760,7 @@ class DistAutogradTest(object):
             # Kill all odd rank nodes.
             if self.rank % 2 == 0:
                 # Wait a bit for all other nodes to die.
-                time.sleep(5)
+                time.sleep(5)  # This is flaky.
                 with self.assertRaisesRegex(RuntimeError, "Request aborted during client shutdown"):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
