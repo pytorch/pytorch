@@ -129,7 +129,7 @@ jobs:
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
   pytorch_windows_build:
-    executor: windows-cuda
+    executor: windows-cpu-with-nvidia-cuda
     environment:
       BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
       SCCACHE_BUCKET: "ossci-compiler-cache"
@@ -158,7 +158,7 @@ jobs:
             .jenkins/pytorch/win-build.sh
 
   pytorch_windows_test:
-    executor: windows-nvidia-gpu
+    executor: windows-with-nvidia-gpu
     environment:
       BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
       SCCACHE_BUCKET: "ossci-compiler-cache"
