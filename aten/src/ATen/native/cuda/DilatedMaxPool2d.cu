@@ -79,6 +79,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data,
                                    const int stride_w, const int pad_h, const int pad_w,
                                    const int dilation_h, const int dilation_w,
                                    const int in_stride_c, const int in_stride_h, const int in_stride_w,
+                                   const int offsetH, const int offsetW,
                                    scalar_t* top_data, int64_t* top_mask) {
   extern __shared__ int smem[];
   int *out_mask_cached = smem;
@@ -106,52 +107,43 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data,
 
   int oH = (pooled_height + gridDim.z-1) / gridDim.z;
   int oW = (pooled_width + gridDim.y-1) / gridDim.y;
-  //int ostartH = threadIdx.z + blockIdx.z*oH;
-  //int ostartW = threadIdx.y + blockIdx.y*oW;
+  int ostartH = threadIdx.z + blockIdx.z*oH;
+  int oendH = ::min(ostartH+oH, pooled_height);
+  int ostartW = threadIdx.y + blockIdx.y*oW;
+  int oendW = ::min(ostartW+oW, pooled_width);
 
-  for (int ostartH = threadIdx.z + blockIdx.z*oH; ostartH < pooled_height; ostartH += 65535) {
-    if (ostartH >= pooled_height) break;
-    for (int ostartW = threadIdx.y + blockIdx.y*oW; ostartW < pooled_width; ostartW += 65535) {
-      if (ostartW >= pooled_width) break;
-      int oendH = ::min(ostartH+oH, pooled_height);
-      int oendW = ::min(ostartW+oW, pooled_width);
-
-      for (int oh = ostartH; oh < oendH; oh+=blockDim.z) {
-        for (int ow = ostartW; ow < oendW; ow+=blockDim.y) {
-          int hstart = oh * stride_h - pad_h;
-          int wstart = ow * stride_w - pad_w;
-          int hend = min(hstart + (kernel_h - 1) * dilation_h + 1, height);
-          int wend = min(wstart + (kernel_w - 1) * dilation_w + 1, width);
-          while(hstart < 0)
-            hstart += dilation_h;
-          while(wstart < 0)
-            wstart += dilation_w;
-          for (int ih = hstart; ih < hend; ih++) {
-            for (int iw = wstart; iw < wend; iw++) {
-              const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
-              for(int c = threadIdx.x; c < channels; c+= blockDim.x) {
-                scalar_t val = ptr_input[c];
-                if ((scalar_cast<accscalar_t>(val) > out_cached[c]) || THCNumerics<scalar_t>::isnan(val)) {
-                  out_cached[c] = scalar_cast<accscalar_t>(val);
-                  out_mask_cached[c] = ih * width + iw;
-                }
-              }
-            }
-          }
-          scalar_t *ptr_output_data = top_data + (oh * pooled_width + ow) * channels;
-          int64_t *ptr_output_mask = top_mask + (oh * pooled_width + ow) * channels;
+  for (int oh = ostartH; oh < oendH; oh+=blockDim.z) {
+    for (int ow = ostartW; ow < oendW; ow+=blockDim.y) {
+      int hstart = (offsetH + oh) * stride_h - pad_h;
+      int wstart = (offsetW + ow) * stride_w - pad_w;
+      int hend = min(hstart + (kernel_h - 1) * dilation_h + 1, height);
+      int wend = min(wstart + (kernel_w - 1) * dilation_w + 1, width);
+      while(hstart < 0)
+        hstart += dilation_h;
+      while(wstart < 0)
+        wstart += dilation_w;
+      for (int ih = hstart; ih < hend; ih++) {
+        for (int iw = wstart; iw < wend; iw++) {
+          const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
           for(int c = threadIdx.x; c < channels; c+= blockDim.x) {
-            ptr_output_data[c] = out_cached[c];
-            ptr_output_mask[c] = out_mask_cached[c];
-            out_cached[c] = scalar_t(0.0);
-            out_mask_cached[c] = 0;
+            scalar_t val = ptr_input[c];
+            if ((scalar_cast<accscalar_t>(val) > out_cached[c]) || THCNumerics<scalar_t>::isnan(val)) {
+              out_cached[c] = scalar_cast<accscalar_t>(val);
+              out_mask_cached[c] = ih * width + iw;
+            }
           }
         }
       }
+      scalar_t *ptr_output_data = top_data + (oh * pooled_width + ow) * channels;
+      int64_t *ptr_output_mask = top_mask + (oh * pooled_width + ow) * channels;
+      for(int c = threadIdx.x; c < channels; c+= blockDim.x) {
+        ptr_output_data[c] = out_cached[c];
+        ptr_output_mask[c] = out_mask_cached[c];
+        out_cached[c] = scalar_t(0.0);
+        out_mask_cached[c] = 0;
+      }
     }
   }
-
-
 }
 
 
@@ -212,6 +204,7 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
                                     const int dilation_h, const int dilation_w,
                                     const int out_stride_c, const int out_stride_h, const int out_stride_w,
                                     const int in_stride_c, const int in_stride_h, const int in_stride_w,
+                                    const int offsetH, const int offsetW,
                                     scalar_t* bottom_diff) {
   extern __shared__ int smem[];
   scalar_t *out_cached = reinterpret_cast<scalar_t*>(smem);
@@ -238,10 +231,10 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
 
   for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
     for (int iw = istartW; iw < iendW; iw+=blockDim.y) {
-      int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
-      int phend = p_end(ih, pad_h, pooled_height, stride_h);
-      int pwstart = p_start(iw, pad_w, kernel_w, dilation_w, stride_w);
-      int pwend = p_end(iw, pad_w, pooled_width, stride_w);
+      int phstart = p_start(offsetH + ih, pad_h, kernel_h, dilation_h, stride_h);
+      int phend = p_end(offsetH + ih, pad_h, pooled_height, stride_h);
+      int pwstart = p_start(offsetW + iw, pad_w, kernel_w, dilation_w, stride_w);
+      int pwend = p_end(offsetW + iw, pad_w, pooled_width, stride_w);
       if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
         for(int oh = phstart; oh < phend; ++oh) {
           for(int ow = pwstart; ow < pwend; ++ow) {
@@ -366,6 +359,8 @@ void max_pool2d_with_indices_out_cuda_template(
           int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
 
           int64_t max_grid_size = 65535;
+          int64_t offsetH = 0;
+          int64_t offsetW = 0;
 
           while (outputHeight > max_grid_size) {
             while (outputWidth > max_grid_size) {
@@ -391,10 +386,13 @@ void max_pool2d_with_indices_out_cuda_template(
                       nInputPlane, inputHeight, inputWidth, oH, oW,
                       kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                       in_stride_c, in_stride_h, in_stride_w,
+                      offsetH, offsetW,
                       output_data, indices_data);
               outputWidth -= max_grid_size;
+              offsetW += max_grid_size;
             }
             outputHeight -= max_grid_size;
+            offsetW += max_grid_size;
           }
 
           break;
@@ -526,6 +524,8 @@ void max_pool2d_with_indices_backward_out_cuda_template(
           int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
 
           int64_t max_grid_size = 65535;
+          int64_t offsetH = 0;
+          int64_t offsetW = 0;
 
           while (inputHeight > max_grid_size) {
             while (inputWidth > max_grid_size) {
@@ -555,11 +555,14 @@ void max_pool2d_with_indices_backward_out_cuda_template(
                       kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                       out_stride_c, out_stride_h, out_stride_w,
                       in_stride_c, in_stride_h, in_stride_w,
+                      offsetH, offsetW,
                       gradInput_data);
 
               inputWidth -= max_grid_size;
+              offsetW += max_grid_size;
             }
             inputHeight -= max_grid_size;
+            offsetH += max_grid_size;
           }
           break;
         }
