@@ -1603,3 +1603,29 @@ TEST_F(FunctionalTest, PoissonNLLLoss) {
     F::poisson_nll_loss(input, target,
     PoissonNLLLossOptions().reduction(torch::kMean))));
 }
+
+template<c10::ScalarType S, typename T>
+void test_isfinite() {
+  const std::vector<T> values = {
+    std::numeric_limits<T>::lowest(),
+    0, 1, 42,
+    std::numeric_limits<T>::min(),
+    std::numeric_limits<T>::max()
+  };
+  for (const auto value : values) {
+    const auto x = torch::full({3, 3}, value, torch::TensorOptions().dtype(S));
+    ASSERT_TRUE(torch::isfinite(x).all().template item<bool>());
+  }
+  if (std::numeric_limits<T>::has_infinity) {
+    const auto inf = std::numeric_limits<T>::infinity();
+    const auto x = torch::full({3, 3}, inf, torch::TensorOptions().dtype(S));
+    ASSERT_FALSE(torch::isfinite(x).all().template item<bool>());
+  }
+}
+
+TEST_F(FunctionalTest, isfinite) {
+  test_isfinite<torch::kFloat, float>();
+  test_isfinite<torch::kDouble, double>();
+  test_isfinite<torch::kInt, int>();
+  test_isfinite<torch::kLong, long>();
+}
