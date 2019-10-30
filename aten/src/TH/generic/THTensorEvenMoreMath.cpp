@@ -438,7 +438,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
             scalar_t* cur_src = src_data + cur_row * rowsize;
             PRAGMA_SIMD
             for (auto j = 0; j < rowsize; j++) {
-              cur_dst[j] = src_data[j];
+              cur_dst[j] = cur_src[j];
             }
           }
         });
