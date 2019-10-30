@@ -8,7 +8,7 @@
 #include <c10d/HashStore.hpp>
 #include <c10d/PrefixStore.hpp>
 
-void testHelper(const std::string prefix = "") {
+void testHelper(std::string prefix = "") {
   // Basic set/get
   {
     c10d::HashStore hashStore;
@@ -46,7 +46,7 @@ void testHelper(const std::string prefix = "") {
   c10d::test::check(store, "counter", expected);
 }
 
-int main(int argc, char** argv) {
+int main(int /* unused */, char** /* unused */) {
   testHelper();
   testHelper("testPrefix");
   std::cout << "Test succeeded" << std::endl;

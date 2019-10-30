@@ -31,5 +31,23 @@ struct TORCH_API LayerNormOptions {
   TORCH_ARG(bool, elementwise_affine) = true;
 };
 
+// ============================================================================
+
+/// Options for LocalResponseNorm functional and module.
+struct TORCH_API LocalResponseNormOptions {
+  /* implicit */ LocalResponseNormOptions(int64_t size) : size_(size) {}
+  /// amount of neighbouring channels used for normalization
+  TORCH_ARG(int64_t, size);
+  
+  /// multiplicative factor. Default: 1e-4
+  TORCH_ARG(double, alpha) = 1e-4;
+
+  /// exponent. Default: 0.75
+  TORCH_ARG(double, beta) = 0.75;
+
+  /// additive factor. Default: 1
+  TORCH_ARG(double, k) = 1.;
+};
+
 } // namespace nn
 } // namespace torch

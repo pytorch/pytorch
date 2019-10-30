@@ -12,7 +12,7 @@ namespace c10d {
 
 class HashStore : public Store {
  public:
-  virtual ~HashStore() {}
+  ~HashStore() override {}
 
   void set(const std::string& key, const std::vector<uint8_t>& data) override;
 
