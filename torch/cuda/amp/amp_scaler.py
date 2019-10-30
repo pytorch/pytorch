@@ -223,7 +223,7 @@ class AmpScaler(object):
 
         assert self._scale is not None, self._scale_not_initialized_error("step")
 
-        if (hasattr(optimizer, "step_supports_amp_scaling") and optimizer.step_supports_amp_scaling):
+        if (hasattr(optimizer, "_step_supports_amp_scaling") and optimizer._step_supports_amp_scaling):
             # This optimizer has customized scaling-safe step logic, so we call it directly.
             # The contract with custom optimizers is that their step methods should accept an additional,
             # optional amp_scaler kwarg.  We append self to the kwargs so the custom optimizer has full information:
