@@ -269,6 +269,21 @@ TEST_F(ModulesTest, LPPool1d) {
   ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
 }
 
+TEST_F(ModulesTest, LPPool2d) {
+  int norm_type = 2;
+  int stride = 2;
+  std::vector<int64_t> kernel_size({2, 3});
+
+  LPPool2d model(LPPool2dOptions(norm_type, kernel_size).stride(stride));
+  auto x = torch::ones({1, 2, 5});
+  auto y = model(x);
+  auto expected = (torch::pow(torch::tensor({{{1, 1}}}, torch::kFloat), norm_type) * (kernel_size[0] * kernel_size[1])).pow(1. / norm_type);
+
+  ASSERT_EQ(y.ndimension(), 3);
+  ASSERT_TRUE(torch::allclose(y, expected));
+  ASSERT_EQ(y.sizes(), torch::IntArrayRef({1, 1, 2}));
+}
+
 TEST_F(ModulesTest, Identity) {
   Identity identity;
   auto input = torch::tensor({{1, 3, 4}, {2, 3, 4}}, torch::requires_grad());
@@ -277,6 +292,36 @@ TEST_F(ModulesTest, Identity) {
   auto s = output.sum();
   s.backward();
 
+  ASSERT_TRUE(torch::equal(output, expected));
+  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
+}
+
+TEST_F(ModulesTest, Flatten) {
+  Flatten flatten;
+  auto input = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::requires_grad());
+  auto output = flatten->forward(input);
+  auto expected = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::kFloat);
+  auto s = output.sum();
+
+  s.backward();
+  ASSERT_TRUE(torch::equal(output, expected));
+  ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
+
+  // Testing with optional arguments start_dim and end_dim
+  Flatten flatten_optional_dims(FlattenOptions().start_dim(2).end_dim(3));
+  input = torch::tensor({
+    {{{1, 2}, {3, 4}}, {{5, 6}, {7, 8}}},
+    {{{9, 10}, {11, 12}}, {{13, 14}, {15, 16}}}
+   }, torch::requires_grad()); // Tensor with sizes (2, 2, 2, 2)
+
+  output = flatten_optional_dims->forward(input);
+  expected = torch::tensor({
+    {{1, 2, 3, 4}, {5, 6, 7, 8}},
+    {{9, 10, 11, 12}, {13, 14, 15, 16}}
+   }, torch::kFloat); // Tensor with sizes (2, 2, 4)
+
+  s = output.sum();
+  s.backward();
   ASSERT_TRUE(torch::equal(output, expected));
   ASSERT_TRUE(torch::equal(input.grad(), torch::ones_like(input)));
 }
@@ -986,7 +1031,7 @@ TEST_F(ModulesTest, BatchNormStateful) {
   BatchNorm bn(5);
 
   // Is stateful by default.
-  ASSERT_TRUE(bn->options.stateful());
+  ASSERT_TRUE(bn->options.track_running_stats());
 
   ASSERT_TRUE(bn->running_mean.defined());
   ASSERT_EQ(bn->running_mean.dim(), 1);
@@ -1008,7 +1053,7 @@ TEST_F(ModulesTest, BatchNormStateful) {
   ASSERT_EQ(bn->bias.size(0), 5);
 }
 TEST_F(ModulesTest, BatchNormStateless) {
-  BatchNorm bn(BatchNormOptions(5).stateful(false).affine(false));
+  BatchNorm bn(BatchNormOptions(5).track_running_stats(false).affine(false));
 
   ASSERT_FALSE(bn->running_mean.defined());
   ASSERT_FALSE(bn->running_var.defined());
@@ -1018,7 +1063,7 @@ TEST_F(ModulesTest, BatchNormStateless) {
   ASSERT_THROWS_WITH(
       bn(torch::ones({2, 5})),
       "Calling BatchNorm::forward is only permitted "
-      "when the 'stateful' option is true (was false). "
+      "when the 'track_running_stats' option is true (was false). "
       "Use BatchNorm::pure_forward instead.");
 }
 
@@ -1034,6 +1079,71 @@ TEST_F(ModulesTest, BatchNormPureForward) {
   auto output = bn->pure_forward(input, mean, variance);
   auto expected = (input - mean) / torch::sqrt(variance + bn->options.eps());
   ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(ModulesTest, BatchNormLegacyWarning) {
+  std::stringstream buffer;
+  torch::test::CerrRedirect cerr_redirect(buffer.rdbuf());
+
+  BatchNorm bn(5);
+
+  ASSERT_EQ(
+    count_substr_occurrences(
+      buffer.str(),
+      "torch::nn::BatchNorm module is deprecated"
+    ),
+  1);
+}
+
+TEST_F(ModulesTest, BatchNorm1dStateful) {
+  BatchNorm1d bn(BatchNorm1dOptions(5));
+
+  ASSERT_TRUE(bn->options.track_running_stats());
+
+  ASSERT_TRUE(bn->running_mean.defined());
+  ASSERT_EQ(bn->running_mean.dim(), 1);
+  ASSERT_EQ(bn->running_mean.size(0), 5);
+
+  ASSERT_TRUE(bn->running_var.defined());
+  ASSERT_EQ(bn->running_var.dim(), 1);
+  ASSERT_EQ(bn->running_var.size(0), 5);
+
+  ASSERT_TRUE(bn->num_batches_tracked.defined());
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 1);
+  ASSERT_EQ(bn->num_batches_tracked.size(0), 1);
+
+  ASSERT_TRUE(bn->options.affine());
+
+  ASSERT_TRUE(bn->weight.defined());
+  ASSERT_EQ(bn->weight.dim(), 1);
+  ASSERT_EQ(bn->weight.size(0), 5);
+
+  ASSERT_TRUE(bn->bias.defined());
+  ASSERT_EQ(bn->bias.dim(), 1);
+  ASSERT_EQ(bn->bias.size(0), 5);
+}
+
+TEST_F(ModulesTest, BatchNorm1dStateless) {
+  BatchNorm1d bn(BatchNorm1dOptions(5).track_running_stats(false).affine(false));
+
+  ASSERT_FALSE(bn->running_mean.defined());
+  ASSERT_FALSE(bn->running_var.defined());
+  ASSERT_FALSE(bn->num_batches_tracked.defined());
+  ASSERT_FALSE(bn->weight.defined());
+  ASSERT_FALSE(bn->bias.defined());
+}
+
+TEST_F(ModulesTest, BatchNorm1d) {
+  BatchNorm1d bn(BatchNorm1dOptions(5));
+  bn->eval();
+
+  auto input = torch::randn({2, 5}, torch::requires_grad());
+  auto output = bn->forward(input);
+  auto s = output.sum();
+  s.backward();
+  
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+  ASSERT_TRUE(input.grad().allclose(torch::ones({2, 5})));
 }
 
 TEST_F(ModulesTest, Linear_CUDA) {
@@ -1174,7 +1284,7 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
 }
 
 TEST_F(ModulesTest, MultiLabelMarginLossNoReduction) {
-  MultiLabelMarginLoss loss(torch::Reduction::None);
+  MultiLabelMarginLoss loss(torch::kNone);
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
@@ -1240,7 +1350,7 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossDefaultOptions) {
 }
 
 TEST_F(ModulesTest, SoftMarginLossNoReduction) {
-  SoftMarginLoss loss(torch::Reduction::None);
+  SoftMarginLoss loss(torch::kNone);
   auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output = loss->forward(input, target);
@@ -1256,7 +1366,7 @@ TEST_F(ModulesTest, MultiLabelSoftMarginLossWeightedNoReduction) {
   auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
-  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::Reduction::None).weight(weight);
+  auto options = MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight);
   MultiLabelSoftMarginLoss loss = MultiLabelSoftMarginLoss(options);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.4876902, 0.3321295}, torch::kFloat);
@@ -1673,8 +1783,160 @@ TEST_F(ModulesTest, Threshold) {
   }
 }
 
+TEST_F(ModulesTest, Upsampling1D) {
+  {
+    Upsample model(UpsampleOptions()
+                       .size({4})
+                       .mode(torch::kNearest));
+    auto input = torch::ones({1, 1, 2}, torch::requires_grad());
+    auto output = model->forward(input);
+    auto expected = torch::ones({1, 1, 4});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(UpsampleOptions()
+                           .scale_factor({scale_factor})
+                           .mode(torch::kLinear)
+                           .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+  {
+    // linear (1D) upsampling spatial invariance
+    Upsample model(UpsampleOptions()
+                       .scale_factor({3})
+                       .mode(torch::kLinear)
+                       .align_corners(false));
+    auto input = torch::zeros({1, 1, 9});
+    input.narrow(2, 0, 4).normal_();
+    auto output = model->forward(input);
+    auto expected = model->forward(input.narrow(2, 0, 5));
+
+    ASSERT_TRUE(torch::allclose(output.narrow(2, 0, 15), expected));
+  }
+}
+
+TEST_F(ModulesTest, Upsampling2D) {
+  {
+    Upsample model(UpsampleOptions()
+                       .size({4, 4})
+                       .mode(torch::kNearest));
+    auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
+    auto output = model->forward(input);
+    auto expected = torch::ones({1, 1, 4, 4});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(UpsampleOptions()
+                           .scale_factor({scale_factor, scale_factor})
+                           .mode(torch::kBilinear)
+                           .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(UpsampleOptions()
+                           .scale_factor({scale_factor, scale_factor})
+                           .mode(torch::kBicubic)
+                           .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected = torch::ones({1, 1, expected_size, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+}
+
+TEST_F(ModulesTest, Upsampling3D) {
+  {
+    Upsample model(UpsampleOptions()
+                       .size({4, 4, 4})
+                       .mode(torch::kNearest));
+    auto input = torch::ones({1, 1, 2, 2, 2}, torch::requires_grad());
+    auto output = model->forward(input);
+    auto expected = torch::ones({1, 1, 4, 4, 4});
+    auto s = output.sum();
+    s.backward();
+
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_TRUE(output.allclose(expected));
+  }
+  {
+    for (const auto align_corners : {true, false}) {
+      // test float scale factor up & down sampling
+      for (const auto scale_factor : {0.5, 1.5, 2.0}) {
+        Upsample model(
+            UpsampleOptions()
+                .scale_factor({scale_factor, scale_factor, scale_factor})
+                .mode(torch::kTrilinear)
+                .align_corners(align_corners));
+        auto input = torch::ones({1, 1, 2, 2, 2}, torch::requires_grad());
+        auto output = model->forward(input);
+        auto expected_size =
+            static_cast<int64_t>(std::floor(input.size(-1) * scale_factor));
+        auto expected =
+            torch::ones({1, 1, expected_size, expected_size, expected_size});
+        auto s = output.sum();
+        s.backward();
+
+        ASSERT_EQ(s.ndimension(), 0);
+        ASSERT_TRUE(output.allclose(expected));
+      }
+    }
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
+}
+
+TEST_F(ModulesTest, PrettyPrintFlatten) {
+  ASSERT_EQ(c10::str(Flatten()), "torch::nn::Flatten()");
+  ASSERT_EQ(c10::str(Flatten(FlattenOptions().start_dim(2).end_dim(4))), "torch::nn::Flatten()");
 }
 
 TEST_F(ModulesTest, ReflectionPad1d) {
@@ -1983,6 +2245,15 @@ TEST_F(ModulesTest, PrettyPrintConv) {
       "torch::nn::Conv2d(input_channels=3, output_channels=4, kernel_size=[5, 6], stride=[1, 2])");
 }
 
+TEST_F(ModulesTest, PrettyPrintUpsample) {
+  ASSERT_EQ(
+      c10::str(Upsample(UpsampleOptions().size({2, 4, 4}))),
+      "torch::nn::Upsample(size=[2, 4, 4], mode=kNearest)");
+  ASSERT_EQ(
+      c10::str(Upsample(UpsampleOptions().scale_factor({0.5, 1.5}).mode(torch::kBilinear))),
+      "torch::nn::Upsample(scale_factor=[0.5, 1.5], mode=kBilinear)");
+}
+
 TEST_F(ModulesTest, PrettyPrintUnfold) {
   ASSERT_EQ(
       c10::str(Unfold(torch::IntArrayRef({2, 4}))),
@@ -2047,6 +2318,12 @@ TEST_F(ModulesTest, PrettyPrintLPPool) {
   ASSERT_EQ(
       c10::str(LPPool1d(LPPool1dOptions(1, 2).stride(5).ceil_mode(true))),
       "torch::nn::LPPool1d(norm_type=1, kernel_size=2, stride=5, ceil_mode=true)");
+  ASSERT_EQ(
+      c10::str(LPPool2d(2, std::vector<int64_t>({1, 2}))),
+      "torch::nn::LPPool2d(norm_type=2, kernel_size=[1, 2], stride=[1, 2], ceil_mode=false)");
+  ASSERT_EQ(
+      c10::str(LPPool2d(LPPool2dOptions(1, std::vector<int64_t>({3, 4})).stride({5, 6}).ceil_mode(true))),
+      "torch::nn::LPPool2d(norm_type=1, kernel_size=[3, 4], stride=[5, 6], ceil_mode=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintAdaptiveMaxPool) {
@@ -2126,9 +2403,17 @@ TEST_F(ModulesTest, PrettyPrintFunctional) {
 TEST_F(ModulesTest, PrettyPrintBatchNorm) {
   ASSERT_EQ(
       c10::str(BatchNorm(
-          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).stateful(
+          BatchNormOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(
               true))),
-      "torch::nn::BatchNorm(features=4, eps=0.5, momentum=0.1, affine=false, stateful=true)");
+      "torch::nn::BatchNorm(num_features=4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
+}
+
+TEST_F(ModulesTest, PrettyPrintBatchNorm1d) {
+  ASSERT_EQ(
+      c10::str(BatchNorm1d(
+          BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false)
+          .track_running_stats(true))),
+      "torch::nn::BatchNorm1d(4, eps=0.5, momentum=0.1, affine=false, track_running_stats=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintLayerNorm) {

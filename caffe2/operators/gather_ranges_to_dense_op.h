@@ -30,7 +30,12 @@ class GatherRangesToDenseOp final : public Operator<Context> {
             this->template GetSingleArgument<float>("max_empty_ratio", 0.9)),
         maxMismatchedRatio_(this->template GetSingleArgument<float>(
             "max_mismatched_ratio",
-            0.01)) {
+            0.01)),
+        // This number of log_every_n is intentionally set to a prime number
+        // so that the log will be trigger on all features eventually if
+        // multiple features are corrupt.
+        logEveryN_(
+            this->template GetSingleArgument<int64_t>("log_every_n", 4999)) {
     CAFFE_ENFORCE_GT(lengths_.size(), 0, "There has to be at least one length");
     for (auto length : lengths_) {
       CAFFE_ENFORCE_GT(length, 0, "Each length should be positive");
@@ -45,7 +50,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   }
 
   ~GatherRangesToDenseOp() noexcept override {
-    if (totalRanges_ > 0) {
+    if (totalRanges_ > minObservation_) {
       LOG(INFO) << "In GatherRangesToDenseOp:\n"
                 << "  Lifetime empty ranges for each feature is "
                 << emptyRanges_ << ".\n"
@@ -173,13 +178,13 @@ class GatherRangesToDenseOp final : public Operator<Context> {
             ") which exceeds ",
             maxMismatchedRatio_);
         if (totalRanges_ * maxEmptyRatio_ <= emptyRanges_[j]) {
-          LOG(ERROR) << "Ratio of empty range for feature at index " << j
-                     << " is "
-                     << (static_cast<double>(emptyRanges_[j]) /
-                         static_cast<double>(totalRanges_))
-                     << " (" << emptyRanges_[j] << "/" << totalRanges_
-                     << ") which exceeds " << maxEmptyRatio_ << "\n"
-                     << this->getErrorMsg();
+          C10_LOG_EVERY_N(ERROR, logEveryN_)
+              << "Ratio of empty range for feature at index " << j << " is "
+              << (static_cast<double>(emptyRanges_[j]) /
+                  static_cast<double>(totalRanges_))
+              << " (" << emptyRanges_[j] << "/" << totalRanges_
+              << ") which exceeds " << maxEmptyRatio_ << "\n"
+              << this->getErrorMsg();
         }
       }
     }
@@ -200,6 +205,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   int64_t minObservation_ = 0;
   float maxEmptyRatio_ = 0;
   float maxMismatchedRatio_ = 0;
+  int64_t logEveryN_ = 0;
 };
 
 } // namespace caffe2
