@@ -433,10 +433,13 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
         at::parallel_for(0, numel, TH_OMP_OVERHEAD_THRESHOLD / rowsize,
             [&](int64_t start, int64_t end) {
           for (auto i = start; i < end; i++) {
-            memcpy(
-              tensor_data + i * rowsize,
-              src_data + index_data[i] * rowsize,
-              rowsize * sizeof(scalar_t));
+            auto cur_row = index_data[i];
+            scalar_t* cur_dst = tensor_data + i * rowsize;
+            scalar_t* cur_src = src_data + cur_row * rowsize;
+            PRAGMA_SIMD
+            for (auto j = 0; j < rowsize; j++) {
+              cur_dst[j] = src_data[j];
+            }
           }
         });
       }
