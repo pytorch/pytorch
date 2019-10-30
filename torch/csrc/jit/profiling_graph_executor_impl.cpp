@@ -20,7 +20,7 @@ namespace torch {
 namespace jit {
 
 static std::atomic<bool> profiling_mode{false};
-static std::atomic<bool> executor_mode{false};
+static std::atomic<bool> executor_mode{true};
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
