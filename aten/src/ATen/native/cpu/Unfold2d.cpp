@@ -1,6 +1,6 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec256/vec256.h>
-#include <ATen/native/Unfold.h>
+#include <ATen/native/Unfold2d.h>
 #include <ATen/native/cpu/Loops.h>
 #include <cmath>
 
@@ -30,7 +30,7 @@ static inline void cadd(
 }
 
 template <typename scalar_t>
-static void unfolded_acc(
+static void unfolded2d_acc(
     scalar_t* finput_data,
     scalar_t* input_data,
     int64_t kH,
@@ -126,8 +126,8 @@ static void unfolded_acc(
 }
 
 /* note: due to write issues, this one cannot be parallelized as well as
- * unfolded_copy */
-void unfolded_acc_kernel(
+ * unfolded2d_copy */
+void unfolded2d_acc_kernel(
     Tensor& finput,
     Tensor& input,
     int64_t kH,
@@ -146,11 +146,11 @@ void unfolded_acc_kernel(
   // output_width*dW does not overflow a int64_t
 
   AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, input.scalar_type(), "unfolded_acc", [&] {
+      at::ScalarType::BFloat16, input.scalar_type(), "unfolded2d_acc", [&] {
         scalar_t* finput_data = finput.data_ptr<scalar_t>();
         scalar_t* input_data = input.data_ptr<scalar_t>();
 
-        unfolded_acc(
+        unfolded2d_acc(
             finput_data,
             input_data,
             kH,
@@ -168,7 +168,7 @@ void unfolded_acc_kernel(
 }
 
 template <typename scalar_t>
-static void unfolded_copy(
+static void unfolded2d_copy(
     scalar_t* input_data,
     scalar_t* finput_data,
     int kH,
@@ -271,7 +271,7 @@ static void unfolded_copy(
       });
 }
 
-void unfolded_copy_kernel(
+void unfolded2d_copy_kernel(
     Tensor& finput,
     Tensor& input,
     int64_t kH,
@@ -292,11 +292,11 @@ void unfolded_copy_kernel(
   // output_width*dW does not overflow a int64_t
 
   AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::BFloat16, input.scalar_type(), "unfolded_copy", [&] {
+      at::ScalarType::BFloat16, input.scalar_type(), "unfolded2d_copy", [&] {
         scalar_t* input_data = input.data_ptr<scalar_t>();
         scalar_t* finput_data = finput.data_ptr<scalar_t>();
 
-        unfolded_copy(
+        unfolded2d_copy(
             input_data,
             finput_data,
             kH,
@@ -315,8 +315,8 @@ void unfolded_copy_kernel(
 
 } // namespace
 
-REGISTER_DISPATCH(unfolded_copy_stub, &unfolded_copy_kernel);
-REGISTER_DISPATCH(unfolded_acc_stub, &unfolded_acc_kernel);
+REGISTER_DISPATCH(unfolded2d_copy_stub, &unfolded2d_copy_kernel);
+REGISTER_DISPATCH(unfolded2d_acc_stub, &unfolded2d_acc_kernel);
 
 } // namespace native
 } // namespace at

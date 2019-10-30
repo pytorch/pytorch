@@ -5,7 +5,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/div_rtn.h>
-#include <ATen/native/Unfold.h>
+#include <ATen/native/Unfold2d.h>
 
 namespace at {
 namespace native {
@@ -17,25 +17,25 @@ static inline void conv2d_shape_check(
     const Tensor& grad_output,
     const Tensor& weight,
     const Tensor& bias,
-    int64_t kH,
-    int64_t kW,
-    int64_t dH,
-    int64_t dW,
-    int64_t padH,
-    int64_t padW,
+    int64_t kernel_height,
+    int64_t kernel_width,
+    int64_t stride_height,
+    int64_t stride_width,
+    int64_t pad_height,
+    int64_t pad_width,
     bool weight_optional) {
   TORCH_CHECK(
-      kW > 0 && kH > 0,
-      "kernel size should be greater than zero, but got kH: ",
-      kH,
-      " kW: ",
-      kW);
+      kernel_width > 0 && kernel_height > 0,
+      "kernel size should be greater than zero, but got kernel_height: ",
+      kernel_height,
+      " kernel_width: ",
+      kernel_width);
   TORCH_CHECK(
-      dW > 0 && dH > 0,
-      "stride should be greater than zero, but got dH: ",
-      dH,
-      " dW: ",
-      dW);
+      stride_width > 0 && stride_height > 0,
+      "stride should be greater than zero, but got stride_height: ",
+      stride_height,
+      " stride_width: ",
+      stride_width);
 
   if (weight.defined()) {
     TORCH_CHECK(
@@ -78,24 +78,24 @@ static inline void conv2d_shape_check(
   const int64_t input_height = input.size(dimh);
   const int64_t input_width = input.size(dimw);
 
-  const int64_t exact_input_height = input_height + 2 * padH;
-  const int64_t exact_input_width = input_width + 2 * padW;
+  const int64_t exact_input_height = input_height + 2 * pad_height;
+  const int64_t exact_input_width = input_width + 2 * pad_width;
 
   TORCH_CHECK(
-      exact_input_height >= kH && exact_input_width >= kW,
+      exact_input_height >= kernel_height && exact_input_width >= kernel_width,
       "Calculated padded input size per channel: (",
       exact_input_height,
       " x ",
       exact_input_width,
       "). ",
       "Kernel size: (",
-      kH,
+      kernel_height,
       " x ",
-      kW,
+      kernel_width,
       "). Kernel size can't be greater than actual input size");
 
-  int64_t output_height = div_rtn<int64_t>(exact_input_height - kH, dH) + 1;
-  int64_t output_width = div_rtn<int64_t>(exact_input_width - kW, dW) + 1;
+  const int64_t output_height = div_rtn<int64_t>(exact_input_height - kernel_height, stride_height) + 1;
+  const int64_t output_width = div_rtn<int64_t>(exact_input_width - kernel_width, stride_width) + 1;
 
   TORCH_CHECK(
       output_width >= 1 && output_height >= 1,
@@ -113,7 +113,7 @@ static inline void conv2d_shape_check(
   if (weight.defined()) {
     int64_t n_input_plane = weight.size(1);
     if (weight.dim() == 2) {
-      n_input_plane /= (kH * kW);
+      n_input_plane /= (kernel_height * kernel_width);
     }
     check_dim_size(input, ndim, dimf, n_input_plane);
   }
@@ -135,8 +135,8 @@ static inline void conv2d_shape_check(
 static Tensor view_weight_2d(const Tensor& weight_) {
   Tensor weight = weight_.contiguous();
   if (weight.dim() == 4) {
-    int64_t s1 = weight.size(0);
-    int64_t s2 = weight.size(1) * weight.size(2) * weight.size(3);
+    const int64_t s1 = weight.size(0);
+    const int64_t s2 = weight.size(1) * weight.size(2) * weight.size(3);
     return weight.view({s1, s2});
   } else {
     return weight;
@@ -149,28 +149,28 @@ static void conv2d_update_output_frame(
     const Tensor& weight,
     const Tensor& bias,
     Tensor& finput,
-    int64_t kH,
-    int64_t kW,
-    int64_t dH,
-    int64_t dW,
-    int64_t padH,
-    int64_t padW,
+    int64_t kernel_height,
+    int64_t kernel_width,
+    int64_t stride_height,
+    int64_t stride_width,
+    int64_t pad_height,
+    int64_t pad_width,
     int64_t n_input_plane,
     int64_t input_height,
     int64_t input_width,
     int64_t n_output_plane,
     int64_t output_height,
     int64_t output_width) {
-  unfolded_copy_stub(
+  unfolded2d_copy_stub(
       kCPU,
       finput,
       input,
-      kH,
-      kW,
-      dH,
-      dW,
-      padH,
-      padW,
+      kernel_height,
+      kernel_width,
+      stride_height,
+      stride_width,
+      pad_height,
+      pad_width,
       n_input_plane,
       input_height,
       input_width,
@@ -206,7 +206,7 @@ void conv2d_backward_update_grad_input_frame(
   fgrad_input.addmm_(weight, grad_output_2d, 0, 1);
 
   grad_input.zero_();
-  unfolded_acc_stub(
+  unfolded2d_acc_stub(
       kCPU,
       fgrad_input,
       grad_input,
@@ -258,10 +258,6 @@ void conv2d_backward_out_cpu_template(
   const Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_as_(input);
   fgrad_input.resize_as_(finput);
-
-  // depending on the BLAS library, fgrad_input (result tensor) might
-  // be left uninitialized on zero alpha, which might lead to weird behavior
-  // hence, to be safe, zero it
   fgrad_input.zero_();
   const Tensor tweight = weight.transpose(0, 1);
   if (input.dim() == 3) {
@@ -277,15 +273,15 @@ void conv2d_backward_out_cpu_template(
         pad_height,
         pad_width);
   } else {
-    const int64_t T = input.size(0);
-    //at::parallel_for(0, T, 0, [&](int64_t start, int64_t end) {
+    const int64_t batch_size = input.size(0);
+    //at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       
       // ## AKo: If addmm_() is called inside at::parallel_for the following error is generated
       // for executions on background threads:
       // "Expected object of type Variable but found type torch.DoubleTensor for argument #2 'mat1'""
       // I first thought I had to disable auto-grad but placing at::NoGradGuard had no effect.
       
-      int64_t start = 0, end = T;
+      int64_t start = 0, end = batch_size;
       for (int64_t t = start; t < end; t++) {
         Tensor grad_input_t = grad_input[t];
         Tensor grad_output_t = grad_output[t];
@@ -390,13 +386,13 @@ static void conv2d_backward_parameters_out_cpu_template(
     conv2d_backward_parameters_frame(
         grad_weight_2d, grad_bias, grad_output, finput);
   } else {
-    int64_t T = input.size(0);
+    const int64_t batch_size = input.size(0);
 
-    for (int64_t t = 0; t < T; t++) {
-      Tensor grad_output_t = grad_output.select(0, t);
+    for (int64_t t = 0; t < batch_size; t++) {
+      Tensor grad_output_t = grad_output[t];
       Tensor finput_t;
       if (grad_weight_2d.defined()) {
-        finput_t = finput.select(0, t);
+        finput_t = finput[t];
       }
 
       conv2d_backward_parameters_frame(
@@ -440,7 +436,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv2d_forward_out_cpu(
       false);
 
   Tensor self = self_.contiguous();
-  int64_t ndim = self.dim();
+  const int64_t ndim = self.dim();
   int64_t dimf = 0;
   int64_t dimh = 1;
   int64_t dimw = 2;
@@ -460,7 +456,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv2d_forward_out_cpu(
   const int64_t output_width =
       (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
 
-  if (self.dim() == 3) {
+  if (ndim == 3) {
     // ## AKo: Can we remove this and replace it by a dim() == 4 check/assert??
     // if the call is made through Convolution.cpp this case should
     // not be reachable, since 4D (batch) input in enforced.
@@ -489,18 +485,18 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv2d_forward_out_cpu(
         output_width);
 
   } else {
-    int64_t T = self.size(0);
+    const int64_t batch_size = self.size(0);
 
-    finput.resize_({T,
+    finput.resize_({batch_size,
                     n_input_plane * kernel_height * kernel_width,
                     output_height * output_width});
-    output.resize_({T, n_output_plane, output_height, output_width});
+    output.resize_({batch_size, n_output_plane, output_height, output_width});
 
-    at::parallel_for(0, T, 0, [&](int64_t start, int64_t end) {
+    at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (auto t = start; t < end; t++) {
-        Tensor input_t = self.select(0, t);
-        Tensor output_t = output.select(0, t);
-        Tensor finput_t = finput.select(0, t);
+        Tensor input_t = self[t];
+        Tensor output_t = output[t];
+        Tensor finput_t = finput[t];
 
         conv2d_update_output_frame(
             input_t,

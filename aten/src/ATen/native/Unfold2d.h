@@ -5,7 +5,7 @@
 
 namespace at { namespace native {
 
-using unfold_fn =
+using unfold2d_fn =
     void (*)(
     Tensor& finput,
     Tensor& input,
@@ -22,7 +22,7 @@ using unfold_fn =
     int64_t output_width
 );
 
-DECLARE_DISPATCH(unfold_fn, unfolded_copy_stub);
-DECLARE_DISPATCH(unfold_fn, unfolded_acc_stub);
+DECLARE_DISPATCH(unfold2d_fn, unfolded2d_copy_stub);
+DECLARE_DISPATCH(unfold2d_fn, unfolded2d_acc_stub);
 
 }} // namespace at::native
