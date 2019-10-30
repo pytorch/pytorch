@@ -420,15 +420,9 @@
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _asin__cpu
-    CUDA: _asin__cuda
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _asin_out_cpu
-    CUDA: _asin_out_cuda
 
 - func: atan(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1220,9 +1214,10 @@
 
 - func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: full_like(Tensor self, Scalar fill_value, *, MemoryFormat? memory_format=None) -> Tensor
+- func: full_like(Tensor self, Scalar fill_value) -> Tensor
+  use_c10_dispatcher: full
 
-- func: full_like.dtype(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: full_like.dtype(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -1988,9 +1983,10 @@
 
 - func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: ones_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+- func: ones_like(Tensor self) -> Tensor
+  use_c10_dispatcher: full
 
-- func: ones_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: ones_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
@@ -2063,9 +2059,10 @@
 
 - func: rand.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
-- func: rand_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+- func: rand_like(Tensor self) -> Tensor
+  use_c10_dispatcher: full
 
-- func: rand_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: rand_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2083,13 +2080,15 @@
 
 - func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
-- func: randint_like(Tensor self, int high, *, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like(Tensor self, int high) -> Tensor
+  use_c10_dispatcher: full
 
-- func: randint_like.low(Tensor self, int low, int high, *, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like.low(Tensor self, int low, int high) -> Tensor
+  use_c10_dispatcher: full
 
-- func: randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
-- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2105,9 +2104,10 @@
 
 - func: randn.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
-- func: randn_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+- func: randn_like(Tensor self) -> Tensor
+  use_c10_dispatcher: full
 
-- func: randn_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: randn_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2342,15 +2342,12 @@
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _sin__cpu
-    CUDA: _sin__cuda
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _sin_out_cpu
-    CUDA: _sin_out_cuda
+    CPU: sin_out
+    CUDA: sin_out
 
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2360,15 +2357,9 @@
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _sinh__cpu
-    CUDA: _sinh__cuda
 
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _sinh_out_cpu
-    CUDA: _sinh_out_cuda
 
 - func: detach(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2852,9 +2843,10 @@
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: zeros_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+- func: zeros_like(Tensor self) -> Tensor
+  use_c10_dispatcher: full
 
-- func: zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   use_c10_dispatcher: full
@@ -2997,8 +2989,8 @@
   supports_named_tensor: True
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_zero_
-    CUDA: legacy::cuda::_th_zero_
+    CPU: zero_
+    CUDA: zero_
     SparseCPU: zero_sparse_
     SparseCUDA: zero_sparse_
     MkldnnCPU: mkldnn_zero_
@@ -3662,8 +3654,8 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_set_
-    CUDA: legacy::cuda::_th_set_
+    CPU: set_
+    CUDA: set_
 
 - func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
   variants: method
@@ -3683,8 +3675,8 @@
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_set_
-    CUDA: legacy::cuda::_th_set_
+    CPU: set_cpu_
+    CUDA: set_cuda_
 
 - func: set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)
   variants: method
@@ -3776,8 +3768,8 @@
 - func: index_fill_.int_Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_index_fill_
-    CUDA: legacy::cuda::_th_index_fill_
+    CPU: index_fill_
+    CUDA: index_fill_
   supports_named_tensor: True
 
 - func: index_fill.int_Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
