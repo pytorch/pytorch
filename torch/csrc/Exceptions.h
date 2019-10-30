@@ -84,13 +84,17 @@ struct python_error : public std::exception {
     // clears the error indicator.
     TORCH_INTERNAL_ASSERT(!PyErr_Occurred());
 
+    // We should be holding the GIL.
+    TORCH_INTERNAL_ASSERT(PyGILState_Check() == 1)
+
     // Default message.
     message = "python_error";
 
     // Try to retrieve the error message from the value.
     if (value != nullptr) {
-      AutoGIL gil;
-      Py_XINCREF(value);
+      // Reference count should not be zero.
+      TORCH_INTERNAL_ASSERT(value->ob_refcnt > 0);
+
       PyObject* pyStr = PyObject_Str(value);
       if (pyStr != nullptr) {
         PyObject* encodedString =
@@ -105,7 +109,6 @@ struct python_error : public std::exception {
         }
         Py_XDECREF(pyStr);
       }
-      Py_XDECREF(value);
     }
 
     // Clear any errors since we don't want to propagate errors for functions
