@@ -1,3 +1,4 @@
+#include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
