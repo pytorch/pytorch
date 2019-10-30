@@ -12,13 +12,20 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/LegacyDeviceTypeInit.h>
+#include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/core/TensorImpl.h>
+#include <ATen/core/TensorBody.h>
 
 namespace at {
 
 class CAFFE2_API LegacyTypeDispatch {
  public:
-  void initForBackend(Backend b) {
+  void initForTensorTypeSet(TensorTypeSet ts) {
+    // TODO: Avoid use of legacyExtractTypeId here.  The key
+    // problem is that you may get a TensorTypeSet with
+    // VariableTensorId set; should you initialize the "underlying"
+    // type in that case?  Hard to say.
+    auto b = tensorTypeIdToBackend(legacyExtractTypeId(ts));
     auto p = backendToDeviceType(b);
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;
@@ -40,22 +47,19 @@ class CAFFE2_API LegacyTypeDispatch {
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
 
-// A RAII, thread local (!) guard that has the following effect:
-//
-// Upon construction: sets NonVariableTypeMode_enabled for the current thread to
-// control whether we are in non-Variable-type mode.
-//
-// Upon destruction: sets NonVariableTypeMode_enabled back to the original value.
+// A RAII, thread local (!) guard that will disable dispatch to variable
+// handler.
 //
 // See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
 struct CAFFE2_API AutoNonVariableTypeMode {
-  AutoNonVariableTypeMode(bool enabled) : prev_mode(NonVariableTypeMode::is_enabled()) {
-    NonVariableTypeMode::set_enabled(enabled);
+  // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
+  // TODO: Eliminate this parameter entirely
+  AutoNonVariableTypeMode(bool enabled = true) :
+    guard_(TensorTypeId::VariableTensorId) {
+
+    TORCH_INTERNAL_ASSERT(enabled);
   }
-  ~AutoNonVariableTypeMode() {
-    NonVariableTypeMode::set_enabled(prev_mode);
-  }
-  bool prev_mode;
+  c10::impl::ExcludeTensorTypeIdGuard guard_;
 };
 
 } // namespace at

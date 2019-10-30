@@ -1,3 +1,4 @@
+
 import argparse
 import os
 
@@ -44,12 +45,17 @@ parser.add_argument(
     action='store_true',
     help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
 options = parser.parse_args()
-gen_to_source = os.environ.get('GEN_TO_SOURCE')  # update source directly as part of gen
-if not gen_to_source:
-    core_install_dir = os.path.join(options.install_dir, 'core_tmp') if options.install_dir is not None else None
-else:
-    core_install_dir = os.path.join(options.source_path, 'core')
-
+# NB: It is mandatory to NOT use os.path.join here, as the install directory
+# will eventually be ingested by cmake, which does not respect Windows style
+# path slashes.  If you switch this to use os.path.join, you'll get an error
+# like:
+#
+#   Syntax error in cmake code when parsing string
+#
+#     C:/Jenkins/workspace/pytorch-builds/pytorch-win-ws2016-cuda9-cudnn7-py3-build/build/aten/src/ATen\core/TensorMethods.h
+#
+#   Invalid character escape '\c'.
+core_install_dir = options.install_dir + '/core' if options.install_dir is not None else None
 if options.install_dir is not None and not os.path.exists(options.install_dir):
     os.makedirs(options.install_dir)
 if core_install_dir is not None and not os.path.exists(core_install_dir):
@@ -118,11 +124,10 @@ SPARSE_TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTypeDer
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
-TYPE_EXTENSION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.h")
-TYPE_EXTENSION_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeExtension.cpp")
 REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegistrationDeclarations.h")
+OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/OpsAlreadyMovedToC10.cpp")
 
-TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
+TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
@@ -131,14 +136,6 @@ LEGACY_TH_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctio
 LEGACY_TH_FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctions.cpp")
 
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
-
-EXTENSION_BACKEND_REGISTRATION_H = CodeTemplate.from_file(TEMPLATE_PATH + "/ExtensionBackendRegistration.h")
-
-EXTENSION_BACKEND_REGISTER_SWITCH = CodeTemplate("""\
-case Backend::${Backend}:
-    ${Type}Dispatch::register_function(schema, fn);
-    break;
-""")
 
 core_file_manager = FileManager(core_install_dir)
 file_manager = FileManager()
@@ -154,8 +151,6 @@ densities = ['Dense', 'Sparse', 'Mkldnn']  # TODO: layout instead of densities?
 
 quantized_backends = ['QuantizedCPU']
 
-extension_backends = ['MSNPU', 'XLA']
-
 # scalar_name, c_type, accreal, is_floating_type
 quantized_scalar_types = [
     ('QInt8', 'qint8', 'QInt8AccrealNotDefined', 'QInt8IsFloatingTypeNotDefined'),
@@ -164,11 +159,12 @@ quantized_scalar_types = [
 ]
 
 
-# shared environment for non-derived base classes Tensor.h Storage.h
+# shared environment for non-derived base classes TensorBody.h Storage.h
 top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
     'function_registrations': [],
+    'list_of_aten_ops': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -177,8 +173,6 @@ top_env = {
     'function_definitions': [],
     'type_ids': [],
     'native_function_declarations': [],
-    'extension_backend_headers': [],
-    'extension_backend_register_switches': [],
     'registration_declarations': [],
 }
 
@@ -320,30 +314,6 @@ def generate_storage_type_and_tensor(backend, density, declarations):
             '#include "ATen/{}.h"'.format(env['Type']))
 
 
-def generate_type_extension_backend(backend, declarations):
-    env = {}
-    env['Type'] = "{}Type".format(backend)
-    env['Backend'] = backend
-    env['DeviceType'] = backend_to_devicetype(backend)
-    env['TypeID'] = 'TypeID::' + backend
-    top_env['type_ids'].append(backend + ',')
-
-    declarations, definitions, registrations = function_wrapper.create_extension_backend(
-        env, declarations)
-    env['type_method_declarations'] = declarations
-    env['type_method_definitions'] = definitions
-    env['function_registrations'] = registrations
-
-    top_env['cpu_type_headers'].append('#include "ATen/{}.h"'.format(env['Type']))
-    file_manager.write(env['Type'] + ".cpp", TYPE_EXTENSION_CPP, env)
-    file_manager.write(env['Type'] + ".h", TYPE_EXTENSION_H, env)
-
-    extension_backend_register_switch = EXTENSION_BACKEND_REGISTER_SWITCH.substitute(env)
-    top_env['extension_backend_register_switches'].append(extension_backend_register_switch)
-    top_env['extension_backend_headers'].append(
-        '#include <ATen/{}.h>'.format(env['Type']))
-
-
 # yields (backend, density) tuples
 def iterate_types():
     for backend in backends:
@@ -361,12 +331,11 @@ def iterate_types():
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['Tensor.h', 'TensorMethods.h']
+    core_files = ['TensorBody.h', 'TensorMethods.h', 'OpsAlreadyMovedToC10.cpp']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
-             'Functions.h', 'NativeFunctions.h',
-             'ExtensionBackendRegistration.h', 'RegistrationDeclarations.h']
+             'Functions.h', 'NativeFunctions.h', 'RegistrationDeclarations.h']
     for f in files:
         file_manager.will_write(f)
     for backend, density in iterate_types():
@@ -383,9 +352,6 @@ def declare_outputs():
         if backend == 'CPU' or backend == 'CUDA':
             fm.will_write("LegacyTHFunctions{}.h".format(backend))
             fm.will_write("LegacyTHFunctions{}.cpp".format(backend))
-    for backend in extension_backends:
-        file_manager.will_write("{}Type.h".format(backend))
-        file_manager.will_write("{}Type.cpp".format(backend))
 
 
 def filter_by_extension(files, *extensions):
@@ -397,23 +363,12 @@ def filter_by_extension(files, *extensions):
     return filtered_files
 
 
-# because EOL may not be LF(\n) on some environment (e.g. Windows),
-# normalize EOL from CRLF/CR to LF and compare both files.
-def cmpfiles_with_eol_normalization(a, b, names):
-    results = ([], [], [])    # match, mismatch, error
-    for x in names:
-        try:
-            with open(os.path.join(a, x)) as f:
-                ax = f.read().replace('\r\n', '\n').replace('\r', '\n')
-            with open(os.path.join(b, x)) as f:
-                bx = f.read().replace('\r\n', '\n').replace('\r', '\n')
-            if ax == bx:
-                results[0].append(x)
-            else:
-                results[1].append(x)
-        except OSError:
-            results[2].append(x)
-    return results
+def is_namedtensor_only_decl(decl):
+    if 'Dimname' in decl['schema_string']:
+        return True
+    if decl['name'] == 'align_tensors' or decl['name'] == 'align_as':
+        return True
+    return False
 
 
 def generate_outputs():
@@ -437,21 +392,20 @@ def generate_outputs():
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
 
     # Filter out named-tensor only declarations.
-    # They are necessary in create_generic because that generates Type.h, Tensor.h,
+    # They are necessary in create_generic because that generates Type.h, TensorBody.h,
     # and TensorMethods.h, all of which are checked in to the codebase and therefore
     # need to be consistent whether or not BUILD_NAMEDTENSOR is on/off.
     if not BUILD_NAMEDTENSOR:
         declarations = [decl for decl in declarations
-                        if 'Dimname' not in decl['schema_string']]
+                        if not is_namedtensor_only_decl(decl)]
 
     for backend, density in iterate_types():
         generate_storage_type_and_tensor(backend, density, declarations)
-    for backend in extension_backends:
-        generate_type_extension_backend(backend, declarations)
 
     core_files = {
-        'Tensor.h': TENSOR_H,
-        'TensorMethods.h': TENSOR_METHODS_H
+        'TensorBody.h': TENSOR_H,
+        'TensorMethods.h': TENSOR_METHODS_H,
+        'OpsAlreadyMovedToC10.cpp': OPS_ALREADY_MOVED_TO_C10_CPP,
     }
 
     for core_file, core_template_file in core_files.items():
@@ -465,25 +419,8 @@ def generate_outputs():
 
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
 
-    file_manager.write('ExtensionBackendRegistration.h', EXTENSION_BACKEND_REGISTRATION_H, top_env)
-
     file_manager.check_all_files_written()
     cuda_file_manager.check_all_files_written()
-
-    # check that generated files match source files
-    core_source_path = os.path.join(options.source_path, 'core')
-    match, mismatch, errors = cmpfiles_with_eol_normalization(core_install_dir, core_source_path, core_files.keys())
-    if errors:
-        raise RuntimeError("Error while trying to compare source and generated files for {}. "
-                           "Source directory: {}.  Generated directory: {}."
-                           .format(errors, core_source_path, core_install_dir))
-    if mismatch:
-        file_component = '{}'.format(','.join(mismatch))
-        if len(mismatch) > 1:
-            file_component = '{' + file_component + '}'
-        update_cmd = "cp {}/{} {}".format(core_install_dir, file_component, core_source_path)
-        raise RuntimeError("Source files: {} did not match generated files.  To update the source files, "
-                           "set environment variable GEN_TO_SOURCE or run \"{}\"".format(mismatch, update_cmd))
 
 declare_outputs()
 if options.output_dependencies is not None:

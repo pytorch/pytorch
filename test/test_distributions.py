@@ -30,6 +30,11 @@ from itertools import product
 from random import shuffle
 
 import torch
+
+# TODO: remove this global setting
+# Distributions tests use double as the default dtype
+torch.set_default_dtype(torch.double)
+
 from torch._six import inf
 from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
 from common_cuda import TEST_CUDA
@@ -651,7 +656,7 @@ BAD_EXAMPLES = [
 
 class TestDistributions(TestCase):
     _do_cuda_memory_leak_check = True
-    _do_cuda_non_default_stream = False
+    _do_cuda_non_default_stream = True
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
@@ -2907,7 +2912,8 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(halfcauchy.sample().size(), torch.Size())
         self.assertEqual(halfcauchy.sample(torch.Size((3, 2))).size(),
                          torch.Size((3, 2)))
-        self.assertRaises(ValueError, halfcauchy.log_prob, self.scalar_sample)
+        self.assertEqual(halfcauchy.log_prob(self.scalar_sample).size(),
+                         torch.Size())
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_1).size(),
                          torch.Size((3, 2)))
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_2).size(),
@@ -2945,7 +2951,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gamma._event_shape, torch.Size())
         self.assertEqual(gamma.sample().size(), torch.Size())
         self.assertEqual(gamma.sample((3, 2)).size(), torch.Size((3, 2)))
-        self.assertRaises(ValueError, gamma.log_prob, self.scalar_sample)
+        self.assertEqual(gamma.log_prob(self.scalar_sample).size(), torch.Size())
         self.assertEqual(gamma.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gamma.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
@@ -2965,7 +2971,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(chi2._event_shape, torch.Size())
         self.assertEqual(chi2.sample().size(), torch.Size())
         self.assertEqual(chi2.sample((3, 2)).size(), torch.Size((3, 2)))
-        self.assertRaises(ValueError, chi2.log_prob, self.scalar_sample)
+        self.assertEqual(chi2.log_prob(self.scalar_sample).size(), torch.Size())
         self.assertEqual(chi2.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(chi2.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 

@@ -13,8 +13,8 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/ATenDispatch.h>
 #include <ATen/Context.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 
@@ -68,28 +68,9 @@ inline Tensor from_blob(
   return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
 }
 
-namespace detail {
-
-static inline Backend infer_backend(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return tensorTypeIdToBackend(t.type_id());
+inline int64_t numel(const Tensor& tensor) {
+  return tensor.numel();
 }
-static inline Backend infer_backend(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tensorTypeIdToBackend(tl[0].type_id());
-}
-
-static inline bool infer_is_variable(const Tensor & t) {
-  TORCH_CHECK(t.defined(), "undefined Tensor");
-  return t.is_variable();
-}
-static inline bool infer_is_variable(const TensorList & tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tl[0].is_variable();
-}
-
-
-} // namespace detail
 
 // function definitions are all static inline because
 // they are one-line statically dispatched functions that

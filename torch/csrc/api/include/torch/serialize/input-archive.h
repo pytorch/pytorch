@@ -45,6 +45,9 @@ class TORCH_API InputArchive final {
 
   ~InputArchive() = default;
 
+  /// Reads an `IValue` associated with a given `key`.
+  void read(const std::string& key, c10::IValue& ivalue);
+
   /// Reads a `tensor` associated with a given `key`. If there is no `tensor`
   /// associated with the `key`, this returns false, otherwise it returns true.
   /// If the tensor is expected to be a buffer (not differentiable), `is_buffer`
@@ -78,6 +81,17 @@ class TORCH_API InputArchive final {
   void load_from(std::istream& stream,
       c10::optional<torch::Device> device = c10::nullopt);
 
+  // Loads given the specified flat array.
+  void load_from(const char* data, size_t size,
+      c10::optional<torch::Device> device = c10::nullopt);
+
+  // Loads given the specified read and size functions.
+  void load_from(
+       const std::function<size_t(
+                   uint64_t pos, void* buf, size_t nbytes)>& read_func,
+       const std::function<size_t(void)>& size_func,
+       c10::optional<torch::Device> device = c10::nullopt);
+
   /// Forwards all arguments to `read()`.
   /// Useful for generic code that can be re-used for both `InputArchive` and
   /// `OutputArchive` (where `operator()` forwards to `write()`).
@@ -88,6 +102,7 @@ class TORCH_API InputArchive final {
 
  private:
   jit::script::Module module_;
+  std::string hierarchy_prefix_;
 };
 } // namespace serialize
 } // namespace torch

@@ -55,6 +55,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <functional>
@@ -317,6 +318,12 @@ Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const T
   return self.clone().index_add_(dim, index, source);
 }
 
+Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  TORCH_CHECK(source.dim() == 0, "index_fill_ only supports a 0-dimensional value tensor, but got tensor "
+      "with ", source.dim(), " dimension(s).");
+  return self.index_fill_(dim, index, source.item());
+}
+
 Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
   return self.clone().index_fill_(dim, index, source);
 }
@@ -344,15 +351,39 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
-  Tensor _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
-  return _self.clone().masked_fill_(mask, source);
+  Tensor result;
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
+  {
+    NoNamesGuard guard;
+#endif
+    Tensor _mask, _self;
+    std::tie(_mask, _self) = expand_outplace(mask, self);
+    result = _self.clone();
+    result.masked_fill_(mask, source);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & source) {
+  Tensor result;
+#ifdef BUILD_NAMEDTENSOR
+  auto outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
+  {
+    NoNamesGuard guard;
+#endif
   Tensor _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
-  return _self.clone().masked_fill_(mask, source);
+  result = _self.clone();
+  result.masked_fill_(mask, source);
+#ifdef BUILD_NAMEDTENSOR
+  }
+  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+#endif
+  return result;
 }
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){

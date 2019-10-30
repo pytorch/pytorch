@@ -55,53 +55,67 @@ bool _nnpack_available() {
 
 #include "nnpack.h"
 
-#include <stdlib.h>
-
-#include <ATen/Parallel.h>
-#include <thread>
+#include "caffe2/utils/threadpool/ThreadPoolMobile.h"
 
 namespace at {
 namespace native {
 
-// Stolen from Caffe2
-static pthreadpool_t nnpack_threadpool_ = nullptr;
-static bool called_nnpack_threadpool_ = false;
+static bool init_nnpack() {
+  static std::once_flag once_;
+  static bool nnpack_successfully_initialized_ = false;
 
-pthreadpool_t nnpack_threadpool() {
-  if (! called_nnpack_threadpool_) {
-    called_nnpack_threadpool_ = true;
-    enum nnp_status nnpack_status = nnp_initialize();
+  std::call_once(once_, []() {
+    const nnp_status nnpack_status = nnp_initialize();
+    nnpack_successfully_initialized_ = (nnp_status_success == nnpack_status);
+
     if (nnpack_status != nnp_status_success) {
       if (nnpack_status == nnp_status_out_of_memory) {
-        throw std::runtime_error("could not initialize NNPack (out of memory)");
+        LOG(WARNING) << "Could not initialize NNPACK! Reason: Out of memory.";
       } else if (nnpack_status == nnp_status_unsupported_hardware) {
-        throw std::runtime_error("could not initialize NNPack (unsupported hardware)");
+        LOG(WARNING) << "Could not initialize NNPACK! Reason: Unsupported hardware.";
       } else {
-        throw std::runtime_error("could not initialize NNPack (unknown error)");
+        LOG(WARNING) << "Could not initialize NNPACK! Reason: Unknown error!";
       }
     }
-    unsigned int threads;
-#ifdef INTRA_OP_PARALLEL
-    threads = at::get_num_threads();
+  });
+
+  return nnpack_successfully_initialized_;
+}
+
+static pthreadpool_t nnpack_threadpool() {
+  // Try initializing a threadpool for NNPACK's use.  If we fail to
+  // successfully initialize an implementation, return nullptr which will
+  // instruct NNPACK to run single threaded.
+
+#ifdef C10_MOBILE
+  // If building for mobile, use Caffe 2's mobile-friendly threadpool.
+  return caffe2::mobile_pthreadpool();
 #else
-    threads = std::thread::hardware_concurrency();
+  // Otherwise, try using pthreadpool if we manage to initialize it successfully.
+  static pthreadpool_t nnpack_threadpool_ = nullptr;
+  static bool called_nnpack_threadpool_ = false;
+
+  if (!called_nnpack_threadpool_) {
+    called_nnpack_threadpool_ = true;
+
+#ifdef INTRA_OP_PARALLEL
+    const uint32_t threads = at::get_num_threads();
+#else
+    const uint32_t threads = std::thread::hardware_concurrency();
 #endif
+
     nnpack_threadpool_ = pthreadpool_create(threads);
-    if (nnpack_threadpool_ == nullptr) {
-      throw std::runtime_error("could not initialize NNPack's pthreadpool");
+    if (!nnpack_threadpool_) {
+      LOG(WARNING) << "Failed to initialize pthreadpool! Running NNPACK in single-threaded mode.";
     }
   }
+
   return nnpack_threadpool_;
+#endif
 }
 
 bool _nnpack_available() {
-  if (! called_nnpack_threadpool_) {
-    try {
-      return nnpack_threadpool() != nullptr;
-    } catch (std::runtime_error e) {
-    }
-  }
-  return nnpack_threadpool() != nullptr;
+  return init_nnpack();
 }
 
 // Make thread_local for safety in cases where we have multiple threads running
@@ -126,7 +140,7 @@ static inline void allocate_workspace() {
 }
 
 constexpr int input_batch_size_dim = 0;
-constexpr int input_channels_dim = 1;
+// constexpr int input_channels_dim = 1;
 constexpr int input_height_dim = 2;
 constexpr int input_width_dim = 3;
 constexpr int output_batch_size_dim = 0;
@@ -134,12 +148,12 @@ constexpr int output_channels_dim = 1;
 constexpr int output_height_dim = 2;
 constexpr int output_width_dim = 3;
 constexpr int weight_output_channels_dim = 0;
-constexpr int weight_input_channels_dim = 1;
-constexpr int weight_height_dim = 2;
-constexpr int weight_width_dim = 3;
+// constexpr int weight_input_channels_dim = 1;
+// constexpr int weight_height_dim = 2;
+// constexpr int weight_width_dim = 3;
 
 // Often written as 2 + max_dim (extra dims for batch size and channels)
-constexpr int max_dim = 3;
+// constexpr int max_dim = 3;
 
 std::vector<int64_t> conv_output_size(
     IntArrayRef input_size,

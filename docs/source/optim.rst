@@ -155,6 +155,8 @@ should write your code this way:
 
 .. autoclass:: torch.optim.lr_scheduler.LambdaLR
     :members:
+.. autoclass:: torch.optim.lr_scheduler.MultiplicativeLR
+    :members:
 .. autoclass:: torch.optim.lr_scheduler.StepLR
     :members:
 .. autoclass:: torch.optim.lr_scheduler.MultiStepLR
@@ -166,4 +168,8 @@ should write your code this way:
 .. autoclass:: torch.optim.lr_scheduler.ReduceLROnPlateau
     :members:
 .. autoclass:: torch.optim.lr_scheduler.CyclicLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.OneCycleLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
     :members:

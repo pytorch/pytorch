@@ -23,8 +23,8 @@ __device__ inline int max(int a, int b) {
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_cuda_update_output(
-  PackedTensorAccessor<scalar_t, 4> input,
-  PackedTensorAccessor<scalar_t, 4> output,
+  PackedTensorAccessor64<scalar_t, 4> input,
+  PackedTensorAccessor64<scalar_t, 4> output,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
@@ -87,8 +87,8 @@ __global__ void avg_pool3d_cuda_update_output(
 //
 template<int KERNEL_WIDTH, typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_cuda_update_output(
-  PackedTensorAccessor<scalar_t, 4> input,
-  PackedTensorAccessor<scalar_t, 4> output,
+  PackedTensorAccessor64<scalar_t, 4> input,
+  PackedTensorAccessor64<scalar_t, 4> output,
   int kT, int kH,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
@@ -148,8 +148,8 @@ __global__ void avg_pool3d_cuda_update_output(
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_single_backward_out_frame_stride1(
-  PackedTensorAccessor<scalar_t, 4> gradOutput,
-  PackedTensorAccessor<scalar_t, 4> gradInput,
+  PackedTensorAccessor64<scalar_t, 4> gradOutput,
+  PackedTensorAccessor64<scalar_t, 4> gradInput,
   int kT, int kH, int kW,
   accscalar_t normFactor,
   int offsetZ)
@@ -193,8 +193,8 @@ __global__ void avg_pool3d_single_backward_out_frame_stride1(
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_cuda_update_grad_input_atomic(
-  PackedTensorAccessor<scalar_t, 4> gradOutput,
-  PackedTensorAccessor<scalar_t, 4> gradInput,
+  PackedTensorAccessor64<scalar_t, 4> gradOutput,
+  PackedTensorAccessor64<scalar_t, 4> gradInput,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
@@ -251,8 +251,8 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
 
 template <typename scalar_t, typename accscalar_t>
 __global__ void avg_pool3d_cuda_update_grad_input(
-  PackedTensorAccessor<scalar_t, 4> gradOutput,
-  PackedTensorAccessor<scalar_t, 4> gradInput,
+  PackedTensorAccessor64<scalar_t, 4> gradOutput,
+  PackedTensorAccessor64<scalar_t, 4> gradInput,
   int kT, int kH, int kW,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
@@ -309,8 +309,8 @@ __global__ void avg_pool3d_cuda_update_grad_input(
 #define LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW: \
   avg_pool3d_cuda_update_output<KW, scalar_t, accscalar_t>  \
     <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>( \
-       work_input.packed_accessor<scalar_t, 4>(),           \
-       work_output.packed_accessor<scalar_t, 4>(),          \
+       work_input.packed_accessor64<scalar_t, 4>(),           \
+       work_output.packed_accessor64<scalar_t, 4>(),          \
        kT, kH,                                              \
        dT, dH, dW,                                          \
        padT, padH, padW,                                    \
@@ -334,10 +334,25 @@ void avg_pool3d_out_cuda_template(
   checkAllSameGPU("avg_pool3d_out_cuda", {output_arg, input_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 3) &&
-              (stride.empty() || stride.size() == 3) &&
-              (padding.size() == 1 || padding.size() == 3),
-    "avg_pool3d: all IntArrayRef sizes must be 3");
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
+    "avg_pool3d: kernel_size must be a single int, or a tuple of three ints");
+  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
+  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
+
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
+    "avg_pool3d: stride must be omitted, a single int, or a tuple of three ints");
+  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
+  const int dH = stride.empty() ? kH :
+                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
+
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
+    "avg_pool3d: padding must be a single int, or a tuple of three ints");
+  const int padT = safe_downcast<int, int64_t>(padding[0]);
+  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
+  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
@@ -348,18 +363,6 @@ void avg_pool3d_out_cuda_template(
     TORCH_CHECK(divisor_override.value() != 0, "divisor must be not zero");
     divisor = divisor_override.value();
   }
-
-  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
-
-  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[1]);
-  const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[2]);
-
-  const int padT = safe_downcast<int, int64_t>(padding[0]);
-  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
-  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
 
   const int64_t nbatch = input.ndimension() == 5 ? input.size(-5) : 1;
   const int64_t nslices = input.size(-4);
@@ -422,8 +425,8 @@ void avg_pool3d_out_cuda_template(
         default:
           avg_pool3d_cuda_update_output<scalar_t, accscalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-               work_input.packed_accessor<scalar_t, 4>(),
-               work_output.packed_accessor<scalar_t, 4>(),
+               work_input.packed_accessor64<scalar_t, 4>(),
+               work_output.packed_accessor64<scalar_t, 4>(),
                kT, kH, kW,
                dT, dH, dW,
                padT, padH, padW,
@@ -464,10 +467,25 @@ void avg_pool3d_backward_out_cuda_template(
                   {gradInput_arg, gradOutput_arg, input_arg});
 
   // #20866, #22032: Guarantee this for the official C++ API?
-  TORCH_CHECK((kernel_size.size() == 1 || kernel_size.size() == 3) &&
-              (stride.empty() || stride.size() == 3) &&
-              (padding.size() == 1 || padding.size() == 3),
-    "avg_pool3d: all IntArrayRef sizes must be 3");
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
+    "avg_pool3d: kernel_size must be a single int, or a tuple of three ints");
+  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
+  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
+
+  TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 3,
+    "avg_pool3d: stride must be omitted, a single int, or a tuple of three ints");
+  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
+  const int dH = stride.empty() ? kH :
+                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
+
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
+    "avg_pool3d: padding must be a single int, or a tuple of three ints");
+  const int padT = safe_downcast<int, int64_t>(padding[0]);
+  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
+  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "non-empty 4D or 5D (batch mode) tensor expected for input");
@@ -485,18 +503,6 @@ void avg_pool3d_backward_out_cuda_template(
   // Resize and initialize result tensor.
   gradInput.resize_as_(input);
   gradInput.zero_();
-
-  const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
-
-  const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[1]);
-  const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[2]);
-
-  const int padT = safe_downcast<int, int64_t>(padding[0]);
-  const int padH = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[1]);
-  const int padW = padding.size() == 1 ? padT : safe_downcast<int, int64_t>(padding[2]);
 
   const int64_t nbatch = input.ndimension() == 5 ? input.size(-5) : 1;
   const int64_t nslices = input.size(-4);
@@ -561,8 +567,8 @@ void avg_pool3d_backward_out_cuda_template(
 
           avg_pool3d_single_backward_out_frame_stride1<scalar_t, accscalar_t>
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-              work_grad_output.packed_accessor<scalar_t, 4>(),
-              work_grad_input.packed_accessor<scalar_t, 4>(),
+              work_grad_output.packed_accessor64<scalar_t, 4>(),
+              work_grad_input.packed_accessor64<scalar_t, 4>(),
               kT, kH, kW,
               1.0f/divide_factor,
               offsetZ);
@@ -594,8 +600,8 @@ void avg_pool3d_backward_out_cuda_template(
           if (kernelsOverlap) {
             avg_pool3d_cuda_update_grad_input_atomic<scalar_t, accscalar_t>
               <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                 work_grad_output.packed_accessor<scalar_t, 4>(),
-                 work_grad_input.packed_accessor<scalar_t, 4>(),
+                 work_grad_output.packed_accessor64<scalar_t, 4>(),
+                 work_grad_input.packed_accessor64<scalar_t, 4>(),
                  kT, kH, kW,
                  dT, dH, dW,
                  padT, padH, padW,
@@ -605,8 +611,8 @@ void avg_pool3d_backward_out_cuda_template(
           else {
             avg_pool3d_cuda_update_grad_input<scalar_t, accscalar_t>
               <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-                 work_grad_output.packed_accessor<scalar_t, 4>(),
-                 work_grad_input.packed_accessor<scalar_t, 4>(),
+                 work_grad_output.packed_accessor64<scalar_t, 4>(),
+                 work_grad_input.packed_accessor64<scalar_t, 4>(),
                  kT, kH, kW,
                  dT, dH, dW,
                  padT, padH, padW,

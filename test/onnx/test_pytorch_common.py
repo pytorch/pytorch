@@ -17,6 +17,13 @@ from common_utils import *  # noqa: F401
 
 torch.set_default_tensor_type('torch.FloatTensor')
 
+BATCH_SIZE = 2
+
+RNN_BATCH_SIZE = 7
+RNN_SEQUENCE_LENGTH = 11
+RNN_INPUT_SIZE = 5
+RNN_HIDDEN_SIZE = 3
+
 
 def _skipper(condition, reason):
     def decorator(f):

@@ -6,13 +6,13 @@
 namespace at {
 
 namespace {
-  DeviceType sparseTensorIdToDeviceType(TensorTypeId type_id) {
-    if (type_id == SparseCPUTensorId()) {
+  DeviceType sparseTensorSetToDeviceType(TensorTypeSet type_set) {
+    if (type_set.has(TensorTypeId::SparseCPUTensorId)) {
       return kCPU;
-    } else if (type_id == SparseCUDATensorId()) {
+    } else if (type_set.has(TensorTypeId::SparseCUDATensorId)) {
       return kCUDA;
     } else {
-      AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", type_id);
+      AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", type_set);
     }
   }
 }
@@ -30,13 +30,13 @@ namespace {
 //
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type)
-  :   SparseTensorImpl(type_id, data_type
-      , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(ScalarType::Long))
-      , at::empty({0}, at::initialTensorOptions().device(sparseTensorIdToDeviceType(type_id)).dtype(data_type))) {}
+SparseTensorImpl::SparseTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type)
+  :   SparseTensorImpl(type_set, data_type
+      , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(type_set)).dtype(ScalarType::Long))
+      , at::empty({0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(type_set)).dtype(data_type))) {}
 
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeId type_id, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
-    : TensorImpl(type_id, data_type, values.device())
+SparseTensorImpl::SparseTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
+    : TensorImpl(type_set, data_type, values.device())
     , sparse_dim_(1)
     , dense_dim_(0)
     , indices_(std::move(indices))
@@ -90,7 +90,7 @@ int64_t SparseTensorImpl::storage_offset() const {
   AT_ERROR("sparse tensors do not have storage");
 }
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
-  TORCH_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe is not allowed on Tensor created from .data or .detach()");
+  TORCH_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe ", err_msg_tensor_metadata_change_not_allowed);
   AT_ASSERT(!indices.is_variable() && !values.is_variable());  // They should be plain tensors!  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
 
   TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());

@@ -5,6 +5,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Device.h>
+#include <c10/core/TensorTypeSet.h>
 
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
@@ -348,8 +349,38 @@ struct C10_API TensorOptions {
   }
 
   // Resolves the ATen backend specified by the current construction axes.
+  // TODO: Deprecate this
   Backend backend() const noexcept {
     return at::tensorTypeIdToBackend(computeTensorTypeId());
+  }
+
+  /// Return the right-biased merge of two TensorOptions.  This has the
+  /// effect of overwriting settings from self with specified options
+  /// of options.
+  ///
+  /// NB: This merging operation does NOT respect device merges.
+  /// For example, if you device({kCUDA, 1}).merge_in(kCUDA)
+  /// you will get kCUDA in the end!  Functions like Tensor.new_empty
+  /// ensure the right device is selected anyway by way of a
+  /// device guard.
+  ///
+  TensorOptions merge_in(TensorOptions options) const noexcept {
+    TensorOptions r = options;
+    if (!r.has_device()) r.set_device(device());
+    if (!r.has_dtype()) r.set_dtype(dtype());
+    if (!r.has_layout()) r.set_layout(layout());
+    // NB: requires grad is right biased; not a logical AND/OR!
+    if (!r.has_requires_grad()) r.set_requires_grad(requires_grad());
+    if (!r.has_is_variable()) r.set_is_variable(is_variable());
+    if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory());
+    return r;
+  }
+
+  // Resolves the tensor type set specified by the current construction axes.
+  TensorTypeSet type_set() const noexcept {
+    auto r = TensorTypeSet(computeTensorTypeId());
+    if (is_variable()) r = r.add(TensorTypeId::VariableTensorId);
+    return r;
   }
 
   inline TensorTypeId computeTensorTypeId() const {
@@ -358,49 +389,49 @@ struct C10_API TensorOptions {
         switch (device().type()) {
           case DeviceType::CPU:
             if (isComplexType(typeMetaToScalarType(dtype()))) {
-              return ComplexCPUTensorId();
+              return TensorTypeId::ComplexCPUTensorId;
             }
             if (isQIntType(typeMetaToScalarType(dtype()))) {
-              return QuantizedCPUTensorId();
+              return TensorTypeId::QuantizedCPUTensorId;
             }
-            return CPUTensorId();
+            return TensorTypeId::CPUTensorId;
           case DeviceType::CUDA:
             if (isComplexType(typeMetaToScalarType(dtype()))) {
-              return ComplexCUDATensorId();
+              return TensorTypeId::ComplexCUDATensorId;
             }
-            return CUDATensorId();
+            return TensorTypeId::CUDATensorId;
           case DeviceType::MKLDNN:
-            return MKLDNNTensorId();
+            return TensorTypeId::MKLDNNTensorId;
           case DeviceType::OPENGL:
-            return OpenGLTensorId();
+            return TensorTypeId::OpenGLTensorId;
           case DeviceType::OPENCL:
-            return OpenCLTensorId();
+            return TensorTypeId::OpenCLTensorId;
           case DeviceType::IDEEP:
-            return IDEEPTensorId();
+            return TensorTypeId::IDEEPTensorId;
           case DeviceType::HIP:
-            return HIPTensorId();
+            return TensorTypeId::HIPTensorId;
           case DeviceType::MSNPU:
-            return MSNPUTensorId();
+            return TensorTypeId::MSNPUTensorId;
           case DeviceType::XLA:
-            return XLATensorId();
+            return TensorTypeId::XLATensorId;
           default:
             AT_ERROR("Unsupported device type for dense layout: ", device().type());
         }
       case Layout::Sparse:
         switch (device().type()) {
           case DeviceType::CPU:
-            return SparseCPUTensorId();
+            return TensorTypeId::SparseCPUTensorId;
           case DeviceType::CUDA:
-            return SparseCUDATensorId();
+            return TensorTypeId::SparseCUDATensorId;
           case DeviceType::HIP:
-            return SparseHIPTensorId();
+            return TensorTypeId::SparseHIPTensorId;
           default:
             AT_ERROR("Unsupported device type for sparse layout: ", device().type());
         }
       case Layout::Mkldnn:
         switch (device().type()) {
           case DeviceType::CPU:
-            return MkldnnCPUTensorId();
+            return TensorTypeId::MkldnnCPUTensorId;
           default:
             AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
         }
@@ -581,34 +612,38 @@ inline TensorTypeId computeTensorTypeId(TensorOptions options) {
 }
 
 inline DeviceType computeDeviceType(TensorTypeId tid) {
-  if (tid == CPUTensorId()) {
+  if (tid == TensorTypeId::CPUTensorId) {
     return DeviceType::CPU;
-  } else if (tid == CUDATensorId()) {
+  } else if (tid == TensorTypeId::CUDATensorId) {
     return DeviceType::CUDA;
-  } else if (tid == HIPTensorId()) {
+  } else if (tid == TensorTypeId::HIPTensorId) {
     return DeviceType::HIP;
-  } else if (tid == MKLDNNTensorId()) {
+  } else if (tid == TensorTypeId::MKLDNNTensorId) {
     return DeviceType::MKLDNN;
-  } else if (tid == OpenGLTensorId()) {
+  } else if (tid == TensorTypeId::OpenGLTensorId) {
     return DeviceType::IDEEP;
-  } else if (tid == OpenCLTensorId()) {
+  } else if (tid == TensorTypeId::OpenCLTensorId) {
     return DeviceType::OPENCL;
-  } else if (tid == IDEEPTensorId()) {
+  } else if (tid == TensorTypeId::IDEEPTensorId) {
     return DeviceType::IDEEP;
-  } else if (tid == HIPTensorId()) {
+  } else if (tid == TensorTypeId::HIPTensorId) {
     return DeviceType::HIP;
-  } else if (tid == MSNPUTensorId()) {
+  } else if (tid == TensorTypeId::MSNPUTensorId) {
     return DeviceType::MSNPU;
-  } else if (tid == XLATensorId()) {
+  } else if (tid == TensorTypeId::XLATensorId) {
     return DeviceType::XLA;
-  } else if (tid == SparseCPUTensorId()) {
+  } else if (tid == TensorTypeId::SparseCPUTensorId) {
     return DeviceType::CPU;
-  } else if (tid == SparseCUDATensorId()) {
+  } else if (tid == TensorTypeId::SparseCUDATensorId) {
     return DeviceType::CUDA;
-  } else if (tid == SparseHIPTensorId()) {
+  } else if (tid == TensorTypeId::SparseHIPTensorId) {
     return DeviceType::HIP;
-  } else if (tid == MkldnnCPUTensorId()) {
+  } else if (tid == TensorTypeId::MkldnnCPUTensorId) {
     return DeviceType::CPU;
+  } else if (tid == TensorTypeId::ComplexCPUTensorId) {
+    return DeviceType::CPU;
+  } else if (tid == TensorTypeId::ComplexCUDATensorId) {
+    return DeviceType::CUDA;
   } else {
     AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
   }
