@@ -196,7 +196,7 @@ TEST(TensorTest, AtTensorCtorSingleDim) {
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
   std::vector<int> v = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-  auto tensor = at::tensor(v);
+  tensor = at::tensor(v);
   ASSERT_EQ(tensor.numel(), v.size());
   ASSERT_EQ(tensor.dtype(), at::kInt);
   for (size_t i = 0; i < v.size(); ++i) {
