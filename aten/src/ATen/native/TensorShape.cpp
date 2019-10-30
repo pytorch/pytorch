@@ -501,9 +501,9 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     //
     // NB: Even though we have viewable geometry and the target strides here,
     //     we do not just call `as_strided` on `self` because the backward
-    //     for `as_strided` is not as efficient as `view` (since the former
-    //     is meant to handle general cases). We will redo `THTensor_compute_stride`
-    //     in `view` but that is quite cheap anyways.
+    //     for `as_strided` is not as efficient as that of `view` (since the
+    //     former is meant to handle general cases). We will redo a
+    //     `THTensor_compute_stride` in `view` but that is quite cheap anyways.
     return at::view(self, shape);
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
