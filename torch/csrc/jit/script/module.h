@@ -395,7 +395,7 @@ struct TORCH_API Module {
 
 namespace detail {
 
-struct SlotCursor {
+struct TORCH_API SlotCursor {
   Module module_;
   int64_t i_; // slot offset, -1 indicates the module itself
 };
@@ -580,7 +580,7 @@ namespace detail {
 // slot_iterator_impl always iterate over all the slots in a module,
 // the Policy template argument determines slots should be returned and their
 // types
-struct ModulePolicy {
+struct TORCH_API ModulePolicy {
   // the type of the value being returned
   using value_type = Module;
 
@@ -601,7 +601,7 @@ struct ModulePolicy {
   static constexpr bool all_slots = false;
 };
 
-struct ParameterPolicy {
+struct TORCH_API ParameterPolicy {
   using value_type = at::Tensor;
   static value_type create(
       const std::vector<detail::SlotCursor>& cursors,
@@ -614,7 +614,7 @@ struct ParameterPolicy {
   static constexpr bool all_slots = false;
 };
 
-struct BufferPolicy {
+struct TORCH_API BufferPolicy {
   using value_type = at::Tensor;
   static value_type create(
       const std::vector<detail::SlotCursor>& cursors,
@@ -628,7 +628,7 @@ struct BufferPolicy {
   static constexpr bool all_slots = false;
 };
 
-struct AttributePolicy {
+struct TORCH_API AttributePolicy {
   using value_type = IValue;
   static value_type create(
       const std::vector<detail::SlotCursor>& frames,
@@ -645,7 +645,7 @@ struct AttributePolicy {
 // along with the fully qualified name of that slot. This is used for the named_
 // variants like named_parameters().
 template <typename Policy>
-struct NamedPolicy {
+struct TORCH_API NamedPolicy {
   using value_type = Named<typename Policy::value_type>;
   static value_type create(
       const std::vector<detail::SlotCursor>& frames,

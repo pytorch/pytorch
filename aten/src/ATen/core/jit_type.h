@@ -556,6 +556,12 @@ struct CAFFE2_API TensorType : public Type {
     return r;
   }
 
+  TensorTypePtr withPossiblyUndefined() {
+    auto r = clone();
+    r->undefined_ = c10::nullopt;
+    return r;
+  }
+
   c10::optional<bool> undefined() const { return undefined_; }
 
   static TensorTypePtr get();
@@ -563,29 +569,37 @@ struct CAFFE2_API TensorType : public Type {
   static const TypeKind Kind = TypeKind::TensorType;
 
  private:
-   TensorType(const at::Tensor &tensor)
-       : Type(TypeKind::TensorType), scalar_type_(tensor.scalar_type()),
-         device_(tensor.device()), sizes_(tensor.sizes().size()),
-         strides_(tensor.sizes().size()),
-         requires_grad_(tensor.requires_grad()), undefined_(false) {
-     if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
-       sizes_ = tensor.sizes().vec();
-       strides_ = tensor.strides().vec();
-     }
-        }
-        TensorType(c10::optional<at::ScalarType> scalar_type,
-                   c10::optional<Device> device, const VaryingShape &sizes,
-                   const VaryingStrides &strides,
-                   c10::optional<bool> requires_grad,
-                   c10::optional<bool> undefined = false)
-            : Type(TypeKind::TensorType), scalar_type_(scalar_type),
-              device_(device), sizes_(sizes), strides_(strides),
-              requires_grad_(requires_grad), undefined_(undefined) {}
+  TensorType(const at::Tensor& tensor)
+      : Type(TypeKind::TensorType),
+        scalar_type_(tensor.scalar_type()),
+        device_(tensor.device()),
+        sizes_(tensor.sizes().size()),
+        strides_(tensor.sizes().size()),
+        requires_grad_(tensor.requires_grad()),
+        undefined_(!tensor.defined()) {
+    if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
+      sizes_ = tensor.sizes().vec();
+      strides_ = tensor.strides().vec();
+    }
+  }
+  TensorType(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      const VaryingShape& sizes,
+      const VaryingStrides& strides,
+      c10::optional<bool> requires_grad,
+      c10::optional<bool> undefined = false)
+      : Type(TypeKind::TensorType),
+        scalar_type_(scalar_type),
+        device_(device),
+        sizes_(sizes),
+        strides_(strides),
+        requires_grad_(requires_grad),
+        undefined_(undefined) {}
 
-        TensorTypePtr clone() const {
-          return TensorTypePtr(new TensorType(scalar_type_, device_, sizes_,
-                                              strides_, requires_grad_,
-                                              undefined_));
+  TensorTypePtr clone() const {
+    return TensorTypePtr(new TensorType(
+        scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
   }
 
   static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
