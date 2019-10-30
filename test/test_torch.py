@@ -10997,7 +10997,7 @@ class TestTorchDeviceType(TestCase):
             ("acos", doubles, True, True, 'cpu'),
             ("acos", doubles, False, True, 'cuda'),
             ("asin", doubles, True, True, 'cpu'),
-            ("asin", doubles, False, True, 'cuda'),
+            ("asin", doubles, True, True, 'cuda'),
             ("atan", doubles, True, True, 'cpu'),
             ("atan", doubles, False, True, 'cuda'),
             ("bitwise_not", ints, True, True, 'cpu'),

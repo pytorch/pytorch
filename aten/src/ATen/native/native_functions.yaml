@@ -420,15 +420,9 @@
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _asin__cpu
-    CUDA: _asin__cuda
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _asin_out_cpu
-    CUDA: _asin_out_cuda
 
 - func: atan(Tensor self) -> Tensor
   use_c10_dispatcher: full

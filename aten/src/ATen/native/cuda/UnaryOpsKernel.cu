@@ -32,6 +32,14 @@ void logical_not_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void asin_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "asin_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return ::asin(a);
+    });
+  });
+}
+
 void ceil_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "ceil_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -216,6 +224,7 @@ void lgamma_kernel_cuda(TensorIterator& iter) {
 
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
+REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
 REGISTER_DISPATCH(floor_stub, &floor_kernel_cuda);
