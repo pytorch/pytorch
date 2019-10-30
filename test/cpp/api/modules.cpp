@@ -1931,7 +1931,7 @@ TEST_F(ModulesTest, Upsampling3D) {
 }
 
 TEST_F(ModulesTest, CTCLoss) {
-  CTCLoss loss {CTCLossOptions().reduction(at::Reduction::Reduction::None)};
+  CTCLoss loss {CTCLossOptions().reduction(torch::kNone)};
   const auto target_lengths = torch::tensor({0, 0, 0});
   const auto input_lengths = torch::tensor({50, 50, 50});
   const auto targets =
@@ -2775,5 +2775,5 @@ TEST_F(ModulesTest, PrettyPrintCTCLoss) {
   ASSERT_EQ(c10::str(CTCLoss()), "torch::nn::CTCLoss()");
   ASSERT_EQ(c10::str(CTCLoss(
     CTCLossOptions().blank(42).zero_infinity(false)
-      .reduction(at::Reduction::Reduction::Sum))), "torch::nn::CTCLoss()");
+      .reduction(torch::kSum))), "torch::nn::CTCLoss()");
 }

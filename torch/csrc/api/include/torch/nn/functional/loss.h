@@ -212,7 +212,8 @@ inline Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets,
   const Tensor& input_lengths, const Tensor& target_lengths,
   const CTCLossOptions& options = {}) {
   return torch::ctc_loss(log_probs, targets, input_lengths, target_lengths,
-    options.blank(), options.reduction(), options.zero_infinity());
+    options.blank(), enumtype::reduction_get_enum(options.reduction()),
+    options.zero_infinity());
 }
 
 } // namespace functional
