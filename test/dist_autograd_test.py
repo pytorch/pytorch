@@ -107,8 +107,8 @@ def noop():
 
 def wait_until_node_failure(rank):
     '''
-        Loops until an RPC to the given rank doesn't fail. This is used to
-        indicate that the node has failed in unit tests.
+    Loops until an RPC to the given rank fails. This is used to
+    indicate that the node has failed in unit tests.
     '''
     while True:
         try:
