@@ -556,33 +556,83 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
                 w.add_graph(model, torch.zeros(input_shape))
 
 class TestTensorBoardPytorchGraph_single_operator(BaseTestCase):
-    import torch.nn as nn
-    from common_nn import module_tests, new_module_tests
+    def test_wrong_input_size(self):
+        import torch.nn as nn
+        from common_nn import module_tests, new_module_tests
+        from torch.utils.tensorboard._pytorch_graph import graph
+        from torch.testing import FileCheck
+        modules = torch.nn.modules.__all__
+        tested = []
+        untested = []
+        for test_params in module_tests + new_module_tests:
+            if 'module_name' in test_params and 'input_size' in test_params:
+                print(test_params)
+                if 'constructor_args' in test_params:
+                    model = getattr(nn, test_params['module_name'])(*test_params['constructor_args'])
+                else:
+                    model = getattr(nn, test_params['module_name'])()
 
-    modules = torch.nn.modules.__all__
-    tested = []
-    untested = []
-    for test_params in module_tests + new_module_tests:
-        if 'module_name' in test_params and 'input_size' in test_params:
-            # print(test_params)
-            if 'constructor_args' in test_params:
-                model = getattr(nn, test_params['module_name'])(*test_params['constructor_args'])
-            else:
-                model = getattr(nn, test_params['module_name'])()
+                args = torch.zeros(test_params['input_size'])
+                tested.append(test_params['module_name'])
+                # print(model(args))
+                # print(model, args)
+                #  The expected string can be generated dynamically based on test_params or be predifined by JIT designer.
+                expected = """
+                # CHECK: name
+                name: "Linear/7"
+                op: "aten::addmm"
+                input: "Linear/bias"
+                input: "Input/input"
+                input: "Linear/4"
+                input: "Linear/5"
+                input: "Linear/6"
+                attr {
+                    key: "_output_shapes"
+                    value {
+                    list {
+                        shape {
+                        dim {
+                            size: 4
+                        }
+                        dim {
+                            size: 8
+                        }
+                        }
+                    }
+                    }
+                }
+                attr {
+                    key: "attr"
+                    value {
+                    s: "{}"
+                    }
+                }
+                }
+                versions {
+                producer: 22
+                }
+                , step_stats {
+                dev_stats {
+                    # CHECK: device
+                    device: "/device:CPU:0"
+                }
+                }
+                """
 
-            input = torch.zeros(test_params['input_size'])
-            tested.append(test_params['module_name'])
-            # print(model(input))
-            # add_graph(...)
-        elif 'fullname' in test_params and 'constructor' in test_params and 'input_size' in test_params:
-            model = test_params['constructor']()
-            input = torch.zeros(test_params['input_size'])
-            tested.append(test_params['fullname'])
-            # add_graph(...)
-            # print(model(input))
-        else:  # numerical accuracy tests?
-            untested.append(test_params)
+                result = graph(model, args)
+                FileCheck().run(expected, str(result))
 
+            elif 'fullname' in test_params and 'constructor' in test_params and 'input_size' in test_params:
+                model = test_params['constructor']()
+                args = torch.zeros(test_params['input_size'])
+                tested.append(test_params['fullname'])
+                FileCheck().run(expected, str(result))
+
+                # print(graph(model, args))
+
+                # print(model(args))
+            else:  # numerical accuracy tests?
+                untested.append(test_params)
 
 class TestTensorBoardFigure(BaseTestCase):
     @skipIfNoMatplotlib
