@@ -109,8 +109,8 @@ void Variable::set_data(const at::Tensor &new_data) const {
   get()->shallow_copy_from(new_data.getIntrusivePtr());
 }
 
-DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
-    : AutogradMeta(self_impl, false, std::move(gradient_edge)) {
+DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base)
+    : AutogradMeta(self_impl, false) {
   base_ = std::move(base);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
