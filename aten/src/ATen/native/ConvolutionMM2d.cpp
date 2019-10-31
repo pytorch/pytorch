@@ -39,7 +39,7 @@ static inline void slow_conv2d_shape_check(
 
   if (weight.defined()) {
     TORCH_CHECK(
-        !weight.numel() == 0 && (weight.dim() == 2 || weight.dim() == 4),
+        weight.numel() > 0 && (weight.dim() == 2 || weight.dim() == 4),
         "non-empty 2D or 4D weight tensor expected, but got: ",
         weight.sizes());
     if (bias.defined()) {
