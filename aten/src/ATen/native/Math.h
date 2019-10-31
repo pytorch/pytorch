@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <type_traits>
+#include <c10/util/math_compat.h>
 
 #ifndef M_PIf
 #define M_PIf 3.1415926535f

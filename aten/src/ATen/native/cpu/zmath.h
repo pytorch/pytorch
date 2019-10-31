@@ -2,6 +2,7 @@
 
 // Complex number math operations that act as no-ops for other dtypes.
 #include <complex>
+#include <c10/util/math_compat.h>
 
 namespace at { namespace native {
 namespace {
