@@ -234,6 +234,22 @@ Tensor PoissonNLLLossImpl::forward(
 
 // ============================================================================
 
+MarginRankingLossImpl::MarginRankingLossImpl(
+  const MarginRankingLossOptions& options_) : options(options_) {}
+
+void MarginRankingLossImpl::reset() {}
+
+void MarginRankingLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::PoissonNLLLoss()";
+}
+
+Tensor MarginRankingLossImpl::forward(const Tensor& input1,
+    const Tensor& input2, const Tensor& target) {
+  return F::margin_ranking_loss(input1, input2, target, options);
+}
+
+// ============================================================================
+
 BCEWithLogitsLossImpl::BCEWithLogitsLossImpl(
   const BCEWithLogitsLossOptions& options_) : options(options_) {
   reset();
