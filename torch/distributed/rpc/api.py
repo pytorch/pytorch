@@ -78,7 +78,6 @@ def _init_rpc(
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
-    # TODO, pass timeout, change process group agent constructor to use options struct
     _agent = backend_registry.init_backend(
         backend,
         store=store,
@@ -86,6 +85,7 @@ def _init_rpc(
         self_rank=self_rank,
         worker_name_to_id=worker_name_to_id,
         num_send_recv_threads=num_send_recv_threads,
+        rpc_timeout=rpc_timeout,
     )
     _start_rpc_agent(_agent)
 
