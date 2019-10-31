@@ -13,11 +13,11 @@ end.parse!
 puts "Current directory: #{Dir.pwd}"
 
 install_path = File.expand_path("../../../build_ios/install")
-if not Dir.exist? (install_path) 
+if not Dir.exist? (install_path)
     raise "path doesn't exist:#{install_path}!"
 end
 xcodeproj_path = File.expand_path("../TestApp.xcodeproj")
-if not File.exist? (xcodeproj_path) 
+if not File.exist? (xcodeproj_path)
     raise "path doesn't exist:#{xcodeproj_path}!"
 end
 
@@ -63,8 +63,8 @@ target.resources_build_phase.add_file_reference(config_file_ref, true)
 
 puts "Linking static libraries..."
 target.frameworks_build_phases.clear
-libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch.a']
-for lib in libs do 
+libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libnnpack_reference_layers.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch.a']
+for lib in libs do
     path = "#{install_path}/lib/#{lib}"
     if File.exist?(path)
         libref = project.frameworks_group.new_file(path)
