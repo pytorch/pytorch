@@ -298,7 +298,7 @@ TEST_F(ModulesTest, Identity) {
 
 TEST_F(ModulesTest, Flatten) {
   Flatten flatten;
-  auto input = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::requires_grad());
+  auto input = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto output = flatten->forward(input);
   auto expected = torch::tensor({{1, 3, 4}, {2, 5, 6}}, torch::kFloat);
   auto s = output.sum();
@@ -1171,7 +1171,7 @@ TEST_F(ModulesTest, BatchNorm1dStateful) {
   ASSERT_EQ(bn->running_var.size(0), 5);
 
   ASSERT_TRUE(bn->num_batches_tracked.defined());
-  ASSERT_EQ(bn->num_batches_tracked.dim(), 1);
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 0);
   ASSERT_EQ(bn->num_batches_tracked.size(0), 1);
 
   ASSERT_TRUE(bn->options.affine());
