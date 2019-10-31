@@ -253,7 +253,6 @@ class TestQuantizedTensor(TestCase):
         q.copy_(q2)
         # check scale and zero_points has been copied
         self.assertEqual(q, q2)
-
         # deep copy
         scale, zero_point, dtype = 1.0, 2, torch.uint8
         q_int = torch.randint(0, 100, [3, 5], dtype=dtype)
