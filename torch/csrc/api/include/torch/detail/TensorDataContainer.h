@@ -118,8 +118,21 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       sizes_({(int64_t)values.size()}), \
       scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Tensor) { \
-    at::AutoNonVariableTypeMode non_var_type_mode(true);  \
-    tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU).is_variable(false));       \
+    at::AutoNonVariableTypeMode non_var_type_mode(true); \
+    /* NOTE: if I only use
+       `tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU).is_variable(false));` here,
+       a call such as
+       `torch::tensor(at::ArrayRef<bool>({true, false, true}))` would throw the following runtime error:
+       ```
+       C++ exception with description ""tensor_cpu" not implemented for 'Bool'
+       (operator() at ../aten/src/ATen/native/TensorFactories.cpp:850)
+       ```
+    */ \
+    if (scalar_type_ == at::kBool) { \
+      tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU).is_variable(false)); \
+    } else { \
+      tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU).is_variable(false)); \
+    } \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
