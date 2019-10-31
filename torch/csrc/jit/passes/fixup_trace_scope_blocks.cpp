@@ -11,6 +11,14 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
+bool isEligibleNode(Node* n) {
+  return n->kind() == prim::FakeScopeBlock || n->kind() == prim::FakeFork;
+}
+
+} // namespace
+
 // Iterate through all the nodes in program order and--for each use--
 // if the Value referenced is not in a scope that dominates the node,
 // add block and Node outputs to lift it into a scope in which
@@ -65,7 +73,7 @@ struct MakeDefsDominateUses {
       }
     }
 
-    if (n->kind() == prim::FakeScopeBlock) {
+    if (isEligibleNode(n)) {
       run(n->blocks()[0]);
     }
   }
@@ -83,7 +91,9 @@ struct MakeDefsDominateUses {
 // it is required to properly inline the blocks).
 void convertReturnsToTuples(Block* b) {
   for (Node* n : b->nodes()) {
-    if (n->kind() == prim::FakeScopeBlock) {
+    if (n->kind() == prim::FakeFork) {
+      convertReturnsToTuples(n->blocks()[0]);
+    } else if (n->kind() == prim::FakeScopeBlock) {
       TORCH_INTERNAL_ASSERT(n->blocks().size() == 1);
       convertReturnsToTuples(n->blocks()[0]);
 
@@ -128,7 +138,7 @@ void convertReturnsToTuples(Block* b) {
 // appears as a Graph attribute attr::Subgraph
 void lambdaLiftBlocksAndConvertToGraph(Block* b) {
   for (Node* n : b->nodes()) {
-    if (n->kind() == prim::FakeScopeBlock) {
+    if (isEligibleNode(n)) {
       lambdaLiftBlocksAndConvertToGraph(n->blocks()[0]);
 
       auto graph = std::make_shared<Graph>();
@@ -174,30 +184,40 @@ std::string mangleMethodName(
 void addSelfArgsToBlocks(
     Block* b,
     script::Module this_level_self,
-    std::vector<std::string> prefix) {
+    std::vector<std::string> prefix,
+    Value* self) {
   // Top level block already has `self`, skip it.
   if (prefix != std::vector<std::string>{"__module"}) {
     b->addInput()->setType(this_level_self.type())->setDebugName("self");
   }
 
   for (Node* n : b->nodes()) {
-    if (n->kind() == prim::FakeScopeBlock) {
+    if (n->kind() == prim::FakeFork) {
+      addSelfArgsToBlocks(n->blocks()[0], this_level_self, prefix, self);
+    } else if (n->kind() == prim::FakeScopeBlock) {
       // First, figure out what module we need to get in scope to call
       // the method
       auto sub_atoms = c10::QualifiedName(n->s(attr::scope)).atoms();
       TORCH_INTERNAL_ASSERT(sub_atoms.size() > prefix.size());
 
       script::Module callee_mod = this_level_self;
+      Value* callee_val = self;
+
+      WithInsertPoint ip(n);
 
       for (size_t i = 0; i < sub_atoms.size(); ++i) {
         if (i < prefix.size()) {
           TORCH_INTERNAL_ASSERT(sub_atoms[i] == prefix[i]);
         } else {
+          callee_val =
+              b->owningGraph()->insertGetAttr(callee_val, sub_atoms[i]);
           callee_mod = callee_mod.get_module(sub_atoms[i]);
         } // if (i < prefix.size())
       } // for (size_t i = 0; i < sub_atoms.size(); ++i)
 
-      addSelfArgsToBlocks(n->blocks()[0], callee_mod, sub_atoms);
+      n->addInput(callee_val);
+
+      addSelfArgsToBlocks(n->blocks()[0], callee_mod, sub_atoms, callee_val);
     } // if (n->kind() == prim::FakeScopeBlock)
   } // for (Node *n : b->nodes())
 }
@@ -209,13 +229,15 @@ void addSelfArgsToBlocks(
 void createMethodCalls(
     const std::shared_ptr<Graph>& g,
     script::Module this_level_self,
-    std::vector<std::string> prefix) {
-  Value* self = g->inputs()[0];
+    std::vector<std::string> prefix,
+    Value* self) {
   TORCH_INTERNAL_ASSERT(self->type()->isSubtypeOf(this_level_self.type()));
 
   for (auto node_itr = g->nodes().begin(); node_itr != g->nodes().end();) {
     Node* n = *node_itr++;
-    if (n->kind() == prim::FakeScopeBlock) {
+    if (n->kind() == prim::FakeFork) {
+      createMethodCalls(n->g(attr::Subgraph), this_level_self, prefix, self);
+    } else if (n->kind() == prim::FakeScopeBlock) {
       // First, figure out what module we need to get in scope to call
       // the method
       auto sub_atoms = c10::QualifiedName(n->s(attr::scope)).atoms();
@@ -223,18 +245,18 @@ void createMethodCalls(
 
       WithInsertPoint ip(n);
 
-      Value* callee_val = self;
+      Value* callee_val = n->inputs()[0];
       script::Module callee_mod = this_level_self;
       for (size_t i = 0; i < sub_atoms.size(); ++i) {
         if (i < prefix.size()) {
           TORCH_INTERNAL_ASSERT(sub_atoms[i] == prefix[i]);
         } else {
-          callee_val = g->insertGetAttr(callee_val, sub_atoms[i]);
           callee_mod = callee_mod.get_module(sub_atoms[i]);
         }
       }
 
-      createMethodCalls(n->g(attr::Subgraph), callee_mod, sub_atoms);
+      createMethodCalls(
+          n->g(attr::Subgraph), callee_mod, sub_atoms, callee_val);
 
       auto mangled_method_name = mangleMethodName("forward", callee_mod);
       auto qualname =
@@ -243,8 +265,7 @@ void createMethodCalls(
           qualname, n->g(attr::Subgraph));
       callee_mod.type()->addMethod(f);
 
-      std::vector<NamedValue> nvs = {
-          NamedValue(callee_val->node()->sourceRange(), callee_val)};
+      std::vector<NamedValue> nvs;
       for (Value* i : n->inputs()) {
         nvs.emplace_back(i->node()->sourceRange(), i);
       }
@@ -278,11 +299,44 @@ void inlineScopeBlocks(Block* b) {
   }
 }
 
+void convertFakeForksToRealForks(const std::shared_ptr<Graph>& g) {
+  for (auto itr = g->nodes().begin(); itr != g->nodes().end();) {
+    Node* n = *itr++;
+    if (n->kind() == prim::FakeFork) {
+      WithInsertPoint guard(n);
+      Node* new_fork_node =
+          g->insertNode(g->create(prim::fork, n->outputs().size()))
+              ->copyAttributes(*n);
+      for (Value* i : n->inputs()) {
+        new_fork_node->addInput(i);
+      }
+      for (size_t i = 0; i < new_fork_node->outputs().size(); ++i) {
+        new_fork_node->outputs()[i]->copyMetadata(n->outputs()[i]);
+        n->outputs()[i]->replaceAllUsesWith(new_fork_node->outputs()[i]);
+      }
+      n->destroy();
+    }
+  }
+}
+
 // Run a few clean-up passes to make the graph a bit cleaner.
 void runCleanupPasses(const std::shared_ptr<Graph>& g) {
+  for (Node* n : g->nodes()) {
+    if (n->kind() == prim::FakeFork) {
+      auto subgraph = n->g(attr::Subgraph);
+      if (script::getInlineEverythingMode()) {
+        Inline(*subgraph);
+      }
+      convertFakeForksToRealForks(subgraph);
+      LowerSimpleTuples(subgraph);
+      EliminateDeadCode(subgraph);
+      LintGraph(subgraph);
+    }
+  }
   if (script::getInlineEverythingMode()) {
     Inline(*g);
   }
+  convertFakeForksToRealForks(g);
   LowerSimpleTuples(g);
   EliminateDeadCode(g);
   LintGraph(g);
@@ -307,11 +361,14 @@ void FixupTraceScopeBlocks(
     // We have no Module, so we're just going to inline everything.
     // This should give us a totally flag graph.
     inlineScopeBlocks(graph->block());
+    // For FakeFork nodes
+    lambdaLiftBlocksAndConvertToGraph(graph->block());
     runCleanupPasses(graph);
   } else {
-    addSelfArgsToBlocks(graph->block(), *self, {"__module"});
+    addSelfArgsToBlocks(
+        graph->block(), *self, {"__module"}, graph->inputs()[0]);
     lambdaLiftBlocksAndConvertToGraph(graph->block());
-    createMethodCalls(graph, *self, {"__module"});
+    createMethodCalls(graph, *self, {"__module"}, graph->inputs()[0]);
     runCleanupPasses(self);
     // `graph` isn't referenced in `self` yet, so we need to run
     // this separately
