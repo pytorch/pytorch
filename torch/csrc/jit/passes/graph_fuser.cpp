@@ -235,11 +235,12 @@ struct GraphFuser {
       GRAPH_DEBUG("too many arguments for ", getHeader(node));
       return false;
     }
-    if (tensors_node->kind() != prim::ListConstruct)
+    if (tensors_node->kind() != prim::ListConstruct) {
       GRAPH_DEBUG(
           "inputs tensors don't come from prim::ListConstruct for ",
           getHeader(node));
       return false;
+    }
     // NB: Note that technically other uses of the list aren't a big problem for
     // us. It would be enough to place the prim::FusedConcat before the
     // prim::ListConstruct, and allUsersAreThisConsumerOrOccurAfterIt would
