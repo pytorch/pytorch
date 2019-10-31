@@ -4,7 +4,7 @@
 #include <torch/types.h>
 
 namespace torch {
-namespace nn{
+namespace nn {
 namespace functional {
 
 inline Tensor conv1d(
