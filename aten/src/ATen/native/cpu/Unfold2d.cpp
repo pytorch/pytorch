@@ -23,8 +23,8 @@ static inline void cadd(
       ptrs,
       n,
       -1,
-      [](scalar_t x, scalar_t y, scalar_t c) -> scalar_t { return x + y; },
-      [](Vec x, Vec y, Vec c) -> Vec { return x + y; });
+      [](scalar_t x, scalar_t y) -> scalar_t { return x + y; },
+      [](Vec x, Vec y) -> Vec { return x + y; });
 }
 
 template <typename scalar_t>
