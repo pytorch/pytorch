@@ -19,7 +19,7 @@ if sys.version_info >= (3, 0):
         self_rank=-1,
         worker_name_to_id=None,
         num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
-        rpc_timeout=DEFAULT_RPC_TIMEOUT
+        rpc_timeout=DEFAULT_RPC_TIMEOUT,
     ):
         r"""
         Initializes model parallel primitives such as the local rpc agent
@@ -61,7 +61,7 @@ if sys.version_info >= (3, 0):
             self_rank,
             worker_name_to_id,
             num_send_recv_threads,
-            rpc_timeout
+            rpc_timeout,
         )
 
         # Initialize Autograd.

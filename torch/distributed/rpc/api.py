@@ -67,7 +67,7 @@ def _init_rpc(
     self_rank=-1,
     worker_name_to_id=None,
     num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
-    rpc_timeout=DEFAULT_RPC_TIMEOUT
+    rpc_timeout=DEFAULT_RPC_TIMEOUT,
 ):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
@@ -78,6 +78,7 @@ def _init_rpc(
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
+    # TODO, pass timeout, change process group agent constructor to use options struct
     _agent = backend_registry.init_backend(
         backend,
         store=store,
