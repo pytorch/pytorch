@@ -120,7 +120,7 @@ void convertReturnsToTuples(Block* b) {
         Node* tup_unpack = g->createTupleUnpack(tup_output)->insertAfter(n);
         for (size_t i = 0; i < tup_unpack->outputs().size(); ++i) {
           auto rev_idx = tup_unpack->outputs().size() - i - 1;
-          n->output(rev_idx)->replaceAllUsesWith(tup_unpack->output(i));
+          n->output(rev_idx)->replaceAllUsesWith(tup_unpack->output(rev_idx));
           n->eraseOutput(rev_idx);
         }
       } else if (sub_block->outputs().size() == 0) {
