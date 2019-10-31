@@ -384,12 +384,14 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         # nn.Module.forward)
         script_module.__dict__[name] = script_method
 
-
     # In order to continue to expose module container functions to python,
     # we add on the methods that we had previously exposed in the previous
     # version of this api.
     if isinstance(nn_module, (ModuleList, Sequential)):
         add_python_modulelist_methods(script_module, nn_module)
+
+    if isinstance(nn_module, Sequential):
+        add_sequential_forward(nn_module, script_module)
 
     if isinstance(nn_module, ModuleDict):
         add_python_moduledict_methods(script_module, nn_module)
@@ -408,6 +410,18 @@ def add_python_modulelist_methods(script_module, orig):
 def add_python_moduledict_methods(script_module, orig):
     exposed_attrs = ['__contains__', '__iter__', '__dir__', 'keys', 'items', 'values']
     add_python_attributes_to_scripted_model(script_module, orig, exposed_attrs)
+
+def add_sequential_forward(nn_module, script_module):
+    forward_func = getattr(nn_module.forward, "__func__", None)
+    # we aren't currently able to support compiling Sequential.forward
+    # so if we encounter it, use this forward instead. support for self._modules.values() is blocking
+    if forward_func == Sequential.forward:
+        script_module.define("""
+        def forward(self, input):
+            for m in self:
+                input = m(input)
+            return input
+        """)
 
 def get_overload_annotations(mod):
     # original function => [(mangled overload name, overload function)]
@@ -469,7 +483,8 @@ def infer_methods_to_compile(nn_module):
 
     methods = []
     if hasattr(nn_module, 'forward'):
-        if getattr(nn_module.forward, "__func__", None) == torch.nn.Module.forward:
+        forward_func = getattr(nn_module.forward, "__func__", None)
+        if forward_func == torch.nn.Module.forward or forward_func == Sequential.forward:
             # TODO, we deleted a check that forward is actually defined, instead skipping it
             pass
         elif not _jit_internal.is_ignored_fn(nn_module.forward):
