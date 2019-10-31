@@ -76,5 +76,9 @@ Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
   return self;
 }
 
+Tensor& zero_(Tensor &self) {
+  return self.fill_(0);
+}
+
 } // namespace native
 } // namespace at

@@ -49,7 +49,7 @@ void TensorIterator::reorder_dimensions() {
       } else if (stride0 <= stride1) {
         return -1;
       } else {
-        ret = 1;
+        return 1;
       }
     }
     return ret;
@@ -158,14 +158,6 @@ static void maybe_promote_common_dtype(OperandInfo& op, ScalarType common_dtype)
     } else {
       op.tensor =
           at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype));
-    }
-    auto original_element_size = op.original_tensor.element_size();
-    auto new_element_size = op.tensor.element_size();
-
-    // stride size (in bytes) can change if we change the dtype.
-    for( size_t i=0; i < op.stride_bytes.size(); i++ ) {
-      auto stride = op.stride_bytes[i] / original_element_size;
-      op.stride_bytes[i] = stride * new_element_size;
     }
   }
 }
@@ -863,12 +855,12 @@ void TensorIterator::build() {
 #endif
   // compute the broadcasted shape
   compute_shape();
+  // compute the result dtype and device
+  compute_types();
   // compute each tensor's stride after broadcasting
   compute_strides();
   // re-order dimensions to improve coalescing
   reorder_dimensions();
-  // compute the result dtype and device
-  compute_types();
   // allocate the output tensor if it's not provided
   allocate_outputs();
 #ifdef BUILD_NAMEDTENSOR
