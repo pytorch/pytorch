@@ -14,19 +14,17 @@ static inline void cadd(
     scalar_t* z,
     const scalar_t* x,
     const scalar_t* y,
-    const scalar_t c,
     int64_t n) {
   using Vec = vec256::Vec256<scalar_t>;
   char* ptrs[] = {reinterpret_cast<char*>(z),
                   reinterpret_cast<char*>(const_cast<scalar_t*>(x)),
-                  reinterpret_cast<char*>(const_cast<scalar_t*>(y)),
-                  reinterpret_cast<char*>(const_cast<scalar_t*>(&c))};
+                  reinterpret_cast<char*>(const_cast<scalar_t*>(y))};
   vectorized_loop(
       ptrs,
       n,
-      3,
-      [](scalar_t x, scalar_t y, scalar_t c) -> scalar_t { return x + c * y; },
-      [](Vec x, Vec y, Vec c) -> Vec { return x + c * y; });
+      -1,
+      [](scalar_t x, scalar_t y, scalar_t c) -> scalar_t { return x + y; },
+      [](Vec x, Vec y, Vec c) -> Vec { return x + y; });
 }
 
 template <typename scalar_t>
@@ -72,21 +70,14 @@ static void unfolded2d_acc(
                       dst_slice,
                       dst_slice,
                       src + (size_t)y * output_width + lpad,
-                      static_cast<scalar_t>(1),
                       output_width - lpad - rpad);
-                  // note: THVector_add could handle 1 value better
                 } else {
                   for (x = 0; x < output_width; x++) {
                     ix = (int64_t)x * dW - padW + kw;
                     if (ix < 0 || ix >= input_width) {
                     } else {
                       scalar_t* dst_slice = dst + (size_t)iy * input_width + ix;
-                      cadd(
-                          dst_slice,
-                          dst_slice,
-                          src + (size_t)y * output_width + x,
-                          static_cast<scalar_t>(1),
-                          1);
+                      *dst_slice = *dst_slice + src[(size_t)y * output_width + x];
                     }
                   }
                 }
@@ -102,19 +93,12 @@ static void unfolded2d_acc(
                     dst_slice,
                     dst_slice,
                     src + (size_t)y * output_width,
-                    static_cast<scalar_t>(1),
-                    output_width); // note: THVector_add could handle 1 value
-                                   // better
+                    output_width);
               } else {
                 for (x = 0; x < output_width; x++) {
                   scalar_t* dst_slice =
                       dst + (size_t)iy * input_width + ix + x * dW;
-                  cadd(
-                      dst_slice,
-                      dst_slice,
-                      src + (size_t)y * output_width + x,
-                      static_cast<scalar_t>(1),
-                      1);
+                  *dst_slice = *dst_slice + src[(size_t)y * output_width + x];
                 }
               }
             }
@@ -171,17 +155,17 @@ template <typename scalar_t>
 static void unfolded2d_copy(
     scalar_t* input_data,
     scalar_t* finput_data,
-    int kH,
-    int kW,
-    int dH,
-    int dW,
-    int padH,
-    int padW,
-    int n_input_plane,
-    int input_height,
-    int input_width,
-    int output_height,
-    int output_width) {
+    int64_t kH,
+    int64_t kW,
+    int64_t dH,
+    int64_t dW,
+    int64_t padH,
+    int64_t padW,
+    int64_t n_input_plane,
+    int64_t input_height,
+    int64_t input_width,
+    int64_t output_height,
+    int64_t output_width) {
   at::parallel_for(
       0, (int64_t)n_input_plane * kH * kW, 0, [&](int64_t start, int64_t end) {
         for (auto k = start; k < end; k++) {
@@ -189,7 +173,7 @@ static void unfolded2d_copy(
           int64_t rest = k % (kH * kW);
           int64_t kh = rest / kW;
           int64_t kw = rest % kW;
-          int x, y;
+          int64_t x, y;
           int64_t ix, iy;
           scalar_t* dst = finput_data +
               nip * ((size_t)kH * kW * output_height * output_width) +
