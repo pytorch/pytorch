@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from sys import maxsize
+
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import warnings
@@ -65,7 +67,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
         broadcast_index_shape = g.op("Shape", index)
         index = g.op("Unsqueeze", index, axes_i=[-1])
     sub_data_shape = sym_help._slice_helper(
-        g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[9223372036854775807])
+        g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize])
     values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
     values = g.op("Reshape", values, values_shape)
 

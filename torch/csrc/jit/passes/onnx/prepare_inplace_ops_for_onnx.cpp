@@ -28,7 +28,7 @@ Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
   auto start = slice->get(attr::start);
   auto end = slice->get(attr::end);
   auto step = slice->get(attr::step);
-  auto index = graph->insert(aten::arange, {size});
+  auto index = graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
   auto sliced_index = graph->insert(aten::slice, {index, {0}, start, end, step});
   return sliced_index;
 }
@@ -38,7 +38,7 @@ Value* CreateCompleteIndexTensor(Value* size, Node* insertBefore) {
   // The result is torch.tensor([0, 1, 2, ..., size - 1])
   auto graph = size->owningGraph();
   WithInsertPoint guard(insertBefore);
-  auto index = graph->insert(aten::arange, {size});
+  auto index = graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
   return index;
 }
 
@@ -90,7 +90,6 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
     Graph* graph,
     Node* index_put_node,
     const std::vector<Node*>& slice_and_select_nodes,
-    Node* last_node,
     Value* orig_data) {
   std::unordered_map<int64_t, ConvertedIndex> dim_index_map;
 
@@ -116,7 +115,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
           index_put_node->input(1)->node()->input(cur_dim - dim_offset)->node()->mustBeNone()) {
         auto size = CreateSizeOfDim(orig_data, cur_dim, index_put_node);
         WithInsertPoint guard(index_put_node);
-        auto index_tensor = graph->insert(aten::arange, {size});
+        auto index_tensor = graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
         dim_index_map.emplace(std::piecewise_construct,
                               std::forward_as_tuple(cur_dim),
                               std::forward_as_tuple(index_tensor, aten::slice));
@@ -241,7 +240,7 @@ void SquashSliceAndSelect(Node* index_put_node) {
 
   // Convert fetched slice/select operators into tensor indices.
   std::unordered_map<int64_t, ConvertedIndex> dim_index_map =
-      MergeSliceAndSelectToIndices(graph, index_put_node, slice_and_select_nodes, last_node, orig_data);
+      MergeSliceAndSelectToIndices(graph, index_put_node, slice_and_select_nodes, orig_data);
   std::vector<Value*> indices =
       ReshapeToAdvancedIndexingFormat(graph, index_put_node, dim_index_map);
 
