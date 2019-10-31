@@ -96,7 +96,8 @@ template std::shared_ptr<UserRRef<py::object>> RRefContext::createUserRRef<
     const ForkId& forkId);
 
 template <typename T>
-std::shared_ptr<RRef> RRefContext::getOrCreateRRef(const RRefForkData& rfd) {
+std::shared_ptr<RRefBase> RRefContext::getOrCreateRRef(
+    const RRefForkData& rfd) {
   auto& ownerId = rfd.ownerId_;
   auto& rrefId = rfd.rrefId_;
   auto& forkId = rfd.forkId_;
@@ -107,10 +108,10 @@ std::shared_ptr<RRef> RRefContext::getOrCreateRRef(const RRefForkData& rfd) {
   }
 }
 
-template std::shared_ptr<RRef> RRefContext::getOrCreateRRef<IValue>(
+template std::shared_ptr<RRefBase> RRefContext::getOrCreateRRef<IValue>(
     const RRefForkData& rfd);
 
-template std::shared_ptr<RRef> RRefContext::getOrCreateRRef<py::object>(
+template std::shared_ptr<RRefBase> RRefContext::getOrCreateRRef<py::object>(
     const RRefForkData& rfd);
 
 template <typename T>
@@ -140,7 +141,7 @@ template std::shared_ptr<OwnerRRef<IValue>> RRefContext::getOrCreateOwnerRRef<
 template std::shared_ptr<OwnerRRef<py::object>> RRefContext::
     getOrCreateOwnerRRef<py::object>(const RRefId& rrefId);
 
-RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
+RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRefBase>& rref) {
   auto rfd = rref->fork();
   if (rref->isOwner()) {
     // Note [Early Fork Registration]
@@ -174,7 +175,7 @@ RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
 void RRefContext::notifyOwnerAndParentOfFork(
     const ForkId& forkId,
     worker_id_t parent,
-    const std::shared_ptr<RRef>& rref) {
+    const std::shared_ptr<RRefBase>& rref) {
   if (parent == rref->owner()) {
     // If the parent is the owner, this fork has already been added into the
     // forks_ map when the owner sends the message to the callee user. Hence,
@@ -206,7 +207,7 @@ void RRefContext::notifyOwnerAndParentOfFork(
 
 void RRefContext::addPendingChild(
     const ForkId& forkId,
-    const std::shared_ptr<RRef>& rref) {
+    const std::shared_ptr<RRefBase>& rref) {
   // see Note [Early Fork Registration]
   // If the parent is the owner, it should directly add the child UserRRef as a
   // fork.
@@ -230,7 +231,7 @@ void RRefContext::delPendingChild(const ForkId& forkId) {
 
 void RRefContext::addPendingUser(
     const ForkId& forkId,
-    const std::shared_ptr<RRef>& rref) {
+    const std::shared_ptr<RRefBase>& rref) {
   TORCH_INTERNAL_ASSERT(
       !rref->isOwner(), "Attempt to add an OwnerRRef as a pending User.");
   std::lock_guard<std::mutex> lock(mutex_);
@@ -268,7 +269,7 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
 }
 
 void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
-  std::shared_ptr<RRef> deletedRRef = nullptr;
+  std::shared_ptr<RRefBase> deletedRRef = nullptr;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     auto rrefIter = forks_.find(rrefId);
