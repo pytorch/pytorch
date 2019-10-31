@@ -972,11 +972,6 @@ class _TestTorchMixin(object):
                 x1 = rand_tensor((5, 5), dt1, device)
                 x2 = rand_tensor((5, 5), dt2, device)
                 res = torch.where(x1 < 1, x1, x2)
-                print(dt1)
-                print(dt2)
-                print(x1)
-                print(x2)
-                print(res)
                 for i in range(5):
                     for j in range(5):
                         if x1[i][j] < 1:
