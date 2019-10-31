@@ -354,6 +354,13 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
             as_module_interface(scripted_wrong_mod)
 
+        with self.assertRaisesRegex(RuntimeError, "does not support inheritance yet. Please directly"):
+            @torch.jit.interface
+            class InheritMod(FooMod):
+                def three(self, x):
+                    # type: (Tensor) -> Tensor
+                    return 3 * x
+
 
 if __name__ == '__main__':
     run_tests()

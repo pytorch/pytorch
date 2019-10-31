@@ -146,7 +146,7 @@ static void THVector_(interleaved_normal_fill_16)(scalar_t *data,
     const scalar_t theta = 2.0f * M_PI * u2;
 
     data[j] = radius * cos(theta) * stddev + mean;
-    data[j + 8] = radius * sin(theta) * stddev + mean;
+    data[j + 8] = radius * std::sin(theta) * stddev + mean;
   }
 }
 
@@ -250,9 +250,6 @@ VECTOR_IMPLEMENT_FUNCTION(erfc,TH_MATH_NAME(erfc))
 VECTOR_IMPLEMENT_FUNCTION(cos,TH_MATH_NAME(cos))
 VECTOR_IMPLEMENT_FUNCTION(acos,TH_MATH_NAME(acos))
 VECTOR_IMPLEMENT_FUNCTION(cosh,TH_MATH_NAME(cosh))
-VECTOR_IMPLEMENT_FUNCTION(sin,TH_MATH_NAME(sin))
-VECTOR_IMPLEMENT_FUNCTION(asin,TH_MATH_NAME(asin))
-VECTOR_IMPLEMENT_FUNCTION(sinh,TH_MATH_NAME(sinh))
 VECTOR_IMPLEMENT_FUNCTION(tan,TH_MATH_NAME(tan))
 VECTOR_IMPLEMENT_FUNCTION(atan,TH_MATH_NAME(atan))
 VECTOR_IMPLEMENT_FUNCTION(tanh,TH_MATH_NAME(tanh))
