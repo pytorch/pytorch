@@ -119,7 +119,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Tensor) { \
     at::AutoNonVariableTypeMode non_var_type_mode(true);  \
-    tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU).is_variable(false));       \
+    tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU).is_variable(false));       \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
