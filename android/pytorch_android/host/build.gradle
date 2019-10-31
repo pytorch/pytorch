@@ -28,6 +28,6 @@ sourceSets {
 dependencies {
     compileOnly 'com.google.code.findbugs:jsr305:3.0.1'
     implementation 'com.facebook.soloader:nativeloader:0.8.0'
-    implementation 'com.facebook.fbjni:fbjni:0.0.3-SNAPSHOT'
+    implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
     testImplementation 'junit:junit:4.12'
 }

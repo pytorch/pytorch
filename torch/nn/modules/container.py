@@ -91,7 +91,7 @@ class Sequential(Module):
         return iter(self._modules.values())
 
     def forward(self, input):
-        for module in self:
+        for module in self._modules.values():
             input = module(input)
         return input
 

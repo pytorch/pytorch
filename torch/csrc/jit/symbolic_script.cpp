@@ -923,11 +923,11 @@ const std::vector<std::string> functions = {
 
             return torch.log2(self), backward
 
-        def rand_like(self):
+        def rand_like(self, *, memory_format: Optional[int]):
             def backward(grad_output):
                 return None
 
-            return torch.rand_like(self), backward
+            return torch.rand_like(self, memory_format=memory_format), backward
 
         def reciprocal(self):
             result = torch.reciprocal(self)
@@ -1309,7 +1309,7 @@ const std::vector<std::string> functions = {
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
       )",
-      R"(
+    R"(
         def AD_sizes_if_not_equal_multi_1(t1, t2, res):
             return torch._size_if_not_equal(t1.size(), res.size()), torch._size_if_not_equal(t2.size(), res.size())
 
