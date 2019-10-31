@@ -133,7 +133,8 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
     } else { \
       tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU).is_variable(false)); \
     } \
-  }
+  } \
+  TensorDataContainer(std::initializer_list<T> values) : TensorDataContainer(at::ArrayRef<T>(values)) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
