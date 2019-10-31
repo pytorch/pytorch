@@ -1,9 +1,9 @@
 #include <c10d/HashStore.hpp>
 
+#include <errno.h>
 #include <stdint.h>
 #include <unistd.h>
 
-#include <errno.h>
 #include <chrono>
 #include <cstdio>
 #include <system_error>
@@ -22,10 +22,16 @@ std::vector<uint8_t> HashStore::get(const std::string& key) {
   if (it != map_.end()) {
     return it->second;
   }
-  // Not found? Wait up to any Store timeout_.
-  lock.unlock();
-  wait({key}, timeout_);
-  lock.lock();
+  // Slow path: wait up to any timeout_.
+  auto pred = [&]() { return map_.find(key) != map_.end(); };
+  if (timeout_ == kNoTimeout) {
+    cv_.wait(lock, pred);
+  } else {
+    if (!cv_.wait_for(lock, timeout_, pred)) {
+      throw std::system_error(
+          ETIMEDOUT, std::system_category(), "Wait timeout");
+    }
+  }
   return map_[key];
 }
 
