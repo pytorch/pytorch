@@ -811,8 +811,8 @@ graph(%self, %x):
     worklist.pop();
 
     // Queue submodules for processing
-    for (const script::NameModule& submodule : current.named_children()) {
-      worklist.push(submodule.value);
+    for (const script::Module& submodule : current.children()) {
+      worklist.push(submodule);
     }
 
     // Process forward method of the current module
@@ -948,8 +948,8 @@ void InsertPrepackUnpack(script::Module& module) {
   for (auto& method : module.get_methods()) {
     auto graph = method.graph();
     InsertPrepackUnpack(graph);
-    for (script::NameModule m : module.named_children()) {
-      InsertPrepackUnpack(m.value);
+    for (script::Module m : module.children()) {
+      InsertPrepackUnpack(m);
     }
   }
 }
@@ -1067,9 +1067,9 @@ void FoldPrepackedWeightIntoModule(
   for (auto& method : module.get_methods()) {
     FoldPrepackedWeightIntoModule(
         module, method.name(), linear_params_module, conv_params_module);
-    for (script::NameModule m : module.named_children()) {
+    for (script::Module m : module.children()) {
       FoldPrepackedWeightIntoModule(
-          m.value, linear_params_module, conv_params_module);
+          m, linear_params_module, conv_params_module);
     }
   }
 }

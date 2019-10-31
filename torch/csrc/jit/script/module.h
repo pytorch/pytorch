@@ -405,7 +405,7 @@ struct TORCH_API SlotCursor {
 // This iterator allows the (optionally recursive) enumeration of
 // the  members of a Module. It performs a depth-first pre-order
 // traversal of the module. The Policy template parameter determines
-// which slots of the object should be include. For instance,
+// which slots of the object should be included. For instance,
 // when iterating parameters, we return the parameter tensors,
 // but skip modules, buffers, and other attributes.
 // See ModulePolicy for comments about Policy object's API.
@@ -424,7 +424,7 @@ struct TORCH_API slot_iterator_impl {
     // advance iterator to first valid element (or the end, if empty)
     while_not_valid_next();
   }
-  // empty frame_, represents end of iteration
+  // empty cursors_, represents end of iteration
   slot_iterator_impl() : recurse_(false) {}
   value_type operator*() const {
     return Policy::create(cursors_, cur());
@@ -446,9 +446,9 @@ struct TORCH_API slot_iterator_impl {
 
  private:
   // return_module() is a corner case where instead of returning a submodule
-  // of root, we are return root itself, because we are iterating modules(),
+  // of root, we are returning root itself, because we are iterating modules(),
   // which contains the root module itself.
-  // It is represented with a single Frame whose index is -1.
+  // It is represented with a single SlotCursor whose index is -1.
   bool return_module() const {
     return top().i_ == -1;
   }
@@ -484,7 +484,7 @@ struct TORCH_API slot_iterator_impl {
       return;
     }
     // if the current thing is a module, we have to scan it for recursive
-    // traversals. We do this by adding a new frame to track the traversal.
+    // traversals. We do this by adding a new SlotCursor to track the traversal.
     if (recurse_ &&
         top().module_.module_object()->type()->is_module(top().i_)) {
       cursors_.emplace_back(SlotCursor{cur().toModule(), 0});
@@ -524,8 +524,8 @@ struct TORCH_API slot_iterator_impl {
   friend inline bool operator!=(
       const slot_iterator_impl<Policy>& a,
       const slot_iterator_impl<Policy>& b) {
-    // we are finished iteration when we have no more iteration Frames.
-    // end is always an empty iterator with no frames.
+    // we are finished iteration when we have no more iteration SlotCursors.
+    // end is always an empty iterator with no cursors.
     return (a.cursors_.empty() != b.cursors_.empty());
   }
 };
@@ -631,7 +631,7 @@ struct TORCH_API BufferPolicy {
 struct TORCH_API AttributePolicy {
   using value_type = IValue;
   static value_type create(
-      const std::vector<detail::SlotCursor>& frames,
+      const std::vector<detail::SlotCursor>& cursors,
       IValue v) {
     return v;
   }
@@ -648,22 +648,22 @@ template <typename Policy>
 struct TORCH_API NamedPolicy {
   using value_type = Named<typename Policy::value_type>;
   static value_type create(
-      const std::vector<detail::SlotCursor>& frames,
+      const std::vector<detail::SlotCursor>& cursors,
       IValue v) {
     std::string name;
-    if (frames.size() == 1) {
-      name = (frames.back().i_ == -1) ? "" : nameFragment(frames.back());
+    if (cursors.size() == 1) {
+      name = (cursors.back().i_ == -1) ? "" : nameFragment(cursors.back());
     } else {
       std::ostringstream ss;
-      for (size_t i = 0; i < frames.size(); ++i) {
+      for (size_t i = 0; i < cursors.size(); ++i) {
         if (i > 0) {
           ss << ".";
         }
-        ss << nameFragment(frames[i]);
+        ss << nameFragment(cursors[i]);
       }
       name = ss.str();
     }
-    return value_type{std::move(name), Policy::create(frames, v)};
+    return value_type{std::move(name), Policy::create(cursors, v)};
   }
   static bool valid(const ClassTypePtr& t, size_t i) {
     return Policy::valid(t, i);

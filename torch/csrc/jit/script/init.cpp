@@ -685,19 +685,6 @@ void initJitScriptBindings(PyObject* module) {
             didFinishEmitModule(self);
           })
       .def(
-          "_debug_dump_iterators",
-          [](Module& self) {
-            py::dict result;
-            py::list modules;
-            for (auto elem : self.modules()) {
-              modules.append(py::cast(elem));
-            }
-            py::list named_modules;
-            for (auto elem : self.named_modules()) {
-              modules.append(py::cast(std::make_pair(elem.name, elem.value)));
-            }
-          })
-      .def(
           "get_debug_state",
           [](Module& self) {
             if (auto m = self.find_method("forward")) {

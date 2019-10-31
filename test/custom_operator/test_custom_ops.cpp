@@ -17,6 +17,7 @@ void check_all_parameters(
   for (at::Tensor parameter : module.parameters()) {
     AT_ASSERT(predicate(parameter));
   }
+}
 } // namespace helpers
 
 void get_operator_from_registry_and_execute() {
