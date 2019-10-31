@@ -139,6 +139,30 @@ struct C10_API AutogradMetaInterface {
   virtual ~AutogradMetaInterface();
 };
 
+namespace impl {
+
+// Unfortunately, the definition of AutogradMeta lives in a separate
+// compilation unit than TensorImpl (libtorch.so versus libc10.so)
+// which means that we cannot construct an AutogradMeta from TensorImpl,
+// not even from the cpp file.  So we have to indirect it through a factory
+// function which will be initialized when we load libtorch.so.
+
+struct C10_API AutogradMetaFactory {
+  virtual ~AutogradMetaFactory() = default;
+  virtual std::unique_ptr<AutogradMetaInterface> make() const = 0;
+};
+
+C10_API void SetAutogradMetaFactory(AutogradMetaFactory* factory);
+C10_API AutogradMetaFactory* GetAutogradMetaFactory();
+
+struct C10_API AutogradMetaFactoryRegisterer {
+  explicit AutogradMetaFactoryRegisterer(AutogradMetaFactory* factory) {
+    SetAutogradMetaFactory(factory);
+  }
+};
+
+} // namespace impl
+
 struct C10_API NamedTensorMetaInterface {
   virtual ~NamedTensorMetaInterface() {};
   virtual std::unique_ptr<NamedTensorMetaInterface> clone() const {

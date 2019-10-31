@@ -287,4 +287,20 @@ void TensorImpl::copy_tensor_metadata(
   }
 }
 
+namespace impl {
+
+namespace {
+AutogradMetaFactory* meta_factory = nullptr;
+}
+
+void SetAutogradMetaFactory(AutogradMetaFactory* factory) {
+  meta_factory = factory;
+}
+AutogradMetaFactory* GetAutogradMetaFactory() {
+  TORCH_CHECK(meta_factory, "Support for autograd has not been loaded; have you linked against libtorch.so?")
+  return meta_factory;
+}
+
+} // namespace impl
+
 } // namespace c10

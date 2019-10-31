@@ -28,7 +28,10 @@ AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge g
   output_nr_ = gradient_edge.input_nr;
 
   // set_requires_grad also checks error conditions.
-  set_requires_grad(requires_grad, self_impl);
+  if (requires_grad) {
+    TORCH_INTERNAL_ASSERT(self_impl);
+    set_requires_grad(requires_grad, self_impl);
+  }
   TORCH_CHECK(
       !grad_fn_ || !requires_grad_,
       "requires_grad should be false if grad_fn is set");
@@ -187,6 +190,20 @@ void Variable::remove_hook(unsigned pos) {
   TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
   // Hook will be ignored
   (*list)[pos] = nullptr;
+}
+
+namespace {
+
+struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
+  std::unique_ptr<c10::AutogradMetaInterface> make() const override {
+    return c10::guts::make_unique<AutogradMeta>();
+  }
+};
+
+ConcreteAutogradMetaFactory meta_factory;
+
+static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_factory);
+
 }
 
 }} // namespace torch::autograd
