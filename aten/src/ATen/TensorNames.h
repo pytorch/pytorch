@@ -17,6 +17,9 @@ namespace at { namespace namedinference {
 // Definition: Two names in two tensors *match* if they are equal, or if at
 // least one of them is a wildcard that can be *refined* to the other name.
 //
+// Definition: unify(name, other) fails if the names do not match. Otherwise,
+// it returns the most refined of name and other.
+//
 // Here is an example of checking if two names match.
 // tensor: Tensor[A, None]
 // other: Tensor[A]
