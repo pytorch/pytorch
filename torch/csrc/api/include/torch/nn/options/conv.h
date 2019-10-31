@@ -77,6 +77,26 @@ struct ConvOptions {
 
   /// Accepted values `zeros` and `circular` Default: `zeros`
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
+
+  // FIXME: The following methods are added so that we can merge PR #28917
+  // without breaking torchvision builds in CI. After PR #28917 is merged
+  // and a new PyTorch nightly is built, @yf225 will open a PR to torchvision
+  // to change all `with_bias` call sites to `bias`, and then open a PR to PyTorch
+  // to remove the methods below.
+ public:
+  inline auto with_bias(const bool& new_with_bias)->decltype(*this) {
+    this->bias_ = new_with_bias;
+    return *this;
+  }
+
+  inline auto with_bias(bool&& new_with_bias)->decltype(*this) {
+    this->bias_ = std::move(new_with_bias);
+    return *this;
+  }
+
+  inline const bool& with_bias() const noexcept {
+    return this->bias_;
+  }
 };
 
 /// `ConvOptions` specialized for 1-D convolution.
