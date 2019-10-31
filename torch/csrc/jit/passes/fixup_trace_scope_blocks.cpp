@@ -147,21 +147,6 @@ void lambdaLiftBlocksAndConvertToGraph(Block* b) {
   }
 }
 
-// An artifact of how we record scopes (via `push_scope` and `pop_scope`)
-// is that we have a redundant FakeScopeBlock at the top level of the
-// trace graph. We can just trivially inline this with no change to
-// program semantics.
-void inlineBaseModule(Graph* g) {
-  Block* b = g->block();
-  // Inline base __module call
-  for (auto n_itr = b->nodes().begin(); n_itr != b->nodes().end();) {
-    Node* n = *n_itr++;
-    if (n->kind() == prim::FakeScopeBlock && n->s(attr::scope) == "__module") {
-      inlineCallTo(n, *n->g(attr::Subgraph));
-    }
-  }
-}
-
 namespace {
 
 // Find a unique name to add this method as
@@ -326,7 +311,6 @@ void FixupTraceScopeBlocks(
   } else {
     addSelfArgsToBlocks(graph->block(), *self, {"__module"});
     lambdaLiftBlocksAndConvertToGraph(graph->block());
-    inlineBaseModule(graph.get());
     createMethodCalls(graph, *self, {"__module"});
     runCleanupPasses(self);
     // `graph` isn't referenced in `self` yet, so we need to run
