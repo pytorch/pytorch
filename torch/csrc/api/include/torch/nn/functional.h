@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/nn/functional/batchnorm.h>
 #include <torch/nn/functional/distance.h>
 #include <torch/nn/functional/embedding.h>
 #include <torch/nn/functional/fold.h>
