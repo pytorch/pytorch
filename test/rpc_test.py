@@ -11,23 +11,24 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 from common_utils import load_tests
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
-from torch.distributed.rpc import RpcBackend
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 
 
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
-            TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP,
-            message,
+            TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
         )(old_func)
+
     return decorator
 
 
 VALUE_FUTURE = concurrent.futures.Future()
 
 
-def stub_start_rpc_backend_handler(self_rank, self_name, init_method):
+def stub_start_rpc_backend_handler(
+    store, self_name, self_rank, worker_name_to_id, *args, **kwargs
+):
     return mock.Mock()  # RpcAgent.
 
 
@@ -192,9 +193,7 @@ class RpcTest(object):
 
     @property
     def init_method(self):
-        return INIT_METHOD_TEMPLATE.format(
-            file_name=self.file_name, rank=self.rank, world_size=self.world_size
-        )
+        return INIT_METHOD_TEMPLATE.format(file_name=self.file_name)
 
     @dist_init
     def test_worker_id(self):
@@ -226,73 +225,126 @@ class RpcTest(object):
 
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
+    @dist_init(setup_model_parallel=False)
     def test_register_rpc_backend_and_start_rpc_backend(
         self, mock_rpc_agent, mock_dist_autograd_init
     ):
         backend_name = "stub_backend"
-        rpc.register_backend(
+
+        backend = rpc.backend_registry.register_backend(
             backend_name, stub_start_rpc_backend_handler
         )
-        rpc.init_model_parallel(self_name="worker1", backend=backend_name, self_rank=1)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "^RPC backend .+: already registered$"
+        ):
+            rpc.backend_registry.register_backend(
+                backend_name, stub_start_rpc_backend_handler
+            )
+
+        rpc.init_model_parallel(
+            self_name="worker1",
+            backend=backend,
+            init_method=self.init_method,
+            self_rank=self.rank,
+            worker_name_to_id=self.worker_name_to_id,
+        )
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    @dist_init(setup_model_parallel=False)
     def test_duplicate_name(self):
-        dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
             rpc.init_model_parallel(
                 self_name="duplicate_name",
-                backend=TEST_CONFIG.rpc_backend,
-                self_rank=self.rank,
+                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
             )
         rpc.join_rpc()
 
+    @dist_init(setup_model_parallel=False)
     def test_reinit(self):
-        dist.init_process_group(backend=dist.Backend.GLOO, init_method=self.init_method)
         rpc.init_model_parallel(
             self_name="worker{}".format(self.rank),
-            backend=TEST_CONFIG.rpc_backend,
-            self_rank=self.rank,
+            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
             init_method=self.init_method,
+            self_rank=self.rank,
+            worker_name_to_id=self.worker_name_to_id,
         )
+
+        # This is for the below `dist.barrier`.
+        # For `RpcAgent` other than `ProcessGroupAgent`,
+        # no `_default_pg` is initialized.
+        if not dist.is_initialized():
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+        # Wait for all init to complete.
+        dist.barrier()
+
         with self.assertRaisesRegex(RuntimeError, "is already initialized"):
             rpc.init_model_parallel(
                 self_name="worker{}".format(self.rank),
-                backend=TEST_CONFIG.rpc_backend,
-                self_rank=self.rank,
+                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
             )
         rpc.join_rpc()
 
-    def test_init_invalid_backend(self):
-        with self.assertRaisesRegex(RuntimeError, "Unrecognized RPC backend"):
+    @dist_init(setup_model_parallel=False)
+    def test_invalid_names(self):
+        with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
             rpc.init_model_parallel(
-                self_name="worker{}".format(self.rank),
-                backend="invalid",
-                self_rank=self.rank,
+                self_name="abc*",
+                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
                 init_method=self.init_method,
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
+                num_send_recv_threads=16,
             )
 
-    def test_invalid_names(self):
-        dist.init_process_group(
-            backend=dist.Backend.GLOO,
-            init_method=self.init_method
-        )
-
+        base_file_name = self.file_name
+        # Use a different file path for FileStore to avoid rendezvous mismatch.
+        self.file_name = base_file_name + "1"
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            rpc.init_model_parallel(self_name="abc*")
+            rpc.init_model_parallel(
+                self_name=" ",
+                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                init_method=self.init_method,
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
+                num_send_recv_threads=16,
+            )
 
-        with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
-            rpc.init_model_parallel(self_name=" ")
-
+        # Use a different file path for FileStore to avoid rendezvous mismatch.
+        self.file_name = base_file_name + "2"
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            rpc.init_model_parallel(self_name="")
+            rpc.init_model_parallel(
+                self_name="",
+                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                init_method=self.init_method,
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
+                num_send_recv_threads=16,
+            )
 
+        # Use a different file path for FileStore to avoid rendezvous mismatch.
+        self.file_name = base_file_name + "3"
         # If the number in the message does not match, it is likely that the
         # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             rpc.init_model_parallel(
                 self_name="".join(["a" for _ in range(500)]),
+                backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+                init_method=self.init_method,
+                self_rank=self.rank,
+                worker_name_to_id=self.worker_name_to_id,
+                num_send_recv_threads=16,
             )
 
         from torch.distributed.rpc.api import _agent
@@ -310,7 +362,6 @@ class RpcTest(object):
         # would add extra overhead to the call, and normal use cases won't
         # create a progress group and exit without doing anything. Hence, it is
         # not worthy to introduce the overhead just for this test case.
-        dist.barrier()
 
     @dist_init
     def test_add(self):
@@ -394,14 +445,15 @@ class RpcTest(object):
             self.assertEqual(ret1, torch.ones(n, n) * 2)
             self.assertEqual(ret2, torch.ones(n, n) * 3)
 
+    @dist_init(setup_model_parallel=False)
     def test_join_rpc(self):
         # Initialize RPC.
-        dist.init_process_group(backend="gloo", init_method=self.init_method)
         rpc.init_model_parallel(
             self_name="worker%d" % self.rank,
-            backend=TEST_CONFIG.rpc_backend,
-            self_rank=self.rank,
+            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
             init_method=self.init_method,
+            self_rank=self.rank,
+            worker_name_to_id=self.worker_name_to_id,
         )
 
         n = self.rank + 1
@@ -432,6 +484,7 @@ class RpcTest(object):
         value = VALUE_FUTURE.result()
         self.assertEqual(value, expected_src_rank)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28932")
     @dist_init
     def test_py_built_in(self):
         n = self.rank + 1
@@ -872,5 +925,18 @@ class RpcTest(object):
         def test_func():
             return "expected result"
 
-        if TEST_CONFIG.rpc_backend == RpcBackend.PROCESS_GROUP:
+        if TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
             self.assertEqual(test_func(), "expected result")
+
+    def test_dist_init_decorator(self):
+        @dist_init(setup_model_parallel=False)
+        def test_func(self):
+            return "expected result"
+
+        self.assertEqual(test_func(self), "expected result")
+
+        @dist_init
+        def test_func(self):
+            return "expected result"
+
+        self.assertEqual(test_func(self), "expected result")

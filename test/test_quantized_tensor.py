@@ -341,6 +341,7 @@ class TestQuantizedTensor(TestCase):
         qc = deepcopy(q)
         self.assertEqual(qc, q)
         # copy_
+        scale, zero_point = 2.0, 3
         qd = torch._empty_affine_quantized([3, 5], scale=scale, zero_point=zero_point, dtype=torch.quint8)
         qd.copy_(q)
         self.assertEqual(qd, q)

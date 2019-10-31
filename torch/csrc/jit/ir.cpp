@@ -244,22 +244,20 @@ std::ostream &Node::print(std::ostream &out, size_t level,
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
     pyOp->writeScalars(out);
-  } else if (print_attributes) {
-    if (hasAttribute(attr::Subgraph) && groups) {
-      out << kind().toQualString() << "_" << groups->size();
-      if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
-        printAttributes(out, /*ignore_subgraph=*/true);
-      }
+  } else if (hasAttribute(attr::Subgraph) && groups) {
+    out << kind().toQualString() << "_" << groups->size();
+    if (print_attributes && numAttributes() > 1 &&
+        kind() != prim::DifferentiableGraph) {
+      printAttributes(out, /*ignore_subgraph=*/true);
+    }
 
-      groups->push_back(this);
-    } else {
-      out << kind().toQualString();
-      if (hasAttributes()) {
-        printAttributes(out);
-      }
+    groups->push_back(this);
+  } else {
+    out << kind().toQualString();
+    if (print_attributes && hasAttributes()) {
+      printAttributes(out);
     }
   }
-
   out << "(" << inputs() << ")";
 
   if (print_scopes) {
@@ -765,7 +763,7 @@ Value* Value::setDebugName(const std::string& name) {
     if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
       if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
           std::string::npos) {
-        suffix = std::stoll(name.substr(last_dot_pos + 1));
+        suffix = c10::stoll(name.substr(last_dot_pos + 1));
         name_base = name.substr(0, last_dot_pos);
       }
     }
@@ -940,6 +938,8 @@ bool Node::hasSideEffects() const {
     case prim::CallMethod:
     case prim::BailoutTemplate:
     case prim::profile:
+    case prim::BailOut:
+    case prim::Guard:
       return true;
   }
 
