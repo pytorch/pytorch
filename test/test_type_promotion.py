@@ -1,5 +1,6 @@
 import torch
 import unittest
+import itertools
 
 from common_utils import TestCase, run_tests, load_tests
 
@@ -148,31 +149,29 @@ class TestTypePromotion(TestCase):
     # verifies that torch.<op>(a, b) is the same as 
     # torch.<op>(a.to(common_dtype), b.to(common_dtype)) in cases where that should hold.
     def test_many_promotions(self):
-        for dt1 in torch.testing.get_all_math_dtypes(self.device):
-            for dt2 in torch.testing.get_all_math_dtypes(self.device):
-                for op in [torch.add, torch.sub, torch.mul, torch.div]:
-                    for contiguous in [True, False]:
+        all_dtypes = torch.testing.get_all_math_dtypes(self.device)
+        for dt1, dt2 in itertools.product(all_dtypes, all_dtypes):
+            for op in [torch.add, torch.sub, torch.mul, torch.div]:
+                for contiguous in [True, False]:
+                    common_dtype = torch.promote_types(dt1, dt2)
+                    if op == torch.sub and common_dtype != torch.bool:
+                        # Subtraction, the `-` operator, with a bool tensor is not supported.
+                        continue
 
-                        common_dtype = torch.promote_types(dt1, dt2)
-
-                        if op == torch.sub and common_dtype != torch.bool:
-                            # Subtraction, the `-` operator, with a bool tensor is not supported.
-                            continue
-
-                        a = torch.rand([20, 20], device=self.device).to(dt1)  # no _th_uniform for half on cpu.
-                        b = torch.rand([20, 20], device=self.device).to(dt2)
-                        # test ops with non-contiguous tensors
-                        if not contiguous:
-                            a = a.t()
-                            b = b.t()
-                        self.assertEqual(a.is_contiguous(), contiguous)
-                        self.assertEqual(b.is_contiguous(), contiguous)
-                        # ensure no div-by-zero
-                        b[b == 0] = 5
-                        c = op(a, b)
-                        d = op(a.to(common_dtype), b.to(common_dtype))
-                        self.assertEqual(c.dtype, d.dtype, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
-                        self.assertEqual(c, d, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
+                    first = torch.rand([20, 20], device=self.device).to(dt1)  # no _th_uniform for half on cpu.
+                    second = torch.rand([20, 20], device=self.device).to(dt2)
+                    # test ops with non-contiguous tensors
+                    if not contiguous:
+                        first = first.t()
+                        second = second.t()
+                    self.assertEqual(first.is_contiguous(), contiguous)
+                    self.assertEqual(second.is_contiguous(), contiguous)
+                    # ensure no div-by-zero
+                    second[second == 0] = 5
+                    result = op(first, second)
+                    expected = op(first.to(common_dtype), second.to(common_dtype))
+                    self.assertEqual(result.dtype, expected.dtype, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
+                    self.assertEqual(result, expected, message='{} with {}, {}'.format(op.__name__, dt1, dt2))
 
     def test_non_promoting_ops(self):
         x = torch.ones(4, dtype=torch.double)
