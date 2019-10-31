@@ -108,7 +108,11 @@ Tensor Conv1dImpl::forward(const Tensor& input) {
     return F::conv1d(
       F::pad(input, PadOptions(expanded_padding).mode(torch::kCircular)),
       weight, bias,
-      options.padding(0));
+      Conv1dOptions()
+        .stride(options.stride())
+        .padding(0)
+        .dilation(options.dilation())
+        .groups(options.groups()));
   }
   return F::conv1d(
     input,
@@ -129,7 +133,11 @@ Tensor Conv2dImpl::forward(const Tensor& input) {
     return F::conv2d(
       F::pad(input, PadOptions(expanded_padding).mode(torch::kCircular)),
       weight, bias,
-      options.padding(0));
+      Conv2dOptions()
+        .stride(options.stride())
+        .padding(0)
+        .dilation(options.dilation())
+        .groups(options.groups()));
   }
   return F::conv2d(
     input,
@@ -151,7 +159,11 @@ Tensor Conv3dImpl::forward(const Tensor& input) {
     return F::conv3d(
       F::pad(input, PadOptions(expanded_padding).mode(torch::kCircular)),
       weight, bias,
-      options.padding(0));
+      Conv3dOptions()
+        .stride(options.stride())
+        .padding(0)
+        .dilation(options.dilation())
+        .groups(options.groups()));
   }
   return F::conv3d(
     input,
