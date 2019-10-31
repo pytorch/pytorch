@@ -1216,8 +1216,10 @@
 
 - func: full_like(Tensor self, Scalar fill_value) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
 
 - func: full_like.dtype(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+  supports_named_tensor: True
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -1985,8 +1987,10 @@
 
 - func: ones_like(Tensor self) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
 
 - func: ones_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+  supports_named_tensor: True
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
@@ -2061,8 +2065,10 @@
 
 - func: rand_like(Tensor self) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
 
 - func: rand_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+  supports_named_tensor: True
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2106,8 +2112,10 @@
 
 - func: randn_like(Tensor self) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
 
 - func: randn_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+  supports_named_tensor: True
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2845,8 +2853,10 @@
 
 - func: zeros_like(Tensor self) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
 
 - func: zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+  supports_named_tensor: True
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   use_c10_dispatcher: full

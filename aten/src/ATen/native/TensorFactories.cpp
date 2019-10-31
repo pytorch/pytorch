@@ -328,6 +328,11 @@ Tensor full_like(const Tensor& self, Scalar fill_value) {
 }
 
 Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
+#ifdef BUILD_NAMEDTENSOR
+  if (self.has_names()) {
+    return native::full(self.sizes(), fill_value, self.names(), options);
+  }
+#endif
   return native::full(self.sizes(), fill_value, options);
 }
 
@@ -376,10 +381,15 @@ Tensor& ones_out(Tensor& result, IntArrayRef size) {
 }
 
 Tensor ones_like(const Tensor& self) {
-  return native::ones(self.sizes(), self.options());
+  return native::ones_like(self, self.options());
 }
 
 Tensor ones_like(const Tensor& self, const TensorOptions& options) {
+#ifdef BUILD_NAMEDTENSOR
+  if (self.has_names()) {
+    return native::ones(self.sizes(), self.names(), options);
+  }
+#endif
   return native::ones(self.sizes(), options);
 }
 
@@ -414,6 +424,11 @@ Tensor rand_like(const Tensor& self) {
 }
 
 Tensor rand_like(const Tensor& self, const TensorOptions& options) {
+#ifdef BUILD_NAMEDTENSOR
+  if (self.has_names()) {
+    return native::rand(self.sizes(), self.names(), options);
+  }
+#endif
   return native::rand(self.sizes(), options);
 }
 
@@ -536,6 +551,11 @@ Tensor randn_like(const Tensor& self) {
 }
 
 Tensor randn_like(const Tensor& self, const TensorOptions& options) {
+#ifdef BUILD_NAMEDTENSOR
+  if (self.has_names()) {
+    return native::randn(self.sizes(), nullptr, self.names(), options);
+  }
+#endif
   return native::randn(self.sizes(), nullptr, options);
 }
 
@@ -720,6 +740,11 @@ Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
     res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
   }
+#ifdef BUILD_NAMEDTENSOR
+  if (self.has_names()) {
+    return native::zeros(self.sizes(), self.names(), options);
+  }
+#endif
   return native::zeros(self.sizes(), options);
 }
 
