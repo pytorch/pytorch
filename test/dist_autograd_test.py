@@ -1027,7 +1027,10 @@ class DistAutogradTest(object):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward([val.sum()])
 
-    @unittest.skip("Using sleep to simulate syncronization is flaky")
+    @unittest.skip(
+        "Using sleep to simulate syncronization is flaky, "
+        "see https://github.com/pytorch/pytorch/issues/28976"
+    )
     @unittest.skipIf(TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP",
                      "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures")
     @dist_init(clean_shutdown=False)
