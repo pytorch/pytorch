@@ -139,6 +139,7 @@ void magmaSolve<double>(
     magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
     magma_int_t* ipiv, double* dB, magma_int_t lddb, magma_int_t* info) {
   magma_dgesv_gpu(n, nrhs, dA, ldda, ipiv, dB, lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -146,6 +147,7 @@ void magmaSolve<float>(
     magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda,
     magma_int_t* ipiv, float* dB, magma_int_t lddb, magma_int_t* info) {
   magma_sgesv_gpu(n, nrhs, dA, ldda, ipiv, dB, lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -154,6 +156,7 @@ void magmaSolveBatched<double>(
     magma_int_t** dipiv_array, double** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
   magma_dgesv_batched(n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, dinfo_array, batch_count, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -162,6 +165,7 @@ void magmaSolveBatched<float>(
     magma_int_t** dipiv_array, float** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue) {
   magma_sgesv_batched(n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, dinfo_array, batch_count, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -169,6 +173,7 @@ void magmaLu<double>(
     magma_int_t m, magma_int_t n, double* dA, magma_int_t ldda,
     magma_int_t* ipiv, magma_int_t* info) {
   magma_dgetrf_gpu(m, n, dA, ldda, ipiv, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -176,6 +181,7 @@ void magmaLu<float>(
     magma_int_t m, magma_int_t n, float* dA, magma_int_t ldda,
     magma_int_t* ipiv, magma_int_t* info) {
   magma_sgetrf_gpu(m, n, dA, ldda, ipiv, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -184,6 +190,7 @@ void magmaLuBatched<double>(
     magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
   magma_dgetrf_batched(m, n, dA_array, ldda, ipiv_array, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -192,6 +199,7 @@ void magmaLuBatched<float>(
     magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
   magma_sgetrf_batched(m, n, dA_array, ldda, ipiv_array, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -199,6 +207,7 @@ void magmaLuNoPiv<double>(
     magma_int_t m, magma_int_t n, double* dA, magma_int_t ldda,
     magma_int_t* info) {
   magma_dgetrf_nopiv_gpu(m, n, dA, ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -206,6 +215,7 @@ void magmaLuNoPiv<float>(
     magma_int_t m, magma_int_t n, float* dA, magma_int_t ldda,
     magma_int_t* info) {
   magma_sgetrf_nopiv_gpu(m, n, dA, ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -213,6 +223,7 @@ void magmaLuNoPivBatched<double>(
     magma_int_t m, magma_int_t n, double** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_dgetrf_nopiv_batched(m, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -220,6 +231,7 @@ void magmaLuNoPivBatched<float>(
     magma_int_t m, magma_int_t n, float** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_sgetrf_nopiv_batched(m, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -237,6 +249,7 @@ void magmaGetri<double>(
     magma_int_t n, double* dA, magma_int_t ldda, magma_int_t* ipiv, double* dwork,
     magma_int_t lwork, magma_int_t* info) {
   magma_dgetri_gpu(n, dA, ldda, ipiv, dwork, lwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -244,6 +257,7 @@ void magmaGetri<float>(
     magma_int_t n, float* dA, magma_int_t ldda, magma_int_t* ipiv, float* dwork,
     magma_int_t lwork, magma_int_t* info) {
   magma_sgetri_gpu(n, dA, ldda, ipiv, dwork, lwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -252,6 +266,7 @@ void magmaGetriBatched<double>(
     magma_int_t** ipiv_array, double** dinvA_array, magma_int_t lddia,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_dgetri_outofplace_batched(n, dA_array, ldda, ipiv_array, dinvA_array, lddia, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -260,6 +275,7 @@ void magmaGetriBatched<float>(
     magma_int_t** ipiv_array, float** dinvA_array, magma_int_t lddia,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_sgetri_outofplace_batched(n, dA_array, ldda, ipiv_array, dinvA_array, lddia, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -267,6 +283,7 @@ void magmaCholeskySolve<double>(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda,
     double* dB, magma_int_t lddb, magma_int_t* info) {
   magma_dpotrs_gpu(uplo, n, nrhs, dA, ldda, dB, lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -274,6 +291,7 @@ void magmaCholeskySolve<float>(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda,
     float* dB, magma_int_t lddb, magma_int_t* info) {
   magma_spotrs_gpu(uplo, n, nrhs, dA, ldda, dB, lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -281,6 +299,7 @@ void magmaCholeskySolveBatched<double>(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, double** dA_array, magma_int_t ldda,
     double** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   info = magma_dpotrs_batched(uplo, n, nrhs, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -288,6 +307,7 @@ void magmaCholeskySolveBatched<float>(
     magma_uplo_t uplo, magma_int_t n, magma_int_t nrhs, float** dA_array, magma_int_t ldda,
     float** dB_array, magma_int_t lddb, magma_int_t& info, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   info = magma_spotrs_batched(uplo, n, nrhs, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -295,6 +315,7 @@ void magmaCholesky<double>(
     magma_uplo_t uplo, magma_int_t n, double* dA,
     magma_int_t ldda, magma_int_t* info) {
   magma_dpotrf_gpu(uplo, n, dA, ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -302,6 +323,7 @@ void magmaCholesky<float>(
     magma_uplo_t uplo, magma_int_t n, float* dA,
     magma_int_t ldda, magma_int_t* info) {
   magma_spotrf_gpu(uplo, n, dA, ldda, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -309,6 +331,7 @@ void magmaCholeskyBatched<double>(
     magma_uplo_t uplo, magma_int_t n, double** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_dpotrf_batched(uplo, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -316,6 +339,7 @@ void magmaCholeskyBatched<float>(
     magma_uplo_t uplo, magma_int_t n, float** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_spotrf_batched(uplo, n, dA_array, ldda, info_array, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -323,6 +347,7 @@ void magmaTriangularSolve<double>(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     double* dA, magma_int_t ldda, double* dB, magma_int_t lddb) {
   magma_dtrsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -330,6 +355,7 @@ void magmaTriangularSolve<float>(
     magma_uplo_t uplo, magma_trans_t trans, magma_diag_t diag, magma_int_t m, magma_int_t n,
     float* dA, magma_int_t ldda, float* dB, magma_int_t lddb) {
   magma_strsm(MagmaLeft, uplo, trans, diag, m, n, 1, dA, ldda, dB, lddb);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -338,6 +364,7 @@ void magmaTriangularSolveBatched<double>(
     double** dA_array, magma_int_t ldda, double** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
   magmablas_dtrsm_batched(MagmaLeft, uplo, trans, diag, m, n, 1, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -346,6 +373,7 @@ void magmaTriangularSolveBatched<float>(
     float** dA_array, magma_int_t ldda, float** dB_array, magma_int_t lddb, magma_int_t batchsize,
     const MAGMAQueue& magma_queue) {
   magmablas_strsm_batched(MagmaLeft, uplo, trans, diag, m, n, 1, dA_array, ldda, dB_array, lddb, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -367,6 +395,7 @@ void magmaGeqrf<double>(
   } else {
     magma_dgeqrf2_gpu(m, n, dA, ldda, tau, info);
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -378,6 +407,7 @@ void magmaGeqrf<float>(
   } else {
     magma_sgeqrf2_gpu(m, n, dA, ldda, tau, info);
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -385,6 +415,7 @@ void magmaOrgqr<double>(
     magma_int_t m, magma_int_t n, magma_int_t k, double* dA, magma_int_t ldda,
     double* tau, double* dT, magma_int_t nb, magma_int_t* info) {
   magma_dorgqr_gpu(m, n, k, dA, ldda, tau, dT, nb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -392,6 +423,7 @@ void magmaOrgqr<float>(
     magma_int_t m, magma_int_t n, magma_int_t k, float* dA, magma_int_t ldda,
     float* tau, float* dT, magma_int_t nb, magma_int_t* info) {
   magma_sorgqr_gpu(m, n, k, dA, ldda, tau, dT, nb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -400,6 +432,7 @@ void magmaSymeig<double>(
     double* w, double* wA, magma_int_t ldwa, double* work, magma_int_t lwork,
     magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
   magma_dsyevd_gpu(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -408,6 +441,7 @@ void magmaSymeig<float>(
     float* w, float* wA, magma_int_t ldwa, float* work, magma_int_t lwork,
     magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
   magma_ssyevd_gpu(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -417,6 +451,7 @@ void magmaSvd<double>(
     double* VT, magma_int_t ldvt, double* work, magma_int_t lwork,
     magma_int_t* iwork, magma_int_t* info) {
   magma_dgesdd(jobz, m, n, A, lda, s, U, ldu, VT, ldvt, work, lwork, iwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -426,6 +461,7 @@ void magmaSvd<float>(
     float* VT, magma_int_t ldvt, float* work, magma_int_t lwork,
     magma_int_t* iwork, magma_int_t* info) {
   magma_sgesdd(jobz, m, n, A, lda, s, U, ldu, VT, ldvt, work, lwork, iwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -433,6 +469,7 @@ void magmaLuSolve<double>(
     magma_int_t n, magma_int_t nrhs, double* dA, magma_int_t ldda, magma_int_t* ipiv,
     double* dB, magma_int_t lddb, magma_int_t* info) {
   magma_dgetrs_gpu(MagmaNoTrans, n, nrhs, dA, ldda, ipiv, dB, lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -440,6 +477,7 @@ void magmaLuSolve<float>(
     magma_int_t n, magma_int_t nrhs, float* dA, magma_int_t ldda, magma_int_t* ipiv,
     float* dB, magma_int_t lddb, magma_int_t* info) {
   magma_sgetrs_gpu(MagmaNoTrans, n, nrhs, dA, ldda, ipiv, dB, lddb, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 
@@ -449,6 +487,7 @@ void magmaLuSolveBatched<double>(
     double** dB_array, magma_int_t lddb, magma_int_t& info,
     magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   info = magma_dgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -457,6 +496,7 @@ void magmaLuSolveBatched<float>(
     float** dB_array, magma_int_t lddb, magma_int_t& info,
     magma_int_t batchsize, const MAGMAQueue& magma_queue) {
  info = magma_sgetrs_batched(MagmaNoTrans, n, nrhs, dA_array, ldda, dipiv_array, dB_array, lddb, batchsize, magma_queue.get_queue());
+ AT_CUDA_CHECK(cudaGetLastError());
 }
 #endif
 
@@ -537,6 +577,7 @@ AT_ERROR("solve: MAGMA library not found in "
       infos[i] = info_array[i];
     }
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -622,6 +663,7 @@ AT_ERROR("inverse: MAGMA library not found in "
   for (int64_t i = 0; i < batch_size; i++) {
     infos[i] = info_array[i];
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -646,6 +688,7 @@ AT_ERROR("inverse: MAGMA library not found in "
   magmaGetri<scalar_t>(
     n, self_data, n, ipiv.data_ptr<magma_int_t>(), dwork.data_ptr<scalar_t>(), lwork, &info_tmp);
   info = info_tmp;
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -736,6 +779,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
 
     info = info_tmp;
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -810,6 +854,7 @@ AT_ERROR("cholesky: MAGMA library not found in "
       infos[i] = info_array[i];
     }
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -898,6 +943,7 @@ AT_ERROR("lu: MAGMA library not found in "
         batch_size, magma_queue);
     }
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -1029,6 +1075,7 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
           n, &b_array[mini_idx], n, batch_size % batch_limit, magma_queue);
     }
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -1099,6 +1146,7 @@ AT_ERROR("qr: MAGMA library not found in "
       return;
     }
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -1192,6 +1240,7 @@ AT_ERROR("symeig: MAGMA library not found in "
       return;
     }
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -1284,6 +1333,7 @@ AT_ERROR("svd: MAGMA library not found in "
       return;
     }
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
@@ -1414,6 +1464,7 @@ AT_ERROR("lu_solve: MAGMA library not found in "
 
     info = info_tmp;
   }
+  AT_CUDA_CHECK(cudaGetLastError());
 #endif
 }
 
