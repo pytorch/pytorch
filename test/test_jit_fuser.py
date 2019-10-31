@@ -445,6 +445,7 @@ class TestFuser(JitTestCase):
         z = torch.randn(4, 2, dtype=torch.float, device='cuda')
         ge = self.checkTrace(fn, (x, y, z))
         graph = ge.graph_for(x, y, z)
+        print(str(graph))
         self.assertAllFused(graph, except_for={'aten::add'})
         FileCheck().check("FusedConcat").check_next("return").run(str(graph))
 

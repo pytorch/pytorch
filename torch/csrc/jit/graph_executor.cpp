@@ -49,6 +49,8 @@
 #include <utility>
 #include <vector>
 
+static std::unique_ptr<torch::jit::GraphExecutor> ge;
+
 namespace torch {
 namespace jit {
 
@@ -212,12 +214,14 @@ struct DifferentiableGraphBackward : public autograd::Node {
   DifferentiableGraphBackward(
       const std::shared_ptr<Graph>& unspec_graph,
       size_t input_size,
-      size_t capture_size,
-      c10::optional<GraphExecutor>& grad_executor)
+      size_t capture_size
+      //c10::optional<GraphExecutor>& grad_executor
+      )
       : captures_(capture_size),
         input_instructions_(input_size),
-        unspecialized_graph_(unspec_graph),
-        grad_executor_(grad_executor) {}
+        unspecialized_graph_(unspec_graph->copy())
+        // grad_executor_(grad_executor) 
+        {}
 
   variable_list apply(variable_list&& inputs) override {
     Stack stack;
@@ -313,14 +317,19 @@ struct DifferentiableGraphBackward : public autograd::Node {
         input_type->setType(ListType::create(getTensorType(defined)));
       }
     }
+    
     grad_executors_[hash] = GraphExecutor(spec_copy);
+    
+    //grad_executors_.insert({hash, GraphExecutor(spec_copy)});
   }
 
 
   // set last optimized graph
   // make a copy because DifferentiableBackward might disappear
   // by the time we get to use diff_op_.grad_executor
-  grad_executor_ = GraphExecutor(grad_executors_[hash].graph()) ;
+  
+  //grad_executor_ = GraphExecutor(grad_executors_[hash].graph()) ;
+  ge.reset(new GraphExecutor(grad_executors_[hash].graph()));
   return grad_executors_[hash];
 
   }
@@ -387,7 +396,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
   UnpackInstructions input_instructions_;
   std::unordered_map<std::vector<bool>, GraphExecutor> grad_executors_;
   std::shared_ptr<Graph> unspecialized_graph_;
-  c10::optional<GraphExecutor>& grad_executor_;
+  //c10::optional<GraphExecutor>& grad_executor_;
 };
 
 // an optimized way of executing the subgraph computed directly on
@@ -399,7 +408,7 @@ struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
       : f(grad.f),
         grad(std::move(grad)),
-        grad_executor(),
+        grad_executor(this->grad.df),
         num_inputs(this->grad.f->inputs().size()),
         num_outputs(this->grad.f->outputs().size()) {}
 
@@ -409,8 +418,8 @@ struct DifferentiableGraphOp {
         this->grad.df,
         grad.df_input_vjps.size(),
         grad.df_input_captured_inputs.size() +
-            grad.df_input_captured_outputs.size(),
-            grad_executor);
+            grad.df_input_captured_outputs.size()//,
+            /*grad_executor*/);
 
     {
       auto inputs = last(stack, num_inputs);
@@ -497,7 +506,8 @@ struct DifferentiableGraphOp {
 
   Code f;
   Gradient grad;
-  mutable c10::optional<GraphExecutor> grad_executor;
+  //mutable c10::optional<GraphExecutor> grad_executor;
+  GraphExecutor grad_executor;
 
   const size_t num_inputs;
   const size_t num_outputs;
@@ -528,11 +538,16 @@ RegisterOperators reg_graph_executor_ops({Operator(
 
 namespace detail {
 
+
+
 GraphExecutor* getGradExecutor(Operation& op) {
   if (auto diff_op = op.target<DifferentiableGraphOp>()) {
 
-    TORCH_INTERNAL_ASSERT(diff_op->grad_executor.has_value())
-    return &(*diff_op->grad_executor);
+    //TORCH_INTERNAL_ASSERT(diff_op->grad_executor.has_value())
+    //return &(*diff_op->grad_executor);
+    //@#$ to do try this next
+    return &diff_op->grad_executor;
+    return ge.get();
   }
   return nullptr;
 }
