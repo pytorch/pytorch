@@ -249,11 +249,6 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
   return autograd_meta_.get();
 }
 
-std::unique_ptr<c10::AutogradMetaInterface> TensorImpl::detach_autograd_meta() {
-  type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
-  return std::move(autograd_meta_);
-}
-
 void TensorImpl::copy_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl,
