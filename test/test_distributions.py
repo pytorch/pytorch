@@ -36,7 +36,7 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf
-from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests, skipIfRocm
+from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -63,9 +63,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             StickBreakingTransform,
                                             identity_transform, StackTransform)
 from torch.distributions.utils import probs_to_logits, lazy_property
-from torch.distributions.von_mises import _log_modified_bessel_fn
 from torch.nn.functional import softmax
-from torch import optim
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -695,7 +693,7 @@ class TestDistributions(TestCase):
             asset_fn(i, val.squeeze(), log_prob)
 
     def _check_sampler_sampler(self, torch_dist, ref_dist, message, multivariate=False,
-                               num_samples=10000, failure_rate=1e-3):
+                               circular=False, num_samples=10000, failure_rate=1e-3):
         # Checks that the .sample() method matches a reference function.
         torch_samples = torch_dist.sample((num_samples,)).squeeze()
         torch_samples = torch_samples.cpu().numpy()
@@ -707,6 +705,8 @@ class TestDistributions(TestCase):
             torch_samples = np.dot(torch_samples, axis)
             ref_samples = np.dot(ref_samples, axis)
         samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
+        if circular:
+            samples = [(np.cos(x), v) for (x, v) in samples]
         shuffle(samples)  # necessary to prevent stable sort from making uneven bins for discrete
         samples.sort(key=lambda x: x[0])
         samples = np.array(samples)[:, 1]
@@ -1360,46 +1360,14 @@ class TestDistributions(TestCase):
         low.grad.zero_()
         high.grad.zero_()
 
-    def _fit_vonmises_params_from_samples(self, samples, n_iter):
-        assert samples.dim() == 1
-        samples_count = samples.size(0)
-        samples_cs = samples.cos().sum()
-        samples_ss = samples.sin().sum()
-        mu = torch.atan2(samples_ss / samples_count, samples_cs / samples_count)
-        samples_r = (samples_cs ** 2 + samples_ss ** 2).sqrt() / samples_count
-        # From Banerjee, Arindam, et al.
-        # "Clustering on the unit hypersphere using von Mises-Fisher distributions."
-        # Journal of Machine Learning Research 6.Sep (2005): 1345-1382.
-        # By mic (https://stats.stackexchange.com/users/67168/mic),
-        # Estimating kappa of von Mises distribution, URL (version: 2015-06-12):
-        # https://stats.stackexchange.com/q/156692
-        kappa = (samples_r * 2 - samples_r ** 3) / (1 - samples_r ** 2)
-        lr = 1e-2
-        kappa.requires_grad = True
-        bfgs = optim.LBFGS([kappa], lr=lr)
-
-        def bfgs_closure():
-            bfgs.zero_grad()
-            obj = (_log_modified_bessel_fn(kappa, order=1)
-                   - _log_modified_bessel_fn(kappa, order=0))
-            obj = (obj - samples_r.log()).abs()
-            obj.backward()
-            return obj
-
-        for i in range(n_iter):
-            bfgs.step(bfgs_closure)
-        return mu, kappa.detach()
-
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_vonmises_sample(self):
-        for loc in [-math.pi / 2.0, 0.0, math.pi / 2.0]:
-            for concentration in [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]:
-                n_samples = int(2e6)
-                n_iter = 50
-                prob = VonMises(loc, concentration)
-                samples = prob.sample((n_samples,))
-                mu, kappa = self._fit_vonmises_params_from_samples(samples, n_iter=n_iter)
-                self.assertLess(abs(loc - mu), 0.1)
-                self.assertLess(abs(concentration - kappa), concentration * 0.1)
+        for loc in [0.0, math.pi / 2.0]:
+            for concentration in [0.03, 0.3, 1.0, 10.0, 100.0]:
+                self._check_sampler_sampler(VonMises(loc, concentration),
+                                            scipy.stats.vonmises(loc=loc, kappa=concentration),
+                                            "VonMises(loc={}, concentration={})".format(loc, concentration),
+                                            num_samples=int(1e5), circular=True)
 
     def test_vonmises_logprob(self):
         concentrations = [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
@@ -4206,9 +4174,9 @@ class TestTransforms(TestCase):
 
 class TestFunctors(TestCase):
     def test_cat_transform(self):
-        x1 = -1 * torch.range(1, 100).view(-1, 100)
-        x2 = (torch.range(1, 100).view(-1, 100) - 1) / 100
-        x3 = torch.range(1, 100).view(-1, 100)
+        x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        x2 = (torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100
+        x3 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
         t1, t2, t3 = ExpTransform(), AffineTransform(1, 100), identity_transform
         dim = 0
         x = torch.cat([x1, x2, x3], dim=dim)
@@ -4221,9 +4189,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.cat([t1(x1), t2(x2), t3(x3)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.range(1, 100).view(-1, 100)
-        y2 = torch.range(1, 100).view(-1, 100)
-        y3 = torch.range(1, 100).view(-1, 100)
+        y1 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        y2 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        y3 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
         y = torch.cat([y1, y2, y3], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.cat([t1.codomain.check(y1),
@@ -4240,9 +4208,9 @@ class TestFunctors(TestCase):
         self.assertEqual(actual_jac, expected_jac)
 
     def test_cat_transform_non_uniform(self):
-        x1 = -1 * torch.range(1, 100).view(-1, 100)
-        x2 = torch.cat([(torch.range(1, 100).view(-1, 100) - 1) / 100,
-                        torch.range(1, 100).view(-1, 100)])
+        x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        x2 = torch.cat([(torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100,
+                        torch.arange(1, 101, dtype=torch.float).view(-1, 100)])
         t1 = ExpTransform()
         t2 = CatTransform([AffineTransform(1, 100), identity_transform], dim=0)
         dim = 0
@@ -4255,9 +4223,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.cat([t1(x1), t2(x2)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.range(1, 100).view(-1, 100)
-        y2 = torch.cat([torch.range(1, 100).view(-1, 100),
-                        torch.range(1, 100).view(-1, 100)])
+        y1 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        y2 = torch.cat([torch.arange(1, 101, dtype=torch.float).view(-1, 100),
+                        torch.arange(1, 101, dtype=torch.float).view(-1, 100)])
         y = torch.cat([y1, y2], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.cat([t1.codomain.check(y1),
@@ -4272,9 +4240,9 @@ class TestFunctors(TestCase):
         self.assertEqual(actual_jac, expected_jac)
 
     def test_stack_transform(self):
-        x1 = -1 * torch.range(1, 100)
-        x2 = (torch.range(1, 100) - 1) / 100
-        x3 = torch.range(1, 100)
+        x1 = -1 * torch.arange(1, 101, dtype=torch.float)
+        x2 = (torch.arange(1, 101, dtype=torch.float) - 1) / 100
+        x3 = torch.arange(1, 101, dtype=torch.float)
         t1, t2, t3 = ExpTransform(), AffineTransform(1, 100), identity_transform
         dim = 0
         x = torch.stack([x1, x2, x3], dim=dim)
@@ -4287,9 +4255,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.stack([t1(x1), t2(x2), t3(x3)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.range(1, 100)
-        y2 = torch.range(1, 100)
-        y3 = torch.range(1, 100)
+        y1 = torch.arange(1, 101, dtype=torch.float)
+        y2 = torch.arange(1, 101, dtype=torch.float)
+        y3 = torch.arange(1, 101, dtype=torch.float)
         y = torch.stack([y1, y2, y3], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.stack([t1.codomain.check(y1),
@@ -4527,7 +4495,6 @@ class TestJit(TestCase):
             if Dist not in xfail:
                 self.assertTrue(any(n.isNondeterministic() for n in traced_f.graph.nodes()))
 
-    @skipIfRocm
     def test_log_prob(self):
         for Dist, keys, values, sample in self._examples():
             # FIXME traced functions produce incorrect results
