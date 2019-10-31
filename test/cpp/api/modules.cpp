@@ -312,7 +312,7 @@ TEST_F(ModulesTest, Flatten) {
   input = torch::tensor({
     {{{1, 2}, {3, 4}}, {{5, 6}, {7, 8}}},
     {{{9, 10}, {11, 12}}, {{13, 14}, {15, 16}}}
-   }, torch::requires_grad()); // Tensor with sizes (2, 2, 2, 2)
+   }, torch::dtype(torch::kFloat).requires_grad(true)); // Tensor with sizes (2, 2, 2, 2)
 
   output = flatten_optional_dims->forward(input);
   expected = torch::tensor({
@@ -1172,7 +1172,6 @@ TEST_F(ModulesTest, BatchNorm1dStateful) {
 
   ASSERT_TRUE(bn->num_batches_tracked.defined());
   ASSERT_EQ(bn->num_batches_tracked.dim(), 0);
-  ASSERT_EQ(bn->num_batches_tracked.size(0), 1);
 
   ASSERT_TRUE(bn->options.affine());
 
