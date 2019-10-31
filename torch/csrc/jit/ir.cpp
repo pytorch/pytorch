@@ -244,22 +244,20 @@ std::ostream &Node::print(std::ostream &out, size_t level,
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
     pyOp->writeScalars(out);
-  } else if (print_attributes) {
-    if (hasAttribute(attr::Subgraph) && groups) {
-      out << kind().toQualString() << "_" << groups->size();
-      if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
-        printAttributes(out, /*ignore_subgraph=*/true);
-      }
+  } else if (hasAttribute(attr::Subgraph) && groups) {
+    out << kind().toQualString() << "_" << groups->size();
+    if (print_attributes && numAttributes() > 1 &&
+        kind() != prim::DifferentiableGraph) {
+      printAttributes(out, /*ignore_subgraph=*/true);
+    }
 
-      groups->push_back(this);
-    } else {
-      out << kind().toQualString();
-      if (hasAttributes()) {
-        printAttributes(out);
-      }
+    groups->push_back(this);
+  } else {
+    out << kind().toQualString();
+    if (print_attributes && hasAttributes()) {
+      printAttributes(out);
     }
   }
-
   out << "(" << inputs() << ")";
 
   if (print_scopes) {

@@ -1476,6 +1476,9 @@ struct CAFFE2_API ClassType : public NamedType {
       TypePtr type,
       bool is_parameter = false);
 
+  // [Internal Only] Remove attribute from the ClassType
+  // caller is responsible to make sure the attribute is
+  // no longer used
   void removeAttribute(const std::string& name);
 
   // Add attribute \p NAME if it doesn't exist or verify that it has a
