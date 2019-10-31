@@ -73,6 +73,7 @@ namespace VariableType {
   Tensor & resize_as_(Tensor & self, const Tensor & the_template, c10::optional<MemoryFormat> optional_memory_format);
   Tensor detach(const Tensor & self);
   Tensor & detach_(Tensor & self);
+  Tensor& requires_grad_(Tensor& self, bool _requires_grad);
 };
 
 }} // namespace torch::autograd
