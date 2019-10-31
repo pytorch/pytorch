@@ -679,6 +679,7 @@ class MultiheadAttention(Module):
         'bias_v': torch._jit_internal.Optional[torch.Tensor],
     }
     __constants__ = ['q_proj_weight', 'k_proj_weight', 'v_proj_weight', 'in_proj_weight']
+    _version = 1  # If new parameters/buffers are added/removed from a module, this number shall be bumped.
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
         super(MultiheadAttention, self).__init__()
