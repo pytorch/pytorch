@@ -616,8 +616,8 @@ struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
   ~UnCopyableDataset() = default;
 
   Example<> get(size_t index) override {
-    return {torch::tensor(static_cast<int64_t>(index)),
-            torch::tensor(static_cast<int64_t>(index))};
+    return {torch::tensor({static_cast<int64_t>(index)}),
+            torch::tensor({static_cast<int64_t>(index)})};
   }
 
   torch::optional<size_t> size() const override {
