@@ -1236,7 +1236,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
     if isinstance(obj, torch.nn.Module):
-        return torch.jit.torch.jit._recursive.recursive_script(obj)
+        return torch.jit._recursive.recursive_script(obj)
 
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
