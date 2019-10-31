@@ -249,13 +249,13 @@ TEST(TensorTest, TorchTensorCtorScalar) {
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
   ASSERT_EQ(tensor.dtype(), at::kBool);
-  ASSERT_TRUE(almost_equal(tensor, true));
+  ASSERT_TRUE(exactly_equal(tensor, true));
 
   tensor = torch::tensor({true});
   ASSERT_EQ(tensor.numel(), 1);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1}));
   ASSERT_EQ(tensor.dtype(), at::kBool);
-  ASSERT_TRUE(almost_equal(tensor[0], true));
+  ASSERT_TRUE(exactly_equal(tensor[0], true));
 }
 
 TEST(TensorTest, TorchTensorCtorSingleDim) {
