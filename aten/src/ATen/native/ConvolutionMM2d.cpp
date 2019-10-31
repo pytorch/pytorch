@@ -46,7 +46,7 @@ static inline void conv2d_shape_check(
       check_dim_size(bias, 1, 0, weight.size(0));
     }
   } else {
-    TORCH_CHECK(!weight_optional, "weight tensor is undefined");
+    TORCH_CHECK(weight_optional, "weight tensor is undefined");
   }
 
   const int64_t ndim = input.dim();
@@ -313,7 +313,7 @@ void conv2d_backward_parameters_frame(
   if (grad_bias.defined()) {
     AT_DISPATCH_FLOATING_TYPES_AND(
         at::ScalarType::BFloat16,
-        grad_weight.scalar_type(),
+        grad_output.scalar_type(),
         "conv2d_backward_parameters",
         [&] {
           auto grad_output_2d_acc = grad_output_2d.accessor<scalar_t, 2>();
@@ -567,12 +567,13 @@ std::tuple<Tensor&, Tensor&, Tensor&> conv2d_backward_out_cpu(
   }
 
   if (grad_weight.defined()) {
+    printf("grad_weight\n");
     grad_weight.resize_(weight.sizes());
     grad_weight.zero_();
   }
 
   if (grad_bias.defined()) {
-    grad_bias.resize_({weight.size(0)});
+    grad_bias.resize_({grad_output.size(1)});
     grad_bias.zero_();
   }
 
