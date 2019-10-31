@@ -176,6 +176,33 @@ def warn_on_static_input_change(input_states):
                           "Note that strings will not appear as inputs/outputs of the ONNX graph. "
                 warnings.warn(warning)
 
+def _decide_keep_init_as_input(keep_initializers_as_inputs, operator_export_type,
+                               opset_version):
+    # This method encapsulates the logic to decide whether the initializers in the graph
+    # should be listed as ONNX graph inputs (i.e., whether to choose ONNX IR v3 or v4).
+    # If keep_initializers_as_inputs is not specified (None), then we decide whether to keep
+    # intializers as graph inputs (val_keep_init_as_ip) based on export type. If export type
+    # is ONNX, then do not keep initializers as input (val_keep_init_as_ip=False). For all other 
+    # export types keep initializers as input (val_keep_init_as_ip=True).
+    # If keep_initializers_as_inputs is specified, then respect it. Unless opset version <= 8,
+    # in which case it must be ignored because for opset version <= 8, all initializers MUST be
+    # part of graph input (only ONNX IR v3 is allowed), i.e. val_keep_init_as_ip=True.
+
+    # Special handling is needed for opset version 8 or lower, because irrespective
+    # of user input for keep_initializers_as_inputs, the graph must follow ONNX IR v3
+    # semantics, i.e. all intializers must be listed as ONNX graph input.
+    if opset_version < 9:
+        if keep_initializers_as_inputs is False:
+            warnings.warn("Setting 'keep_initializers_as_inputs=False' for opset version"
+                          "8 or lower would lead to an invalid ONNX graph. Therefore, "
+                          "'keep_initializers_as_inputs=False' is ignored during export."
+                          "Exported model will have initialiers as graph inputs (compliant "
+                          " to ONNX IR v3).")
+        return True  # i.e. True == initializers are part of graph input (ONNX IR v3)
+    val_keep_init_as_ip = True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
+    if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:
+        val_keep_init_as_ip = False
+    return val_keep_init_as_ip
 
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
@@ -328,9 +355,9 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         opset_version = _default_onnx_opset_version
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
-    val_keep_init_as_ip = True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
-    if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:
-        val_keep_init_as_ip = False
+    val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
+                                                     operator_export_type,
+                                                     opset_version)
     graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                     training, input_names,
                                                     output_names, operator_export_type,
@@ -371,9 +398,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                 operator_export_type = OperatorExportTypes.ONNX
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
-        val_keep_init_as_ip = True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
-        if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:
-            val_keep_init_as_ip = False
+        val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
+                                                         operator_export_type,
+                                                         opset_version)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                         training, input_names,
                                                         output_names, operator_export_type,
