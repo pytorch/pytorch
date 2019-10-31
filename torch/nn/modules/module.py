@@ -288,6 +288,13 @@ class Module(object):
         fn(self)
         return self
 
+    def channels_last(self):
+        return self._apply(
+            lambda t: t.contiguous(memory_format=torch.channels_last)
+            if t.dim() == 4
+            else t
+        )
+
     def cuda(self, device=None):
         r"""Moves all model parameters and buffers to the GPU.
 
