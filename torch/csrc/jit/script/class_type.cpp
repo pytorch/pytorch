@@ -92,6 +92,22 @@ size_t ClassType::addAttribute(
   return slot;
 }
 
+void ClassType::removeAttribute(const std::string& name) {
+  std::vector<std::string> attributeNames;
+  std::vector<TypePtr> attributeTypes;
+  auto& names = attributeNames_;
+  auto& types = attributeTypes_;
+  TORCH_CHECK(std::find(names.begin(), names.end(), name) != names.end(), "Can't remove a non-existent attribute");
+  for (size_t i = 0; i < names.size(); ++i) {
+    if (names[i] != name) {
+      attributeNames.push_back(names[i]);
+      attributeTypes.push_back(types[i]);
+    }
+  }
+  attributeNames_ = attributeNames;
+  attributeTypes_ = attributeTypes;
+}
+
 const std::vector<Function*>& ClassType::methods() const {
   return methods_;
 }

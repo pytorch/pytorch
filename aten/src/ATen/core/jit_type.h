@@ -1476,6 +1476,8 @@ struct CAFFE2_API ClassType : public NamedType {
       TypePtr type,
       bool is_parameter = false);
 
+  void removeAttribute(const std::string& name);
+
   // Add attribute \p NAME if it doesn't exist or verify that it has a
   // compatible type otherwise.
   size_t addOrCheckAttribute(
