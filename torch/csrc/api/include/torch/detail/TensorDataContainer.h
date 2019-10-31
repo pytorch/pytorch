@@ -137,7 +137,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
-  // NOTE: We need to handle `std::vector` explicitly instead of relying on an implicit conversion
+  // NOTE: We have to handle `std::vector` explicitly instead of relying on an implicit conversion
   // to `at::ArrayRef`, otherwise the following error can be thrown when calling
   // `torch::tensor(std::vector<double>({1.1, 2.2}))`:
   // ```
