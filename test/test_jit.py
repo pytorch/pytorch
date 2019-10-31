@@ -14908,7 +14908,7 @@ a")
 
         class Mod(torch.nn.Module):
             def __init__(self):
-                super().__init__()
+                super(Mod, self).__init__()
                 self.ml = torch.nn.ModuleList([
                     MySubmod() for i in range(2)
                 ])
@@ -14942,7 +14942,7 @@ a")
 
         class Mod(torch.nn.Module):
             def __init__(self):
-                super().__init__()
+                super(Mod, self).__init__()
                 self.sm = MySubmod()
                 self.fm = MyFunctionalMod()
 
