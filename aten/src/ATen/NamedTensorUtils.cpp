@@ -326,10 +326,28 @@ static std::vector<Dimname> compute_matmul_outnames(
       "both arguments to matmul need to be at least 1D, but they are ",
       self_names.size(), "D and ", other_names.size(), "D");
 
+  // matmul performs a batch matrix multiply between self and other, each of which
+  // can either be:
+  // - a batches of matrices (if dim > 2)
+  // - a matrix (if dim == 2)
+  // - a vector (if dim == 1)
+  //
+  // To compute output names, we unify the batch dimensions because those are
+  // broadcastable to get the output batch dimensions.
+  //
+  // After that, we append some names that are equal to the result of the matmul
+  // without batch dimensions. Those names are computed by removing the names
+  // of the dimensions that were contracted away. We always contract the
+  // last dim of the first tensor with the first feature dimension of the second.
+
+  // Get the output's batch dimension names
   const auto wrapped_self_names = TensorNames(self_names, 0, num_batch_dims(self_names));
   const auto wrapped_other_names = TensorNames(other_names, 0, num_batch_dims(other_names));
-
   auto working_names = wrapped_self_names.unifyFromRight(wrapped_other_names, "matmul");
+
+  // Append the result of each individual (non-batched) matmul.
+  // If either of self or other have dim 1, that means they are a vector. Vectors get
+  // completely contracted away during matmul so we don't take any names from them.
   if (self_names.size() >= 2) {
     working_names.append(TensorName(self_names, -2));
   }
