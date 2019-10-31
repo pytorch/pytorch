@@ -82,46 +82,13 @@ struct Node;
 /// instead. To create a view variable, use `make_variable_view`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+struct AutogradMeta;
+struct DifferentiableViewMeta;
+
 struct TORCH_API Variable : public at::Tensor {
   /// Default constructor.
   Variable() = default;
-
-  // Factory Functions
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  // TODO: These factory functions don't need to be friends anymore. Move them out of
-  // the Variable class.
-
-  /// Creates a `Variable` that is a *view* of another (*base*) variable.
-  /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
-  /// `is_differentiable` is a bool that specifies whether this view is
-  /// differentiable, i.e., whether the relation should be tracked by autograd.
-  /// See NOTE [ Autograd View Variables ] for details.
-  friend Variable make_variable_view(
-      Variable base,
-      at::Tensor data,
-      bool is_differentiable,
-      bool allow_tensor_metadata_change,
-      Edge gradient_edge);
-
-  /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
-  /// `requires_grad` should be
-  /// set only for leaves, and determines whether the `Variable` will accumulate
-  /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
-  /// type *must* be `Tensor`.
-  friend Variable make_variable(
-      at::Tensor data,
-      bool requires_grad,
-      bool allow_tensor_metadata_change);
-
-  /// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
-  /// `gradient_edge` should be a (function, input_nr) pair specifying the function
-  /// in the autograd graph, and what particular input of that function, this
-  /// variable is connected to.
-  friend Variable make_variable(
-      at::Tensor data,
-      Edge gradient_edge,
-      bool allow_tensor_metadata_change);
+  Variable(c10::intrusive_ptr<at::TensorImpl> self);
 
   // Tensor Conversions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -332,31 +299,24 @@ public:
   PyObject* pyobj() const noexcept;
   void set_pyobj(PyObject* pyobj) noexcept;
 
- private:
-  struct AutogradMeta;
-
  public:
-  Variable::AutogradMeta* get_autograd_meta() const noexcept;
+  AutogradMeta* get_autograd_meta() const noexcept;
 
  private:
-  struct DifferentiableViewMeta;
-
   // Private Methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  Variable(c10::intrusive_ptr<at::TensorImpl> self);
   at::TensorImpl* get() const;
   void create_cpp_hook();
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//                            Variable::AutogradMeta
+//                            AutogradMeta
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Each `Variable` has one unique `AutogradMeta` struct, which stores autograd
 /// metadata fields that are necessary for tracking the Variable's autograd history.
 
-struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
+struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::string name_;
 
   Variable grad_;
@@ -412,7 +372,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//                     Variable::DifferentiableViewMeta
+//                     DifferentiableViewMeta
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// NOTE [ Autograd View Variables ]
@@ -455,7 +415,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
 ///                                              var[1] filled with all ones and
 ///                                              zeros everywhere else
 ///
-/// Variable::DifferentiableViewMeta is created to support gradient tracking of
+/// DifferentiableViewMeta is created to support gradient tracking of
 /// such **in-place** operations. In particular,
 ///   + if an in-place op is done on base, the grad_fn field of the view may
 ///     become stale. So accesses should always go through grad_fn(), which
@@ -484,7 +444,7 @@ struct TORCH_API Variable::AutogradMeta : public c10::AutogradMetaInterface {
 /// through the view relation.
 /// Relevant logic for non-differentiable views is implemented in
 /// make_variable_view below, and wrap_output of gen_variable_type.py.
-struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMeta {
+struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// The base `Variable` (never a view).
   Variable base_;
 
@@ -508,6 +468,12 @@ struct TORCH_API Variable::DifferentiableViewMeta : public Variable::AutogradMet
 // Factory Functions
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+/// Creates a `Variable` that is a *view* of another (*base*) variable.
+/// The `gradient_edge` is an optional (gradient_function, input_number) pair.
+/// `is_differentiable` is a bool that specifies whether this view is
+/// differentiable, i.e., whether the relation should be tracked by autograd.
+/// See NOTE [ Autograd View Variables ] for details.
+
 /// NOTE: `allow_tensor_metadata_change` is set to true by default, because there
 /// are a lot of call sites to these factory functions that need to change the
 /// variable's size or storage afterwards, and they don't expect the original
@@ -528,7 +494,7 @@ inline Variable make_variable_view(
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::DifferentiableViewMeta>(
+      data_impl_copy->set_autograd_meta(c10::guts::make_unique<DifferentiableViewMeta>(
         data_impl_copy.get(), std::move(base), std::move(gradient_edge)));
       return Variable(data_impl_copy);
     } else {
@@ -536,7 +502,7 @@ inline Variable make_variable_view(
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/base.version_counter(),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
+      data_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(
         data_impl_copy.get(), false, std::move(gradient_edge)));
       return Variable(data_impl_copy);
     }
@@ -544,6 +510,11 @@ inline Variable make_variable_view(
   return Variable();
 }
 
+/// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
+/// `requires_grad` should be
+/// set only for leaves, and determines whether the `Variable` will accumulate
+/// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
+/// type *must* be `Tensor`.
 inline Variable make_variable(
     at::Tensor data,
     bool requires_grad = false,
@@ -555,13 +526,13 @@ inline Variable make_variable(
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.getIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      data_impl->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(data_impl.get(), requires_grad));
+      data_impl->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
       return Variable(std::move(data_impl));
     } else {
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
         /*version_counter=*/0,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
+      data_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(
         data_impl_copy.get(), requires_grad));
       return Variable(data_impl_copy);
     }
@@ -569,6 +540,10 @@ inline Variable make_variable(
   return Variable();
 }
 
+/// Creates a `Variable` from the given `Tensor`, copying its underlying `TensorImpl`.
+/// `gradient_edge` should be a (function, input_nr) pair specifying the function
+/// in the autograd graph, and what particular input of that function, this
+/// variable is connected to.
 inline Variable make_variable(
     at::Tensor data,
     Edge gradient_edge,
@@ -580,7 +555,7 @@ inline Variable make_variable(
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    data_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(
+    data_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(
       data_impl_copy.get(), false, std::move(gradient_edge)));
     return Variable(data_impl_copy);
   }
@@ -620,7 +595,7 @@ inline at::Tensor Variable::variable_data() const noexcept {
   auto self_impl_copy = get()->shallow_copy_and_detach(
     /*version_counter=*/0,
     /*allow_tensor_metadata_change=*/false);
-  self_impl_copy->set_autograd_meta(c10::guts::make_unique<Variable::AutogradMeta>(self_impl_copy.get(), false));
+  self_impl_copy->set_autograd_meta(c10::guts::make_unique<AutogradMeta>(self_impl_copy.get(), false));
   return at::Tensor(self_impl_copy);
 }
 
@@ -737,7 +712,7 @@ inline bool Variable::is_view() const noexcept {
 
 inline const Variable& Variable::base() const {
   if (is_view()) {
-    auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
+    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta());
     return diff_view_meta->base_;
   } else {
     throw std::runtime_error("Can't get base of non-view Variable");
@@ -763,8 +738,8 @@ inline PyObject* Variable::pyobj() const noexcept {
   return get()->pyobj();
 }
 
-inline Variable::AutogradMeta* Variable::get_autograd_meta() const noexcept {
-  return static_cast<Variable::AutogradMeta*>(get()->autograd_meta());
+inline AutogradMeta* Variable::get_autograd_meta() const noexcept {
+  return static_cast<AutogradMeta*>(get()->autograd_meta());
 }
 
 // Private Methods

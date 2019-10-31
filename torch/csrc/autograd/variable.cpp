@@ -21,7 +21,7 @@
 
 namespace torch {
 namespace autograd {
-Variable::AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge gradient_edge) {
+AutogradMeta::AutogradMeta(at::TensorImpl* self_impl, bool requires_grad, Edge gradient_edge) {
   grad_fn_ = std::move(gradient_edge.function);
   requires_grad_ = false;
   is_view_ = false;
@@ -83,7 +83,7 @@ void Variable::set_data(const at::Tensor &new_data) const {
     "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
 
   // Resets gradient accumulator if metadata is out of date
-  Variable::AutogradMeta* autograd_meta = get_autograd_meta();
+  AutogradMeta* autograd_meta = get_autograd_meta();
   std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
   auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
   if (prior_accumulator) {
@@ -106,8 +106,8 @@ void Variable::set_data(const at::Tensor &new_data) const {
   get()->shallow_copy_from(new_data.getIntrusivePtr());
 }
 
-Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
-    : Variable::AutogradMeta(self_impl, false, std::move(gradient_edge)) {
+DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, Edge gradient_edge)
+    : AutogradMeta(self_impl, false, std::move(gradient_edge)) {
   base_ = std::move(base);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
@@ -118,13 +118,13 @@ Variable::DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_im
   attr_version = self_impl->version_counter().current_version();
 }
 
-Variable::DifferentiableViewMeta::~DifferentiableViewMeta() {
+DifferentiableViewMeta::~DifferentiableViewMeta() {
   base_.reset();
 }
 
 const std::shared_ptr<Node>& Variable::grad_fn() const {
   if (is_view()) {
-    auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
+    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta());
     std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
     if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
@@ -154,7 +154,7 @@ const std::shared_ptr<Node>& Variable::grad_fn() const {
 void Variable::rebase_history(Edge gradient_edge) {
   AT_ASSERT(gradient_edge.function != nullptr);
   if (is_view()) {
-    auto diff_view_meta = static_cast<Variable::DifferentiableViewMeta*>(get_autograd_meta());
+    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta());
     AT_ASSERT(gradient_edge.input_nr == 0);
     AT_ASSERT(gradient_edge.function);
     TORCH_CHECK(
