@@ -774,16 +774,14 @@ class _TestTorchMixin(object):
                 for dt2 in torch.testing.get_all_math_dtypes(device):
                     x1 = rand_tensor((5, 5), dt1, device)
                     x2 = rand_tensor((5, 5), dt2, device)
-                    if (dt1 != dt2):
-                        self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(x1 < 1, x1, x2))
-                    else:
-                        res = torch.where(x1 < 1, x1, x2)
-                        for i in range(5):
-                            for j in range(5):
-                                if x1[i][j] < 1:
-                                    self.assertTrue(res[i][j] == x1[i][j])
-                                else:
-                                    self.assertTrue(res[i][j] == x2[i][j])
+                    res = torch.where(x1 < 1, x1, x2)
+                    for i in range(5):
+                        for j in range(5):
+                            if x1[i][j] < 1:
+                                self.assertTrue(res[i][j] == x1[i][j])
+                            else:
+                                self.assertTrue(res[i][j] == x2[i][j])
+
 
     def test_all_any_with_dim(self):
         def test(x):
