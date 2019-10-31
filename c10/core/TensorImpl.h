@@ -150,6 +150,9 @@ namespace impl {
 struct C10_API AutogradMetaFactory {
   virtual ~AutogradMetaFactory() = default;
   virtual std::unique_ptr<AutogradMetaInterface> make() const = 0;
+  // This method is the dumbest method.  But I don't have access
+  // to Tensor (not TensorImpl) which is undefined in this header.
+  virtual const at::Tensor& undefined_tensor() const = 0;
 };
 
 C10_API void SetAutogradMetaFactory(AutogradMetaFactory* factory);
@@ -843,12 +846,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * Set the pointer to autograd metadata.
+   * Set the pointer to autograd metadata.  Without a call to this function, you
+   * have a non-Variable tensor.  With a call to this function, you are
+   * transforming this into a variable: a nullptr autograd metadata means
+   * that you are setting this variable to not require grad and not track
+   * gradients.
+   *
+   * NB: In the period of time when we still have Variable and
+   * non-Variable tensors, explicitly setting null is still useful as it
+   * turns a tensor into a variable.
    */
   void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta);
 
   /**
-   * Return the pointer to autograd metadata.
+   * Return the pointer to autograd metadata.  May return nullptr if the
+   * tensor does not track gradients.
    */
   c10::AutogradMetaInterface* autograd_meta() const;
 
@@ -1553,8 +1565,28 @@ private:
   // (such as grad_ / grad_fn_ / grad_accumulator_).
   // This pointer always has unique ownership (meaning only one TensorImpl can own it
   // at a time).
-  // This is private because we must maintain dispatcher invariants on it
-  // in type_set_, namely, that autograd_meta_ != nullptr iff type_set_.has(VariableTensorId).
+  //
+  // autograd_meta_ can be nullptr, as an optimization.  When this occurs, it is
+  // equivalent to having an autograd_meta_ pointing to a default constructed
+  // AutogradMeta; intuitively, tensors which don't require grad will have this
+  // field set to null.  If !type_set_.has(VariableTensorId), then
+  // autograd_meta == nullptr (but not vice versa, due to the nullptr
+  // optimization)
+  //
+  // This means accessors on autograd_meta_ have to be careful to test if they
+  // got a nullptr, and handle default behavior appropriately in that case.
+  //
+  // Note that we don't enforce the invariant that if the AutogradMeta is
+  // default constructed, it is nullptr (to do this, we'd have to continuously
+  // check if an AutogradMeta became, by mutation, equal to the default
+  // constructed form.  (This might be useful, but it seems rare enough that
+  // a requires_grad=True variable will turn back into the requires_grad=False
+  // version.)  So there are three representable states:
+  //
+  //    1. autograd_meta_ == nullptr
+  //    2. autograd_meta_ is default constructed (semantically, same as (1))
+  //    3. autograd_meta_ has nontrivial information content
+  //
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
 protected:
