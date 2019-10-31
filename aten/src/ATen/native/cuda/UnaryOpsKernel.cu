@@ -60,7 +60,7 @@ void expm1_kernel_cuda(TensorIterator& iter) {
 void frac_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "frac_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::trunc(a);
+      return a - ::trunc(a);
     });
   });
 }
