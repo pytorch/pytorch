@@ -68,9 +68,9 @@ def infer_raw_concrete_type(nn_module):
     """
     concrete_type = torch._C.ConcreteModuleType()
     concrete_type.add_pyclass(type(nn_module))
-    if isinstance(nn_module, (torch.nn.ModuleDict, torch.jit._ConstModuleDict)):
+    if isinstance(nn_module, (torch.nn.ModuleDict)):
         concrete_type.set_module_dict()
-    if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.jit._ConstModuleList)):
+    if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential)):
         concrete_type.set_module_list()
 
     added_names = set()
@@ -237,25 +237,6 @@ class ConcreteTypeStore(object):
                 hasattr(nn_module, "_concrete_type"):
             return nn_module._concrete_type
 
-        if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):
-            # TODO: This is here because the compilation path for constant iterable
-            # modules is different from everything else. Instead of calling
-            # create_script_module, we directly create a
-            # _ConstSequential/ModuleList/ModuleDict instance.
-            #
-            # The path used to create ConcreteTypes involves going in and analyzing
-            # all the nn.Modules ahead of time.
-            #
-            # That leads to skew where the result of generating a ConcreteType
-            # (which involves looking at torch.nn.Sequential) is different from the
-            # actual compilation path (which directly builds _ConstSequential).
-            #
-            # The right solution is to make these modules not special in the
-            # compilation path. But for now, just mimic what compilation does when
-            # generating a ConcreteType
-            scripted = create_constant_iterable_module(nn_module)
-            return scripted._concrete_type
-
         raw_concrete_type = infer_raw_concrete_type(nn_module)
 
         nn_module_type = type(nn_module)
@@ -403,7 +384,30 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         # nn.Module.forward)
         script_module.__dict__[name] = script_method
 
+
+    # In order to continue to expose module container functions to python,
+    # we add on the methods that we had previously exposed in the previous
+    # version of this api.
+    if isinstance(nn_module, (ModuleList, Sequential)):
+        add_python_modulelist_methods(script_module, nn_module)
+
+    if isinstance(nn_module, ModuleDict):
+        add_python_moduledict_methods(script_module, nn_module)
+
     return script_module
+
+def add_python_attributes_to_scripted_model(script_model, orig, attr_list):
+    for method in attr_list:
+        if not hasattr(orig, method):
+            setattr(script_module, method, getattr(orig, method))
+
+def add_python_modulelist_methods(script_module, orig):
+    exposed_attrs = ['__getitem__', '__len__', '__iter__', '__dir__']
+    add_python_attributes_to_scripted_model(script_module, orig, exposed_attrs)
+
+def add_python_moduledict_methods(script_module, orig):
+    exposed_attrs = ['__contains__', '__iter__', '__dir__', 'keys', 'items', 'values']
+    add_python_attributes_to_scripted_model(script_module, orig, exposed_attrs)
 
 def get_overload_annotations(mod):
     # original function => [(mangled overload name, overload function)]
@@ -520,10 +524,6 @@ def recursive_script(nn_module):
 
     check_module_initialized(nn_module)
 
-    if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)):
-        # Create constant versions for the iterable modules
-        return create_constant_iterable_module(nn_module)
-
     return create_script_module(nn_module, infer_methods_to_compile(nn_module))
 
 def try_compile_fn(fn, loc):
@@ -546,26 +546,6 @@ def try_compile_fn(fn, loc):
     # object
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
     return torch.jit.script(fn, _rcb=rcb)
-
-def create_constant_iterable_module(module):
-    modules = collections.OrderedDict()
-
-    for key, submodule in module._modules.items():
-        if isinstance(submodule, (ModuleList, Sequential, ModuleDict)):
-            # Make each item in the module a constant
-            modules[key] = create_constant_iterable_module(submodule)
-        else:
-            modules[key] = recursive_script(submodule)
-
-    if isinstance(module, Sequential):
-        return torch.jit._ConstSequential(Sequential(modules))
-    elif isinstance(module, ModuleList):
-        return torch.jit._ConstModuleList(modules)
-    elif isinstance(module, ModuleDict):
-        return torch.jit._ConstModuleDict(modules)
-    else:
-        raise RuntimeError("Only nn.ModuleList, nn.Sequential, and nn.ModuleDict can be made "
-                           "into constant modules, found {}".format(module))
 
 def wrap_cpp_module(cpp_module):
     """
