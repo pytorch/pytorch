@@ -269,15 +269,6 @@ TEST(TensorTest, TorchTensorCtorSingleDim) {
   ASSERT_TRUE(exactly_equal(tensor[1], 2));
   ASSERT_TRUE(exactly_equal(tensor[2], 3));
 
-  tensor = torch::tensor(std::initializer_list<int>({1, 2, 3}));
-  ASSERT_TRUE(tensor.is_variable());
-  ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
-  ASSERT_EQ(tensor.dtype(), at::kInt);
-  ASSERT_TRUE(exactly_equal(tensor[0], 1));
-  ASSERT_TRUE(exactly_equal(tensor[1], 2));
-  ASSERT_TRUE(exactly_equal(tensor[2], 3));
-
   tensor = torch::tensor(std::vector<int>({1, 2, 3}));
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
@@ -304,15 +295,6 @@ TEST(TensorTest, TorchTensorCtorSingleDim) {
   ASSERT_TRUE(almost_equal(tensor[1], 2.25));
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
-  tensor = torch::tensor(std::initializer_list<double>({1.5, 2.25, 3.125}));
-  ASSERT_TRUE(tensor.is_variable());
-  ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
-  ASSERT_EQ(tensor.dtype(), at::kDouble);
-  ASSERT_TRUE(almost_equal(tensor[0], 1.5));
-  ASSERT_TRUE(almost_equal(tensor[1], 2.25));
-  ASSERT_TRUE(almost_equal(tensor[2], 3.125));
-
   tensor = torch::tensor(std::vector<double>({1.5, 2.25, 3.125}));
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
@@ -332,15 +314,6 @@ TEST(TensorTest, TorchTensorCtorSingleDim) {
   ASSERT_TRUE(exactly_equal(tensor[2], true));
 
   tensor = torch::tensor(at::ArrayRef<bool>({true, false, true}));
-  ASSERT_TRUE(tensor.is_variable());
-  ASSERT_EQ(tensor.numel(), 3);
-  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
-  ASSERT_EQ(tensor.dtype(), at::kBool);
-  ASSERT_TRUE(exactly_equal(tensor[0], true));
-  ASSERT_TRUE(exactly_equal(tensor[1], false));
-  ASSERT_TRUE(exactly_equal(tensor[2], true));
-
-  tensor = torch::tensor(std::initializer_list<bool>({true, false, true}));
   ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
