@@ -342,3 +342,11 @@ from torch._classes import classes
 
 # Import the quasi random sampler
 import torch.quasirandom
+
+# Register at fork handler to initialize OpenMP in child processes (see gh-28389)
+def _torch_at_fork(self):
+    torch.get_num_threads()
+
+import multiprocessing as _mp
+_mp.util.register_after_fork(_torch_at_fork, _torch_at_fork)
+del _mp
