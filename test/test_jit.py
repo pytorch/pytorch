@@ -14927,6 +14927,30 @@ a")
         m = Mod()
         traced = torch.jit.trace(m, torch.rand(3, 4))
 
+    def test_trace_invert_module_hierarchy(self):
+        class MySubmod(torch.nn.Module):
+            def __init__(self):
+                super(MySubmod, self).__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x), torch.neg(x)
+
+        class MyFunctionalMod(torch.nn.Module):
+            def forward(self, x, submod):
+                return submod(x)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sm = MySubmod()
+                self.fm = MyFunctionalMod()
+
+            def forward(self, x):
+                return self.fm(x, self.sm)
+
+        torch.jit.trace(Mod(), (torch.rand(3, 4),))
+
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_scriptmodule_transformer_cuda(self):
 
