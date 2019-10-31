@@ -366,7 +366,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   }
 
   AutogradMeta(
-    at::TensorImpl* self_impl,
+    at::TensorImpl* self_impl = nullptr,
     bool requires_grad = false,
     Edge gradient_edge = Edge());
 };
