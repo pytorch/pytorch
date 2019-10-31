@@ -18,7 +18,7 @@ fi
 
 # Use ccache if available (this path is where Homebrew installs ccache symlinks)
 if [ "$(uname)" == 'Darwin' ]; then
-  if [ -n "${CCACHE_WRAPPER_PATH}" ]; then
+  if [ -n "${CCACHE_WRAPPER_PATH:-}"]; then
     CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
   fi
   if [ -d "$CCACHE_WRAPPER_PATH" ]; then
