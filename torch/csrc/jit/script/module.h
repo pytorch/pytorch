@@ -45,10 +45,10 @@ using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
 struct Module;
 
 template <typename T>
-struct slot_list_impl;
+struct TORCH_API slot_list_impl;
 
 template <typename T>
-struct Named {
+struct TORCH_API Named {
   std::string name;
   T value;
 };

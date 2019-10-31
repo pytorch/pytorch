@@ -130,7 +130,7 @@ def doAutodiffCheck(testname):
     ]
 
     if testname in test_exceptions:
-        return False    
+        return False
     return True
 
 func_call = torch._C.ScriptFunction.__call__
@@ -562,7 +562,7 @@ class TestJit(JitTestCase):
 
     def test_peephole_optimize_shape_ops(self):
         def test_input(func, input, result):
-            # if result == 2 we will trigger a bailout and 
+            # if result == 2 we will trigger a bailout and
             # the unprofiled graph should return the correct result
             self.assertEqual(func(input, profile_and_replay=True), result)
             gre = func.graph_for(input)
@@ -3957,36 +3957,39 @@ def foo(x):
                     v[i] = (n, replace(v2))
                 else:
                     v[i] = replace(v[i])
+            # module type creation is not deterministic, so we have to sort
+            # the result
+            v.sort()
         expected = {'buffers': [],
                     'buffers_r': ['B'],
-                    'children': ['foo', 'another'],
-                    'modules': ['a', 'foo', 'bar', 'another'],
-                    'named_attributes': [('training', True),
-                                         ('p', 'P'),
-                                         ('name', 'a'),
+                    'children': ['another', 'foo'],
+                    'modules': ['a', 'another', 'bar', 'foo'],
+                    'named_attributes': [('another', 'another'),
                                          ('foo', 'foo'),
-                                         ('another', 'another')],
-                    'named_attributes_r': [('training', True),
-                                           ('p', 'P'),
-                                           ('name', 'a'),
+                                         ('name', 'a'),
+                                         ('p', 'P'),
+                                         ('training', True)],
+                    'named_attributes_r': [('another', 'another'),
+                                           ('another.name', 'another'),
+                                           ('another.training', True),
                                            ('foo', 'foo'),
-                                           ('foo.training', True),
                                            ('foo.b', 'B'),
-                                           ('foo.name', 'foo'),
                                            ('foo.bar', 'bar'),
-                                           ('foo.bar.training', True),
                                            ('foo.bar.an_int', 4),
                                            ('foo.bar.name', 'bar'),
-                                           ('another', 'another'),
-                                           ('another.training', True),
-                                           ('another.name', 'another')],
+                                           ('foo.bar.training', True),
+                                           ('foo.name', 'foo'),
+                                           ('foo.training', True),
+                                           ('name', 'a'),
+                                           ('p', 'P'),
+                                           ('training', True)],
                     'named_buffers': [],
                     'named_buffers_r': [('foo.b', 'B')],
-                    'named_children': [('foo', 'foo'), ('another', 'another')],
+                    'named_children': [('another', 'another'), ('foo', 'foo')],
                     'named_modules': [('', 'a'),
+                                      ('another', 'another'),
                                       ('foo', 'foo'),
-                                      ('foo.bar', 'bar'),
-                                      ('another', 'another')],
+                                      ('foo.bar', 'bar')],
                     'named_parameters': [('p', 'P')],
                     'named_parameters_r': [('p', 'P')],
                     'parameters': ['P'],
@@ -16507,7 +16510,7 @@ def create_traced_fn(self, fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         # `check_trace` is set to False because check_trace is run with @no_grad
-        # Also, `check_against_reference` already does all the checks 
+        # Also, `check_against_reference` already does all the checks
         # against python function
         traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
         self.assertExportImport(traced.graph, inputs_tensors)
