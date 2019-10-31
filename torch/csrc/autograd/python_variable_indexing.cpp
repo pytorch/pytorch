@@ -139,6 +139,7 @@ static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
+  at::AutoNonVariableTypeMode guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), options);
   }

@@ -96,19 +96,12 @@ struct TORCH_API Variable : public at::Tensor {
   // Tensor Conversions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  // "Downcasts" a `Tensor` into a `Variable`. Only call this on tensors you
-  // know are Variables.
+  // "Downcasts" a `Tensor` into a `Variable`.
   /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {
-    TORCH_CHECK(
-        is_variable() || !defined(),
-        "Tensor that was converted to Variable was not actually a Variable");
   }
 
   /*implicit*/ Variable(at::Tensor&& rhs)
       : at::Tensor(std::move(rhs)) {
-    TORCH_CHECK(
-        is_variable() || !defined(),
-        "Tensor that was converted to Variable was not actually a Variable");
   }
 
   // NOTE: Assignment operators to Tensor come for free from the constructors.
