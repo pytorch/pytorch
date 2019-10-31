@@ -60,7 +60,7 @@ void ConvImpl<D, Derived>::reset() {
     this->register_parameter("bias", Tensor(), /*requires_grad=*/false);
   }
 
-  init::kaiming_uniform_(weight, /*a=*/std::sqrt(5));
+  init::kaiming_uniform_(weight, /*a=*/std::sqrt(5));  // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
   if (bias.defined()) {
     int64_t fan_in, fan_out;
