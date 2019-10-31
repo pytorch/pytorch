@@ -3560,7 +3560,9 @@ class ModuleTest(TestBase):
         nc_grad_output = self.noncontiguize(grad_output)
         for contig_i, contig_g in product((True, False), repeat=2):
             i = input if contig_i else nc_input
-            go = grad_output if contig_g else nc_grad_output
+            # Some ops, e.g., nn.Flatten, return gradient that shares
+            # storage with the grad_output. Hence we copy here.
+            go = deepcopy(grad_output if contig_g else nc_grad_output)
             test_case._zero_grad_parameters(module)
             test_case._zero_grad_input(i)
             with freeze_rng_state():
