@@ -18,8 +18,8 @@ EmbeddingImpl::EmbeddingImpl(const EmbeddingOptions& options_) : options(options
 }
 
 void EmbeddingImpl::reset() {
-  TORCH_CHECK(*options.num_embeddings(), "num_embeddings needs to be defined");
-  TORCH_CHECK(*options.embedding_dim(), "embedding_dim needs to be defined");
+  TORCH_CHECK(options.num_embeddings(), "num_embeddings needs to be specified in options");
+  TORCH_CHECK(options.embedding_dim(), "embedding_dim needs to be specified in options");
   if (options.padding_idx() != c10::nullopt) {
     if (*options.padding_idx() > 0) {
       TORCH_CHECK(*options.padding_idx() < *options.num_embeddings(), "Padding_idx must be within num_embeddings");
@@ -74,8 +74,8 @@ EmbeddingBagImpl::EmbeddingBagImpl(const EmbeddingBagOptions& options_) : option
 }
 
 void EmbeddingBagImpl::reset() {
-  TORCH_CHECK(options.num_embeddings(), "num_embeddings needs to be defined");
-  TORCH_CHECK(options.embedding_dim(), "embedding_dim needs to be defined");
+  TORCH_CHECK(options.num_embeddings(), "num_embeddings needs to be specified in options");
+  TORCH_CHECK(options.embedding_dim(), "embedding_dim needs to be specified in options");
   if (!options._weight().defined()) {
     weight = register_parameter(
         "weight", torch::empty({*options.num_embeddings(), *options.embedding_dim()}));
