@@ -112,10 +112,25 @@ static inline void upsample_3d_shape_check(
 }
 
 template <typename scalar_t>
+static inline scalar_t compute_scales_value(
+    const double scale,
+    int64_t input_size,
+    int64_t output_size) {
+      if (output_size > 1) {
+          return (scale > 0.)
+              ? static_cast<scalar_t>(1. / static_cast<scalar_t>(scale))
+              : (static_cast<scalar_t>(input_size) / static_cast<scalar_t>(output_size));
+      } else {
+          return scalar_t(0);
+      }
+}
+
+template <typename scalar_t>
 static inline scalar_t area_pixel_compute_scale(
     int64_t input_size,
     int64_t output_size,
-    bool align_corners) {
+    bool align_corners,
+    const double scale=-1.) {
   /* We view each pixel as an area, idx + 0.5 as its center index.
    * Here is an example formula in 1D case.
    * if align_corners: center of two corner pixel areas are preserved,
@@ -130,7 +145,7 @@ static inline scalar_t area_pixel_compute_scale(
   if (output_size > 1) {
     return align_corners
         ? static_cast<scalar_t>(input_size - 1) / (output_size - 1)
-        : static_cast<scalar_t>(input_size) / output_size;
+        : compute_scales_value<scalar_t>(scale, input_size, output_size);
   } else {
     return scalar_t(0);
   }

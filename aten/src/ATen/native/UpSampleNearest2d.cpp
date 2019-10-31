@@ -15,9 +15,11 @@ static void upsample_nearest2d_out_frame(
     int64_t output_height,
     int64_t output_width,
     int64_t nbatch,
-    int64_t channels) {
-  const float height_scale = (float)input_height / (float)output_height;
-  const float width_scale = (float)input_width / (float)output_width;
+    int64_t channels,
+    double scales_1,
+    double scales_2) {
+  float height_scale = compute_scales_value<float>(scales_1, input_height, output_height);
+  float width_scale = compute_scales_value<float>(scales_2, input_width, output_width);
 
   channels = channels * nbatch;
 
@@ -70,9 +72,12 @@ static void upsample_nearest2d_backward_out_frame(
     int64_t output_height,
     int64_t output_width,
     int64_t nbatch,
-    int64_t channels) {
-  const float height_scale = (float)input_height / (float)output_height;
-  const float width_scale = (float)input_width / (float)output_width;
+    int64_t channels,
+    double scales_1,
+    double scales_2) {
+
+  float height_scale = compute_scales_value<float>(scales_1, input_height, output_height);
+  float width_scale = compute_scales_value<float>(scales_2, input_width, output_width);
 
   channels = channels * nbatch;
 
@@ -163,7 +168,9 @@ static void upsample_nearest2d_out_cpu_template(
         output_height,
         output_width,
         nbatch,
-        channels);
+        channels,
+        scales_1,
+        scales_2);
   });
 }
 
@@ -220,7 +227,9 @@ static void upsample_nearest2d_backward_out_cpu_template(
             output_height,
             output_width,
             nbatch,
-            channels);
+            channels,
+            scales_1,
+            scales_2);
       });
 }
 } // namespace

@@ -13,8 +13,9 @@ static void upsample_nearest1d_out_frame(
     int64_t input_width,
     int64_t output_width,
     int64_t nbatch,
-    int64_t channels) {
-  const float scale = (float)input_width / (float)output_width;
+    int64_t channels,
+    double scales_1) {
+  float scale = compute_scales_value<float>(scales_1, input_width, output_width);
   channels = channels * nbatch;
 
   // special case: just copy
@@ -55,8 +56,9 @@ static void upsample_nearest1d_backward_out_frame(
     int64_t input_width,
     int64_t output_width,
     int64_t nbatch,
-    int64_t channels) {
-  const float scale = (float)input_width / (float)output_width;
+    int64_t channels,
+    double scales_1) {
+  float scale = compute_scales_value<float>(scales_1, input_width, output_width);
   channels = channels * nbatch;
 
   // special case: same-size matching grids
@@ -131,7 +133,8 @@ static void upsample_nearest1d_out_cpu_template(
         input_width,
         output_width,
         nbatch,
-        channels);
+        channels,
+        scales_1);
   });
 }
 
@@ -181,7 +184,8 @@ static void upsample_nearest1d_backward_out_cpu_template(
             input_width,
             output_width,
             nbatch,
-            channels);
+            channels,
+            scales_1);
       });
 }
 } // namespace

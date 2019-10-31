@@ -16,7 +16,9 @@ static void upsample_bicubic2d_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2) {
   // Special case: input/output same size, just copy
   if (input_height == output_height && input_width == output_width) {
     for (int64_t output_y = 0; output_y < output_height; output_y++) {
@@ -36,9 +38,9 @@ static void upsample_bicubic2d_out_frame(
 
   // Bicubic interpolation
   const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
-      input_height, output_height, align_corners);
+      input_height, output_height, align_corners, scales_1);
   const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners);
+      input_width, output_width, align_corners, scales_2);
 
   for (int64_t output_y = 0; output_y < output_height; output_y++) {
     for (int64_t output_x = 0; output_x < output_width; output_x++) {
@@ -96,7 +98,9 @@ static void upsample_bicubic2d_backward_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2) {
   channels = channels * nbatch;
 
   // Special case: input/output same size, just copy
@@ -116,9 +120,9 @@ static void upsample_bicubic2d_backward_out_frame(
   }
 
   const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
-      input_height, output_height, align_corners);
+      input_height, output_height, align_corners, scales_1);
   const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners);
+      input_width, output_width, align_corners, scales_2);
 
   for (int64_t output_y = 0; output_y < output_height; output_y++) {
     for (int64_t output_x = 0; output_x < output_width; output_x++) {
@@ -209,7 +213,9 @@ static void upsample_bicubic2d_out_cpu_template(
         output_width,
         nbatch,
         channels,
-        align_corners);
+        align_corners,
+        scales_1,
+        scales_2);
   });
 }
 
@@ -268,7 +274,9 @@ static void upsample_bicubic2d_backward_out_cpu_template(
             output_width,
             nbatch,
             channels,
-            align_corners);
+            align_corners,
+            scales_1,
+            scales_2);
       });
 }
 } // namespace

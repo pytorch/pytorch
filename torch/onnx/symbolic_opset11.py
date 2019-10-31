@@ -126,7 +126,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners):
     if not sym_help._is_none(size) :
         input_size = g.op("Shape", input)
         input_size_beg = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
-        is_scalar = ((sym_help._maybe_get_const(size, 't').dim() == 0))
+        is_scalar = ((not sym_help._is_packed_list(size)) and (sym_help._maybe_get_const(size, 't').dim() == 0))
         if is_scalar:
             size = unsqueeze(g, size, 0)
             size = [size for i in range(input.type().dim() - 2)]

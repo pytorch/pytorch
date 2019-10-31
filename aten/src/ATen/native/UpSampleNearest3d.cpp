@@ -17,10 +17,13 @@ static void upsample_nearest3d_out_frame(
     int64_t output_height,
     int64_t output_width,
     int64_t nbatch,
-    int64_t channels) {
-  const float depth_scale = (float)input_depth / (float)output_depth;
-  const float height_scale = (float)input_height / (float)output_height;
-  const float width_scale = (float)input_width / (float)output_width;
+    int64_t channels,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
+  float depth_scale = compute_scales_value<float>(scales_1, input_depth, output_depth);
+  float height_scale = compute_scales_value<float>(scales_2, input_height, output_height);
+  float width_scale = compute_scales_value<float>(scales_3, input_width, output_width);
 
   channels = channels * nbatch;
 
@@ -89,10 +92,13 @@ static void upsample_nearest3d_backward_out_frame(
     int64_t output_height,
     int64_t output_width,
     int64_t nbatch,
-    int64_t channels) {
-  const float depth_scale = (float)input_depth / (float)output_depth;
-  const float height_scale = (float)input_height / (float)output_height;
-  const float width_scale = (float)input_width / (float)output_width;
+    int64_t channels,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
+  float depth_scale = compute_scales_value<float>(scales_1, input_depth, output_depth);
+  float height_scale = compute_scales_value<float>(scales_2, input_height, output_height);
+  float width_scale = compute_scales_value<float>(scales_3, input_width, output_width);
 
   channels = channels * nbatch;
 
@@ -207,7 +213,10 @@ static void upsample_nearest3d_out_cpu_template(
         output_height,
         output_width,
         nbatch,
-        channels);
+        channels,
+        scales_1,
+        scales_2,
+        scales_3);
   });
 }
 
@@ -272,7 +281,10 @@ static void upsample_nearest3d_backward_out_cpu_template(
             output_height,
             output_width,
             nbatch,
-            channels);
+            channels,
+            scales_1,
+            scales_2,
+            scales_3);
       });
 }
 } // namespace

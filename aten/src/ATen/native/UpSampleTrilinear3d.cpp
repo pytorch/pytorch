@@ -21,7 +21,10 @@ static void upsample_trilinear3d_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   channels = channels * nbatch;
 
   // special case: just copy
@@ -52,11 +55,11 @@ static void upsample_trilinear3d_out_frame(
     return;
   }
   const scalar_t rdepth = area_pixel_compute_scale<scalar_t>(
-      input_depth, output_depth, align_corners);
+      input_depth, output_depth, align_corners, scales_1);
   const scalar_t rheight = area_pixel_compute_scale<scalar_t>(
-      input_height, output_height, align_corners);
+      input_height, output_height, align_corners, scales_2);
   const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners);
+      input_width, output_width, align_corners, scales_3);
   for (int64_t t2 = 0; t2 < output_depth; ++t2) {
     const scalar_t t1r = area_pixel_compute_source_index<scalar_t>(
         rdepth, t2, align_corners, /*cubic=*/false);
@@ -128,7 +131,10 @@ static void upsample_trilinear3d_backward_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
   channels = channels * nbatch;
 
   // special case: same-size matching grids
@@ -159,13 +165,13 @@ static void upsample_trilinear3d_backward_out_frame(
     return;
   }
   const scalar_t rdepth = area_pixel_compute_scale<scalar_t>(
-      input_depth, output_depth, align_corners);
+      input_depth, output_depth, align_corners, scales_1);
 
   const scalar_t rheight = area_pixel_compute_scale<scalar_t>(
-      input_height, output_height, align_corners);
+      input_height, output_height, align_corners, scales_2);
 
   const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners);
+      input_width, output_width, align_corners, scales_3);
 
   for (int64_t t2 = 0; t2 < output_depth; ++t2) {
     const scalar_t t1r = area_pixel_compute_source_index<scalar_t>(
@@ -277,7 +283,10 @@ static void upsample_trilinear3d_out_cpu_template(
             output_width,
             nbatch,
             channels,
-            align_corners);
+            align_corners,
+            scales_1,
+            scales_2,
+            scales_3);
       });
 }
 
@@ -344,7 +353,10 @@ static void upsample_trilinear3d_backward_out_cpu_template(
             output_width,
             nbatch,
             channels,
-            align_corners);
+            align_corners,
+            scales_1,
+            scales_2,
+            scales_3);
       });
 }
 } // namespace

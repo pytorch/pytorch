@@ -17,7 +17,8 @@ static void upsample_linear1d_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1) {
   channels = channels * nbatch;
 
   // special case: just copy
@@ -36,7 +37,7 @@ static void upsample_linear1d_out_frame(
     return;
   }
   const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners);
+      input_width, output_width, align_corners, scales_1);
 
   for (int64_t w2 = 0; w2 < output_width; ++w2) {
     const scalar_t w1r = area_pixel_compute_source_index<scalar_t>(
@@ -66,7 +67,8 @@ static void upsample_linear1d_backward_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    double scales_1) {
   channels = nbatch * channels;
 
   // special case: same-size matching grids
@@ -85,7 +87,7 @@ static void upsample_linear1d_backward_out_frame(
     return;
   }
   const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners);
+      input_width, output_width, align_corners, scales_1);
 
   for (int64_t w2 = 0; w2 < output_width; ++w2) {
     const scalar_t w1r = area_pixel_compute_source_index<scalar_t>(
@@ -150,7 +152,8 @@ static void upsample_linear1d_out_cpu_template(
         output_width,
         nbatch,
         channels,
-        align_corners);
+        align_corners,
+        scales_1);
   });
 }
 
@@ -202,7 +205,8 @@ static void upsample_linear1d_backward_out_cpu_template(
             output_width,
             nbatch,
             channels,
-            align_corners);
+            align_corners,
+            scales_1);
       });
 }
 } // namespace
