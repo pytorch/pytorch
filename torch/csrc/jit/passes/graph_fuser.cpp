@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -11,7 +12,6 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/script/compiler.h>
-#include <torch/csrc/jit/jit_log.h>
 
 #include <queue>
 #include <unordered_map>
@@ -202,7 +202,13 @@ struct GraphFuser {
     }
 
     bool is_fusable_map = isFusableMap(node);
-    GRAPH_DEBUG("isFusableDefault for ", getHeader(node), " fusableDevice = ", fusableDevice, " is_fusable_map = ", is_fusable_map);
+    GRAPH_DEBUG(
+        "isFusableDefault for ",
+        getHeader(node),
+        " fusableDevice = ",
+        fusableDevice,
+        " is_fusable_map = ",
+        is_fusable_map);
     return fusableDevice && is_fusable_map;
   }
 
@@ -226,22 +232,25 @@ struct GraphFuser {
     auto tensors_node = node->namedInput(attr::tensors)->node();
     if ((tensors_node->inputs().size() + node->outputs().size()) >
         subgraph_arg_limit_) {
-
       GRAPH_DEBUG("too many arguments for ", getHeader(node));
       return false;
     }
     if (tensors_node->kind() != prim::ListConstruct)
-      GRAPH_DEBUG("inputs tensors don't come from prim::ListConstruct for ", getHeader(node));
+      GRAPH_DEBUG(
+          "inputs tensors don't come from prim::ListConstruct for ",
+          getHeader(node));
       return false;
     // NB: Note that technically other uses of the list aren't a big problem for
     // us. It would be enough to place the prim::FusedConcat before the
     // prim::ListConstruct, and allUsersAreThisConsumerOrOccurAfterIt would
     // still be satisfied. However, I don't expect this to be necessary any time
     // soon, and so we're simply assuming that we don't have to deal with it.
-    if (tensors_node->output()->uses().size() > 1) {
-      GRAPH_DEBUG("there's more than one user of the input tensors of ", getHeader(node));
-      return false;
-    }
+      if (tensors_node->output()->uses().size() > 1) {
+        GRAPH_DEBUG(
+            "there's more than one user of the input tensors of ",
+            getHeader(node));
+        return false;
+      }
     return true;
   }
 
@@ -266,8 +275,11 @@ struct GraphFuser {
   }
 
   void mergeFusionGroups(Node* consumer_group, Node* producer_group) {
-
-    GRAPH_UPDATE("Merging a producer group ", getHeader(producer_group), " into ",getHeader(consumer_group));
+    GRAPH_UPDATE(
+        "Merging a producer group ",
+        getHeader(producer_group),
+        " into ",
+        getHeader(consumer_group));
     // Now we have two fusion groups!
     // Revert the fusion - place all inner nodes of producer back in the outer
     // graph.
@@ -402,7 +414,7 @@ struct GraphFuser {
       }
     }
 
-    GRAPH_UPDATE("Merging ", getHeader(n), " into ",getHeader(group));
+    GRAPH_UPDATE("Merging ", getHeader(n), " into ", getHeader(group));
     return subgraph.insertNode(in_graph);
   }
 
@@ -418,7 +430,7 @@ struct GraphFuser {
     auto sel = group->addOutput();
     sel->copyMetadata(n->output());
     n->replaceAllUsesWith(group);
-    GRAPH_UPDATE("Replacing ", getHeader(n), " with ",getHeader(group));
+    GRAPH_UPDATE("Replacing ", getHeader(n), " with ", getHeader(group));
     n->destroy();
     return group;
   }
