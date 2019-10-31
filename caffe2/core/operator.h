@@ -1583,6 +1583,7 @@ struct ExternalTensorDescriptor {
   uint64_t dataType;
   uint32_t dimensions;
   const uint64_t* shape;
+  uint8_t isOffline = 0;
   uint32_t quantizationAxis;
   uint64_t quantizationParams;
   const float* scales;
