@@ -329,36 +329,35 @@ void InsertObserversHelper::insertObservers(
             bias_values_.emplace(v);
           }
         }
-        if (v->node()->kind() == prim::CallMethod) {
-          // If we find a call to a method of a child module,
-          // we'll recursively insert observers for the forward function to
-          // the child module.
-          auto module_instance = v->node()->inputs()[0];
-          auto module_method_name = v->node()->s(attr::name);
-          // TODO: looks like this block is not related to v? maybe we should
-          // move this outside
-          script::Module callee_module;
-          if (module_instance->node()->kind() == prim::GetAttr) {
-            auto child_module_name = module_instance->node()->s(attr::name);
-            auto child_module = module.find_module(child_module_name);
-            TORCH_INTERNAL_ASSERT(
-                child_module,
-                "Child module " + child_module_name + " does not exist");
-            callee_module = child_module.value();
-          } else {
-            TORCH_INTERNAL_ASSERT(
-                module_instance == graph->inputs()[0],
-                "We only support call method either on %self"
-                "or child instance in insert_observers_pass right now");
-            callee_module = module;
-          }
-          auto method_graph =
-              callee_module.get_method(module_method_name).graph();
-          propagateValues(v->node(), method_graph);
-          // Recursively insert observer for the forward function of child
-          // module
-          insertObservers(callee_module, module_method_name);
+      }
+
+      if (n->kind() == prim::CallMethod) {
+        // If we find a call to a method of a child module,
+        // we'll recursively insert observers for the forward function to
+        // the child module.
+        auto module_instance = n->inputs()[0];
+        auto module_method_name = n->s(attr::name);
+        script::Module callee_module;
+        if (module_instance->node()->kind() == prim::GetAttr) {
+          auto child_module_name = module_instance->node()->s(attr::name);
+          auto child_module = module.find_module(child_module_name);
+          TORCH_INTERNAL_ASSERT(
+              child_module,
+              "Child module " + child_module_name + " does not exist");
+          callee_module = child_module.value();
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              module_instance == graph->inputs()[0],
+              "We only support call method either on %self"
+              "or child instance in insert_observers_pass right now");
+          callee_module = module;
         }
+        auto method_graph =
+            callee_module.get_method(module_method_name).graph();
+        propagateValues(n, method_graph);
+        // Recursively insert observer for the forward function of child
+        // module
+        insertObservers(callee_module, module_method_name);
       }
 
       for (Block* subblock : n->blocks()) {
@@ -626,6 +625,42 @@ void InsertQuantDeQuantImpl(
   qh.destroyNodes();
 }
 
+void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
+  std::string linear_with_quant = R"(
+graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        return (%r) )";
+
+  std::string linear_with_quant_prepack = R"(
+graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::linear_prepack(%w_quant, %b)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        return (%r) )";
+
+  // Filter to match linear CallFunction
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto linear_node = match_vmap.at(vmap.at("linear"))->node();
+    auto func =
+        linear_node->output()->type()->expect<FunctionType>()->function();
+    auto func_name = getFuncName(func->qualname());
+    if (func_name == "linear") {
+      return true;
+    }
+    return false;
+  };
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
+  rewriter.runOnGraph(graph, filter);
+}
+
 void insertPrepackUnpackForConv2d(std::shared_ptr<Graph>& graph) {
   std::string conv_with_quant = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
@@ -640,7 +675,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
         %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
   SubgraphRewriter rewriter;
@@ -918,40 +953,7 @@ graph(%self, %scale, %zero_point, %dtype):
 }
 
 void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
-  std::string linear_with_quant = R"(
-graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %w_dequant = aten::dequantize(%w_quant)
-        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        return (%r) )";
-
-  std::string linear_with_quant_prepack = R"(
-graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %packed_params = quantized::linear_prepack(%w_quant, %b)
-        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
-        %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        return (%r) )";
-
-  // Filter to match linear CallFunction
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto linear_node = match_vmap.at(vmap.at("linear"))->node();
-    auto func =
-        linear_node->output()->type()->expect<FunctionType>()->function();
-    auto func_name = getFuncName(func->qualname());
-    if (func_name == "linear") {
-      return true;
-    }
-    return false;
-  };
-
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
-  rewriter.runOnGraph(graph, filter);
-
+  insertPrepackUnpackForLinear(graph);
   insertPrepackUnpackForConv2d(graph);
 }
 
