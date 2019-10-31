@@ -14,6 +14,13 @@ namespace native {
 
 using namespace at::cuda;
 
+template <typename dst_t, typename src_t>
+void copy_kernel_impl(TensorIterator& iter) {
+  gpu_kernel(iter, []GPU_LAMBDA(src_t x) -> dst_t {
+    return static_cast<dst_t>(static_cast<native::inter_copy_type_t<dst_t>>(x));
+  });
+}
+
 // device-to-device copy, does type conversion
 static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
   int64_t numel = iter.numel();
@@ -58,11 +65,11 @@ static void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
         cudaMemcpyDeviceToDevice,
         copy_stream));
   } else {
-    // this is done intentionally done after build because copy has a "promotion"
-    // rule that always "promote" to target dtype.
-    iter.promote_common_dtype();
-    AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(0), "copy_", [&] {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t x) { return x; });
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(0), "copy_", [&] {
+      using dst_t = scalar_t;
+      AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(1), "copy_", [&] {
+        copy_kernel_impl<dst_t, scalar_t>(iter);
+      });
     });
   }
 
