@@ -468,7 +468,7 @@ void QuantizeHelper::removeObserver(
     Value* v,
     const std::string& observer_name) {
   // remove observer_module
-  observer_modules_to_remove_.push_back(observer_name);
+  module_.type()->removeAttribute(observer_name);
   // remove observer forward call
   for (const Use& u : v->uses()) {
     Node* user = u.user;

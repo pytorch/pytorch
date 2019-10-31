@@ -130,7 +130,7 @@ def doAutodiffCheck(testname):
     ]
 
     if testname in test_exceptions:
-        return False    
+        return False
     return True
 
 func_call = torch._C.ScriptFunction.__call__
@@ -562,7 +562,7 @@ class TestJit(JitTestCase):
 
     def test_peephole_optimize_shape_ops(self):
         def test_input(func, input, result):
-            # if result == 2 we will trigger a bailout and 
+            # if result == 2 we will trigger a bailout and
             # the unprofiled graph should return the correct result
             self.assertEqual(func(input, profile_and_replay=True), result)
             gre = func.graph_for(input)
@@ -1182,6 +1182,8 @@ graph(%x : Tensor,
         # right now the result will have extra observer modules
         # will fix later when we figure out how to remove modules
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
+        assert len(m._c._get_modules()) == 1, \
+            'Expected to have single submodule of conv'
 
         get_forward(m._c)(data)
         FileCheck().check_not("aten::quantize_per_tensor") \
@@ -16440,7 +16442,7 @@ def create_traced_fn(self, fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         # `check_trace` is set to False because check_trace is run with @no_grad
-        # Also, `check_against_reference` already does all the checks 
+        # Also, `check_against_reference` already does all the checks
         # against python function
         traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
         self.assertExportImport(traced.graph, inputs_tensors)
