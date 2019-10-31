@@ -955,6 +955,36 @@ class _TestTorchMixin(object):
             res = torch.where(a > 0)
             self.assertEqual(1, len(res))
 
+    def test_where_tensor_cpu(self):
+        def rand_tensor(size, dtype, device):
+            if dtype.is_floating_point:
+                return torch.rand(size=size, dtype=dtype, device=device)
+            elif dtype == torch.uint8:
+                return torch.randint(1, 5, size=size, dtype=dtype, device=device)
+            elif dtype == torch.bool:
+                return torch.randint(0, 1, size=size, dtype=dtype, device=device).bool()
+            else:
+                return torch.randint(-5, 5, size=size, dtype=dtype, device=device)
+
+        device = "cpu"
+        for dt1 in torch.testing.get_all_math_dtypes(device):
+            for dt2 in torch.testing.get_all_math_dtypes(device):
+                x1 = rand_tensor((5, 5), dt1, device)
+                x2 = rand_tensor((5, 5), dt2, device)
+                res = torch.where(x1 < 1, x1, x2)
+                print(dt1)
+                print(dt2)
+                print(x1)
+                print(x2)
+                print(res)
+                for i in range(5):
+                    for j in range(5):
+                        if x1[i][j] < 1:
+                            self.assertTrue(res[i][j].item() == x1[i][j].item())
+                        else:
+                            self.assertTrue(res[i][j].item() == x2[i][j].item())
+
+
     def test_all_any_with_dim(self):
         def test(x):
             r1 = x.prod(dim=0, keepdim=False).byte()

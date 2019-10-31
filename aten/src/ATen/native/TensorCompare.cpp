@@ -122,9 +122,10 @@ std::vector<Tensor> where(const Tensor& condition) {
 }
 
 Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  Tensor ret = at::empty(self.sizes(), self.options());
+  auto common_type = at::promote_types(self.scalar_type(), other.scalar_type());
+  Tensor ret = at::empty(self.sizes(), self.options().dtype(common_type));
   AT_DISPATCH_ALL_TYPES(ret.scalar_type(), "where_cpu", [&] {
-    where_cpu<scalar_t>(ret, condition, self, other);
+    where_cpu<scalar_t>(ret, condition, self.to(common_type), other.to(common_type));
   });
   return ret;
 }
