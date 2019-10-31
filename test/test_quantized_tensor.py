@@ -254,6 +254,14 @@ class TestQuantizedTensor(TestCase):
         # check scale and zero_points has been copied
         self.assertEqual(q, q2)
 
+        # deep copy
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        q_int = torch.randint(0, 100, [3, 5], dtype=dtype)
+        scale, zero_point = 2.0, 3
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
+        qc = deepcopy(q)
+        self.assertEqual(qc, q)
+
     def test_qtensor_clone(self):
         numel = 10
         scale = 0.5
@@ -323,7 +331,6 @@ class TestQuantizedTensor(TestCase):
         c = b.reshape(1, 4, 2, 3)
 
     def test_qscheme_pickle(self):
-
         f = Foo()
         buf = io.BytesIO()
         torch.save(f, buf)
@@ -332,19 +339,6 @@ class TestQuantizedTensor(TestCase):
         f2 = torch.load(buf)
 
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
-
-    def test_copy(self):
-        # deep copy
-        scale, zero_point, dtype = 1.0, 2, torch.uint8
-        q_int = torch.randint(0, 100, [3, 5], dtype=dtype)
-        q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
-        qc = deepcopy(q)
-        self.assertEqual(qc, q)
-        # copy_
-        scale, zero_point = 2.0, 3
-        qd = torch._empty_affine_quantized([3, 5], scale=scale, zero_point=zero_point, dtype=torch.quint8)
-        qd.copy_(q)
-        self.assertEqual(qd, q)
 
 
 if __name__ == "__main__":
