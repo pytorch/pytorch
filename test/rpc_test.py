@@ -208,6 +208,7 @@ class RpcTest(object):
         with self.assertRaisesRegex(RuntimeError, "Unknown destination worker"):
             unknown_worker_id = rpc.get_worker_info("WorkerUnknown")
 
+    @requires_process_group_agent
     @dist_init
     def test_self_add(self):
         self_worker_info = rpc.get_worker_info()
@@ -216,7 +217,7 @@ class RpcTest(object):
         with self.assertRaisesRegex(
             RuntimeError, "does not support making RPC calls to self"
         ):
-            rpc.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
+            rpc.rpc_async(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
 
         with self.assertRaisesRegex(
             RuntimeError, "does not support making RPC calls to self"
