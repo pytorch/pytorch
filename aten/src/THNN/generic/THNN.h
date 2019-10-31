@@ -149,20 +149,6 @@ TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
           THTensor *gradInput,
           int64_t reduction);
 
-TH_API void THNN_(MSECriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *output,
-          int64_t reduction);
-TH_API void THNN_(MSECriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t reduction);
-
 TH_API void THNN_(RReLU_updateOutput)(
           THNNState *state,
           THTensor *input,
