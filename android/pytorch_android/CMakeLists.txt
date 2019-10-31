@@ -87,6 +87,7 @@ else()
       -Wl,--no-whole-archive
       c10
       nnpack
+      nnpack_reference_layers
       pytorch_qnnpack
       cpuinfo
       clog
