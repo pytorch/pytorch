@@ -162,9 +162,7 @@ static void upsample_nearest3d_out_cuda_template(
   unsigned int n = output.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-  dim3 gdim{std::min<unsigned int>(
-      at::cuda::getCurrentDeviceProperties()->maxGridSize[0],
-      cuda::ATenCeilDiv(n, bdim.x))};
+  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "upsample_nearest3d_out_frame", [&] {
@@ -240,9 +238,7 @@ static void upsample_nearest3d_backward_out_cuda_template(
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-  dim3 gdim{std::min<unsigned int>(
-      at::cuda::getCurrentDeviceProperties()->maxGridSize[0],
-      cuda::ATenCeilDiv(n, bdim.x))};
+  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_nearest3d_backward_out_frame", [&] {
