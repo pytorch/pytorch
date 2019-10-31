@@ -87,6 +87,14 @@ def _call_method_on_rref(method, rref, *args, **kwargs):
     return method(rref.local_value().wait(), *args, **kwargs)
 
 
+def get_rref_list(values):
+    return [rpc.RRef(MyClass(a)) for a in values]
+
+
+def add_rref_to_value(rref, value):
+    return rref.to_here().wait() + value
+
+
 def run_nested_pickle(pickle_cls_instance, tensor):
     return pickle_cls_instance.t + tensor
 
@@ -913,6 +921,50 @@ class RpcTest(object):
 
         ret = ret_rref
         self.assertEqual(ret, torch.add(torch.ones(n, n), 1))
+
+    @dist_init
+    def test_local_rref_no_fork(self):
+        local_rref = rpc.RRef(35)
+        self.assertEqual(local_rref.local_value().wait(), 35)
+
+    @dist_init
+    def test_return_local_rrefs(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        rref_list = rpc.rpc_sync(
+            "worker{}".format(dst_rank), get_rref_list, args=(
+                [1, 2, 3], ))
+
+        for rref in rref_list:
+            rpc.rpc_sync(rref.owner(), _call_method_on_rref, args=(
+                MyClass.increment_value, rref, 10))
+
+        rets = [
+            rpc.rpc_sync(rref.owner(), _call_method_on_rref, args=(
+                MyClass.get_value, rref))
+            for rref in rref_list]
+
+        self.assertEqual(rets, [11, 12, 13])
+
+    @dist_init
+    def test_pass_local_rrefs(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+
+        rref = rpc.RRef(40)
+        self.assertEqual(
+            rpc.rpc_sync(
+                dst_worker, add_rref_to_value, args=(rref, 50)), 90)
+        self.assertEqual(
+            rpc.rpc_async(
+                dst_worker, add_rref_to_value, args=(rref, 50)).wait(), 90)
+        self.assertEqual(
+            rpc.remote(
+                dst_worker,
+                add_rref_to_value,
+                args=(rref, 50)).to_here().wait(), 90)
 
     @dist_init
     def test_remote_same_worker(self):

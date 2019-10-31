@@ -47,6 +47,7 @@ class PyRRef {
   std::shared_ptr<PyFuture> localValue();
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
+  static PyRRef local(const py::object& value);
 
  private:
   std::shared_ptr<RRef> rref_;

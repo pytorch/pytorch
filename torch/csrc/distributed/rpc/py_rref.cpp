@@ -152,6 +152,13 @@ PyRRef PyRRef::unpickle(const py::tuple& t) {
   return PyRRef(std::move(rref));
 }
 
+PyRRef PyRRef::local(const py::object& value) {
+  auto rref = RRefContext::getInstance().createOwnerRRef<py::object>();
+  py::object copy(value); // increases refcount
+  rref->setValue(std::move(copy));
+  return PyRRef(std::move(rref));
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

@@ -2,7 +2,7 @@ from torch.distributed import invoke_rpc_builtin, invoke_rpc_python_udf
 from torch.distributed import invoke_remote_builtin, invoke_remote_python_udf
 from torch.distributed import _start_rpc_agent
 from torch.distributed import _destroy_rref_context, _cleanup_python_rpc_handler
-from torch.distributed import WorkerInfo
+from torch.distributed import WorkerInfo, RRef as PyRRef
 from . import backend_registry
 from .internal import _internal_rpc_pickler, PythonUDF
 
@@ -12,6 +12,9 @@ import torch
 
 
 _agent = None
+
+
+RRef = PyRRef
 
 
 def _require_initialized(func):
