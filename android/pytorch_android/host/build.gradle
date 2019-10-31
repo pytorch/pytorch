@@ -1,0 +1,33 @@
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the Apache-2 license found in the
+// LICENSE file in the root directory of this source tree.
+
+plugins {
+    id 'java-library'
+}
+
+repositories {
+    mavenLocal()
+    jcenter()
+}
+
+sourceSets {
+    main {
+        java.srcDir '../src/main/java'
+    }
+    test {
+        java {
+            srcDir '../src/androidTest/java'
+            exclude '**/PytorchInstrumented*'
+        }
+        resources.srcDirs = ["../src/androidTest/assets"]
+    }
+}
+
+dependencies {
+    compileOnly 'com.google.code.findbugs:jsr305:3.0.1'
+    implementation 'com.facebook.soloader:nativeloader:0.8.0'
+    implementation 'com.facebook.fbjni:fbjni:0.0.3-SNAPSHOT'
+    testImplementation 'junit:junit:4.12'
+}
