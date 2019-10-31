@@ -110,7 +110,7 @@ test_python_nn() {
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods quantizer
+  time python test/run_test.py --exclude nn --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods
   assert_git_not_dirty
 }
 
