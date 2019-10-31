@@ -390,11 +390,6 @@ bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
 }
 
 bool Type::is_module() const {
-  if (auto cls_type = this->cast<ClassType>()) {
-    return cls_type->is_module();
-  } else if (auto interface_type = this->cast<InterfaceType>()) {
-    return interface_type->is_module();
-  }
   return false;
 }
 
