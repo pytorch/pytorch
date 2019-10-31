@@ -149,6 +149,7 @@ static void upsample_nearest2d_out_cuda_template(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS);
 
   int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
+  int* maxGridSize = at::cuda::getCurrentDeviceProperties()->maxGridSize;
 
   // upsample_2d_shape_check makes sure input/output tensor is not empty;
   int block_x = std::min<int>(
@@ -160,9 +161,12 @@ static void upsample_nearest2d_out_cuda_template(
       maxThreadsDim[2], std::min<int>(nc, max_threads / block_x / block_y));
   const dim3 block(block_x, block_y, block_z);
 
-  int grid_x = cuda::ATenCeilDiv(output_width, block_x);
-  int grid_y = cuda::ATenCeilDiv(output_height, block_y);
-  int grid_z = cuda::ATenCeilDiv(nc, block_z * 4);
+  int grid_x = std::min<int>(
+      maxGridSize[0], cuda::ATenCeilDiv(output_width, block_x));
+  int grid_y = std::min<int>(
+      maxGridSize[1], cuda::ATenCeilDiv(output_height, block_y));
+  int grid_z = std::min<int>(
+      maxGridSize[2], cuda::ATenCeilDiv(nc, block_z * 4));
   const dim3 grid(grid_x, grid_y, grid_z);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -233,7 +237,9 @@ static void upsample_nearest2d_backward_out_cuda_template(
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-  dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
+  dim3 gdim{std::min<unsigned int>(
+      at::cuda::getCurrentDeviceProperties()->maxGridSize[0],
+      cuda::ATenCeilDiv(n, bdim.x))};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {

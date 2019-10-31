@@ -8392,6 +8392,13 @@ class TestNNDeviceType(NNTestCase):
                 self._test_rnn_retain_variables(device, dtype)
 
     @onlyCUDA
+    def test_upsamplingNearest2d_launch_config(self, device):
+        m = nn.Upsample(scale_factor=2)
+        x = torch.rand(2**24, 1, 1, 1).to(device=device)
+        o = m(x)
+
+
+    @onlyCUDA
     @skipCUDAIfCudnnVersionLessThan(7600)
     def test_CTCLoss_cudnn(self, device):
         target_lengths = [30, 25, 20]
