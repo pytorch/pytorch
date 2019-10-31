@@ -40,7 +40,7 @@ const at::Tensor& TensorImpl::grad() const {
   // is not so easy to fix right now because the mutable counterpart of
   // this function must keep working so that "x.grad() = ..." keeps working
   // (part of public API).
-  if (!autograd_meta_) impl::GetAutogradMetaFactory()->undefined_tensor();
+  if (!autograd_meta_) return impl::GetAutogradMetaFactory()->undefined_tensor();
   return autograd_meta_->grad();
 }
 
