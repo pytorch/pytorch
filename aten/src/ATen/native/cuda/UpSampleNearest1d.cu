@@ -108,7 +108,7 @@ static void upsample_nearest1d_out_cuda_template(
   unsigned int n = output.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-  dim3 gdim{std::min<int>(
+  dim3 gdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxGridSize[0],
       cuda::ATenCeilDiv(n, bdim.x))};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -163,7 +163,7 @@ static void upsample_nearest1d_backward_out_cuda_template(
   unsigned int n = grad_input.numel() / nbatch;
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
-  dim3 gdim{std::min<int>(
+  dim3 gdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxGridSize[0],
       cuda::ATenCeilDiv(n, bdim.x))};
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
