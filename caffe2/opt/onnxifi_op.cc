@@ -60,14 +60,14 @@ void SetInputTensorDescriptorTypeAndBuffer(
 }
 
 TypeMeta OnnxifiTypeToDataType(uint64_t onnxifi_type) {
-  static std::map<uint64_t, TypeMeta> data_type_map {
-    {ONNXIFI_DATATYPE_FLOAT32, TypeMeta::Make<float>()},
-    {ONNXIFI_DATATYPE_INT32, TypeMeta::Make<int>()},
-    {ONNXIFI_DATATYPE_INT8, TypeMeta::Make<int8_t>()},
-    {ONNXIFI_DATATYPE_UINT8, TypeMeta::Make<uint8_t>()},
-    {ONNXIFI_DATATYPE_INT64, TypeMeta::Make<int64_t>()},
-    {ONNXIFI_DATATYPE_INT16, TypeMeta::Make<int16_t>()},
-    {ONNXIFI_DATATYPE_UINT16, TypeMeta::Make<uint16_t>()},
+  static std::map<uint64_t, TypeMeta> data_type_map{
+      {ONNXIFI_DATATYPE_FLOAT32, TypeMeta::Make<float>()},
+      {ONNXIFI_DATATYPE_INT32, TypeMeta::Make<int>()},
+      {ONNXIFI_DATATYPE_INT8, TypeMeta::Make<int8_t>()},
+      {ONNXIFI_DATATYPE_UINT8, TypeMeta::Make<uint8_t>()},
+      {ONNXIFI_DATATYPE_INT64, TypeMeta::Make<int64_t>()},
+      {ONNXIFI_DATATYPE_INT16, TypeMeta::Make<int16_t>()},
+      {ONNXIFI_DATATYPE_UINT16, TypeMeta::Make<uint16_t>()},
   };
   const auto it = data_type_map.find(onnxifi_type);
   CAFFE_ENFORCE(
@@ -87,11 +87,12 @@ void SetOutputTensorDescriptorTypeAndBuffer(
 }
 
 #ifndef C10_MOBILE
-void CopyDescriptor(
+void copyDescriptor(
     const ExternalTensorDescriptor* from,
     onnxTensorDescriptorV1* to) {
   to->dataType = from->dataType;
   to->buffer = from->buffer;
+  to->isOffline = from->isOffline;
   to->quantizationParams = from->quantizationParams;
   to->quantizationAxis = from->quantizationAxis;
   to->scales = from->scales;
@@ -130,6 +131,7 @@ void BlobToTensorDescriptor(
       " needs to be TensorCPU or Int8TensorCPU or Int8FCDNNLowPPackedWeightBlob Based class");
   desc->tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
   desc->memoryType = ONNXIFI_MEMORY_TYPE_CPU;
+  desc->isOffline = false;
 
   if (is_int8tensor) {
     // Data type
@@ -146,7 +148,7 @@ void BlobToTensorDescriptor(
     ExternalTensorDescriptor ext_desc;
     function_ptr->SetupExternalTensorDescriptor(
         blob, shapes, all_scales, all_offsets, &ext_desc);
-    CopyDescriptor(&ext_desc, desc);
+    copyDescriptor(&ext_desc, desc);
 #endif
   } else {
     // Data type

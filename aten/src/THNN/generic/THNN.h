@@ -62,26 +62,6 @@ TH_API void THNN_(BCECriterion_updateGradInput)(
           int64_t reduction,
           THTensor *weights);          // [OPTIONAL]
 
-TH_API void THNN_(ClassNLLCriterion_updateOutput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor (1D/2D)
-          THIndexTensor *target,       // tensor containing indexes of target classes
-          THTensor *output,            // [OUT] a one-element tensor with loss
-          int64_t reduction,
-          THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight,      // [BUFFER]
-          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
-TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor (1D/2D)
-          THIndexTensor *target,       // tensor containing indexes of target classes
-          THTensor *gradOutput,
-          THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          int64_t reduction,
-          THTensor *weights,           // [OPTIONAL] class weights
-          THTensor *total_weight,      // [BUFFER]
-          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
-
 TH_API void THNN_(ELU_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
@@ -167,36 +147,6 @@ TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
           THTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int64_t reduction);
-
-TH_API void THNN_(MSECriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *output,
-          int64_t reduction);
-TH_API void THNN_(MSECriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t reduction);
-
-TH_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *output,
-          THTensor *isTarget,
-          int64_t reduction);
-TH_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THIndexTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *isTarget,
           int64_t reduction);
 
 TH_API void THNN_(RReLU_updateOutput)(
