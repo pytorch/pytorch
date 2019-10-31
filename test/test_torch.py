@@ -758,6 +758,33 @@ class _TestTorchMixin(object):
             res = torch.where(a > 0)
             self.assertEqual(1, len(res))
 
+    def test_where_tensor(self):
+        def rand_tensor(size, dtype, device):
+            if dtype.is_floating_point:
+                return torch.rand(size=size, dtype=dtype, device=device)
+            elif dtype == torch.uint8:
+                return torch.randint(1, 5, size=size, dtype=dtype, device=device)
+            elif dtype == torch.bool:
+                return torch.randint(0, 1, size=size, dtype=dtype, device=device).bool()
+            else:
+                return torch.randint(-5, 5, size=size, dtype=dtype, device=device)
+
+        for device in torch.testing.get_all_device_types():
+            for dt1 in torch.testing.get_all_math_dtypes(device):
+                for dt2 in torch.testing.get_all_math_dtypes(device):
+                    x1 = rand_tensor((5, 5), dt1, device)
+                    x2 = rand_tensor((5, 5), dt2, device)
+                    if (dt1 != dt2):
+                        self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(x1 < 1, x1, x2))
+                    else:
+                        res = torch.where(x1 < 1, x1, x2)
+                        for i in range(5):
+                            for j in range(5):
+                                if x1[i][j] < 1:
+                                    self.assertTrue(res[i][j] == x1[i][j])
+                                else:
+                                    self.assertTrue(res[i][j] == x2[i][j])
+
     def test_all_any_with_dim(self):
         def test(x):
             r1 = x.prod(dim=0, keepdim=False).byte()
