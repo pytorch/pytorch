@@ -460,7 +460,6 @@ class QuantizeHelper {
 
  private:
   const script::Module& module_;
-  std::vector<std::string> observer_modules_to_remove_;
   std::vector<Node*> nodes_to_destroy_;
 };
 
