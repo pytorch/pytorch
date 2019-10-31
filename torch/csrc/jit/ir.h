@@ -637,11 +637,12 @@ struct TORCH_API Node {
   virtual ~Node() = default;
 
   // Methods for accessing attributes
-  void copyAttributes(const Node& rhs) {
+  Node* copyAttributes(const Node& rhs) {
     values_.clear();
     for (const AVPtr& i : rhs.values_) {
       values_.push_back(i->clone());
     }
+    return this;
   }
   bool hasAttribute(Symbol name) const {
     AT_ASSERT(name.is_attr());
