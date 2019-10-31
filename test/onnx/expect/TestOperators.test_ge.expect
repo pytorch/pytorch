@@ -3,8 +3,8 @@ producer_name: "pytorch"
 producer_version: "1.3"
 graph {
   node {
-    input: "0"
-    input: "1"
+    input: "x"
+    input: "y"
     output: "2"
     op_type: "Less"
   }
@@ -15,7 +15,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "x"
     type {
       tensor_type {
         elem_type: 6
@@ -31,7 +31,7 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "y"
     type {
       tensor_type {
         elem_type: 6

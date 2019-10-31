@@ -11,6 +11,8 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/subgraph_matcher.h>
 
+#include <torch/csrc/jit/script/shadow_class_type.h>
+
 #include <algorithm>
 #include <stack>
 
@@ -114,7 +116,7 @@ class InsertObserversHelper {
       : module_qconfig_map_(map) {}
   void insertObservers(
       script::Module& module,
-      ShadowClassTypePtr s_cls,
+      script::ShadowClassTypePtr s_cls,
       const std::string& method_name);
 
  private:
@@ -122,7 +124,7 @@ class InsertObserversHelper {
       Value* v,
       Graph* g,
       script::Module& module,
-      ShadowClassTypePtr s_cls,
+      script::ShadowClassTypePtr s_cls,
       const QConfig& qconfig);
 
   void findIntermediateValuesInPattern(
@@ -149,6 +151,11 @@ class InsertObserversHelper {
   // Values that are the output of GetAttr[name="bias"] and they
   // will be propagated through the function call hierarchy
   std::unordered_set<Value*> bias_values_;
+  // Unique id generator for observer module, used for generating
+  // unique observer names when we insert observer module, we
+  // record the current unique id used to avoid incrementing from 0
+  // every time to find a unique id.
+  int uid_ = 0;
 };
 
 // Clone observer module and add it to the original module,
@@ -157,7 +164,7 @@ Node* InsertObserversHelper::insertObserverFor(
     Value* v,
     Graph* g,
     script::Module& module,
-    ShadowClassTypePtr s_cls,
+    script::ShadowClassTypePtr s_cls,
     const QConfig& qconfig) {
   // Skip observing bias
   if (bias_values_.count(v)) {
@@ -170,17 +177,20 @@ Node* InsertObserversHelper::insertObserverFor(
   } else {
     observer_module = std::get<0>(qconfig);
   }
-  std::string observer_name = "observer_for_" + v->debugName();
   script::Module observer = observer_module.clone();
+  std::string observer_name = "_observer_" + std::to_string(uid_++);
+  while (module.find_module(observer_name)) {
+    observer_name = "_observer_" + std::to_string(uid_++);
+  }
   module.register_module(observer_name, observer);
   GRAPH_UPDATE(
       "Adding attribute ",
       observer_name,
       "to ShadowClassType");
-  s_cls->addAttribute(observer_name, observer.type());
+  s_cls->addMutableAttribute(observer_name, observer.type());
   // Get handle of observer module
   Node* observer_instance = g->create(c10::prim::GetAttr);
-  // self.observer_for_v
+  // self._observer_v
   observer_instance->addInput(g->inputs()[0]);
   observer_instance->s_(c10::attr::name, observer_name);
   observer_instance->output()->setDebugName(observer_name);
@@ -267,7 +277,7 @@ void InsertObserversHelper::propagateValues(
 
 void InsertObserversHelper::insertObservers(
     script::Module& module,
-    ShadowClassTypePtr s_cls,
+    script::ShadowClassTypePtr s_cls,
     const std::string& method_name) {
   if (!module_qconfig_map_.count(module.module_object())) {
     // the module is added by us, e.g.: observer module
@@ -332,40 +342,44 @@ void InsertObserversHelper::insertObservers(
             bias_values_.emplace(v);
           }
         }
-        if (v->node()->kind() == prim::CallMethod) {
-          // If we find a call to a method of a child module,
-          // we'll recursively insert observers for the forward function to
-          // the child module.
-          auto module_instance = v->node()->inputs()[0];
-          auto module_method_name = v->node()->s(attr::name);
-          // TODO: looks like this block is not related to v? maybe we should
-          // move this outside
-          script::Module callee_module;
-          ShadowClassTypePtr callee_s_cls;
-          if (module_instance->node()->kind() == prim::GetAttr) {
-            auto child_module_name = module_instance->node()->s(attr::name);
-            auto child_module = module.find_module(child_module_name);
-            TORCH_INTERNAL_ASSERT(
-                child_module,
-                "Child module " + child_module_name + " does not exist");
-            callee_module = child_module.value();
-            auto callee_module_name = module_instance->node()->s(attr::name);
-            callee_s_cls = s_cls->getAttribute(callee_module_name)->expect<ShadowClassType>();
-          } else {
-            TORCH_INTERNAL_ASSERT(
-                module_instance == graph->inputs()[0],
-                "We only support call method either on %self"
-                "or child instance in insert_observers_pass right now");
-            callee_module = module;
-            callee_s_cls = s_cls;
-          }
-          auto method_graph =
-              callee_module.get_method(module_method_name).graph();
-          propagateValues(v->node(), method_graph);
-          // Recursively insert observer for the forward function of child
-          // module
-          insertObservers(callee_module, callee_s_cls, module_method_name);
+      }
+      if (n->kind() == prim::CallMethod) {
+        // If we find a call to a method of a child module,
+        // we'll recursively insert observers for the forward function to
+        // the child module.
+        auto module_instance = n->inputs()[0];
+        auto module_method_name = n->s(attr::name);
+        // TODO: looks like this block is not related to v? maybe we should
+        // move this outside
+        script::Module callee_module;
+        script::ShadowClassTypePtr callee_s_cls;
+        if (module_instance->node()->kind() == prim::GetAttr) {
+          auto child_module_name = module_instance->node()->s(attr::name);
+          auto child_module = module.find_module(child_module_name);
+          TORCH_INTERNAL_ASSERT(
+              child_module,
+              "Child module " + child_module_name + " does not exist");
+          callee_module = child_module.value();
+          auto callee_module_name = module_instance->node()->s(attr::name);
+          auto mt_opt = s_cls->getMutableAttribute(callee_module_name);
+          TORCH_CHECK(mt_opt.has_value(), "Failed to getMutableAttribute");
+          auto mt = mt_opt.value();
+          TORCH_CHECK(c10::holds_alternative<script::ShadowClassTypePtr>(mt), "Expected to get a ShadowClassType for child module");
+          callee_s_cls = c10::get<script::ShadowClassTypePtr>(mt);
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              module_instance == graph->inputs()[0],
+              "We only support call method either on %self"
+              "or child instance in insert_observers_pass right now");
+          callee_module = module;
+          callee_s_cls = s_cls;
         }
+        auto method_graph =
+            callee_module.get_method(module_method_name).graph();
+        propagateValues(n, method_graph);
+        // Recursively insert observer for the forward function of child
+        // module
+        insertObservers(callee_module, callee_s_cls, module_method_name);
       }
 
       for (Block* subblock : n->blocks()) {
@@ -441,7 +455,7 @@ c10::optional<std::string> findObserverName(Value* v) {
         u.user->s(attr::name) == "forward") {
       auto module_instance = u.user->inputs().at(0);
       if (module_instance->node()->kind() == prim::GetAttr &&
-          module_instance->node()->s(attr::name).find("observer_for_") !=
+          module_instance->node()->s(attr::name).find("_observer_") !=
               std::string::npos) {
         return module_instance->node()->s(attr::name);
       }
@@ -454,7 +468,7 @@ class QuantizeHelper {
  public:
   QuantizeHelper(
       const script::Module& m,
-      ShadowClassTypePtr s_cls) :
+      script::ShadowClassTypePtr s_cls) :
       module_(m), s_cls_(s_cls) {}
   // quantization parameters and scalar type
   std::tuple<IValue, IValue> getQParams(Value* v);
@@ -474,7 +488,7 @@ class QuantizeHelper {
 
  private:
   const script::Module& module_;
-  ShadowClassTypePtr s_cls_;
+  script::ShadowClassTypePtr s_cls_;
   std::vector<std::string> observer_modules_to_remove_;
   std::vector<Node*> nodes_to_destroy_;
 };
@@ -571,7 +585,7 @@ c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
       child_instance->node()->kind() == prim::GetAttr,
       "Child instance should come from GetAttr.");
   auto child_module_name = child_instance->node()->s(attr::name);
-  if (child_module_name.find("observer_for_") == std::string::npos) {
+  if (child_module_name.find("_observer_") == std::string::npos) {
     auto child_module = module_.find_module(child_module_name);
     TORCH_INTERNAL_ASSERT(
         child_module,
@@ -584,7 +598,7 @@ c10::optional<script::Module> QuantizeHelper::findChildModuleToQuantize(
 
 void InsertQuantDeQuantImpl(
     script::Module& module,
-    ShadowClassTypePtr s_cls,
+    script::ShadowClassTypePtr s_cls,
     const std::string& method_name) {
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
@@ -616,7 +630,7 @@ void InsertQuantDeQuantImpl(
           auto module_instance = v->node()->inputs()[0];
           auto module_method_name = v->node()->s(attr::name);
           c10::optional<script::Module> m;
-          ShadowClassTypePtr callee_s_cls;
+          script::ShadowClassTypePtr callee_s_cls;
           // calling method on self
           if (module_instance == graph->inputs()[0]) {
             m = module;
@@ -624,7 +638,11 @@ void InsertQuantDeQuantImpl(
           } else {
             m = qh.findChildModuleToQuantize(module_instance);
             auto child_module_name = module_instance->node()->s(attr::name);
-            callee_s_cls = s_cls->getAttribute(child_module_name)->expect<ShadowClassType>();
+            auto mt_opt = s_cls->getMutableAttribute(child_module_name);
+            TORCH_CHECK(mt_opt.has_value(), "Failed to getMutableAttribute");
+            auto mt = mt_opt.value();
+            TORCH_CHECK(c10::holds_alternative<script::ShadowClassTypePtr>(mt), "Expected to get a ShadowClassType for child module");
+            callee_s_cls = c10::get<script::ShadowClassTypePtr>(mt);
           }
           if (m) {
             InsertQuantDeQuantImpl(m.value(), callee_s_cls, module_method_name);
@@ -650,6 +668,42 @@ void InsertQuantDeQuantImpl(
   qh.destroyNodes();
 }
 
+void insertPrepackUnpackForLinear(std::shared_ptr<Graph>& graph) {
+  std::string linear_with_quant = R"(
+graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        return (%r) )";
+
+  std::string linear_with_quant_prepack = R"(
+graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
+        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
+        %packed_params = quantized::linear_prepack(%w_quant, %b)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
+        return (%r) )";
+
+  // Filter to match linear CallFunction
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto linear_node = match_vmap.at(vmap.at("linear"))->node();
+    auto func =
+        linear_node->output()->type()->expect<FunctionType>()->function();
+    auto func_name = getFuncName(func->qualname());
+    if (func_name == "linear") {
+      return true;
+    }
+    return false;
+  };
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
+  rewriter.runOnGraph(graph, filter);
+}
+
 void insertPrepackUnpackForConv2d(std::shared_ptr<Graph>& graph) {
   std::string conv_with_quant = R"(
 graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, %dilation, %groups):
@@ -664,7 +718,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
         %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
   SubgraphRewriter rewriter;
@@ -702,7 +756,7 @@ TORCH_API script::Module InsertObservers(
   ModuleQConfigMap module_qconfig_map;
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
-  auto s_cls = ShadowClassType::create(module.type());
+  auto s_cls = script::ShadowClassType::create(module.type());
   helper.insertObservers(module, s_cls, method_name);
   return module.create_module_from_shadow(s_cls);
 }
@@ -712,7 +766,7 @@ script::Module InsertQuantDeQuant(
     const std::string& method_name,
     bool inplace) {
   script::Module module = inplace ? input_module : input_module.clone();
-  auto s_cls = ShadowClassType::create(module.type());
+  auto s_cls = script::ShadowClassType::create(module.type());
   InsertQuantDeQuantImpl(module, s_cls, method_name);
 
   return module.create_module_from_shadow(s_cls);
@@ -941,40 +995,7 @@ graph(%self, %scale, %zero_point, %dtype):
 }
 
 void InsertPrepackUnpack(std::shared_ptr<Graph>& graph) {
-  std::string linear_with_quant = R"(
-graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %w_dequant = aten::dequantize(%w_quant)
-        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        return (%r) )";
-
-  std::string linear_with_quant_prepack = R"(
-graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
-        %w_quant = aten::quantize_per_tensor(%w, %w_scale, %w_zero_point, %w_dtype)
-        %packed_params = quantized::linear_prepack(%w_quant, %b)
-        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
-        %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %r = prim::CallFunction(%linear, %a_dequant, %w_dequant, %b)
-        return (%r) )";
-
-  // Filter to match linear CallFunction
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto linear_node = match_vmap.at(vmap.at("linear"))->node();
-    auto func =
-        linear_node->output()->type()->expect<FunctionType>()->function();
-    auto func_name = getFuncName(func->qualname());
-    if (func_name == "linear") {
-      return true;
-    }
-    return false;
-  };
-
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(linear_with_quant, linear_with_quant_prepack);
-  rewriter.runOnGraph(graph, filter);
-
+  insertPrepackUnpackForLinear(graph);
   insertPrepackUnpackForConv2d(graph);
 }
 
@@ -1060,8 +1081,11 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       }
       auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
       // unique name for the module based on %w_quant
-      auto module_name =
-          module_name_prefix + std::to_string(w_quant_val->unique());
+      int uid = 0;
+      auto module_name = module_name_prefix + std::to_string(uid++);
+      while (module.find_module(module_name)) {
+        module_name_prefix + std::to_string(uid++);
+      }
       module.register_module(module_name, wrapper_module);
 
       // Add GetAttr of the packed module

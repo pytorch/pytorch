@@ -20,6 +20,7 @@ namespace jit {
 struct Function;
 namespace script {
 struct CompilationUnit;
+struct ShadowClassType;
 }
 } // namespace jit
 } // namespace torch
@@ -49,8 +50,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(FunctionType)           \
   _(ClassType)              \
   _(CapsuleType)            \
-  _(InterfaceType)          \
-  _(ShadowClassType)
+  _(InterfaceType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -557,6 +557,12 @@ struct CAFFE2_API TensorType : public Type {
     return r;
   }
 
+  TensorTypePtr withPossiblyUndefined() {
+    auto r = clone();
+    r->undefined_ = c10::nullopt;
+    return r;
+  }
+
   c10::optional<bool> undefined() const { return undefined_; }
 
   static TensorTypePtr get();
@@ -564,29 +570,37 @@ struct CAFFE2_API TensorType : public Type {
   static const TypeKind Kind = TypeKind::TensorType;
 
  private:
-   TensorType(const at::Tensor &tensor)
-       : Type(TypeKind::TensorType), scalar_type_(tensor.scalar_type()),
-         device_(tensor.device()), sizes_(tensor.sizes().size()),
-         strides_(tensor.sizes().size()),
-         requires_grad_(tensor.requires_grad()), undefined_(false) {
-     if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
-       sizes_ = tensor.sizes().vec();
-       strides_ = tensor.strides().vec();
-     }
-        }
-        TensorType(c10::optional<at::ScalarType> scalar_type,
-                   c10::optional<Device> device, const VaryingShape &sizes,
-                   const VaryingStrides &strides,
-                   c10::optional<bool> requires_grad,
-                   c10::optional<bool> undefined = false)
-            : Type(TypeKind::TensorType), scalar_type_(scalar_type),
-              device_(device), sizes_(sizes), strides_(strides),
-              requires_grad_(requires_grad), undefined_(undefined) {}
+  TensorType(const at::Tensor& tensor)
+      : Type(TypeKind::TensorType),
+        scalar_type_(tensor.scalar_type()),
+        device_(tensor.device()),
+        sizes_(tensor.sizes().size()),
+        strides_(tensor.sizes().size()),
+        requires_grad_(tensor.requires_grad()),
+        undefined_(!tensor.defined()) {
+    if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
+      sizes_ = tensor.sizes().vec();
+      strides_ = tensor.strides().vec();
+    }
+  }
+  TensorType(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      const VaryingShape& sizes,
+      const VaryingStrides& strides,
+      c10::optional<bool> requires_grad,
+      c10::optional<bool> undefined = false)
+      : Type(TypeKind::TensorType),
+        scalar_type_(scalar_type),
+        device_(device),
+        sizes_(sizes),
+        strides_(strides),
+        requires_grad_(requires_grad),
+        undefined_(undefined) {}
 
-        TensorTypePtr clone() const {
-          return TensorTypePtr(new TensorType(scalar_type_, device_, sizes_,
-                                              strides_, requires_grad_,
-                                              undefined_));
+  TensorTypePtr clone() const {
+    return TensorTypePtr(new TensorType(
+        scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
   }
 
   static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
@@ -1419,7 +1433,7 @@ struct CAFFE2_API ClassType : public NamedType {
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
-  size_t numAttributes() const {
+  virtual size_t numAttributes() const {
     AT_ASSERT(attributeNames_.size() == attributeTypes_.size());
     return attributeNames_.size();
   }
@@ -1533,7 +1547,7 @@ struct CAFFE2_API ClassType : public NamedType {
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
   static const TypeKind Kind = TypeKind::ClassType;
 
- private:
+ protected:
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
@@ -1557,38 +1571,6 @@ struct CAFFE2_API ClassType : public NamedType {
   // List of methods associated with this class.
   std::vector<Function*> methods_;
   friend struct ShadowClassType;
-};
-
-struct ShadowClassType;
-using ShadowClassTypePtr = std::shared_ptr<ShadowClassType>;
-
-struct TORCH_API ShadowClassType : ClassType {
-  static ShadowClassTypePtr create(c10::ClassTypePtr shadowed) {
-    return c10::ShadowClassTypePtr(new ShadowClassType(shadowed));
-  }
-
-  void removeAttribute(const std::string& name);
-  std::vector<std::string> attributeNames() const {
-    return attributeNames_;
-  }
-
-protected:
-  explicit ShadowClassType(c10::ClassTypePtr shadowed) : ClassType(shadowed->name(), shadowed->compilation_unit(), shadowed->is_module()) {
-    auto& names = shadowed->attributeNames_;
-    auto& types = shadowed->attributeTypes_;
-    for(size_t i = 0; i < names.size(); ++i) {
-      if (types[i]->kind() == TypeKind::ClassType) {
-        addAttribute(names[i], ShadowClassType::create(types[i]->expect<ClassType>()));
-      } else {
-        addAttribute(names[i], types[i]);
-      }
-    }
-    // Copy methods over
-    // TODO: validate the type here
-    for (const auto& method : shadowed->methods()) {
-      addMethod(method);
-    }
-  }
 };
 
 struct InterfaceType;

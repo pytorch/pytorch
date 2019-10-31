@@ -856,7 +856,7 @@ class ShapePropagator {
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
             "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
-            "aten::empty_like(Tensor self) -> Tensor",
+            "aten::empty_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
             "aten::full_like(Tensor self, Scalar fill_value) -> Tensor",
             "aten::ones_like(Tensor self) -> Tensor",
             "aten::rand_like(Tensor self) -> Tensor",

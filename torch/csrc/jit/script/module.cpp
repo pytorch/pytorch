@@ -35,6 +35,34 @@ c10::optional<EntityType> get_entity_type(ClassTypePtr type, const std::string& 
   return c10::nullopt;
 }
 
+EntityType get_entity_type(ShadowClassTypePtr type, size_t offset_) {
+  TORCH_CHECK(offset_ < type->numAttributes());
+  if (type->is_parameter(offset_)) {
+    return EntityType::PARAMETER;
+  }
+  auto mt = type->getMutableAttribute(offset_);
+  if (c10::holds_alternative<ShadowClassTypePtr>(mt)) {
+    auto cls = c10::get<ShadowClassTypePtr>(mt);
+    TORCH_CHECK(cls->is_module(), "Only module can have ShadowClassType");
+    return EntityType::MODULE;
+  }
+
+  auto t = c10::get<TypePtr>(mt);
+  if (auto cls = t->cast<c10::ClassType>()) {
+    if (cls->is_module()) {
+      return EntityType::MODULE;
+    }
+  }
+  return EntityType::ATTRIBUTE;
+}
+
+c10::optional<EntityType> get_entity_type(ShadowClassTypePtr type, const std::string& name) {
+  if (auto slot_idx = type->findMutableAttributeSlot(name)) {
+    return get_entity_type(type, *slot_idx);
+  }
+  return c10::nullopt;
+}
+
 static ModulePtr create_module_object(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
@@ -290,15 +318,23 @@ Module Module::create_module_from_shadow_impl(
     auto slot_idx = m.type()->findAttributeSlot(name);
     // TODO: type check for m.type() and s_cls
     const auto& value = slot_idx ? m.module_object()->getSlot(*slot_idx) : IValue();
+    auto mutable_type = s_cls->getMutableAttribute(name).value();
     if (get_entity_type(s_cls, name) == EntityType::MODULE) {
       const Module& orig = Module(value.toObject());
-      Module cloned = create_module_from_shadow_impl(orig, s_cls->getAttribute(name)->expect<ShadowClassType>(), type_remap);
+      Module cloned;
+      if (c10::holds_alternative<ShadowClassTypePtr>(mutable_type)) {
+        cloned = create_module_from_shadow_impl(orig, c10::get<ShadowClassTypePtr>(mutable_type), type_remap);
+      } else {
+        cloned = orig.clone_impl(type_remap);
+      }
       type_remap[orig.type()] = cloned.type();
       r.register_module(name, cloned);
     } else {
+      TORCH_CHECK(c10::holds_alternative<TypePtr>(mutable_type),
+                  "Expected mutable module attribute to have type of Type");
       r.register_attribute(
           name,
-          s_cls->getAttribute(name),
+          c10::get<TypePtr>(mutable_type),
           value,
           get_entity_type(s_cls, name) == EntityType::PARAMETER);
     }

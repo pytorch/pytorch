@@ -12,6 +12,7 @@
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/jit/script/shadow_class_type.h>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
