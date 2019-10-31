@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import sys
 
-from .backend_registry import *  # noqa: F401
+from . import backend_registry
 
 
 if sys.version_info >= (3, 0):
@@ -13,7 +13,7 @@ if sys.version_info >= (3, 0):
 
     def init_model_parallel(
         self_name,
-        backend=RpcBackend.PROCESS_GROUP,
+        backend=backend_registry.BackendType.PROCESS_GROUP,
         init_method=None,
         self_rank=-1,
         worker_name_to_id=None,
@@ -43,14 +43,22 @@ if sys.version_info >= (3, 0):
             init_method(str): backend specific init arguments.
             num_send_recv_threads(int): Number of threads for send/recv work.
         """
+        # Rendezvous.
+        world_size = len(worker_name_to_id)
+        rendezvous_iterator = torch.distributed.rendezvous(
+            init_method, rank=self_rank, world_size=world_size
+        )
+        store, _, _ = next(rendezvous_iterator)
+
         # Initialize RPC.
         _init_rpc(
             backend,
-            init_method,
+            store,
             self_name,
             self_rank,
             worker_name_to_id,
             num_send_recv_threads,
         )
+
         # Initialize Autograd.
         torch.distributed.autograd._init(api._agent.get_worker_info().id)
