@@ -13,7 +13,6 @@
 #include <c10/util/C++17.h>
 #include <c10/util/BFloat16.h>
 #include <ATen/native/cpu/zmath.h>
-#include <c10/util/TypeCast.h>
 
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
@@ -257,8 +256,20 @@ public:
   Vec256<T> log1p() const {
     return map(std::log1p);
   }
+  template <typename other_t_log2 = T,
+            typename std::enable_if<!std::is_complex_t<other_t_log2>::value, int>::type = 0>
   Vec256<T> log2() const {
+    // other_t_log2 is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<other_t_log2, T>::value, "other_t_log2 must be T");
     return map(std::log2);
+  }
+  template <typename complex_t_log2 = T,
+            typename std::enable_if<std::is_complex_t<complex_t_log2>::value, int>::type = 0>
+  Vec256<T> log2() const {
+    // complex_t_log2 is for SFINAE and clarity. Make sure it is not changed.
+    static_assert(std::is_same<complex_t_log2, T>::value, "complex_t_log2 must be T");
+    const T log_2 = T(std::log(2.0));
+    return Vec256(map(std::log))/Vec256(log_2);
   }
   Vec256<T> ceil() const {
     return map(at::native::ceil_impl);
@@ -682,7 +693,8 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 # pragma unroll
 #endif
   for (int64_t i = 0; i < n; i++) {
-    *dst = c10::static_cast_with_inter_type<dst_T>(*src);
+    *dst = static_cast<dst_T>(
+        static_cast<at::native::inter_copy_type_t<dst_T>>(*src));
     src++;
     dst++;
   }
