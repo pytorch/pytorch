@@ -10,9 +10,9 @@ inline Tensor one_hot(const Tensor& tensor, int64_t num_classes = -1) {
   return torch::one_hot(tensor, num_classes);
 }
 
-inline void _no_grad_embedding_renorm_(Tensor weight, Tensor input, const EmbeddingOptions& options) {
+inline void _no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) {
   torch::NoGradGuard no_grad;
-  torch::embedding_renorm_(weight, input, *options.max_norm(), options.norm_type());
+  torch::embedding_renorm_(weight, input, max_norm, norm_type);
 }
 
 inline Tensor embedding(Tensor input, Tensor weight, EmbeddingOptions options = {}) {
@@ -30,7 +30,7 @@ inline Tensor embedding(Tensor input, Tensor weight, EmbeddingOptions options = 
 
   if (options.max_norm() != c10::nullopt) {
     input = input.contiguous();
-    _no_grad_embedding_renorm_(weight, input, options);
+    _no_grad_embedding_renorm_(weight, input, *options.max_norm(), options.norm_type());
   }
   return torch::embedding(weight, input, *options.padding_idx(), options.scale_grad_by_freq(), options.sparse());
 }
@@ -76,7 +76,7 @@ inline Tensor embedding_bag(
 
   if (options.max_norm() != c10::nullopt) {
     torch::NoGradGuard no_grad;
-    torch::embedding_renorm_(weight, input, *options.max_norm(), options.norm_type());
+    _no_grad_embedding_renorm_(weight, input, *options.max_norm(), options.norm_type());
   }
 
   TORCH_CHECK(

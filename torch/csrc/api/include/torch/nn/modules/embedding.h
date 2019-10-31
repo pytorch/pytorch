@@ -45,13 +45,15 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
 
   static Embedding from_pretrained(const torch::Tensor& embeddings, EmbeddingOptions options = {}, bool freeze = true) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
-    if(options.num_embeddings() && options.num_embeddings()) {
-      TORCH_CHECK(*options.num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", *options.num_embeddings());
-      TORCH_CHECK(*options.embedding_dim() == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", *options.embedding_dim());
-    } else {
-      options.num_embeddings(embeddings.size(0));
-      options.embedding_dim(embeddings.size(1));
+    if(options.num_embeddings()) {
+      TORCH_WARN(*options.num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", *options.num_embeddings());
     }
+    if(options.embedding_dim()) {
+      TORCH_WARN(*options.embedding_dim() == embeddings.size(1), "Expects options.num_embeddings to be ", embeddings.size(1) , "but found ", *options.embedding_dim());
+    }
+    options.num_embeddings(embeddings.size(0));
+    options.embedding_dim(embeddings.size(1));
+
     Embedding embedding(options._weight(embeddings));
     embedding->weight.set_requires_grad(!freeze);
     return embedding;
@@ -87,13 +89,14 @@ class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
 
   static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, EmbeddingBagOptions options = {}, bool freeze = true) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
-    if(options.num_embeddings() && options.num_embeddings()) {
-      TORCH_CHECK(*options.num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", *options.num_embeddings());
-      TORCH_CHECK(*options.embedding_dim() == embeddings.size(1), "Expects options.embeddings_dim to be ", embeddings.size(1) , "but found ", *options.embedding_dim());
-    } else {
-      options.num_embeddings(embeddings.size(0));
-      options.embedding_dim(embeddings.size(1));
+    if(options.num_embeddings()) {
+      TORCH_WARN(*options.num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", *options.num_embeddings());
     }
+    if(options.embedding_dim()) {
+      TORCH_WARN(*options.embedding_dim() == embeddings.size(1), "Expects options.num_embeddings to be ", embeddings.size(1) , "but found ", *options.embedding_dim());
+    }
+    options.num_embeddings(embeddings.size(0));
+    options.embedding_dim(embeddings.size(1));
     EmbeddingBag embeddingbag(options._weight(embeddings));
     embeddingbag->weight.set_requires_grad(!freeze);
     return embeddingbag;
