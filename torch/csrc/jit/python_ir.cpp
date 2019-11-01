@@ -732,7 +732,7 @@ void initPythonIRBindings(PyObject* module_) {
       }))
       .def("getMethodNames", [](InterfaceType& self) {
         std::vector<std::string> names;
-        for (FunctionSchema fn: self.methods()) {
+        for (const FunctionSchema& fn : self.methods()) {
           names.emplace_back(fn.name());
         }
         return names;
