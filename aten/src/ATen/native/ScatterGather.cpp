@@ -20,13 +20,17 @@ Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Ten
       TORCH_CHECK(index_sizes[i] == self_sizes[i], "Size does not match at dimension ", i, " get ", self_sizes[i], " vs ", index_sizes[i]);
     }
   }
-  result.resize_as_(index);
+  if (result.defined() && result.sizes() != index.sizes()) {
+    result.resize_as_(index);
+  } else {
+    result = at::empty(index.sizes(), self.options());
+  }
   gather_stub(result.device().type(), result, self, dim, index);
   return result;
 }
 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  Tensor result = at::empty({}, self.options());
+  Tensor result;
   return at::gather_out(result, self, dim, index, sparse_grad);
 }
 
