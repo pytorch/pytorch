@@ -4,12 +4,6 @@
 #include <cuda_runtime.h>
 #endif
 
-#ifdef _MSC_VER
-#define LSEEK _lseeki64
-#else
-#define LSEEK lseek
-#endif
-
 static PyObject * THPStorage_(size)(THPStorage *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
@@ -105,13 +99,13 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
 #if !(defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR))
-  torch::utils::THPByteOrder byte_order;
+  THPByteOrder byte_order;
   if (strcmp(byte_order_str, "native") == 0) {
-    byte_order = torch::utils::THP_nativeByteOrder();
+    byte_order = THP_nativeByteOrder();
   } else if (strcmp(byte_order_str, "big") == 0) {
-    byte_order = torch::utils::THP_BIG_ENDIAN;
+    byte_order = THP_BIG_ENDIAN;
   } else if (strcmp(byte_order_str, "little") == 0) {
-    byte_order = torch::utils::THP_LITTLE_ENDIAN;
+    byte_order = THP_LITTLE_ENDIAN;
   } else {
     PyErr_Format(PyExc_ValueError,
       "invalid byte_order '%s' (expected 'big', 'little', or 'native')",
@@ -158,30 +152,22 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   // Because of ASAN checks, that are failing in the THStorage.cpp whenever
   // we are trying to get a value which is not 0 or 1, we have to manually
   // convert original values to boolean ones.
-  torch::utils::THP_decodeBoolBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeBoolBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_SHORT)
-  torch::utils::THP_decodeInt16Buffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeInt16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_INT)
-  torch::utils::THP_decodeInt32Buffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeInt32Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_LONG)
   // TODO: remove the cast
-  torch::utils::THP_decodeInt64Buffer(
-      (int64_t*)THWStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeInt64Buffer((int64_t*) THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_HALF)
-  torch::utils::THP_decodeHalfBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeHalfBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_BFLOAT16)
-  torch::utils::THP_decodeBFloat16Buffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeBFloat16Buffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_FLOAT)
-  torch::utils::THP_decodeFloatBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeFloatBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #elif defined(TH_REAL_IS_DOUBLE)
-  torch::utils::THP_decodeDoubleBuffer(
-      THWStorage_(data)(storage), src + offset, byte_order, count);
+  THP_decodeDoubleBuffer(THWStorage_(data)(storage), src + offset, byte_order, count);
 #else
 #error "Unknown type"
 #endif
@@ -265,9 +251,9 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
 
   // file is backed by a fd
   const int fd = PyObject_AsFileDescriptor(file);
-  const auto fd_original_pos = LSEEK(fd, 0, SEEK_CUR);
+  const auto fd_original_pos = lseek(fd, 0, SEEK_CUR);
   if (offset != Py_None) {
-    LSEEK(fd, THPUtils_unpackLong(offset), SEEK_SET);
+    lseek(fd, THPUtils_unpackLong(offset), SEEK_SET);
   }
   THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
@@ -279,9 +265,9 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   // the file descriptor is returned to original position and
   // the file handle at python call-site needs updating to the
   // advanced postion
-  const auto fd_current_pos = LSEEK(fd, 0, SEEK_CUR);
-  LSEEK(fd, fd_original_pos, SEEK_SET);
-  const auto seek_return = PyObject_CallMethod(file, "seek", "Li", (long long)fd_current_pos, 0);
+  const auto fd_current_pos = lseek(fd, 0, SEEK_CUR);
+  lseek(fd, fd_original_pos, SEEK_SET);
+  const auto seek_return = PyObject_CallMethod(file, "seek", "li", (long)fd_current_pos, 0);
   if (seek_return == nullptr) {
       return nullptr;
   }

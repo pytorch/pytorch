@@ -55,14 +55,10 @@ add_subdirectory(src/THNN)
 IF(USE_ROCM)
   include(LoadHIP)
   if (NOT PYTORCH_FOUND_HIP)
-    set(USE_ROCM OFF)
+    MESSAGE(FATAL_ERROR
+      "Could not find HIP installation")
   endif()
 ENDIF()
-
-# Both CUDA and ROCM are enabled and found. Report an error.
-if(USE_CUDA AND USE_ROCM)
-  message(FATAL_ERROR "Both CUDA and ROCm are enabled and found. PyTorch can only be built with either of them. Please turn one off by using either USE_CUDA=OFF or USE_ROCM=OFF.")
-endif()
 
 IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .

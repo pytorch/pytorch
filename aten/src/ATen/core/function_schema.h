@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/StringUtil.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
@@ -323,7 +322,15 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   if (arg.default_value()) {
     out << "=";
     if (arg.type()->kind() == c10::TypeKind::StringType) {
-        printQuotedString(out, arg.default_value().value().toStringRef());
+        // TODO prettify the result, such as using \n to represent \012
+        out << "\'";
+        std::ios_base::fmtflags flags(out.flags());
+        for (unsigned char c : arg.default_value().value().toStringRef()) {
+          out << "\\" << std::oct << std::setfill('0') << std::setw(3)
+            << static_cast<uint64_t>(c);
+        }
+        out.flags(flags);
+        out << "\'";
     } else {
       out << arg.default_value().value();
     }

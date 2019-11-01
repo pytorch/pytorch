@@ -570,10 +570,5 @@ class TestHub(TestCase):
                          SUM_OF_HUB_EXAMPLE)
 
 
-class TestHipify(TestCase):
-    def test_import_hipify(self):
-        from torch.utils.hipify import hipify_python # noqa
-
-
 if __name__ == '__main__':
     run_tests()

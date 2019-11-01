@@ -38,13 +38,6 @@ Module::Module(c10::QualifiedName class_name)
           std::make_shared<CompilationUnit>())) {}
 
 Module::Module(
-    std::shared_ptr<CompilationUnit> cu,
-    const c10::ClassTypePtr& type)
-    : module_value_(c10::ivalue::Object::create(
-          c10::StrongTypePtr(std::move(cu), type),
-          type->numAttributes())) {}
-
-Module::Module(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle)
@@ -208,9 +201,6 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
       e.n->removeInput(e.offset);
       continue;
     }
-    if (e.n->kind() == prim::PythonOp) {
-      throw ErrorReport(e.n->sourceRange()) << "Couldn't export Python method.";
-    }
     if (e.n->kind() != prim::GetAttr) {
       throw ErrorReport(e.n->sourceRange())
           << "temporary: the only valid use of a module is looking up an "
@@ -344,9 +334,13 @@ Module Module::clone_impl(
       const Module& orig = s.to_module();
       Module cloned = orig.clone_impl(type_remap);
       type_remap[orig.type()] = cloned.type();
-      r.register_module(s.name(), cloned);
+      r.set_or_add_slot(
+          s.name(),
+          type_remap.at(s.type()),
+          cloned.module_object(),
+          s.entity_type());
     } else {
-      r.register_attribute(s.name(), s.type(), s.value(), s.is_parameter());
+      r.set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
     }
   }
 
@@ -364,7 +358,7 @@ void Module::train(bool on) {
   if (auto slot = find_attribute("training")) {
     slot->setValue(on);
   } else {
-    TORCH_INTERNAL_ASSERT("'training' attribute not found");
+    register_attribute("training", BoolType::get(), on);
   }
 }
 
@@ -427,11 +421,11 @@ void Module::apply(const std::function<void(Module&)>& fn) {
   fn(*this);
 }
 
-std::string Module::dump_to_str(
+std::string Module::_dump_to_string(
     bool print_method_bodies,
     bool print_attr_values,
     bool print_param_values,
-    int level = 0) const {
+    int level) const {
   std::stringstream ss;
   std::stringstream parameters_ss;
   std::stringstream attributes_ss;
@@ -480,7 +474,7 @@ std::string Module::dump_to_str(
   for (const Module& submodule : get_modules()) {
     // We do level + 2, because one level of indentation comes from 'submodules'
     // scope and the other one goes from a specific submodule we're printing.
-    ss << submodule.dump_to_str(
+    ss << submodule._dump_to_string(
         print_method_bodies, print_attr_values, print_param_values, level + 2);
   }
   ss << "  }" << std::endl;
@@ -494,10 +488,11 @@ void Module::dump(
     bool print_method_bodies = true,
     bool print_attr_values = true,
     bool print_param_values = true) const {
-  std::cout << dump_to_str(
+  std::cout << _dump_to_string(
                    print_method_bodies,
                    print_attr_values,
-                   print_param_values)
+                   print_param_values,
+                   0)
             << std::endl;
 }
 

@@ -1,8 +1,8 @@
 #!/bin/bash
-set -ex -o pipefail
+set -eux -o pipefail
 
 echo ""
-echo "DIR: $(pwd)"
+echo "PWD: ${PWD}"
 WORKSPACE=/Users/distiller/workspace
 PROJ_ROOT=/Users/distiller/project
 export TCLLIBPATH="/usr/local/lib" 
@@ -13,7 +13,7 @@ chmod +x ~/Downloads/conda.sh
 export PATH="~/anaconda/bin:${PATH}"
 source ~/anaconda/bin/activate
 # Install dependencies
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests --yes
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing requests
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 # sync submodules
 cd ${PROJ_ROOT}

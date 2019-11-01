@@ -66,11 +66,7 @@
   supports_named_tensor: True
 
 - func: align_to(Tensor(a) self, DimnameList names) -> Tensor(a)
-  variants: method
-  supports_named_tensor: True
-
-- func: align_to(Tensor(a) self, DimnameList order, int ellipsis_idx) -> Tensor(a)
-  variants: method
+  variants: function, method
   supports_named_tensor: True
 
 - func: align_as(Tensor self, Tensor other) -> Tensor
@@ -198,54 +194,6 @@
   supports_named_tensor: True
   dispatch:
     CPU: _abs_out_cpu
-    CUDA: _abs_out_cuda
-
-- func: angle(Tensor self) -> Tensor
-  variants: function, method
-  supports_named_tensor: True
-  named_guard: False
-
-- func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
-  supports_named_tensor: True
-  dispatch:
-    CPU: _angle_out_cpu
-    CUDA: _abs_out_cuda
-
-- func: real(Tensor self) -> Tensor
-  variants: function, method
-  named_guard: False
-  supports_named_tensor: True
-
-- func: real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
-  supports_named_tensor: True
-  dispatch:
-    CPU: _real_out_cpu
-    CUDA: _abs_out_cuda
-
-- func: imag(Tensor self) -> Tensor
-  variants: function, method
-  named_guard: False
-  supports_named_tensor: True
-
-- func: imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
-  supports_named_tensor: True
-  dispatch:
-    CPU: _imag_out_cpu
-    CUDA: _abs_out_cuda
-
-- func: conj(Tensor self) -> Tensor
-  variants: function, method
-  named_guard: False
-  supports_named_tensor: True
-
-- func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  named_guard: False
-  supports_named_tensor: True
-  dispatch:
-    CPU: _conj_out_cpu
     CUDA: _abs_out_cuda
 
 - func: acos(Tensor self) -> Tensor
@@ -1079,9 +1027,6 @@
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
 
-- func: new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  variants: method
-
 # other overrides are to provide a more helpful error message that dtype is required
 - func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
@@ -1452,8 +1397,7 @@
   use_c10_dispatcher: full
   variants: function
   device_guard: False
-  supports_named_tensor: True
-  
+
 - func: is_distributed(Tensor self) -> bool
   use_c10_dispatcher: full
   variants: function, method
@@ -1519,8 +1463,16 @@
 - func: layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor
 
 - func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_cpu
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_backward_cpu
+
+- func: native_layer_norm_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    CPU: layer_norm_double_backward_cpu
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -1586,12 +1538,15 @@
   use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
+  dispatch:
+    CPU: _log10__cpu
+    CUDA: _log10__cuda
 
 - func: log10.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: log10_out
-    CUDA: log10_out
+    CPU: _log10_out_cpu
+    CUDA: _log10_out_cuda
 
 - func: log1p(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3152,7 +3107,8 @@
 - func: nuclear_norm.dim_out(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
-- func: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+- func: clone(Tensor self) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU: clone
@@ -3600,6 +3556,12 @@
     SparseCUDA: copy_sparse_
   requires_tensor: True
 
+- func: numel(Tensor self) -> int
+  use_c10_dispatcher: full
+  variants: function, method
+  device_guard: False
+  supports_named_tensor: True
+
 - func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: unboxed_only
   variants: function, method
@@ -3719,17 +3681,6 @@
     CPU: fake_quantize_per_tensor_affine_backward_cpu
     CUDA: fake_quantize_per_tensor_affine_backward_cuda
 
-- func: fake_quantize_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
-  variants: function
-  dispatch:
-    CPU: fake_quantize_per_channel_affine_cpu
-    CUDA: fake_quantize_per_channel_affine_cuda
-
-- func: fake_quantize_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
-  variants: function
-  dispatch:
-    CPU: fake_quantize_per_channel_affine_backward_cpu
-    CUDA: fake_quantize_per_channel_affine_backward_cuda
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
@@ -4522,14 +4473,12 @@
     CUDA: legacy::cuda::_th_trace
 
 - func: ne.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: ne_out
     CUDA: ne_out
     QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Scalar(Tensor self, Scalar other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4538,14 +4487,12 @@
     QuantizedCPU: ne_quantized_cpu
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: ne_out
     CUDA: ne_out
     QuantizedCPU: ne_out_quantized_cpu
 
 - func: ne.Tensor(Tensor self, Tensor other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4554,14 +4501,12 @@
     QuantizedCPU: ne_quantized_cpu
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: eq_out
     CUDA: eq_out
     QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Scalar(Tensor self, Scalar other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4570,14 +4515,12 @@
     QuantizedCPU: eq_quantized_cpu
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: eq_out
     CUDA: eq_out
     QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Tensor(Tensor self, Tensor other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4586,14 +4529,12 @@
     QuantizedCPU: eq_quantized_cpu
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: ge_out
     CUDA: ge_out
     QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Scalar(Tensor self, Scalar other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4602,14 +4543,12 @@
     QuantizedCPU: ge_quantized_cpu
 
 - func: ge.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: ge_out
     CUDA: ge_out
     QuantizedCPU: ge_out_quantized_cpu
 
 - func: ge.Tensor(Tensor self, Tensor other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4618,14 +4557,12 @@
     QuantizedCPU: ge_quantized_cpu
 
 - func: le.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: le_out
     CUDA: le_out
     QuantizedCPU: le_out_quantized_cpu
 
 - func: le.Scalar(Tensor self, Scalar other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4634,14 +4571,12 @@
     QuantizedCPU: le_quantized_cpu
 
 - func: le.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: le_out
     CUDA: le_out
     QuantizedCPU: le_out_quantized_cpu
 
 - func: le.Tensor(Tensor self, Tensor other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4650,14 +4585,12 @@
     QuantizedCPU: le_quantized_cpu
 
 - func: gt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: gt_out
     CUDA: gt_out
     QuantizedCPU: gt_out_quantized_cpu
 
 - func: gt.Scalar(Tensor self, Scalar other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4666,14 +4599,12 @@
     QuantizedCPU: gt_quantized_cpu
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: gt_out
     CUDA: gt_out
     QuantizedCPU: gt_out_quantized_cpu
 
 - func: gt.Tensor(Tensor self, Tensor other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4682,14 +4613,12 @@
     QuantizedCPU: gt_quantized_cpu
 
 - func: lt.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: lt_out
     CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Scalar(Tensor self, Scalar other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
@@ -4698,14 +4627,12 @@
     QuantizedCPU: lt_quantized_cpu
 
 - func: lt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
   dispatch:
     CPU: lt_out
     CUDA: lt_out
     QuantizedCPU: lt_out_quantized_cpu
 
 - func: lt.Tensor(Tensor self, Tensor other) -> Tensor
-  supports_named_tensor: True
   use_c10_dispatcher: full
   variants: method, function
   dispatch:

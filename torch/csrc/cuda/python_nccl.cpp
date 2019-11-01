@@ -185,14 +185,14 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
   auto user_comms = unpack_comms(_comms, inputs.size());
 
   with_no_gil([&] {
-    check_inputs(inputs, outputs, 1, 1);
+    _check_inputs(inputs, outputs, 1, 1);
     size_t len = inputs.size();
 
-    ncclDataType_t data_type = get_data_type(inputs[0]);
+    ncclDataType_t data_type = _get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel();
     AutoNcclGroup nccl_group_guard;
-    auto comms = user_comms.empty() ? get_communicators(inputs)
+    auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     at::cuda::OptionalCUDAGuard device_guard;
     for (size_t i = 0; i < len; i++) {
@@ -265,13 +265,13 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
 
   with_no_gil([&] {
     size_t len = inputs.size();
-    check_inputs(inputs, outputs, len, 1);
+    _check_inputs(inputs, outputs, len, 1);
 
-    ncclDataType_t data_type = get_data_type(inputs[0]);
+    ncclDataType_t data_type = _get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel();
     AutoNcclGroup nccl_group_guard;
-    auto comms = user_comms.empty() ? get_communicators(inputs)
+    auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     at::cuda::OptionalCUDAGuard device_guard;
     for (size_t i = 0; i < len; i++) {
@@ -327,13 +327,13 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
 
   with_no_gil([&] {
     size_t len = inputs.size();
-    check_inputs(inputs, outputs, 1, len);
+    _check_inputs(inputs, outputs, 1, len);
 
-    ncclDataType_t data_type = get_data_type(inputs[0]);
+    ncclDataType_t data_type = _get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel() / len;
     AutoNcclGroup nccl_group_guard;
-    auto comms = user_comms.empty() ? get_communicators(inputs)
+    auto comms = user_comms.empty() ? _get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
     at::cuda::OptionalCUDAGuard device_guard;
     for (size_t i = 0; i < len; i++) {

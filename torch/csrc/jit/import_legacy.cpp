@@ -271,11 +271,7 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
   const auto atoms = c10::QualifiedName(module_def.name()).atoms();
   const size_t numPushed = atoms.size();
   for (const auto& atom : atoms) {
-    auto is_digits = [](const std::string& str) {
-      return std::all_of(str.begin(), str.end(), ::isdigit);
-    };
-    auto sanitized = is_digits(atom) ? std::string("_") + atom : atom;
-    LEGACY_moduleStack_.emplace_back(sanitized);
+    LEGACY_moduleStack_.emplace_back(atom);
   }
   auto module = script::Module(
       c10::QualifiedName(LEGACY_moduleStack_), compilation_unit_);

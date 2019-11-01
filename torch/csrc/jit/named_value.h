@@ -70,8 +70,6 @@ struct NamedValue {
     return *loc_;
   }
 
-  at::TypePtr type() const;
-
  private:
   c10::optional<SourceRange> loc_;
   c10::optional<std::string> name_;

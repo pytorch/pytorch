@@ -226,12 +226,10 @@ Tensor empty_like(
                                          use_memory_format);
     } else if (qscheme == kPerChannelAffine) {
       // Copy the tensors with channels to avoid accidental overrides
-      auto q_per_channel_scales = self.q_per_channel_scales().clone(at::MemoryFormat::Contiguous);
-      auto q_per_channel_zero_points = self.q_per_channel_zero_points().clone(at::MemoryFormat::Contiguous);
       return at::_empty_per_channel_affine_quantized(
           self.sizes(),
-          q_per_channel_scales,
-          q_per_channel_zero_points,
+          self.q_per_channel_scales().clone(),
+          self.q_per_channel_zero_points().clone(),
           self.q_per_channel_axis(),
           options,
           use_memory_format);
@@ -713,14 +711,6 @@ Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   return native::zeros(self.sizes(), options);
 }
 
-Tensor new_zeros(
-    const Tensor& self,
-    IntArrayRef size,
-    const TensorOptions& options
-    ) {
-  return at::zeros(size, self.options().merge_in(options));
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor bartlett_window(int64_t window_length, const TensorOptions& options) {
@@ -877,20 +867,8 @@ Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ clone ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
-  if (memory_format == MemoryFormat::Preserve) {
-    if (src.is_non_overlapping_and_dense()) {
-      // Copy all strides
-      auto self = at::empty_strided(src.sizes(), src.strides(), src.options());
-      self.copy_(src);
-      return self;
-    } else {
-      memory_format = src.suggest_memory_format();
-    }
-  }
-  auto self = at::empty_like(src, src.options(), memory_format);
+Tensor clone(const Tensor& src) {
+  auto self = at::empty_like(src);
   self.copy_(src);
   return self;
 }

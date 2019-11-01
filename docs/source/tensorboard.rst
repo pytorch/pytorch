@@ -91,6 +91,5 @@ Expected result:
    .. automethod:: add_pr_curve
    .. automethod:: add_custom_scalars
    .. automethod:: add_mesh
-   .. automethod:: add_hparams
    .. automethod:: flush
    .. automethod:: close

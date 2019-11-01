@@ -18,7 +18,6 @@ import argparse
 import collections
 import fnmatch
 import json
-import os
 import os.path
 import re
 import shlex
@@ -173,7 +172,7 @@ def run_clang_tidy(options, line_filters, files):
 
         with open(options.config_file) as config:
             # Here we convert the YAML config file to a JSON blob.
-            command += ["-config", json.dumps(yaml.load(config, Loader=yaml.FullLoader))]
+            command += ["-config", json.dumps(yaml.load(config))]
     command += options.extra_args
 
     if line_filters:
@@ -294,13 +293,8 @@ def main():
     if options.diff:
         line_filters = [get_changed_lines(options.diff, f) for f in files]
 
-    pwd = os.getcwd() + "/"
-    clang_tidy_output = run_clang_tidy(options, line_filters, files)
-    formatted_output = []
+    print(run_clang_tidy(options, line_filters, files), file=sys.stderr)
 
-    for line in clang_tidy_output.splitlines():
-        if line.startswith(pwd):
-            print(line[len(pwd):])
 
 if __name__ == "__main__":
     main()
