@@ -119,7 +119,8 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     TORCH_CHECK(self.qscheme() == src.qscheme(),
                 "Quantized Copy only works with same qscheme");
     TORCH_CHECK(self.scalar_type() == src.scalar_type());
-    self.set_quantizer_(src.quantizer());
+    TORCH_CHECK(self.q_scale() == src.q_scale());
+    TORCH_CHECK(self.q_zero_point() == src.q_zero_point());
   }
 
   auto iter = TensorIterator();
