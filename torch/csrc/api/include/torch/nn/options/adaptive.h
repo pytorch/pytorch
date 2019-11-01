@@ -9,8 +9,8 @@ namespace nn {
 
 /// Options for the `AdaptiveLogSoftmaxWithLoss` module.
 struct TORCH_API AdaptiveLogSoftmaxWithLossOptions {
-  AdaptiveLogSoftmaxWithLossOptions(int64_t in_features, int64_t n_classes, std::vector<int64_t> cutoffs)
-  : in_features_(in_features), n_classes_(n_classes), cutoffs_(cutoffs) {}
+  /* implicit */ AdaptiveLogSoftmaxWithLossOptions(int64_t in_features, int64_t n_classes, std::vector<int64_t> cutoffs);
+
  /// Number of features in the input tensor
   TORCH_ARG(int64_t, in_features);
 
@@ -23,7 +23,8 @@ struct TORCH_API AdaptiveLogSoftmaxWithLossOptions {
   /// value used as an exponent to compute sizes of the clusters. Default: 4.0
   TORCH_ARG(double, div_value) = 4.;
 
-  /// exponent. Default: 0.75
+  /// If ``True``, adds a bias term to the 'head' of 
+  /// the adaptive softmax. Default: False
   TORCH_ARG(bool, head_bias) = false;
 };
 
