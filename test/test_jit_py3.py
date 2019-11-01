@@ -296,6 +296,11 @@ class TestScriptPy3(JitTestCase):
                 # type: (Tensor) -> Tensor
                 return self.two(self.one(x, x))
 
+            @torch.jit.export
+            def forward2(self, x):
+                # type: (Tensor) -> Tensor
+                return self.two(self.one(x, x)) + 1
+
         def use_module_interface(mod_list, x):
             # type: (List[OneTwo], Tensor) -> Tensor
             return mod_list[0].forward(x) + mod_list[1].forward(x)
@@ -338,6 +343,14 @@ class TestScriptPy3(JitTestCase):
         # check class object is not a subtype of module interface
         with self.assertRaisesRegex(RuntimeError, "ScriptModule class can be subtype of module interface"):
             as_module_interface(Foo())
+
+        def call_module_interface_on_other_method(mod_interface, x):
+            # type: (OneTwo, Tensor) -> Tensor
+            return mod_interface.forward2(x)
+
+        # ensure error out when we call the module on the method other than the interface specified.
+        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute or method"):
+            self.checkScript(call_module_interface_on_other_method, (scripted_bar_mod, torch.rand(3, 4),))
 
         class WrongMod(nn.Module):
             def two(self, x):

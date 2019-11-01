@@ -203,6 +203,21 @@ Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
 
 // ============================================================================
 
+SmoothL1LossImpl::SmoothL1LossImpl(
+    const torch::nn::SmoothL1LossOptions& options_) : options(options_) {}
+
+void SmoothL1LossImpl::reset() {}
+
+void SmoothL1LossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::SmoothL1Loss";
+}
+
+Tensor SmoothL1LossImpl::forward(const Tensor& input, const Tensor& target) {
+  return F::smooth_l1_loss(input, target, options);
+}
+  
+// ============================================================================
+  
 CTCLossImpl::CTCLossImpl(const CTCLossOptions& options_) : options(options_) {}
 
 void CTCLossImpl::reset() {}
@@ -214,6 +229,22 @@ void CTCLossImpl::pretty_print(std::ostream& stream) const {
 Tensor CTCLossImpl::forward(const Tensor& log_probs, const Tensor& targets,
                  const Tensor& input_lengths, const Tensor& target_lengths) {
   return F::ctc_loss(log_probs, targets, input_lengths, target_lengths, options);
+}
+
+// ============================================================================
+
+PoissonNLLLossImpl::PoissonNLLLossImpl(const PoissonNLLLossOptions& options_)
+  : options(options_) {}
+
+void PoissonNLLLossImpl::reset() {}
+
+void PoissonNLLLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::PoissonNLLLoss()";
+}
+
+Tensor PoissonNLLLossImpl::forward(
+  const Tensor& log_input, const Tensor& target) {
+  return F::poisson_nll_loss(log_input, target, options);
 }
 
 } // namespace nn
