@@ -77,14 +77,6 @@ Function* ClassType::getMethod(const std::string& name) const {
   return nullptr;
 }
 
-#ifndef DECOUPLE_JIT
-
-// This file exists because we need to reference module.h, which we can't from
-// c10. Sigh...
-FunctionType::FunctionType(Function* function)
-    : NamedType(TypeKind::FunctionType, function->qualname()),
-      function_(function) {}
-
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
   auto cu = compilation_unit_.lock();
   TORCH_INTERNAL_ASSERT(cu);
@@ -95,6 +87,14 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   TORCH_INTERNAL_ASSERT(cu);
   return cu;
 }
+
+#ifndef USE_MOBILE_CLASSTYPE
+
+// This file exists because we need to reference module.h, which we can't from
+// c10. Sigh...
+FunctionType::FunctionType(Function* function)
+    : NamedType(TypeKind::FunctionType, function->qualname()),
+      function_(function) {}
 
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   auto ptr = ClassType::create(name(), compilation_unit_);
