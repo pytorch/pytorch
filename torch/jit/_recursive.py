@@ -87,22 +87,31 @@ def infer_raw_concrete_type(nn_module):
 
     added_names = set()
 
-    def add_params_or_buffers(tensor_list, is_param=True):
-        for name, item in tensor_list.items():
-            if item is None:
-                # TODO special case: parameters can be None. The JIT assumes
-                # parameters are Tensor types, so in this case just add it as a
-                # attribute.
-                # The "correct" fix here is to add the parameter as a NoneType
-                # attribute, but NoneType refinemenet is currently wonky
-                continue
-            assert isinstance(item, torch.Tensor)
-            attr_type = infer_type(name, item)
-            concrete_type.add_attribute(name, attr_type, is_param)
-            added_names.add(name)
+    for name, item in nn_module._parameters.items():
+        if item is None:
+            # TODO special case: parameters can be None. The JIT assumes
+            # parameters are Tensor types, so in this case just add it as a
+            # attribute.
+            # The "correct" fix here is to add the parameter as a NoneType
+            # attribute, but NoneType refinemenet is currently wonky
+            continue
+        assert isinstance(item, torch.Tensor)
+        attr_type = infer_type(name, item)
+        concrete_type.add_attribute(name, attr_type, True)
+        added_names.add(name)
 
-    add_params_or_buffers(nn_module._parameters, is_param=True)
-    add_params_or_buffers(nn_module._buffers, is_param=False)
+    for name, item in nn_module._buffers.items():
+        if item is None:
+            # TODO special case: parameters can be None. The JIT assumes
+            # parameters are Tensor types, so in this case just add it as a
+            # attribute.
+            # The "correct" fix here is to add the parameter as a NoneType
+            # attribute, but NoneType refinemenet is currently wonky
+            continue
+        assert isinstance(item, torch.Tensor)
+        attr_type = infer_type(name, item)
+        concrete_type.add_attribute(name, attr_type, False)
+        added_names.add(name)
 
     for name, item in nn_module._modules.items():
         sub_concrete_type = concrete_type_store.get_or_create_concrete_type(item)
@@ -341,12 +350,10 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
         for name, (attr_type, is_param) in concrete_type.get_attributes().items():
             orig_value = getattr(nn_module, name)
-            if isinstance(orig_value, torch.jit.Attribute):
-                orig_value = orig_value.value
-
             if is_param:
                 cpp_module._register_parameter(name, orig_value, False)
             else:
+                orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
                 cpp_module._register_attribute(name, attr_type, orig_value)
 
         # 2. Copy the submodules from the original `nn_module` to the new ScriptModule,

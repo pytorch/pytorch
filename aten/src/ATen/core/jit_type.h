@@ -1498,7 +1498,7 @@ struct CAFFE2_API ClassType : public NamedType {
     TORCH_CHECK(
       ty->isSubtypeOf(atype),
       ty->python_str(),
-      " does not compatible with the type ",
+      " is not compatible with the type ",
       atype->python_str(),
       " for the field '",
       name,

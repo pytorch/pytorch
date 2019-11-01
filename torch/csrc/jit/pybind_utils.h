@@ -456,25 +456,25 @@ inline IValue toIValue(
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
-      c10::intrusive_ptr<c10::ivalue::Object> userObj;
       if (auto mod = script::as_module(py::cast<py::object>(obj))) {
         // if obj is already a ScriptModule, just return its ivalue
-        userObj = mod.value().module_object();
-      } else {
-        // 1. create a bare ivalue
-        const size_t numAttrs = classType->numAttributes();
-        auto cu = classType->compilation_unit();
-        userObj = c10::ivalue::Object::create(
-            c10::StrongTypePtr(cu, classType), numAttrs);
+        return mod.value().module_object();
+      }
+      // otherwise is a normal class object, we create a fresh
+      // ivalue::Object to use from the py object.
+      // 1. create a bare ivalue
+      const size_t numAttrs = classType->numAttributes();
+      auto cu = classType->compilation_unit();
+      auto userObj = c10::ivalue::Object::create(
+          c10::StrongTypePtr(cu, classType), numAttrs);
 
-        // 2. copy all the contained types
-        for (size_t slot = 0; slot < numAttrs; slot++) {
-          const auto& attrType = classType->getAttribute(slot);
-          const auto& attrName = classType->getAttributeName(slot);
+      // 2. copy all the contained types
+      for (size_t slot = 0; slot < numAttrs; slot++) {
+        const auto& attrType = classType->getAttribute(slot);
+        const auto& attrName = classType->getAttributeName(slot);
 
-          const auto& contained = py::getattr(obj, attrName.c_str());
-          userObj->setSlot(slot, toIValue(contained, attrType));
-        }
+        const auto& contained = py::getattr(obj, attrName.c_str());
+        userObj->setSlot(slot, toIValue(contained, attrType));
       }
       return userObj;
     }
