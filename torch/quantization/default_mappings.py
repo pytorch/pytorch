@@ -14,6 +14,7 @@ from .stubs import QuantStub, DeQuantStub
 DEFAULT_MODULE_MAPPING = {
     nn.Linear: nnq.Linear,
     nn.ReLU: nnq.ReLU,
+    nn.ReLU6: nnq.ReLU6,
     nn.Conv2d: nnq.Conv2d,
     QuantStub: nnq.Quantize,
     DeQuantStub: nnq.DeQuantize,

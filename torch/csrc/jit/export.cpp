@@ -573,14 +573,13 @@ class ScriptModuleSerializer {
     data_pickle.pushIValue(value);
     data_pickle.stop();
     size_t i = 0;
+    std::string prefix = archive_name + "/";
     for (const auto& td : data_pickle.tensorData()) {
-      std::stringstream fname;
-      fname << archive_name << "/" << i++;
-      writer_.writeRecord(fname.str(), td.data(), td.sizeInBytes());
+      std::string fname = prefix + std::to_string(i++);
+      writer_.writeRecord(fname, td.data(), td.sizeInBytes());
     }
-    std::stringstream fname;
-    fname << archive_name << ".pkl";
-    writer_.writeRecord(fname.str(), data.data(), data.size());
+    std::string fname = archive_name + ".pkl";
+    writer_.writeRecord(fname, data.data(), data.size());
 
     // serialize all the captured run-time class types
     for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
@@ -621,19 +620,25 @@ class ScriptModuleSerializer {
 
       std::string src = item.value().str();
 
-      writer_.writeRecord(filename, src.c_str(), src.size(), /*compress=*/true);
+      // Only compress these records if they're not tiny.
+      // The cpu cost of generating zip datastructs and compressing isn't
+      // well-spent for very small records.
+      static constexpr size_t kMinToCompress = 200;
+
+      writer_.writeRecord(
+          filename, src.c_str(), src.size(),
+          src.size() > kMinToCompress /*compress*/);
 
       // Write out the debug information
-      std::stringstream debugFilename;
-      debugFilename << filename << ".debug_pkl";
+      std::string debugFilename = filename + ".debug_pkl";
       SourceRangePickler source_range_pickler;
-      const auto& range_data =
+      auto range_data =
           source_range_pickler.pickle(item.value().ranges());
       writer_.writeRecord(
-          debugFilename.str(),
+          debugFilename,
           range_data.data(),
           range_data.size(),
-          /*compress=*/true);
+          range_data.size() > kMinToCompress /*compress*/);
     }
   }
 
@@ -905,7 +910,7 @@ void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
 }
 
 std::string prettyPrint(const onnx::ModelProto& model) {
-  std::stringstream ss;
+  std::ostringstream ss;
   dump(model, ss, 0);
   return ss.str();
 }
