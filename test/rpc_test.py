@@ -226,7 +226,7 @@ class RpcTest(object):
         with self.assertRaisesRegex(
             RuntimeError, "does not support making RPC calls to self"
         ):
-            rpc.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
+            rpc.rpc_async(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
 
         with self.assertRaisesRegex(
             RuntimeError, "does not support making RPC calls to self"
