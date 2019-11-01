@@ -236,98 +236,75 @@ Tensor _nnpack_spatial_convolution(
         "Mismatched Tensor types in NNPack convolutionOutput");
   }
 
-  // Setup parameters for the NNPack convolution output function call
+  const auto compute = [&](const size_t batch_size)-> nnp_status {
+    const auto algorithm = nnp_convolution_algorithm_auto;
+    const size_t input_channels = input.size(1);
+    const size_t output_channels = weight.size(0);
+    const struct nnp_size input_size = {
+        .width = (size_t)input.size(3),
+        .height = (size_t)input.size(2),
+    };
+    const struct nnp_padding input_padding = {
+        .top = (size_t)padding[0],
+        .right = (size_t)padding[1],
+        .bottom = (size_t)padding[0],
+        .left = (size_t)padding[1],
+    };
+    const struct nnp_size kernel_size = {
+        .width = (size_t)weight.size(3),
+        .height = (size_t)weight.size(2),
+    };
+    const struct nnp_size output_size = {
+        .width = (size_t)output.size(3),
+        .height = (size_t)output.size(2),
+    };
+    const nnp_size output_subsample = {
+        .width = stride[1],
+        .height = stride[0],
+    };
 
-  // For now, we use the default algorithm
-  const auto algorithm = nnp_convolution_algorithm_auto;
+    const auto input_ = input.contiguous();
+    // If we don't have a defined bias Tensor, we need to create one filled with zeroes
+    const auto bias_ = bias.defined() ? bias : at::zeros({weight.size(0)}, input.options());
 
-  const size_t batch_size = input.size(0);
-  const size_t input_channels = input.size(1);
-  const size_t output_channels = weight.size(0);
-  const struct nnp_size input_size = {.width = (size_t)input.size(3),
-                                      .height = (size_t)input.size(2)};
-  const struct nnp_padding input_padding = {.top = (size_t)padding[0],
-                                            .right = (size_t)padding[1],
-                                            .bottom = (size_t)padding[0],
-                                            .left = (size_t)padding[1]};
-  const struct nnp_size kernel_size = {.width = (size_t)weight.size(3),
-                                       .height = (size_t)weight.size(2)};
-  const nnp_size output_subsample = {.width = stride[1], .height = stride[0]};
+    const size_t input_size_per_batch = input_channels * input_size.width * input_size.height;
+    const size_t output_size_per_batch = output_channels * output_size.width * output_size.height;
 
-  const auto input_ = input.contiguous();
-  // If we don't have a defined bias Tensor, we need to create one filled with
-  // zeroes
-  const auto bias_ =
-      bias.defined() ? bias : at::zeros({weight.size(0)}, input.options());
-
-  // Note: we assume that the output is shaped correctly, probably should add an
-  // assert
-  auto batched = [&]() -> nnp_status {
-    if ((output_subsample.width != 1) || (output_subsample.height != 1)) {
-      nnp_convolution_output__reference(
-          batch_size,
+    for (size_t batch = 0u; batch < batch_size; ++batch) {
+      const nnp_status status = nnp_convolution_inference(
+          algorithm,
+          nnp_convolution_transform_strategy_compute,
           input_channels,
           output_channels,
           input_size,
           input_padding,
           kernel_size,
           output_subsample,
-          input_.data_ptr<float>(),
+          input_.data_ptr<float>() + batch * input_size_per_batch,
           weight.data_ptr<float>(),
           bias_.data_ptr<float>(),
-          output.data_ptr<float>(),
-          nnpack_threadpool());
+          output.data_ptr<float>() + batch * output_size_per_batch,
+          workspace, // workspace_buffer
+          &workspace_size, // workspace_size
+          nnp_activation_identity,
+          nullptr, // activation parameters
+          nnpack_threadpool(),
+          nullptr // profile
+        );
 
-      return nnp_status_success;
+      if (nnp_status_success != status) {
+        return status;
+      }
     }
 
-    return nnp_convolution_output(
-        algorithm,
-        batch_size,
-        input_channels,
-        output_channels,
-        input_size,
-        input_padding,
-        kernel_size,
-        input_.data_ptr<float>(),
-        weight.data_ptr<float>(),
-        bias_.data_ptr<float>(),
-        output.data_ptr<float>(),
-        workspace, // workspace_buffer
-        &workspace_size, // workspace_size
-        nnp_activation_identity,
-        nullptr, // activation parameters
-        nnpack_threadpool(),
-        nullptr // profile
-    );
+    return nnp_status_success;
   };
 
-  auto single = [&]() -> nnp_status {
-    return nnp_convolution_inference(
-        algorithm,
-        nnp_convolution_transform_strategy_compute,
-        input_channels,
-        output_channels,
-        input_size,
-        input_padding,
-        kernel_size,
-        output_subsample,
-        input_.data_ptr<float>(),
-        weight.data_ptr<float>(),
-        bias_.data_ptr<float>(),
-        output.data_ptr<float>(),
-        workspace, // workspace_buffer
-        &workspace_size, // workspace_size
-        nnp_activation_identity,
-        nullptr, // activation parameters
-        nnpack_threadpool(),
-        nullptr // profile
-    );
-  };
+  const size_t batch_size = input.size(0);
 
   auto size_and_allocate_ws = [&]() {
     // Run a single pass to get the size of memory workspace buffer
-    auto status = batch_size == 1 ? single() : batched();
+    const auto status = compute(batch_size);
     if (status != nnp_status_success) {
       throw std::runtime_error("NNPACK SpatialConvolution_updateOutput failed");
     }
@@ -340,7 +317,7 @@ Tensor _nnpack_spatial_convolution(
   }
 
   // Try to run with the newly created, or existing workspace
-  auto status = batch_size == 1 ? single() : batched();
+  auto status = compute(batch_size);
 
   if (status == nnp_status_insufficient_buffer) {
     // Need to reallocate the workspace
@@ -348,7 +325,7 @@ Tensor _nnpack_spatial_convolution(
     size_and_allocate_ws();
 
     // Try one more time
-    status = batch_size == 1 ? single() : batched();
+    status = compute(batch_size);
   }
 
   if (status != nnp_status_success) {
