@@ -114,7 +114,7 @@ torch.nn.BCEWithLogitsLoss|No|No
 torch.nn.MarginRankingLoss|No|No
 torch.nn.HingeEmbeddingLoss|Yes|No
 torch.nn.MultiLabelMarginLoss|Yes|No
-torch.nn.SmoothL1Loss|No|No
+torch.nn.SmoothL1Loss|Yes|No
 torch.nn.SoftMarginLoss|Yes|No
 torch.nn.MultiLabelSoftMarginLoss|Yes|No
 torch.nn.CosineEmbeddingLoss|Yes|No
