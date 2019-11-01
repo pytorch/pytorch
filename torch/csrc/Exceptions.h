@@ -10,8 +10,8 @@
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include "c10/util/StringUtil.h"
-#include "c10/util/Exception.h"
+#include <c10/util/StringUtil.h>
+#include <c10/util/Exception.h>
 
 /// NOTE [ Conversion Cpp Python Warning ]
 /// The warning handler cannot set python warnings immediately
