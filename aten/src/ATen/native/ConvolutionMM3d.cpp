@@ -6,7 +6,7 @@
 #include <ATen/div_rtn.h>
 #include <ATen/native/Unfold3d.h>
 
-#define CONV3D_GRAIN_SALT 20
+constexpr int64_t CONV3D_GRAIN_SALT = 20;
 
 namespace at {
 namespace native {
@@ -416,18 +416,19 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
   auto grad_output_contiguous = grad_output.contiguous();
 
   const int64_t batch_size = input.size(0);
-  at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-    for (int64_t t = start; t < end; t++) {
-      Tensor grad_output_t = grad_output_contiguous[t];
-      Tensor finput_t;
-      if (grad_weight_2d.defined()) {
-        finput_t = finput[t];
-      }
+  at::parallel_for(
+      0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
+        for (int64_t t = start; t < end; t++) {
+          Tensor grad_output_t = grad_output_contiguous[t];
+          Tensor finput_t;
+          if (grad_weight_2d.defined()) {
+            finput_t = finput[t];
+          }
 
-      slow_conv3d_backward_parameters_frame(
-          grad_weight_2d, grad_bias, grad_output_t, finput_t);
-    }
-  });
+          slow_conv3d_backward_parameters_frame(
+              grad_weight_2d, grad_bias, grad_output_t, finput_t);
+        }
+      });
 }
 
 } // namespace
