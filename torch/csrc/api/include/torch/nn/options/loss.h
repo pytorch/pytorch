@@ -192,6 +192,20 @@ struct TORCH_API CTCLossOptions {
 
 // ============================================================================
 
+/// Options for a smooth L1 loss functional and module.
+struct TORCH_API SmoothL1LossOptions {
+  SmoothL1LossOptions(torch::Reduction::Reduction reduction = torch::Reduction::Mean)
+    : reduction_(reduction) {}
+
+  /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+  /// 'none': no reduction will be applied, 'mean': the sum of the output will
+  /// be divided by the number of elements in the output, 'sum': the output will
+  /// be summed. Default: 'mean'
+  TORCH_ARG(torch::Reduction::Reduction, reduction);
+};
+
+// ============================================================================
+
 /// Options for PoissonNLLLoss functional and module.
 struct TORCH_API PoissonNLLLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
