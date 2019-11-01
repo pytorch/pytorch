@@ -20,7 +20,7 @@ Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Ten
       TORCH_CHECK(index_sizes[i] == self_sizes[i], "Size does not match at dimension ", i, " get ", self_sizes[i], " vs ", index_sizes[i]);
     }
   }
-  if (result.defined() && result.sizes() != index.sizes()) {
+  if (result.defined()) {
     result.resize_as_(index);
   } else {
     result = at::empty(index.sizes(), self.options());
