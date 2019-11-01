@@ -1642,12 +1642,20 @@ void Graph::freeBlock(Block* b) {
   all_blocks.erase(it);
 }
 
+void Node::setCallStack(InlinedCallStackPtr cs) {
+  callstack_ = cs;
+}
+
+static InlinedCallStackPtr getOrCreateCallStackEntry(
+    InlinedCallStackPtr cs,
+    Function* f,
+    const SourceRange& sr) {
+  return cs ? cs : c10::make_intrusive<InlinedCallStack>(f, sr);
+}
+
 void Node::insertCallStackEntry(Function* f, const SourceRange& sr) {
-  if (!callstack_) {
-    callstack_ = c10::make_intrusive<InlinedCallStack>(f, sr);
-  } else {
-    callstack_ = (*callstack_)->insertCallStackEntry(f, sr);
-  }
+  AT_ASSERT(callstack_);
+  callstack_ = (*callstack_)->insertCallStackEntry(f, sr);
 }
 
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
@@ -1672,10 +1680,17 @@ std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   // TODO: We might need to use nodes_map instead of value_map. Otherwise, we
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
+  InlinedCallStackPtr new_callstack_entry;
   for (const auto& kv : value_map) {
     Node* new_node = kv.second->node();
     if (updated_nodes.insert(new_node).second) {
-      new_node->insertCallStackEntry(callee, to_replace->sourceRange());
+      if (!new_node->callstack()) {
+        new_callstack_entry = getOrCreateCallStackEntry(
+            new_callstack_entry, callee, to_replace->sourceRange());
+        new_node->setCallStack(new_callstack_entry);
+      } else {
+        new_node->insertCallStackEntry(callee, to_replace->sourceRange());
+      }
     }
   }
 
