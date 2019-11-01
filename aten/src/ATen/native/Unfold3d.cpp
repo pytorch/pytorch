@@ -1,12 +1,8 @@
 #include <ATen/ATen.h>
-//#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 
 namespace at {
 namespace native {
-
-// DEFINE_DISPATCH(unfolded3d_copy_stub);
-// DEFINE_DISPATCH(unfolded3d_acc_stub);
 
 namespace {
 
@@ -90,49 +86,9 @@ static void unfolded3d_copy(
     const int64_t inputHW = inputHeight * inputWidth;
     const int64_t inputDHW = inputHW * inputDepth;
 
-    /*while (count < line_seg_len) {
-      int64_t w = w_out * dW - pW + k;
-      int64_t h = h_out * dH - pH + j;
-      int64_t d = d_out * dT - pT + i;
-
-      *dst = (h >= 0 && w >= 0 && d >= 0 && h < inputHeight && w < inputWidth &&
-              d < inputDepth)
-          ? input_data[nip * inputDHW + d * inputHW + h * inputWidth + w]
-          : scalar_t(0);
-
-      count++;
-      if (count < line_seg_len) {
-        dst++;
-        w_out++;
-        if (w_out == outputWidth) {
-          w_out = 0;
-          h_out++;
-          if (h_out == outputHeight) {
-            h_out = 0;
-            d_out++;
-            if (d_out == outputDepth) {
-              d_out = 0;
-              k++;
-              if (k == kW) {
-                k = 0;
-                j++;
-                if (j == kH) {
-                  j = 0;
-                  i++;
-                  if (i == kT) {
-                    i = 0;
-                    nip++;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }*/
-
-    int64_t h = h_out * dH - pH + j;
+    // the following variables are updated ouside the most inner loop
     int64_t d = d_out * dT - pT + i;
+    int64_t h = h_out * dH - pH + j;
     int64_t ofs = nip * inputDHW + d * inputHW + h * inputWidth;
     bool d_valid = d >= 0 && d < inputDepth;
     bool dh_valid = d_valid && h >= 0 && h < inputHeight;
@@ -144,7 +100,6 @@ static void unfolded3d_copy(
                                                     : static_cast<scalar_t>(0);
 
       count++;
-      // if (count < line_seg_len) {
       dst++;
       w_out++;
       if (w_out == outputWidth) {
@@ -176,7 +131,6 @@ static void unfolded3d_copy(
         dh_valid = d_valid && h >= 0 && h < inputHeight;
         ofs = nip * inputDHW + d * inputHW + h * inputWidth;
       }
-      //}
     }
   });
 }
