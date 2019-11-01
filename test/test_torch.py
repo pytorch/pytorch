@@ -5670,107 +5670,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
 
-    def test_warning_catch(self):
-        source = '''
-        // error_type:
-        // 0: no error
-        // 1: torch::TypeError
-        // 2: python_error()
-        // 3: py::error_already_set
-        at::Tensor foo(at::Tensor x, int error_type) {
-            std::ostringstream err_stream;
-            err_stream << "Error with "  << x.type();
-
-            TORCH_WARN(err_stream.str());
-            if(error_type == 1) {
-                throw torch::TypeError(err_stream.str().c_str());
-            }
-            if(error_type == 2) {
-                PyObject* obj = PyTuple_New(-1);
-                TORCH_CHECK(!obj);
-                // Pretend it was caught in a different thread and restored here
-                auto e = python_error();
-                e.persist();
-                e.restore();
-                throw e;
-            }
-            if(error_type == 3) {
-                throw py::key_error(err_stream.str());
-            }
-            return x.cos();
-        }
-        '''
-
-        # Ensure double type for hard-coded c name below
-        t = torch.rand(2).double()
-        cpp_tensor_name = r"Variable\[CPUDoubleType\]"
-
-        # Without error handling, the warnings cannot be catched
-        # and the Tensor type names are not cleaned
-        warn_mod = cpp_extension.load_inline(name='warn_mod',
-                                             cpp_sources=[source],
-                                             functions=['foo'],
-                                             with_pytorch_error_handling=False)
-
-        with warnings.catch_warnings(record=True) as w:
-            warn_mod.foo(t, 0)
-            self.assertEqual(len(w), 0)
-
-            # pybind translate all our errors to RuntimeError
-            with self.assertRaisesRegex(RuntimeError, cpp_tensor_name):
-                warn_mod.foo(t, 1)
-            self.assertEqual(len(w), 0)
-
-            # pybind does not understand our "python_error"
-            with self.assertRaisesRegex(RuntimeError, "std::exception"):
-                warn_mod.foo(t, 2)
-            self.assertEqual(len(w), 0)
-
-            with self.assertRaisesRegex(KeyError, cpp_tensor_name):
-                warn_mod.foo(t, 3)
-            self.assertEqual(len(w), 0)
-
-
-        warn_mod = cpp_extension.load_inline(name='warn_mod',
-                                             cpp_sources=[source],
-                                             functions=['foo'],
-                                             with_pytorch_error_handling=True)
-
-
-        with warnings.catch_warnings(record=True) as w:
-            # Catched with no error should be detected
-            warn_mod.foo(t, 0)
-            self.assertEqual(len(w), 1)
-
-            # Catched with cpp error should not be detected
-            with self.assertRaisesRegex(TypeError, t.type()):
-                warn_mod.foo(t, 1)
-            self.assertEqual(len(w), 1)
-
-            # Catched with python error should not be detected
-            with self.assertRaisesRegex(SystemError, "bad argument to internal function"):
-                warn_mod.foo(t, 2)
-            self.assertEqual(len(w), 1)
-
-            # Catched with pybind error should not be detected
-            # Note that there is no type name translation for pybind errors
-            with self.assertRaisesRegex(KeyError, cpp_tensor_name):
-                warn_mod.foo(t, 3)
-            self.assertEqual(len(w), 1)
-
-        # Make sure raising warnings are handled properly
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("error")
-
-            # No error, the warning should raise
-            with self.assertRaisesRegex(UserWarning, t.type()):
-                warn_mod.foo(t, 0)
-            self.assertEqual(len(w), 0)
-
-            # Another error happened, the warning is ignored
-            with self.assertRaisesRegex(TypeError, t.type()):
-                warn_mod.foo(t, 1)
-            self.assertEqual(len(w), 0)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
@@ -5819,6 +5718,7 @@ def make_neg_dim_test(name, tensor_arg, arg_constr, types, extra_dim=0):
                 self.assertEqual(a, b)
 
     return neg_dim_test
+
 
 def idx_tensor(size, max_val):
     return torch.LongTensor(*size).random_(0, max_val - 1)
@@ -6596,12 +6496,6 @@ class TestTorchDeviceType(TestCase):
         # Batch matrices
         M = torch.randn(3, 3, 3, dtype=dtype, device=device)
         run_test(M)
-
-        # one batch
-        matrix = random_fullrank_matrix_distinct_singular_value(5, 1).to(device)
-        matrix_inverse = torch.inverse(matrix)
-        expected_inv = matrix.squeeze(0).inverse()
-        self.assertEqual(matrix_inverse, expected_inv.unsqueeze(0))
 
         # Many batch matrices
         M = torch.randn(2, 3, 3, 3, dtype=dtype, device=device)
@@ -11519,7 +11413,7 @@ class TestTorchDeviceType(TestCase):
                                                   [2., 1.]]],
                                                 dtype=dtype,
                                                 device=device)
-            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]], 
+            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]],
                                                       [[False, True], [True, True]]],
                                                      dtype=torch.bool,
                                                      device=device)
@@ -11581,7 +11475,7 @@ class TestTorchDeviceType(TestCase):
                 x,
                 return_inverse=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_inverse_dim1_bool, x_inverse)
             else:
@@ -11593,7 +11487,7 @@ class TestTorchDeviceType(TestCase):
                 return_inverse=False,
                 return_counts=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_counts_dim1_bool, x_counts)
             else:
@@ -11605,7 +11499,7 @@ class TestTorchDeviceType(TestCase):
                 return_inverse=True,
                 return_counts=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_inverse_dim1_bool, x_inverse)
                 self.assertEqual(expected_counts_dim1_bool, x_counts)
@@ -11699,7 +11593,7 @@ class TestTorchDeviceType(TestCase):
             expected_y_inverse_bool = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 3, 3], dtype=dtype, device=device)
             expected_y_counts_bool = torch.tensor([3, 3, 2, 2], dtype=dtype, device=device)
             y_unique, y_inverse, y_counts = torch.unique_consecutive(y, return_inverse=True, return_counts=True, dim=0)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_y_inverse_bool, y_inverse)
                 self.assertEqual(expected_y_counts_bool, y_counts)
             else:
