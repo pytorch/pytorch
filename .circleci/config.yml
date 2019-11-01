@@ -353,6 +353,8 @@ jobs:
             output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-xla
+            elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-libtorch
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
@@ -386,6 +388,8 @@ jobs:
           output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
+          elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-libtorch
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -1926,7 +1930,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:336"
       - caffe2_linux_test:
           name: caffe2_py2_cuda9_0_cudnn7_ubuntu16_04_test
           requires:
@@ -1939,14 +1943,14 @@ workflows:
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-cuda9.0-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:336"
           resource_class: gpu.medium
       - caffe2_linux_build:
           name: caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:336"
       - caffe2_linux_test:
           name: caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_test
           requires:
@@ -1954,14 +1958,14 @@ workflows:
             - caffe2_cmake_cuda9_0_cudnn7_ubuntu16_04_build
           build_environment: "caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-ubuntu16.04:336"
           resource_class: gpu.medium
       - caffe2_linux_build:
           name: caffe2_py3_5_cuda10_1_cudnn7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.5-cuda10.1-cudnn7-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.5-cuda10.1-cudnn7-ubuntu16.04:336"
       - caffe2_linux_test:
           name: caffe2_py3_5_cuda10_1_cudnn7_ubuntu16_04_test
           requires:
@@ -1969,35 +1973,35 @@ workflows:
             - caffe2_py3_5_cuda10_1_cudnn7_ubuntu16_04_build
           build_environment: "caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.5-cuda10.1-cudnn7-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.5-cuda10.1-cudnn7-ubuntu16.04:336"
           resource_class: gpu.medium
       - caffe2_linux_build:
           name: caffe2_py2_mkl_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py2-mkl-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:336"
       - caffe2_linux_test:
           name: caffe2_py2_mkl_ubuntu16_04_test
           requires:
             - setup
             - caffe2_py2_mkl_ubuntu16_04_build
           build_environment: "caffe2-py2-mkl-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-mkl-ubuntu16.04:336"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_onnx_py2_gcc5_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-onnx-py2-gcc5-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:336"
       - caffe2_linux_test:
           name: caffe2_onnx_py2_gcc5_ubuntu16_04_test
           requires:
             - setup
             - caffe2_onnx_py2_gcc5_ubuntu16_04_build
           build_environment: "caffe2-onnx-py2-gcc5-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-gcc5-ubuntu16.04:336"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_py2_clang3_8_ubuntu16_04_build
@@ -2009,7 +2013,7 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-clang3.8-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.8-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.8-ubuntu16.04:336"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_py2_clang3_9_ubuntu16_04_build
@@ -2021,38 +2025,38 @@ workflows:
                 - master
                 - /ci-all\/.*/
           build_environment: "caffe2-py2-clang3.9-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.9-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang3.9-ubuntu16.04:336"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_py2_clang7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py2-clang7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang7-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-clang7-ubuntu16.04:336"
           build_only: "1"
       - caffe2_linux_build:
           name: caffe2_onnx_py3_6_clang7_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-onnx-py3.6-clang7-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:336"
       - caffe2_linux_test:
           name: caffe2_onnx_py3_6_clang7_ubuntu16_04_test
           requires:
             - setup
             - caffe2_onnx_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-py3.6-clang7-ubuntu16.04-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:336"
           resource_class: large
       - caffe2_linux_build:
           name: caffe2_py2_android_ubuntu16_04_build
           requires:
             - setup
           build_environment: "caffe2-py2-android-ubuntu16.04-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-android-ubuntu16.04:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-android-ubuntu16.04:336"
           build_only: "1"
       - caffe2_linux_build:
-          name: caffe2_py2_cuda9_0_cudnn7_centos7_build
+          name: caffe2_py3_6_devtoolset7_cuda9_2_cudnn7_centos7_build
           requires:
             - setup
           filters:
@@ -2060,21 +2064,21 @@ workflows:
               only:
                 - master
                 - /ci-all\/.*/
-          build_environment: "caffe2-py2-cuda9.0-cudnn7-centos7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:325"
+          build_environment: "caffe2-py3.6-devtoolset7-cuda9.2-cudnn7-centos7-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-devtoolset7-cuda9.2-cudnn7-centos7:336"
       - caffe2_linux_test:
-          name: caffe2_py2_cuda9_0_cudnn7_centos7_test
+          name: caffe2_py3_6_devtoolset7_cuda9_2_cudnn7_centos7_test
           requires:
             - setup
-            - caffe2_py2_cuda9_0_cudnn7_centos7_build
+            - caffe2_py3_6_devtoolset7_cuda9_2_cudnn7_centos7_build
           filters:
             branches:
               only:
                 - master
                 - /ci-all\/.*/
-          build_environment: "caffe2-py2-cuda9.0-cudnn7-centos7-test"
+          build_environment: "caffe2-py3.6-devtoolset7-cuda9.2-cudnn7-centos7-test"
           use_cuda_docker_runtime: "1"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py2-cuda9.0-cudnn7-centos7:325"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-devtoolset7-cuda9.2-cudnn7-centos7:336"
           resource_class: gpu.medium
       - caffe2_macos_build:
           name: caffe2_py2_ios_macos10_13_build
