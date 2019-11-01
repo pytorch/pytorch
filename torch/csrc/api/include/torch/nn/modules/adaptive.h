@@ -6,20 +6,20 @@
 #include <torch/nn/modules/container/modulelist.h>
 #include <torch/nn/modules/container/sequential.h>
 #include <torch/nn/options/adaptive.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
-
-#include <cstddef>
-#include <vector>
 
 namespace torch {
 namespace nn {
+  /// Classifier list for least frequent labels
 
 /// The output of a single invocation of an AdaptiveLogSoftmaxWithLoss
 /// module's `forward()` method.
 struct TORCH_API ASMoutput {
-  ASMoutput(const Tensor& output_, const Tensor& loss_);
+  ASMoutput(const Tensor& output_, const double& loss_);
+  // Tensor containing computed target log probabilities for each example
   Tensor output;
-  Tensor loss;
+
+  //Scalar representing the computed negative log likelihood loss
+  double loss;
 };
 
 /// Efficient softmax approximation as described in
@@ -85,6 +85,7 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl : public Cloneable<AdaptiveLogSof
   /// Number of clusters
   int64_t n_clusters;
 
+  /// Output size of head classifier
   int64_t head_size;
 
   Linear head = nullptr;
