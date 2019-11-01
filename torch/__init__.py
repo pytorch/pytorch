@@ -347,6 +347,6 @@ import torch.quasirandom
 def _torch_at_fork(self):
     torch.get_num_threads()
 
-import multiprocessing as _mp
-_mp.util.register_after_fork(_torch_at_fork, _torch_at_fork)
-del _mp
+from multiprocessing.util import register_after_fork
+register_after_fork(_torch_at_fork, _torch_at_fork)
+del register_after_fork
