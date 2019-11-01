@@ -218,12 +218,6 @@ inline Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets,
 
 inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
                                const PoissonNLLLossOptions& options = {}) {
-  TORCH_CHECK(
-    c10::get_if<enumtype::kNone>(&options.reduction()) ||
-    c10::get_if<enumtype::kMean>(&options.reduction()) ||
-    c10::get_if<enumtype::kSum>(&options.reduction()),
-    enumtype::get_enum_name(options.reduction()), " is not valid"
-  );
   return torch::poisson_nll_loss(input, target, options.log_input(),
     options.full(), options.eps(),
     enumtype::reduction_get_enum(options.reduction()));
