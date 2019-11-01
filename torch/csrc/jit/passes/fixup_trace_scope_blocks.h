@@ -14,13 +14,13 @@ namespace jit {
 //   %1 : ClassType<Module> = prim::GetAttr[name="relu1"](%self)
 //   %2 : ClassType<Module> = prim::GetAttr[name="relu2"](%self)
 //   %3 : ClassType<Module> = prim::GetAttr[name="rrr"](%2)
-//    = prim::FakeScopeBlock[scope="__module.relu1"]()
+//    = prim::TracedModuleForward[scope="__module.relu1"]()
 //     block0():
 //       %input : Float(3, 4) = aten::relu(%input.1),
 //       -> ()
-//    = prim::FakeScopeBlock[scope="__module.relu2"](),
+//    = prim::TracedModuleForward[scope="__module.relu2"](),
 //     block0():
-//        = prim::FakeScopeBlock[scope="__module.relu2.rrr"](),
+//        = prim::TracedModuleForward[scope="__module.relu2.rrr"](),
 //         block0():
 //           %6 : Float(3, 4) = aten::relu(%input),
 //           -> ()
@@ -35,7 +35,7 @@ namespace jit {
 //   2) Lambda lift the blocks. This ensures that all values used within
 //      each scope have their defs captured.
 //   3) Convert the scope blocks into methods on their respective Modules,
-//      and convert FakeScopeBlock nodes to CallMethod nodes into those
+//      and convert TracedModuleForward nodes to CallMethod nodes into those
 //      methods.
 //
 //  Then, we'll have a well-formed graph with proper method calls.

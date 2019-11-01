@@ -148,7 +148,7 @@ void initPythonTracerBindings(PyObject* module) {
           })
       .def("pop_scope", [](TracingState& s) { s.graph->pop_scope(); })
       .def(
-          "curr_scope",
+          "current_scope",
           [](TracingState& s) {
             return s.graph->current_scope()->name().toUnqualString();
           })

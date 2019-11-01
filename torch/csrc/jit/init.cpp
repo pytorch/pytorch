@@ -535,7 +535,7 @@ void initJITBindings(PyObject* module) {
 
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
-      auto fork_node = graph->insertNode(graph->create(prim::FakeFork, 1));
+      auto fork_node = graph->insertNode(graph->create(prim::TracedFork, 1));
       auto body_block = fork_node->addBlock();
 
       Value* node_output;

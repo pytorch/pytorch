@@ -119,8 +119,8 @@ namespace c10 {
   _(prim, CallMethod)                \
   _(prim, LoopContinuation)          \
   _(prim, annotate)                  \
-  _(prim, FakeScopeBlock)            \
-  _(prim, FakeFork)                  \
+  _(prim, TracedModuleForward)       \
+  _(prim, TracedFork)                \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \

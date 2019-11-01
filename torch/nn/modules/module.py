@@ -510,7 +510,7 @@ class Module(object):
         if recording_scopes:
             name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
             if name:
-                cur_scope_name = tracing_state.curr_scope()
+                cur_scope_name = tracing_state.current_scope()
                 if not name.startswith(cur_scope_name):
                     warnings.warn('Called module {} from {}, but these modules are not in a '
                                   'submodule relation! Module information will not be '

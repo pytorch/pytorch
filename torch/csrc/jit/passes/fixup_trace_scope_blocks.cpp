@@ -14,7 +14,8 @@ namespace jit {
 namespace {
 
 bool isEligibleNode(Node* n) {
-  return n->kind() == prim::FakeScopeBlock || n->kind() == prim::FakeFork;
+  return n->kind() == prim::TracedModuleForward ||
+      n->kind() == prim::TracedFork;
 }
 
 } // namespace
@@ -38,6 +39,16 @@ struct MakeDefsDominateUses {
   void processNode(Node* n, Block* b) {
     for (size_t i = 0; i < n->inputs().size(); ++i) {
       Value* inp = n->inputs()[i];
+
+      // Already lifted to this level by a previously processed Use, switch to
+      // remapped value
+      if (remap.count(inp)) {
+        n->replaceInput(i, remap[inp]);
+        inp = remap[inp];
+      }
+
+      // This conditional isn't strictly necessary, but saves a lot of
+      // computation in the common case that we're using a local value.
       if (inp->node()->owningBlock() != b) {
         // Find the common ancestor block between this node and the node that
         // produced this input. For this input Use to be valid, the Value's
@@ -45,25 +56,18 @@ struct MakeDefsDominateUses {
         Block* common_ancestor = n->findCommonAncestorBlockWith(inp->node());
 
         Value* v_itr = inp;
-        Block* b = inp->node()->owningBlock();
-
-        // Already lifted to this level, switch to remapped value
-        // and continue.
-        if (remap.count(v_itr)) {
-          v_itr = remap[v_itr];
-          b = v_itr->node()->owningBlock();
-        }
+        Block* b_itr = inp->node()->owningBlock();
 
         // Starting from the initial def for this input, iterate to
         // wider and wider blocks, adding Block outputs and Node outputs
         // along the way. Then, log the lifted values in the remap table
         // so we can make subsequent Uses refer to the lifted value, if
         // the domination condition is met.
-        while (b != common_ancestor) {
-          b->registerOutput(v_itr);
-          Value* remapped = b->owningNode()->addOutput();
+        while (b_itr != common_ancestor) {
+          b_itr->registerOutput(v_itr);
+          Value* remapped = b_itr->owningNode()->addOutput();
           v_itr = remapped;
-          b = b->owningNode()->owningBlock();
+          b_itr = b_itr->owningNode()->owningBlock();
         }
         // From now on, references to `inp` will be replaced with
         // references to `v_iter`, the lifted Value
@@ -90,9 +94,9 @@ struct MakeDefsDominateUses {
 // it is required to properly inline the blocks).
 void convertReturnsToTuples(Block* b) {
   for (Node* n : b->nodes()) {
-    if (n->kind() == prim::FakeFork) {
+    if (n->kind() == prim::TracedFork) {
       convertReturnsToTuples(n->blocks()[0]);
-    } else if (n->kind() == prim::FakeScopeBlock) {
+    } else if (n->kind() == prim::TracedModuleForward) {
       TORCH_INTERNAL_ASSERT(n->blocks().size() == 1);
       convertReturnsToTuples(n->blocks()[0]);
 
@@ -133,7 +137,7 @@ void convertReturnsToTuples(Block* b) {
 
 // Lambda lift Values (i.e. add Graph inputs for the purpose of
 // referencing values that dominate the block) and convert
-// the block to a Graph. blocks()[0] on each FakeScopeBlock then
+// the block to a Graph. blocks()[0] on each TracedModuleForward then
 // appears as a Graph attribute attr::Subgraph
 void lambdaLiftBlocksAndConvertToGraph(Block* b) {
   for (Node* n : b->nodes()) {
@@ -191,9 +195,9 @@ void addSelfArgsToBlocks(
   }
 
   for (Node* n : b->nodes()) {
-    if (n->kind() == prim::FakeFork) {
+    if (n->kind() == prim::TracedFork) {
       addSelfArgsToBlocks(n->blocks()[0], this_level_self, prefix, self);
-    } else if (n->kind() == prim::FakeScopeBlock) {
+    } else if (n->kind() == prim::TracedModuleForward) {
       // First, figure out what module we need to get in scope to call
       // the method
       auto sub_atoms = c10::QualifiedName(n->s(attr::scope)).atoms();
@@ -217,7 +221,7 @@ void addSelfArgsToBlocks(
       n->addInput(callee_val);
 
       addSelfArgsToBlocks(n->blocks()[0], callee_mod, sub_atoms, callee_val);
-    } // if (n->kind() == prim::FakeScopeBlock)
+    } // if (n->kind() == prim::TracedModuleForward)
   } // for (Node *n : b->nodes())
 }
 
@@ -234,9 +238,9 @@ void createMethodCalls(
 
   for (auto node_itr = g->nodes().begin(); node_itr != g->nodes().end();) {
     Node* n = *node_itr++;
-    if (n->kind() == prim::FakeFork) {
+    if (n->kind() == prim::TracedFork) {
       createMethodCalls(n->g(attr::Subgraph), this_level_self, prefix, self);
-    } else if (n->kind() == prim::FakeScopeBlock) {
+    } else if (n->kind() == prim::TracedModuleForward) {
       // First, figure out what module we need to get in scope to call
       // the method
       auto sub_atoms = c10::QualifiedName(n->s(attr::scope)).atoms();
@@ -283,7 +287,7 @@ void inlineScopeBlocks(Block* b) {
     for (Block* sub_b : n->blocks()) {
       inlineScopeBlocks(sub_b);
     }
-    if (n->kind() == prim::FakeScopeBlock) {
+    if (n->kind() == prim::TracedModuleForward) {
       // Convert the block to a graph so we can inline it
       auto graph = std::make_shared<Graph>();
       std::unordered_map<Value*, Value*> remaps;
@@ -298,10 +302,10 @@ void inlineScopeBlocks(Block* b) {
   }
 }
 
-void convertFakeForksToRealForks(const std::shared_ptr<Graph>& g) {
+void convertTracedForksToRealForks(const std::shared_ptr<Graph>& g) {
   for (auto itr = g->nodes().begin(); itr != g->nodes().end();) {
     Node* n = *itr++;
-    if (n->kind() == prim::FakeFork) {
+    if (n->kind() == prim::TracedFork) {
       WithInsertPoint guard(n);
       Node* new_fork_node =
           g->insertNode(g->create(prim::fork, n->outputs().size()))
@@ -321,12 +325,12 @@ void convertFakeForksToRealForks(const std::shared_ptr<Graph>& g) {
 // Run a few clean-up passes to make the graph a bit cleaner.
 void runCleanupPasses(const std::shared_ptr<Graph>& g) {
   for (Node* n : g->nodes()) {
-    if (n->kind() == prim::FakeFork) {
+    if (n->kind() == prim::TracedFork) {
       auto subgraph = n->g(attr::Subgraph);
       if (script::getInlineEverythingMode()) {
         Inline(*subgraph);
       }
-      convertFakeForksToRealForks(subgraph);
+      convertTracedForksToRealForks(subgraph);
       LowerSimpleTuples(subgraph);
       EliminateDeadCode(subgraph);
       LintGraph(subgraph);
@@ -335,7 +339,7 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
   if (script::getInlineEverythingMode()) {
     Inline(*g);
   }
-  convertFakeForksToRealForks(g);
+  convertTracedForksToRealForks(g);
   LowerSimpleTuples(g);
   EliminateDeadCode(g);
   LintGraph(g);
@@ -360,7 +364,7 @@ void FixupTraceScopeBlocks(
     // We have no Module, so we're just going to inline everything.
     // This should give us a totally flag graph.
     inlineScopeBlocks(graph->block());
-    // For FakeFork nodes
+    // For TracedFork nodes
     lambdaLiftBlocksAndConvertToGraph(graph->block());
     runCleanupPasses(graph);
   } else {
