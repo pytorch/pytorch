@@ -1532,7 +1532,6 @@ struct CAFFE2_API ClassType : public NamedType {
   void addMethod(Function* method);
   Function* getMethod(const std::string& name) const;
 
-#ifndef DECOUPLE_JIT
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
@@ -1545,8 +1544,6 @@ struct CAFFE2_API ClassType : public NamedType {
   ClassTypePtr refine(at::ArrayRef<TypePtr> refined_slots) const;
 
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
-
-#endif
 
   static const TypeKind Kind = TypeKind::ClassType;
 

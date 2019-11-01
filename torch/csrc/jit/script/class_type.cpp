@@ -139,5 +139,15 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   }
   return Type::isSubtypeOfExt(rhs, why_not);
 }
+#else
+bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+  if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
+    return true;
+  }
+  if(auto rhs_ = rhs->cast<OptionalType>()) {
+    return this->isSubtypeOfExt(rhs_->getElementType(), why_not);
+  }
+  return false;
+}
 #endif
 } // namespace c10
