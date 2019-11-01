@@ -164,6 +164,8 @@ struct TORCH_API Module {
     module_object()->setAttr(name, v);
   }
 
+  // Remove attribute by name, caller is responsible for
+  // the safety of this operation
   void unsafe_remove_attribute(const std::string& name) {
     module_object()->unsafeRemoveAttr(name);
   }
