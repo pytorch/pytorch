@@ -21,11 +21,11 @@ namespace at {
 
 namespace {
 static thread_local tbb::task_scheduler_init tbb_init_(intraop_default_num_threads());
+std::atomic<int> num_intraop_threads_{-1};
 static thread_local tbb::task_group tg_;
 
 std::mutex global_thread_mutex_;
 std::shared_ptr<tbb::global_control> global_thread_limit_ = nullptr;
-std::atomic<int> num_intraop_threads_{-1};
 
 void _internal_set_num_threads(int nthreads) {
   TORCH_INTERNAL_ASSERT(nthreads > 0);
@@ -33,7 +33,6 @@ void _internal_set_num_threads(int nthreads) {
     std::unique_lock<std::mutex> lk(global_thread_mutex_);
     global_thread_limit_ = std::make_shared<tbb::global_control>(
         tbb::global_control::max_allowed_parallelism, nthreads);
-    num_intraop_threads_.store(nthreads);
   }
   if (tbb_init_.is_active()) {
     tbb_init_.terminate();
@@ -60,8 +59,14 @@ void init_num_threads() {
 
 void set_num_threads(int nthreads) {
   TORCH_CHECK(nthreads > 0);
-
-  _internal_set_num_threads(nthreads);
+  int no_value = -1;
+  if (num_intraop_threads_.compare_exchange_strong(no_value, nthreads)) {
+    _internal_set_num_threads(nthreads);
+    return;
+  }
+  TORCH_CHECK(false,
+    "Error: cannot set number of interop threads "
+    "after parallel work has started or after set_num_threads call");
 }
 
 int get_num_threads() {

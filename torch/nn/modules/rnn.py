@@ -8,6 +8,7 @@ from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
 from .. import init
 from .. import _VF
+from ..._jit_internal import _parameter_list
 
 _rnn_impls = {
     'RNN_TANH': _VF.rnn_tanh,
@@ -60,7 +61,6 @@ class RNNBase(Module):
         else:
             raise ValueError("Unrecognized RNN mode: " + mode)
 
-        self._flat_weights_names = []
         self._all_weights = []
         for layer in range(num_layers):
             for direction in range(num_directions):
@@ -82,19 +82,10 @@ class RNNBase(Module):
 
                 for name, param in zip(param_names, layer_params):
                     setattr(self, name, param)
-                self._flat_weights_names.extend(param_names)
                 self._all_weights.append(param_names)
 
-        self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names]
         self.flatten_parameters()
         self.reset_parameters()
-
-    def __setattr__(self, attr, value):
-        if hasattr(self, "_flat_weights_names") and attr in self._flat_weights_names:
-            # keep self._flat_weights up to date if you do self.weight = ...
-            idx = self._flat_weights_names.index(attr)
-            self._flat_weights[idx] = value
-        super(RNNBase, self).__setattr__(attr, value)
 
     def flatten_parameters(self):
         """Resets parameter data pointer so that they can use faster code paths.
@@ -137,6 +128,13 @@ class RNNBase(Module):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
             init.uniform_(weight, -stdv, stdv)
+
+    def _get_flat_weights_names(self):
+        return [weight for weights in self._all_weights for weight in weights]
+
+    @_parameter_list(_get_flat_weights_names)
+    def _get_flat_weights(self):
+        return self._flat_weights
 
     def check_input(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> None
@@ -205,10 +203,10 @@ class RNNBase(Module):
         self.check_forward_args(input, hx, batch_sizes)
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
-            result = _impl(input, hx, self._flat_weights, self.bias, self.num_layers,
+            result = _impl(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
                            self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
+            result = _impl(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
                            self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1]
@@ -235,12 +233,10 @@ class RNNBase(Module):
         super(RNNBase, self).__setstate__(d)
         if 'all_weights' in d:
             self._all_weights = d['all_weights']
-
         if isinstance(self._all_weights[0][0], str):
             return
         num_layers = self.num_layers
         num_directions = 2 if self.bidirectional else 1
-        self._flat_weights_names = []
         self._all_weights = []
         for layer in range(num_layers):
             for direction in range(num_directions):
@@ -249,23 +245,16 @@ class RNNBase(Module):
                 weights = [x.format(layer, suffix) for x in weights]
                 if self.bias:
                     self._all_weights += [weights]
-                    self._flat_weights_names.extend(weights)
                 else:
                     self._all_weights += [weights[:2]]
-                    self._flat_weights_names.extend(weights[:2])
-        self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names]
+
+    @property
+    def _flat_weights(self):
+        return [p for layerparams in self.all_weights for p in layerparams]
 
     @property
     def all_weights(self):
         return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
-
-    def _replicate_for_data_parallel(self):
-        replica = super(RNNBase, self)._replicate_for_data_parallel()
-        # Need to copy these caches, otherwise the replica will share the same
-        # flat weights list.
-        replica._flat_weights = replica._flat_weights[:]
-        replica._flat_weights_names = replica._flat_weights_names[:]
-        return replica
 
 
 class RNN(RNNBase):
@@ -533,10 +522,10 @@ class LSTM(RNNBase):
 
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
+            result = _VF.lstm(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
                               self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
+            result = _VF.lstm(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
                               self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]
@@ -687,10 +676,10 @@ class GRU(RNNBase):
     def run_impl(self, input, hx, batch_sizes):
         # type: (Tensor, Tensor, Optional[Tensor]) -> Tuple[Tensor, Tensor]
         if batch_sizes is None:
-            result = _VF.gru(input, hx, self._flat_weights, self.bias, self.num_layers,
+            result = _VF.gru(input, hx, self._get_flat_weights(), self.bias, self.num_layers,
                              self.dropout, self.training, self.bidirectional, self.batch_first)
         else:
-            result = _VF.gru(input, batch_sizes, hx, self._flat_weights, self.bias,
+            result = _VF.gru(input, batch_sizes, hx, self._get_flat_weights(), self.bias,
                              self.num_layers, self.dropout, self.training, self.bidirectional)
         return result
 

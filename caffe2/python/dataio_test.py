@@ -214,7 +214,6 @@ class TestReaderWithLimit(TestCase):
         return ws, session, src_ds, dst_ds
 
     def _test_limit_reader_shared(self, reader_class, size, expected_read_len,
-                                  expected_read_len_threshold,
                                   expected_finish, num_threads, read_delay,
                                   **limiter_args):
         ws, session, src_ds, dst_ds = \
@@ -233,18 +232,10 @@ class TestReaderWithLimit(TestCase):
             pipe(reader, dst_ds.writer(), num_runtime_threads=num_threads)
         session.run(tg)
         read_len = len(sorted(ws.blobs[str(dst_ds.content().label())].fetch()))
-
-        # Do a fuzzy match (expected_read_len +/- expected_read_len_threshold)
-        # to eliminate flakiness for time-limited tests
-        self.assertGreaterEqual(
-            read_len,
-            expected_read_len - expected_read_len_threshold)
-        self.assertLessEqual(
-            read_len,
-            expected_read_len + expected_read_len_threshold)
+        self.assertEqual(read_len, expected_read_len)
         self.assertEqual(
             sorted(ws.blobs[str(dst_ds.content().label())].fetch()),
-            list(range(read_len))
+            list(range(expected_read_len))
         )
         self.assertEqual(ws.blobs[str(reader.data_finished())].fetch(),
                          expected_finish)
@@ -254,7 +245,6 @@ class TestReaderWithLimit(TestCase):
         self._test_limit_reader_shared(ReaderWithLimit,
                                        size=100,
                                        expected_read_len=100,
-                                       expected_read_len_threshold=0,
                                        expected_finish=True,
                                        num_threads=8,
                                        read_delay=0,
@@ -265,7 +255,6 @@ class TestReaderWithLimit(TestCase):
         self._test_limit_reader_shared(ReaderWithLimit,
                                        size=100,
                                        expected_read_len=0,
-                                       expected_read_len_threshold=0,
                                        expected_finish=False,
                                        num_threads=8,
                                        read_delay=0,
@@ -276,7 +265,6 @@ class TestReaderWithLimit(TestCase):
         self._test_limit_reader_shared(ReaderWithLimit,
                                        size=100,
                                        expected_read_len=10,
-                                       expected_read_len_threshold=0,
                                        expected_finish=False,
                                        num_threads=8,
                                        read_delay=0,
@@ -287,7 +275,6 @@ class TestReaderWithLimit(TestCase):
         self._test_limit_reader_shared(ReaderWithLimit,
                                        size=100,
                                        expected_read_len=100,
-                                       expected_read_len_threshold=0,
                                        expected_finish=True,
                                        num_threads=8,
                                        read_delay=0,
@@ -298,7 +285,6 @@ class TestReaderWithLimit(TestCase):
         self._test_limit_reader_shared(ReaderWithTimeLimit,
                                        size=100,
                                        expected_read_len=100,
-                                       expected_read_len_threshold=0,
                                        expected_finish=True,
                                        num_threads=8,
                                        read_delay=0.1,
@@ -314,16 +300,9 @@ class TestReaderWithLimit(TestCase):
         # Because the time limit check happens before the delay + read op,
         # subtract a little bit of time to ensure we don't get in an extra read
         duration = duration - 0.25 * sleep_duration
-
-        # NOTE: `expected_read_len_threshold` was added because this test case
-        # has significant execution variation under stress. Under stress, we may
-        # read strictly less than the expected # of samples; anywhere from
-        # [0,N] where N = expected_read_len.
-        # Hence we set expected_read_len to N/2, plus or minus N/2.
         self._test_limit_reader_shared(ReaderWithTimeLimit,
                                        size=size,
-                                       expected_read_len=expected_read_len / 2,
-                                       expected_read_len_threshold=expected_read_len / 2,
+                                       expected_read_len=expected_read_len,
                                        expected_finish=False,
                                        num_threads=num_threads,
                                        read_delay=sleep_duration,
@@ -331,16 +310,13 @@ class TestReaderWithLimit(TestCase):
 
     def test_time_limit_reader_with_long_limit(self):
         # Read with ample time limit
-        # NOTE: we don't use `expected_read_len_threshold` because the duration,
-        # read_delay, and # threads should be more than sufficient
         self._test_limit_reader_shared(ReaderWithTimeLimit,
                                        size=50,
                                        expected_read_len=50,
-                                       expected_read_len_threshold=0,
                                        expected_finish=True,
                                        num_threads=4,
-                                       read_delay=0.2,
-                                       duration=10)
+                                       read_delay=0.25,
+                                       duration=6)
 
 
 class TestDBFileReader(TestCase):

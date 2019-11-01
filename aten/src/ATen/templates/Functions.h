@@ -69,10 +69,6 @@ inline Tensor from_blob(
   return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
 }
 
-inline int64_t numel(const Tensor& tensor) {
-  return tensor.numel();
-}
-
 // function definitions are all static inline because
 // they are one-line statically dispatched functions that
 // invoke the actual dynamic dispatch on the correct argument

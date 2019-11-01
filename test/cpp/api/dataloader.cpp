@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
-#include <torch/torch.h>
+#include <torch/data.h>
+#include <torch/data/detail/sequencers.h>
+#include <torch/serialize.h>
+#include <torch/types.h>
 
 #include <test/cpp/api/support.h>
 

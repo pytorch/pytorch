@@ -243,10 +243,10 @@ void testATenNativeBatchNorm() {
   at::Tensor running_var = torch::randn({input_size[1]});
 
   // running_mean and running_var are changed in-place, so clone and send them
-  at::Tensor running_mean_eager = running_mean.clone(at::MemoryFormat::Contiguous);
-  at::Tensor running_var_eager = running_var.clone(at::MemoryFormat::Contiguous);
-  at::Tensor running_mean_jit = running_mean.clone(at::MemoryFormat::Contiguous);
-  at::Tensor running_var_jit = running_var.clone(at::MemoryFormat::Contiguous);
+  at::Tensor running_mean_eager = running_mean.clone();
+  at::Tensor running_var_eager = running_var.clone();
+  at::Tensor running_mean_jit = running_mean.clone();
+  at::Tensor running_var_jit = running_var.clone();
 
   // run forward eagerly
   at::Tensor output, savemean, saveinvstd;
@@ -1049,7 +1049,7 @@ void testInsertAndEliminateRedundantGuards() {
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   int num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
-  ASSERT_EQ(num_guards, 12);
+  ASSERT_EQ(num_guards, 11);
   // now eliminate as many guards as possible
   // we should be left with two guards on x and y's defs
   EliminateRedundantGuards(copy);

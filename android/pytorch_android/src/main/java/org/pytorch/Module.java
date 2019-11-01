@@ -5,20 +5,21 @@ package org.pytorch;
 import com.facebook.jni.HybridData;
 
 /**
- * Java wrapper for torch::jit::script::Module.
+ * Java holder for torch::jit::script::Module which owns it on jni side.
  */
 public class Module {
 
   private NativePeer mNativePeer;
 
   /**
-   * Loads a serialized TorchScript module from the specified path on the disk.
+   * Loads serialized torchscript module from the specified absolute path on the disk.
    *
-   * @param modelPath path to file that contains the serialized TorchScript module.
-   * @return new {@link org.pytorch.Module} object which owns torch::jit::script::Module.
+   * @param modelAbsolutePath absolute path to file that contains the serialized torchscript module.
+   * @return new {@link org.pytorch.Module} object which owns torch::jit::script::Module on jni
+   * side.
    */
-  public static Module load(final String modelPath) {
-    return new Module(modelPath);
+  public static Module load(final String modelAbsolutePath) {
+    return new Module(modelAbsolutePath);
   }
 
   private Module(final String moduleAbsolutePath) {
@@ -26,35 +27,24 @@ public class Module {
   }
 
   /**
-   * Runs the 'forward' method of this module with the specified arguments.
+   * Runs 'forward' method of loaded torchscript module with specified arguments.
    *
-   * @param inputs arguments for the TorchScript module's 'forward' method.
-   * @return return value from the 'forward' method.
+   * @param inputs arguments for torchscript module 'forward' method.
+   * @return result of torchscript module 'forward' method evaluation
    */
   public IValue forward(IValue... inputs) {
     return mNativePeer.forward(inputs);
   }
 
   /**
-   * Runs the specified method of this module with the specified arguments.
+   * Runs specified method of loaded torchscript module with specified arguments.
    *
-   * @param methodName name of the TorchScript method to run.
-   * @param inputs     arguments that will be passed to TorchScript method.
-   * @return return value from the method.
+   * @param methodName torchscript module method to run
+   * @param inputs     arguments that will be specified to torchscript module method call
+   * @return result of torchscript module specified method evaluation
    */
   public IValue runMethod(String methodName, IValue... inputs) {
     return mNativePeer.runMethod(methodName, inputs);
-  }
-
-  /**
-   * Explicitly destroys the native torch::jit::script::Module.
-   * Calling this method is not required, as the native object will be destroyed
-   * when this object is garbage-collected.  However, the timing of garbage collection
-   * is not guaranteed, so proactively calling {@code destroy} can free memory more quickly.
-   * See {@link com.facebook.jni.HybridData#resetNative}.
-   */
-  public void destroy() {
-    mNativePeer.mHybridData.resetNative();
   }
 
   private static class NativePeer {

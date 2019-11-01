@@ -42,31 +42,31 @@ struct AutoNcclGroup {
   }
 };
 
-TORCH_API at::ArrayRef<ncclComm_t> get_communicators(at::TensorList inputs);
-TORCH_API void check_inputs(
+at::ArrayRef<ncclComm_t> _get_communicators(at::TensorList inputs);
+void _check_inputs(
     at::TensorList inputs,
     at::TensorList outputs,
     int input_multiplier,
     int output_multiplier);
-TORCH_API ncclDataType_t get_data_type(const at::Tensor& t);
+ncclDataType_t _get_data_type(const at::Tensor& t);
 
 } // namespace detail
 
 using comm_list = std::vector<ncclComm_t>;
 using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
 
-TORCH_API std::uint64_t version();
+std::uint64_t version();
 
 bool is_available(at::TensorList tensors);
 
-TORCH_API void broadcast(
+void broadcast(
     at::TensorList tensors,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
 size_t get_max_count();
 
-TORCH_API void reduce(
+void reduce(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     int32_t root = 0,
@@ -74,7 +74,7 @@ TORCH_API void reduce(
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
-TORCH_API void reduce(
+void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root = 0,
     int32_t op = ncclSum,

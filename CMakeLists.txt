@@ -140,7 +140,7 @@ option(USE_METAL "Use Metal for iOS build" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
-    "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+    "USE_CUDA;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(
     USE_STATIC_NCCL "Use static NCCL" OFF
     "USE_NCCL" OFF)
