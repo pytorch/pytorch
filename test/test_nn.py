@@ -8417,8 +8417,13 @@ class TestNNDeviceType(NNTestCase):
         inp_ref = inp.cpu()
         out_ref = m(inp_ref)
         self.assertEqual(out_ref, out)
+        print(torch.cuda.memory_cached())
+        print(torch.cuda.memory_allocated())
+        import time
+        time.sleep(5)
 
     @unittest.expectedFailure
+    @skipIfRocm
     @onlyCUDA
     def test_upsamplingNearest2d_launch_fail(self, device):
         m = nn.Upsample(scale_factor=2)

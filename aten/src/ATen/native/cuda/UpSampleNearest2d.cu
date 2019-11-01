@@ -68,7 +68,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
     size_t dst_dim_h,
     size_t dst_dim_w,
     scalar_t* grad_i) {
-  size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_h * dst_dim_w)
     return;
 
@@ -95,7 +95,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
     accscalar_t grad = 0;
     for (int y = src_y; y < src_y_up; y++) {
       for (int x = src_x; x < src_x_up; x++) {
-        size_t src_idx =
+        int src_idx =
             b * dim_c * src_c_stride + c * src_c_stride + y * src_dim_w + x;
         grad += grad_o[src_idx];
       }
@@ -244,14 +244,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
   dim3 bdim{std::min<unsigned int>(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, MAX_THREADS)};
   dim3 gdim{cuda::ATenCeilDiv(n, bdim.x)};
-  // Error out on cases where gdim.x exceeds limit of launch config, as
-  // the current kernel implementation doesn't loop over non-batch dimensions.
-  // Note that it is unlikely to happen, as maxGridSize[0] is 2**31-1
-  // TODO: kernel implementation could stride on spatial dimension. We probably
-  //       need to overhaul the kernel.
-  TORCH_CHECK(
-      gdim.x <= at::cuda::getCurrentDeviceProperties()->maxGridSize[0],
-      "input tensor has spatial dimension larger than the kernel capacity");
+  // safe check for int32 indexing; implicitly restrict launch config for kernel
+  TORCH_CHECK(grad_input.numel() <= std::numeric_limits<int32_t>::max());
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
