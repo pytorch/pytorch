@@ -172,7 +172,7 @@ void batch_norm_cpu_inference_channels_last(Tensor& output, const Tensor& input,
   if (n_channel != 1) {
     for (int64_t n = 0; n < n_batch; ++n) {
       for (int64_t i = 0; i < image_size; ++i) {
-      for (int64_t c = 0; c < n_channel; ++c) {
+        for (int64_t c = 0; c < n_channel; ++c) {
           // Keep all the offset calculation within the inner loop for
           // simplicity. Compilers are very good at hoisting the common part
           // outside.
