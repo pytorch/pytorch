@@ -12,8 +12,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-constexpr int kDefaultNumSendRecvThreads = 4;
-
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
 struct SendWork {
@@ -40,8 +38,8 @@ class ProcessGroupAgent : public RpcAgent {
   ProcessGroupAgent(
       std::string workerName,
       std::shared_ptr<c10d::ProcessGroup> pg,
-      int numSendRecvThreads = kDefaultNumSendRecvThreads,
-      std::chrono::milliseconds rpcTimeout = kDefaultRpcTimeout);
+      int numSendRecvThreads,
+      std::chrono::milliseconds rpcTimeout);
 
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 

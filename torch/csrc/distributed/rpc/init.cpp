@@ -98,8 +98,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
               std::chrono::milliseconds>(),
           py::arg("name"),
           py::arg("process_group"),
-          py::arg("num_send_recv_threads") = kDefaultNumSendRecvThreads,
-          py::arg("rpc_timeout") = kDefaultRpcTimeout)
+          py::arg("num_send_recv_threads"),
+          py::arg("rpc_timeout"))
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &

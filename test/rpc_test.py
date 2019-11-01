@@ -651,6 +651,7 @@ class RpcTest(object):
 
     def _stress_test_rpc(self, f, repeat=1000, args=()):
         import time
+
         n = self.rank + 1
         dst_rank = n % self.world_size
         futs = []
