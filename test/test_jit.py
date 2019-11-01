@@ -1795,6 +1795,20 @@ graph(%Ra, %Rb):
         with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
             ge(x)
 
+    def test_force_outplace_check_fill(self):
+        def f(x):
+            return torch.empty(x.shape).fill_(7)
+        x = torch.randn(10, 15)
+        ft = torch.jit.trace(f, x, _force_outplace=True)
+        self.assertEqual(f(x), ft(x))
+
+    def test_force_outplace_check_zero(self):
+        def f(x):
+            return torch.empty(x.shape).zero_()
+        x = torch.randn(10, 15)
+        ft = torch.jit.trace(f, x, _force_outplace=True)
+        self.assertEqual(f(x), ft(x))
+
     def do_trace_size(self, requires_grad):
         def fn(x):
             return x.view(x.shape[1] * 2, x.size(0), 2)
