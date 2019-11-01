@@ -67,12 +67,6 @@
 #include <THNN/generic/BCECriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/ClassNLLCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/ClassNLLCriterion.c>
-#include <TH/THGenerateBFloat16Type.h>
-
 #include <THNN/generic/ELU.c>
 #include <TH/THGenerateFloatTypes.h>
 
@@ -86,9 +80,6 @@
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/LogSigmoid.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/MSECriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/SoftMarginCriterion.c>
