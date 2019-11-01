@@ -33,14 +33,14 @@ class TestJitDisabled(unittest.TestCase):
         with TemporaryFileName() as fname:
             with open(fname, 'w') as f:
                 f.write(src)
-                with _jit_disabled():
-                    out_disabled = subprocess.check_output([
-                        sys.executable,
-                        fname])
-                out_enabled = subprocess.check_output([
+            with _jit_disabled():
+                out_disabled = subprocess.check_output([
                     sys.executable,
                     fname])
-                self.assertEqual(out_disabled, out_enabled)
+            out_enabled = subprocess.check_output([
+                sys.executable,
+                fname])
+            self.assertEqual(out_disabled, out_enabled)
 
     def test_attribute(self):
         _program_string = """
