@@ -112,7 +112,7 @@ private:
 };
 
 struct PythonArgs {
-  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args, PyObject** overloaded_args)
+  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args, std::vector<PyObject*> overloaded_args)
     : idx(idx)
     , traceable(traceable)
     , signature(signature)
@@ -123,7 +123,7 @@ struct PythonArgs {
   bool traceable;
   const FunctionSignature& signature;
   PyObject** args;
-  PyObject** overloaded_args;
+  std::vector<PyObject*> overloaded_args;
 
   inline bool has_torch_function();
   inline std::string get_func_name();
@@ -177,7 +177,7 @@ private:
 struct FunctionSignature {
   explicit FunctionSignature(const std::string& fmt);
 
-  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], PyObject* overloaded_args[], bool raise_exception);
+  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], std::vector<PyObject*> &overloaded_args, bool raise_exception);
 
   std::string toString() const;
 

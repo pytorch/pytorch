@@ -527,22 +527,8 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t
   throw TypeError("invalid keyword arguments");
 }
 
-/*
- * Like list.insert(), but for C arrays of PyObject*. Skips error checking.
- */
-static void
-pyobject_array_insert(PyObject **array, int length, int index, PyObject *item)
-{
-    int j;
-
-    for (j = length; j > index; j--) {
-        array[j] = array[j - 1];
-    }
-    array[index] = item;
-}
-
 auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
-                              PyObject* overloaded_args[], bool raise_exception) -> bool {  // NOLINT
+                              std::vector<PyObject*> &overloaded_args, bool raise_exception) -> bool {  // NOLINT
   auto nargs = PyTuple_GET_SIZE(args);
   ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
   ssize_t arg_pos = 0;
@@ -615,12 +601,12 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       dst[i++] = obj;
       // obj has a __torch_function__ implementation and may either be a
       // subclass of Tensor or a Tensor-like duck type. We may need to append
-      // this object to the overloaded_args array, which tracks all of the
+      // this object to the overloaded_args vector, which tracks all of the
       // arguments with distinct __torch_function__ implementations we've seen
       // so far.
       //
       // If this is the first argument we've seen with __torch_function__
-      // defined, so we unconditionall add obj to the overloaded_args array.
+      // defined, so we unconditionall add obj to the overloaded_args vector.
       //
       // If we've already seen arguments with __torch_function__ defined, then
       // we first need to check if obj is the same type as any of the previous
@@ -656,10 +642,10 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
             break;
           }
         }
-        // add object to overloaded_args. If it's a subclass of another class we've already seen
-        // it will be inserted before the superclass, otherwise it will be inserted at the end
-        // of the array
-        pyobject_array_insert(overloaded_args, num_args_with_torch_function, arg_index, obj);
+        // add object to overloaded_args. If it's a subclass of another class
+        // we've already seen it will be inserted before the superclass,
+        // otherwise it will be inserted at the end of the array
+        overloaded_args.insert(overloaded_args.begin() + arg_index, obj);
         num_args_with_torch_function++;
       }
     } else if (param.check(obj, /*is_exact_class=*/false)) {
@@ -716,17 +702,18 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
 }
 
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
-  constexpr int torch_max_args = 32;
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
-    PyObject* overloaded_args[torch_max_args] = {nullptr}; // NOLINT
+    // initialize overloaded_args with 32 elements, which is more
+    // arguments than any existing torch function takes.
+    std::vector<PyObject*> overloaded_args (32, nullptr);
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
     return PythonArgs(0, traceable, signature, parsed_args, overloaded_args);
   }
 
   int i = 0;
   for (auto& signature : signatures_) {
-    PyObject* overloaded_args[torch_max_args] = {nullptr};  // NOLINT
+    std::vector<PyObject*> overloaded_args (32, nullptr);
     if (signature.parse(args, kwargs, parsed_args, overloaded_args, false)) {
       return PythonArgs(i, traceable, signature, parsed_args, overloaded_args);
     }
@@ -746,10 +733,9 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
     i++;
   }
 
-  constexpr int torch_max_args = 32;
   if (plausible_idxs.size() == 1) {
     auto& signature = signatures_[plausible_idxs[0]];
-    PyObject* overloaded_args[torch_max_args] = {nullptr};  // NOLINT
+    std::vector<PyObject*> overloaded_args (32, nullptr);
     signature.parse(args, kwargs, parsed_args, overloaded_args, true);
   }
 
