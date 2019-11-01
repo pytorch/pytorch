@@ -305,7 +305,6 @@ void slow_conv3d_backward_out_cpu_template(
   const int64_t batch_size = input.size(0);
   at::parallel_for(
       0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-        NoGradGuard no_grad;
         AutoNonVariableTypeMode non_variable_type_mode;
         for (int64_t t = start; t < end; t++) {
           Tensor grad_input_t = grad_input[t];
@@ -499,7 +498,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(
 
   at::parallel_for(
       0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-        NoGradGuard no_grad;
         AutoNonVariableTypeMode non_variable_type_mode;
         for (int64_t t = start; t < end; t++) {
           Tensor input_t = input[t];
@@ -650,6 +648,16 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_backward_cpu(
       fgrad_input);
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);
+}
+
+Tensor & slow_conv3d_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
+  Tensor finput = at::empty({0}, self.options());
+  Tensor fgrad_input = at::empty({0}, self.options());
+  return std::get<0>(at::slow_conv3d_forward_out(output, finput, fgrad_input, self, weight, kernel_size, bias, stride, padding));
+}
+
+Tensor slow_conv3d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
+  return std::get<0>(at::slow_conv3d_forward(self, weight, kernel_size, bias, stride, padding));
 }
 
 } // namespace native
