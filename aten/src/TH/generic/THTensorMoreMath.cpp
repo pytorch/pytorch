@@ -34,7 +34,7 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
         TH_OMP_OVERHEAD_THRESHOLD,
         [&](int64_t begin, int64_t end) {
           for (auto iter = begin; iter < end; iter++) {
-            if (equal) {
+            if (!equal) {
               break;
             }
             if (tap[iter] != tbp[iter]) {
