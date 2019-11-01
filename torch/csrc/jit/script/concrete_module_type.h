@@ -62,13 +62,12 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       std::string name,
       const TypePtr& type,
       py::object pyFunction);
-  void addModule(
-      std::string name,
-      std::shared_ptr<ConcreteModuleType> meta);
 
-  void addModule(
-      std::string name,
-      const TypePtr& type);
+  // add a submodule to the ConcreteModuleType can either be ConcreteModuleType
+  // that get constructed recursively, or InterfaceType (Module)
+  void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
+  void addModule(std::string name, const TypePtr& type);
+
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
