@@ -115,13 +115,13 @@ ${return_type} ${api_name}(${type_method_formals}) {
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyC10CatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
+  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyC10Kernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
+  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(TensorTypeId::${Backend}TensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
@@ -154,7 +154,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
+        op${method_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -165,7 +165,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${method_actuals_with_comma_prefix});
+        op${method_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -186,11 +186,10 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op${native_actuals_with_comma_prefix});
 #endif
 }
 """)
-
 C10_FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
@@ -199,7 +198,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -217,7 +216,7 @@ ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-switch(tensorTypeIdToBackend(impl::dispatchTypeId(${type_set}))) {
+switch(tensorTypeIdToBackend(c10::impl::dispatchTypeId(${type_set}))) {
     ${static_dispatch_function_switches}
     default:
         AT_ERROR("${api_name} not implemented for ", at::toString(${type_set}));
@@ -244,7 +243,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -257,7 +256,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
     return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op, impl::dispatchTypeId(${inferred_type_set})${native_actuals_with_comma_prefix});
+        op${native_actuals_with_comma_prefix});
 #endif
 }
 """)
@@ -266,11 +265,6 @@ ZERO_DIM_CHECK = CodeTemplate("""\
 if (${check_name}.dim() == 0) {
     return ${api_name}(${zero_dim_actuals});
 }""")
-
-ZERO_DIM_ONLY = CodeTemplate("""\
-AT_ERROR("${api_name} only supports a 0-dimensional ${check_name} tensor, but got tensor "
-    "with ", ${check_name}.dim(), " dimension(s).");
-""")
 
 SPARSE_CHECK = CodeTemplate("""\
 if(${check_name}.is_sparse()) {
@@ -647,7 +641,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'when_sparse_dispatch': str,
     'with_gil': bool,
     'zero_dim_dispatch_when_scalar': str,
-    'zero_dim_tensor_only': bool,
 })
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
@@ -1178,7 +1171,7 @@ def create_generic(top_env, declarations):
                     return '*this'
                 else:
                     return t
-            option['inferred_type_set'] = 'at::detail::multi_dispatch_tensor_type_set({})'.format(
+            option['inferred_type_set'] = 'c10::detail::multi_dispatch_tensor_type_set({})'.format(
                 ', '.join(swizzle_self(t) for t in multidispatch_tensors)
             )
 
@@ -1225,7 +1218,7 @@ def create_generic(top_env, declarations):
         def gen_namespace_function(option, multidispatch_tensors):
             # type: (Any, List[str]) -> FunctionCode
             option['inferred_type_set'] = (
-                'at::detail::multi_dispatch_tensor_type_set({})'.format(', '.join(multidispatch_tensors)))
+                'c10::detail::multi_dispatch_tensor_type_set({})'.format(', '.join(multidispatch_tensors)))
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
@@ -1509,9 +1502,6 @@ def create_derived(backend_type_env, declarations):
         if not zero_dim_dispatch:
             return []
         broadcasts_arg = zero_dim_dispatch in option.get('broadcast_actuals', '')
-        zero_dim_only = option.get('zero_dim_tensor_only', False)
-        # this combination doesn't seem to make sense
-        assert not (broadcasts_arg and zero_dim_only)
         # if the argument broadcasts, then this would only affect cases where all broadcasted
         # tensors were zero-dim, which is inconsistent with the scalar handling.
         if broadcasts_arg:
@@ -1520,14 +1510,6 @@ def create_derived(backend_type_env, declarations):
                             if arg['name'] != zero_dim_dispatch else "{}.item()".format(arg['name'])
                             for arg in option['formals_list']]
         return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
-
-    def handle_only_zero_dim(env, option):
-        # type: (Environment, FunctionOption) -> Optional[List[str]]
-        if option.get('zero_dim_tensor_only', False):
-            check_name = option['zero_dim_dispatch_when_scalar']
-            return [ZERO_DIM_ONLY.substitute(env, check_name=check_name)]
-        else:
-            return None
 
     def allocate_arg(env, arg, output_count):
         # type: (Environment, THFormal, int) -> List[str]
@@ -1584,11 +1566,6 @@ def create_derived(backend_type_env, declarations):
         # type: (Environment, FunctionOption, List[str]) -> List[str]
         body = []  # type: List[str]
         body += handle_zero_dim(env, option)
-        only_zero_dim_check = handle_only_zero_dim(env, option)
-        if only_zero_dim_check is not None:
-            #  code below only_zero_dim_check is unreachable so we do not need to generate the rest.
-            body += only_zero_dim_check
-            return body
 
         cases = []
         for scalar_name, c_type, accreal, _ in scalar_types:

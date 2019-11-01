@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
-#include <torch/nn/cloneable.h>
 #include <torch/nn/functional/normalization.h>
 #include <torch/nn/options/normalization.h>
 #include <torch/nn/pimpl.h>
@@ -51,6 +50,30 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(LayerNorm);
+
+/// Applies local response normalization over an input signal composed
+/// of several input planes, where channels occupy the second dimension.
+/// Applies normalization across channels
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LocalResponseNorm to learn
+/// about the exact behavior of this module.
+class TORCH_API LocalResponseNormImpl : public Cloneable<LocalResponseNormImpl> {
+ public:
+  LocalResponseNormImpl(int64_t size)
+      : LocalResponseNormImpl(LocalResponseNormOptions(size)) {}
+  explicit LocalResponseNormImpl(const LocalResponseNormOptions& options_);
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `LocalResponseNormImpl` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  LocalResponseNormOptions options;
+};
+
+TORCH_MODULE(LocalResponseNorm);
 
 } // namespace nn
 } // namespace torch

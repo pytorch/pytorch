@@ -9,6 +9,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
 #include <ATen/core/Dict.h>
@@ -302,45 +304,62 @@ static void gatherParametersAndBuffers(
   }
 }
 
-
+std::pair<std::shared_ptr<TracingState>, Stack> trace(
+    Stack inputs,
+    const std::function<Stack(Stack)>& traced_fn,
+    std::function<std::string(const Variable&)> var_name_lookup_fn,
+    bool force_outplace,
+    script::Module* self) {
+  try {
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
-std::pair<std::shared_ptr<TracingState>, Stack> enter(
-    Stack inputs,
-    script::Module* self) {
-  if (isTracing()) {
-    AT_ERROR("Tracing can't be nested");
-  }
-  auto state = std::make_shared<TracingState>();
-  setTracingState(state);
+    if (isTracing()) {
+      AT_ERROR("Tracing can't be nested");
+    }
+    auto state = std::make_shared<TracingState>();
+    setTracingState(state);
 
-  // if we are a module, then make sure the modules parameters are in the map
-  // and mapped to accesses to the self object
-  if (self) {
-    Value* self_value =
-        state->graph->insertInput(0, "self")->setType(self->module_object()->type());
-    gatherParametersAndBuffers(state, self_value, *self);
-  }
+    // if we are a module, then make sure the modules parameters are in the map
+    // and mapped to accesses to the self object
+    if (self) {
+      Value* self_value =
+          state->graph->insertInput(0, "self")->setType(self->module_object()->type());
+      gatherParametersAndBuffers(state, self_value, *self);
+    }
 
-  size_t i = 0;
-  for (IValue& input : inputs) {
-    input = addInput(state, input, input.type(), state->graph->addInput());
-  }
-  return std::make_pair(state, inputs);
-}
+    for (IValue& input : inputs) {
+      input = addInput(state, input, input.type(), state->graph->addInput());
+    }
+    auto graph = state->graph;
 
-// Exit a trace, treating 'outputs' as the outputs of the trace.  These
-// are the variables whose values will be computed upon subsequent
-// invocations of the trace.
-void exit(const Stack& outputs) {
-  auto& state = getTracingState();
-  size_t i = 0;
-  for (auto& output : outputs) {
-    state->graph->registerOutput(state->getOutput(output));
-    i++;
+    getTracingState()->lookup_var_name_fn = std::move(var_name_lookup_fn);
+    getTracingState()->force_outplace = force_outplace;
+
+    // Invoke the traced function
+    auto out_stack = traced_fn(inputs);
+
+    // Exit a trace, treating 'out_stack' as the outputs of the trace.  These
+    // are the variables whose values will be computed upon subsequent
+    // invocations of the trace.
+    size_t i = 0;
+    for (auto& output : out_stack) {
+      state->graph->registerOutput(state->getOutput(output));
+      i++;
+    }
+    setTracingState(nullptr);
+
+    if (script::getInlineEverythingMode()) {
+      Inline(*graph);
+    }
+    LowerSimpleTuples(graph);
+    EliminateDeadCode(graph);
+
+    return {state, out_stack};
+  } catch (...) {
+    tracer::abandon();
+    throw;
   }
-  setTracingState(nullptr);
 }
 
 // Abort tracing. Used to reset the state in case of errors.
