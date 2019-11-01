@@ -228,6 +228,20 @@ void smooth_l1_kernel(TensorIterator& iter) {
   });
 }
 
+void mse_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cpu", [&]() {
+    cpu_kernel_vec(iter,
+      [=](scalar_t a, scalar_t b) -> scalar_t {
+        auto diff = a - b;
+        return diff * diff;
+      },
+      [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+      auto diff =  a - b;
+      return diff * diff;
+      });
+  });
+}
+
 } // anonymous namespace
 
 
@@ -244,5 +258,6 @@ REGISTER_DISPATCH(ge_stub, &ge_kernel);
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
+REGISTER_DISPATCH(mse_stub, &mse_kernel);
 
 }} // namespace at::native
