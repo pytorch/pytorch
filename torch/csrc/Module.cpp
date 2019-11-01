@@ -63,10 +63,6 @@
 #define WITH_NUMPY_IMPORT_ARRAY
 #include <torch/csrc/utils/numpy_stub.h>
 
-#ifndef WIN32
-#include <pthread.h>
-#endif
-
 namespace py = pybind11;
 
 PyObject* module;
@@ -626,12 +622,6 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
   }
 }
 
-#ifndef WIN32
-static void torch_at_fork() {
-  // Initialize OpenMP in the child process after fork (see gh-28389)
-  at::get_num_threads();
-}
-#endif
 
 #ifdef _WIN32
 __declspec(dllexport)
@@ -790,12 +780,6 @@ PyObject* initModule() {
 
 #ifdef USE_NUMPY
   if (_import_array() < 0) return nullptr;
-#endif
-
-#ifndef WIN32
-  if (pthread_atfork(nullptr, nullptr, torch_at_fork) != 0) {
-    throw std::runtime_error("Failed to register atfork handler");
-  }
 #endif
 
   return module;
