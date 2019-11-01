@@ -534,7 +534,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
   auto features = input_reshaped.size(2);
   auto input = input_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
   auto input_options = input_.options();
-  if (input_.scalar_type() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   if (train) {

@@ -4,20 +4,21 @@ namespace at { namespace native {
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
                                                    const Tensor& running_mean, const Tensor& running_var, bool train, double momentum, double epsilon) {
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_cuda", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "batch_norm_cuda", [&] {
       auto mean_st = running_mean.dtype();
       auto var_st = running_var.dtype();
       TORCH_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
       bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
+      bool is_bfloat16_float = std::is_same<scalar_t, at::BFloat16>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
-        if (is_half_float) {
-          return batch_norm_cuda_template<at::Half, float, int32_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+        if (is_half_float || is_bfloat16_float) {
+          return batch_norm_cuda_template<scalar_t, float, int32_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
         } else {
           return batch_norm_cuda_template<scalar_t, scalar_t, int32_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
         }
       } else {
-        if (is_half_float) {
-          return batch_norm_cuda_template<at::Half, float, int64_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
+        if (is_half_float || is_bfloat16_float) {
+          return batch_norm_cuda_template<scalar_t, float, int64_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
         } else {
           return batch_norm_cuda_template<scalar_t, scalar_t, int64_t>(self, weight, bias, running_mean, running_var, train, momentum, epsilon);
         }
@@ -27,20 +28,21 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Ten
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_out, const Tensor& self, const Tensor& weight, const Tensor& running_mean, const Tensor& running_var,
                                                             const Tensor& save_mean, const Tensor& save_invstd, bool train, double epsilon, std::array<bool,3> grad_input_mask) {
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "batch_norm_backward_cuda", [&] {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "batch_norm_backward_cuda", [&] {
       auto mean_st = running_mean.dtype();
       auto var_st = running_var.dtype();
       TORCH_CHECK(mean_st == var_st, "running_mean and running_var need to have the same data types");
       bool is_half_float = std::is_same<scalar_t, at::Half>::value && mean_st == at::kFloat;
+      bool is_bfloat16_float = std::is_same<scalar_t, at::BFloat16>::value && mean_st == at::kFloat;
       if (cuda::detail::canUse32BitIndexMath(self)) {
-        if (is_half_float) {
-          return batch_norm_backward_cuda_template<at::Half, float, int32_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
+        if (is_half_float || is_bfloat16_float) {
+          return batch_norm_backward_cuda_template<scalar_t, float, int32_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
         } else {
           return batch_norm_backward_cuda_template<scalar_t, scalar_t, int32_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
         }
       } else {
-        if (is_half_float) {
-          return batch_norm_backward_cuda_template<at::Half, float, int64_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
+        if (is_half_float || is_bfloat16_float) {
+          return batch_norm_backward_cuda_template<scalar_t, float, int64_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
         } else {
           return batch_norm_backward_cuda_template<scalar_t, scalar_t, int64_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, epsilon, grad_input_mask);
         }

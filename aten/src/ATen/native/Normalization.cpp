@@ -484,6 +484,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
                && input.scalar_type() != at::kDouble
+               && input.scalar_type() != at::kBFloat16
                && (weight.scalar_type() != at::kHalf)
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
