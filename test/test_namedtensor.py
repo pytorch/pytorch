@@ -907,6 +907,11 @@ class TestNamedTensor(TestCase):
 
             # creation functions
             fn('empty_like'),
+            fn('zeros_like'),
+            fn('ones_like'),
+            fn('full_like', 3.14),
+            fn('rand_like'),
+            fn('randn_like'),
 
             # bernoulli variants
             method('bernoulli_', 0.5),
