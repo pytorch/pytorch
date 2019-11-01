@@ -1,5 +1,3 @@
-#pragma GCC diagnostic ignored "-Wbraced-scalar-init"
-
 #include <gtest/gtest.h>
 #include <test/cpp/api/support.h>
 
