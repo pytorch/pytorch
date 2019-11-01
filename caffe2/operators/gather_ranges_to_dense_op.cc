@@ -71,16 +71,11 @@ are sorted by the corresponding KEY.
     .Arg(
         "min_observation",
         "The number of observations needed before deciding that the ratio of "
-        "empty ranges or mismatched ranges is alarming.")
-    .Arg(
-        "max_empty_ratio",
-        "An error log is triggered when ratio of empty ranges exceeds this.")
+        "mismatched ranges is alarming, also determines whether an info "
+        "sumarizing the empty and mismatch ratio will be printed at the end.")
     .Arg(
         "max_mismatched_ratio",
         "An error is raised when ratio of mismatched ranges exceeds this.")
-    .Arg(
-        "log_every_n",
-        "A log is recorded only after an error is triggered every n times.")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);

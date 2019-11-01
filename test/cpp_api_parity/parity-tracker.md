@@ -78,7 +78,7 @@ torch.nn.InstanceNorm1d|No|No
 torch.nn.InstanceNorm2d|No|No
 torch.nn.InstanceNorm3d|No|No
 torch.nn.LayerNorm|Yes|No
-torch.nn.LocalResponseNorm|No|No
+torch.nn.LocalResponseNorm|Yes|No
 torch.nn.RNN|No|No
 torch.nn.LSTM|No|No
 torch.nn.GRU|No|No
@@ -105,7 +105,7 @@ torch.nn.PairwiseDistance|Yes|No
 torch.nn.L1Loss|Yes|No
 torch.nn.MSELoss|Yes|No
 torch.nn.CrossEntropyLoss|No|No
-torch.nn.CTCLoss|No|No
+torch.nn.CTCLoss|Yes|No
 torch.nn.NLLLoss|No|No
 torch.nn.PoissonNLLLoss|No|No
 torch.nn.KLDivLoss|Yes|No

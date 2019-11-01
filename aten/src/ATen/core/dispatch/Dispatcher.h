@@ -293,7 +293,22 @@ inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatch
           "Available functions are ", dispatchTable.listAllDispatchKeys())
   }
 
-  const std::string dispatchKeyStr = dispatchKey.has_value() ? toString(*dispatchKey) : "None";
+  // If the input is quantized, but the quantization is not supported.
+  if (dispatch_key.value() == TensorTypeId::QuantizedCPUTensorId) {
+    TORCH_CHECK(false, "Tried running '", operator_name_, "' with a",
+                " quantized tensor but '", operator_name_, "' expects a",
+                " non-quantized input.");
+  }
+
+  // If the input is not quantized, but the kernel is.
+  if (kernels_.lookup(TensorTypeId::QuantizedCPUTensorId)) {
+    TORCH_CHECK(false, "Tried running '", operator_name_, "' but the input",
+                " is not quantized. Please ensure you have QuantStub",
+                " during model conversion, or you manually quantize the",
+                " input tensor.");
+  }
+
+  const std::string dispatch_key_str = toString(*dispatch_key);
   TORCH_CHECK(false, "Didn't find kernel to dispatch to for operator '", dispatchTable.operatorName(),
            "'. Tried to look up kernel for dispatch key '", dispatchKeyStr,
            "'. Registered dispatch keys are: ", dispatchTable.listAllDispatchKeys());
