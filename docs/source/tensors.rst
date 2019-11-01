@@ -304,6 +304,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: le_
    .. automethod:: lerp
    .. automethod:: lerp_
+   .. automethod:: lgamma
+   .. automethod:: lgamma_
    .. automethod:: log
    .. automethod:: log_
    .. automethod:: logdet
@@ -363,6 +365,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: permute
    .. automethod:: pin_memory
    .. automethod:: pinverse
+   .. automethod:: polygamma
+   .. automethod:: polygamma_
    .. automethod:: pow
    .. automethod:: pow_
    .. automethod:: prod

@@ -2467,6 +2467,26 @@ Example::
     tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
 """.format(**common_args))
 
+add_docstr(torch.lgamma,
+           r"""
+lgamma(input, out=None) -> Tensor
+
+Computes the logarithm of the gamma function on :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \log \Gamma(\text{input}_{i})
+""" + """
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.arange(0.5, 2, 0.5)
+    >>> torch.lgamma(a)
+    tensor([ 0.5724,  0.0000, -0.1208])
+""".format(**common_args))
+
 add_docstr(torch.linspace,
            r"""
 linspace(start, end, steps=100, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -3890,6 +3910,30 @@ Args:
     https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
 
 """)
+
+add_docstr(torch.polygamma,
+           r"""
+polygamma(n, input, out=None) -> Tensor
+
+Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
+:math:`n \geq 0` is called the order of the polygamma function.
+
+.. math::
+    \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
+
+.. note::
+    This function is not implemented for :math:`n \geq 2`.
+""" + """
+Args:
+    n (int): the order of the polygamma function
+    {input}
+    {out}
+
+Example::
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.polygamma(1, a)
+    tensor([1.64493, 4.9348])
+""".format(**common_args))
 
 add_docstr(torch.pow,
            r"""

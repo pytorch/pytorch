@@ -1469,6 +1469,19 @@ lerp_(end, weight) -> Tensor
 In-place version of :meth:`~Tensor.lerp`
 """)
 
+add_docstr_all('lgamma',
+               r"""
+lgamma() -> Tensor
+
+See :func:`torch.lgamma`
+""")
+
+add_docstr_all('lgamma_', r"""
+lgamma_() -> Tensor
+
+In-place version of :meth:`~Tensor.lgamma`
+""")
+
 add_docstr_all('log',
                r"""
 log() -> Tensor
@@ -1871,6 +1884,20 @@ Example:
     torch.Size([2, 3, 5])
     >>> x.permute(2, 0, 1).size()
     torch.Size([5, 2, 3])
+""")
+
+add_docstr_all('polygamma',
+               r"""
+polygamma(n) -> Tensor
+
+See :func:`torch.polygamma`
+""")
+
+add_docstr_all('polygamma_',
+               r"""
+polygamma_(n) -> Tensor
+
+In-place version of :meth:`~Tensor.polygamma`
 """)
 
 add_docstr_all('pow',
