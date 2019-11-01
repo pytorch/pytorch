@@ -124,13 +124,27 @@ static inline void upsample_3d_shape_check(
 }
 
 template <typename accscalar_t>
+__host__ __forceinline__ static accscalar_t compute_scales_value(
+    const double scale,
+    int64_t input_size,
+    int64_t output_size) {
+  if (output_size > 1) {
+    return (scale > 0.) ? (accscalar_t)(1. / (accscalar_t)(scale))
+                        : (accscalar_t)input_size / output_size;
+  } else {
+    return static_cast<accscalar_t>(0);
+  }
+}
+
+template <typename accscalar_t>
 __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
     int input_size,
     int output_size,
-    bool align_corners) {
+    bool align_corners,
+    const double scale=-1.) {
   if (output_size > 1) {
     return align_corners ? (accscalar_t)(input_size - 1) / (output_size - 1)
-                         : (accscalar_t)input_size / output_size;
+                         :  compute_scales_value<accscalar_t>(scale, input_size, output_size);
   } else {
     return static_cast<accscalar_t>(0);
   }

@@ -152,7 +152,7 @@ static void upsample_linear1d_out_cuda_template(
         auto odata = output.packed_accessor64<scalar_t, 3>();
 
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-          input_width, output_width, align_corners);
+          input_width, output_width, align_corners, scales_1);
 
         upsample_linear1d_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, num_threads),
@@ -213,7 +213,7 @@ static void upsample_linear1d_backward_out_cuda_template(
         auto odata = grad_output.packed_accessor64<scalar_t, 3>();
 
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-            input_width, output_width, align_corners);
+            input_width, output_width, align_corners, scales_1);
 
         upsample_linear1d_out_frame_backward<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, num_threads),

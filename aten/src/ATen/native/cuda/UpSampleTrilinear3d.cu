@@ -252,11 +252,11 @@ static void upsample_trilinear3d_out_cuda_template(
         auto odata = output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
-            input_depth, output_depth, align_corners);
+            input_depth, output_depth, align_corners, scales_1);
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
-            input_height, output_height, align_corners);
+            input_height, output_height, align_corners, scales_2);
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-            input_width, output_width, align_corners);
+            input_width, output_width, align_corners, scales_3);
 
         upsample_trilinear3d_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, num_threads),
@@ -342,11 +342,11 @@ static void upsample_trilinear3d_backward_out_cuda_template(
         auto odata = grad_output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
-            input_depth, output_depth, align_corners);
+            input_depth, output_depth, align_corners, scales_1);
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
-            input_height, output_height, align_corners);
+            input_height, output_height, align_corners, scales_2);
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-            input_width, output_width, align_corners);
+            input_width, output_width, align_corners, scales_3);
 
         upsample_trilinear3d_backward_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, num_threads),
