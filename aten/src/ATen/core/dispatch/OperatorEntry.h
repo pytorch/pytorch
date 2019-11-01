@@ -28,50 +28,24 @@ public:
   }
 
   template<class Return, class... Args>
-  Return callUnboxed(TensorTypeId dispatchKey, Args... args) const {
-    // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
-    #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 5
-      // GCC 4 has issues with parameter packs inside lambdas, let's instead
-      // return the KernelFunction from the lambda. Note: This copies the
-      // KernelFunction and is slow, but it's the only way to make it work for
-      // GCC 4.
-      KernelFunction func = dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> KernelFunction {
-          return dispatchTable.lookup(dispatchKey);
-      });
-      return func.callUnboxed<Return, Args...>(std::forward<Args>(args)...);
-    #else
-      // For all other compilers and newer GCC, let's do it right
-      return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-          return dispatchTable.lookup(dispatchKey)
-              .callUnboxed<Return, Args...>(std::forward<Args>(args)...);
-      });
-    #endif
+  Return callUnboxed(Args... args) const {
+    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
+        const KernelFunction& kernel = dispatchTable.lookupUnboxed(args...);
+        return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
+    });
   }
 
   template<class Return, class... Args>
-  Return callUnboxedOnly(TensorTypeId dispatchKey, Args... args) const {
-    // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
-    #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && __GNUC__ < 5
-      // GCC 4 has issues with parameter packs inside lambdas, let's instead
-      // return the KernelFunction from the lambda. Note: This copies the
-      // KernelFunction and is slow, but it's the only way to make it work for
-      // GCC 4.
-      KernelFunction func = dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> KernelFunction {
-          return dispatchTable.lookup(dispatchKey);
-      });
-      return func.callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
-    #else
-      // For all other compilers and newer GCC, let's do it right
-      return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-          return dispatchTable.lookup(dispatchKey)
-              .callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
-      });
-    #endif
+  Return callUnboxedOnly(Args... args) const {
+    return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
+        const KernelFunction& kernel = dispatchTable.lookupUnboxed(args...);
+        return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
+    });
   }
 
   void callBoxed(Stack* stack) const {
     return dispatchTable_.read([&] (const DispatchTable& dispatchTable) {
-        dispatchTable.lookup(stack).callBoxed(stack);
+        dispatchTable.lookupBoxed(stack).callBoxed(stack);
     });
   }
 

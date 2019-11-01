@@ -62,6 +62,7 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
     set(NNPACK_BUILD_TESTS OFF CACHE BOOL "")
     set(NNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(NNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+    set(NNPACK_LINK_REFERENCE_LAYERS ON CACHE BOOL "")
     set(NNPACK_LIBRARY_TYPE "static" CACHE STRING "")
     set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
     set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
@@ -71,7 +72,6 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
     # We build static versions of nnpack and pthreadpool but link
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET nnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
-    set_property(TARGET nnpack_reference_layers PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()

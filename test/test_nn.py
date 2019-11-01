@@ -1877,10 +1877,10 @@ class TestNN(NNTestCase):
             for p, g in zip(l.parameters(), grad_list):
                 p._grad = g.clone().view_as(p.data) if g is not None else g
 
-        clip_grad_value_(l.parameters(), clip_value)
-        for p in filter(lambda p: p.grad is not None, l.parameters()):
-            self.assertLessEqual(p.grad.data.max(), clip_value)
-            self.assertGreaterEqual(p.grad.data.min(), -clip_value)
+            clip_grad_value_(l.parameters(), clip_value)
+            for p in filter(lambda p: p.grad is not None, l.parameters()):
+                self.assertLessEqual(p.grad.data.max(), clip_value)
+                self.assertGreaterEqual(p.grad.data.min(), -clip_value)
 
         # Should accept a single Tensor as input
         p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
