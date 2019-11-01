@@ -366,8 +366,8 @@ void slow_conv3d_backward_parameters_frame(
 static void slow_conv3d_backward_parameters_out_cpu_template(
     Tensor& grad_weight,
     Tensor& grad_bias,
-    const Tensor& input_,
-    const Tensor& grad_output_,
+    const Tensor& input,
+    const Tensor& grad_output,
     const Tensor& finput,
     Tensor fgrad_input,
     IntArrayRef kernel_size,
@@ -388,8 +388,8 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
   const int64_t stride_width = stride[2];
 
   slow_conv3d_shape_check(
-      input_,
-      grad_output_,
+      input,
+      grad_output,
       grad_weight,
       grad_bias,
       kernel_depth,
@@ -413,13 +413,12 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
     checkContiguous(c, grad_bias_arg);
   }
 
-  auto input = input_.contiguous();
-  auto grad_output = grad_output_.contiguous();
+  auto grad_output_contiguous = grad_output.contiguous();
 
   const int64_t batch_size = input.size(0);
   at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
     for (int64_t t = start; t < end; t++) {
-      Tensor grad_output_t = grad_output[t];
+      Tensor grad_output_t = grad_output_contiguous[t];
       Tensor finput_t;
       if (grad_weight_2d.defined()) {
         finput_t = finput[t];
@@ -438,7 +437,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(
     Tensor& finput,
     Tensor& fgrad_input,
     const Tensor& self,
-    const Tensor& weight_,
+    const Tensor& weight,
     IntArrayRef kernel_size,
     const Tensor& bias,
     IntArrayRef stride,
@@ -456,7 +455,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(
   slow_conv3d_shape_check(
       self,
       Tensor(),
-      weight_,
+      weight,
       bias,
       kernel_depth,
       kernel_height,
@@ -470,7 +469,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv3d_forward_out_cpu(
       false);
 
   const Tensor input = self.contiguous();
-  const Tensor weight_2d = view_weight_2d(weight_);
+  const Tensor weight_2d = view_weight_2d(weight);
 
   const int64_t ndim = input.dim();
   const int64_t dim_planes = 1;
