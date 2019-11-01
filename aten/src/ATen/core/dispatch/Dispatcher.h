@@ -10,8 +10,6 @@ namespace c10 {
 
 class CAFFE2_API OperatorHandle;
 
-namespace detail {
-
 /**
  * Implement this interface and register your instance with the dispatcher
  * to get notified when operators are registered or deregistered with
@@ -218,21 +216,21 @@ inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatch
   }
 
   // If the input is quantized, but the quantization is not supported.
-  if (dispatch_key.value() == TensorTypeId::QuantizedCPUTensorId) {
-    TORCH_CHECK(false, "Tried running '", operator_name_, "' with a",
-                " quantized tensor but '", operator_name_, "' expects a",
+  if (dispatchKey.value() == TensorTypeId::QuantizedCPUTensorId) {
+    TORCH_CHECK(false, "Tried running '", dispatchTable.operatorName(), "' with a",
+                " quantized tensor but '", dispatchTable.operatorName(), "' expects a",
                 " non-quantized input.");
   }
 
   // If the input is not quantized, but the kernel is.
-  if (kernels_.lookup(TensorTypeId::QuantizedCPUTensorId)) {
-    TORCH_CHECK(false, "Tried running '", operator_name_, "' but the input",
+  if (dispatchTable.lookup(TensorTypeId::QuantizedCPUTensorId)) {
+    TORCH_CHECK(false, "Tried running '", dispatchTable.operatorName(), "' but the input",
                 " is not quantized. Please ensure you have QuantStub",
                 " during model conversion, or you manually quantize the",
                 " input tensor.");
   }
 
-  const std::string dispatch_key_str = toString(*dispatch_key);
+  const std::string dispatchKeyStr = toString(*dispatchKey);
   TORCH_CHECK(false, "Didn't find kernel to dispatch to for operator '", dispatchTable.operatorName(),
            "'. Tried to look up kernel for dispatch key '", dispatchKeyStr,
            "'. Registered dispatch keys are: ", dispatchTable.listAllDispatchKeys());

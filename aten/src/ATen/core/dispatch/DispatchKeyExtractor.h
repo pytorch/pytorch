@@ -52,7 +52,7 @@ namespace detail {
   // don't want to move into this function!)
   template <typename... Args>
   TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
-    return MultiDispatchTensorTypeSet().apply(args...);
+    return MultiDispatchTensorTypeSet().apply(args...).ts;
   }
 }
 
