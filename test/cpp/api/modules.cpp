@@ -1221,8 +1221,7 @@ TEST_F(ModulesTest, BatchNorm2dStateful) {
   ASSERT_EQ(bn->running_var.size(0), 5);
 
   ASSERT_TRUE(bn->num_batches_tracked.defined());
-  ASSERT_EQ(bn->num_batches_tracked.dim(), 1);
-  ASSERT_EQ(bn->num_batches_tracked.size(0), 1);
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 0);
 
   ASSERT_TRUE(bn->options.affine());
 
@@ -1272,8 +1271,7 @@ TEST_F(ModulesTest, BatchNorm3dStateful) {
   ASSERT_EQ(bn->running_var.size(0), 5);
 
   ASSERT_TRUE(bn->num_batches_tracked.defined());
-  ASSERT_EQ(bn->num_batches_tracked.dim(), 1);
-  ASSERT_EQ(bn->num_batches_tracked.size(0), 1);
+  ASSERT_EQ(bn->num_batches_tracked.dim(), 0);
 
   ASSERT_TRUE(bn->options.affine());
 
