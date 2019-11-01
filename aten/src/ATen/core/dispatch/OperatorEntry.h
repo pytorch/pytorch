@@ -30,16 +30,16 @@ public:
   template<class Return, class... Args>
   Return callUnboxed(Args... args) const {
     return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-        return dispatchTable.lookupUnboxed(args...)
-            .template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
+        const KernelFunction& kernel = dispatchTable.lookupUnboxed(args...);
+        return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
     });
   }
 
   template<class Return, class... Args>
   Return callUnboxedOnly(Args... args) const {
     return dispatchTable_.read([&] (const DispatchTable& dispatchTable) -> Return {
-        return dispatchTable.lookupUnboxed(args...)
-            .template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
+        const KernelFunction& kernel = dispatchTable.lookupUnboxed(args...);
+        return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
     });
   }
 
