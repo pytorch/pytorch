@@ -31,6 +31,8 @@ namespace at { namespace native {
 
 DEFINE_DISPATCH(smooth_l1_stub);
 DEFINE_DISPATCH(smooth_l1_backward_stub);
+DEFINE_DISPATCH(mse_stub);
+DEFINE_DISPATCH(mse_backward_stub);
 
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
   auto prod_sum = (input1 * input2).sum(1);
@@ -190,6 +192,49 @@ Tensor& smooth_l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_outpu
 Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
   auto grad_input = at::zeros_like(input);
   return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
+}
+
+Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor loss;
+  auto iter = TensorIterator::binary_op(loss, input, target);
+  mse_stub(iter.device_type(), iter);
+  return apply_loss_reduction(iter.output(), reduction);
+}
+
+Tensor& mse_loss_out(Tensor&result, const Tensor& input, const Tensor& target, int64_t reduction) {
+  if (reduction != Reduction::None) {
+    Tensor loss;
+    auto iter = TensorIterator::binary_op(loss, input, target);
+    mse_stub(iter.device_type(), iter);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(result, iter.output(), 0);
+    } else {
+      at::sum_out(result, iter.output(), 0);
+    }
+  } else {
+    auto iter = TensorIterator::binary_op(result, input, target);
+    mse_stub(iter.device_type(), iter);;
+  }
+  return result;
+}
+
+Tensor mse_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor grad_input = at::zeros_like(input);
+  return at::mse_loss_backward_out(grad_input, grad_output, input, target, reduction);
+}
+
+Tensor& mse_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
+    const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? 2. / input.numel() : 2.;
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(grad_input);
+  iter.add_input(input);
+  iter.add_input(target);
+  iter.add_input(grad_output);
+  iter.build();
+  mse_backward_stub(iter.device_type(), iter, norm);
+  return grad_input;
 }
 
 }}  // namespace at::native
