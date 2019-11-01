@@ -61,10 +61,8 @@ def process_function(decl, has_tensor_options, disable_autograd):
         actuals.append(actual)
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
     if decl['name'].endswith('_like') and not has_tensor_options:
-        if decl['name'] == 'empty_like':
-            actuals.insert(-1, '{}.options()'.format(actuals[0]))
-        else:
-            actuals.append('{}.options()'.format(actuals[0]))
+        # Insert TensorOptions before MemoryFormat
+        actuals.insert(-1, '{}.options()'.format(actuals[0]))
 
     if not disable_autograd:
         pre_record_trace, post_record_trace = format_trace(decl)
