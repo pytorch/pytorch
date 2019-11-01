@@ -1010,6 +1010,7 @@ class DistAutogradTest(object):
         # Verify thread is still alive (indicating backward hasn't completed yet).
         self.assertTrue(t.is_alive())
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28928")
     @dist_init
     def test_backward_autograd_engine_error(self):
         with dist_autograd.context() as context_id:
