@@ -67,6 +67,31 @@ TORCH_MODULE(Linear);
 
 // ============================================================================
 
+/// A placeholder for Flatten operator
+class TORCH_API FlattenImpl : public Cloneable<FlattenImpl> {
+ public:
+  explicit FlattenImpl(const FlattenOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `Flatten` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// Applies a flatten transform on the `input`.
+  Tensor forward(const Tensor& input);
+
+  /// The options used to configure this module.
+  FlattenOptions options;
+};
+
+/// A `ModuleHolder` subclass for `FlattenImpl`.
+/// See the documentation for `FlattenImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Flatten);
+
+// ============================================================================
+
 /// Applies a billinear transformation with optional bias.
 class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
  public:

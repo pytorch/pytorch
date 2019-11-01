@@ -133,21 +133,6 @@ THC_API void THNN_(LogSigmoid_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *buffer);
 
-THC_API void THNN_(MSECriterion_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *output,
-                  int64_t reduction);
-
-THC_API void THNN_(MSECriterion_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int64_t reduction);
-
 THC_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
