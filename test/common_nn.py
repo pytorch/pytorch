@@ -3139,7 +3139,7 @@ new_criterion_tests = [
         desc='dim_is_3',
     ),
     dict(
-        module_name='PoissonNLLLoss', # Default is log_input=True, full=False
+        module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         reference_fn=lambda i, t, _: (i.exp() - t.mul(i)).mean(),
@@ -3148,7 +3148,7 @@ new_criterion_tests = [
     ),
     dict(
         module_name='PoissonNLLLoss',
-        constructor_args=(False, False), # log_input=False, full=False
+        constructor_args=(False, False),  # log_input=False, full=False
         input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         reference_fn=lambda i, t, _: (i - t.mul((i + 1e-8).log())).mean(),
@@ -3157,7 +3157,7 @@ new_criterion_tests = [
     ),
     dict(
         module_name='PoissonNLLLoss',
-        constructor_args=(True, True), # log_input=True, full=True
+        constructor_args=(True, True),  # log_input=True, full=True
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         reference_fn=lambda i, t, _:
@@ -3167,7 +3167,7 @@ new_criterion_tests = [
     ),
     dict(
         module_name='PoissonNLLLoss',
-        constructor_args=(False, True), # log_input=False, full=True
+        constructor_args=(False, True),  # log_input=False, full=True
         input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         reference_fn=lambda i, t, _:
