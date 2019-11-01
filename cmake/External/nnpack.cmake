@@ -2,7 +2,7 @@ if (__NNPACK_INCLUDED)
   return()
 endif()
 set(__NNPACK_INCLUDED TRUE)
-
+ 
 if (NOT USE_NNPACK)
   return()
 endif()
@@ -14,7 +14,7 @@ endif()
 ##############################################################################
 
 ##############################################################################
-# (1) MSVC - unsupported
+# (1) MSVC - unsupported 
 ##############################################################################
 
 if (MSVC)
@@ -62,7 +62,6 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
     set(NNPACK_BUILD_TESTS OFF CACHE BOOL "")
     set(NNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(NNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-    set(NNPACK_LINK_REFERENCE_LAYERS ON CACHE BOOL "")
     set(NNPACK_LIBRARY_TYPE "static" CACHE STRING "")
     set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
     set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
