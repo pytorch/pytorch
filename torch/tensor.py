@@ -505,6 +505,8 @@ class Tensor(torch._C._TensorBase):
 
         shape = tuple(self.shape)
         if self.is_contiguous():
+            # __cuda_array_interface__ v2 requires the strides to be omitted
+            # (either not set or set to None) for C-contiguous arrays.
             strides = None
         else:
             strides = tuple(s * itemsize for s in self.stride())
