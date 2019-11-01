@@ -238,37 +238,20 @@ class TestGatherRanges(serial.SerializedTestCase):
         workspace.FeedBlob("ranges", ranges)
         workspace.FeedBlob("key", key)
 
-        def getOpWithThreshold(
-            min_observation=2,
-            max_empty_ratio=0.3,
-            max_mismatched_ratio=0.6,
-            log_every_n=1,
-        ):
+        def getOpWithThreshold(min_observation=2, max_mismatched_ratio=0.6):
             return core.CreateOperator(
                 "GatherRangesToDense",
                 ["data", "ranges", "key"],
                 ["X_{}".format(i) for i in range(len(lengths))],
                 lengths=lengths,
                 min_observation=min_observation,
-                max_empty_ratio=max_empty_ratio,
                 max_mismatched_ratio=max_mismatched_ratio,
-                log_every_n=log_every_n,
             )
 
         workspace.RunOperatorOnce(getOpWithThreshold())
 
-        # An error log should be triggered by each feature in this setting.
-        workspace.RunOperatorOnce(getOpWithThreshold(max_empty_ratio=0.2))
-
-        # Error logs should be triggered only half the time.
         workspace.RunOperatorOnce(
-            getOpWithThreshold(max_empty_ratio=0.2, log_every_n=2)
-        )
-
-        workspace.RunOperatorOnce(
-            getOpWithThreshold(
-                max_empty_ratio=0.2, max_mismatched_ratio=0.4, min_observation=5
-            )
+            getOpWithThreshold(max_mismatched_ratio=0.4, min_observation=5)
         )
 
         with self.assertRaises(RuntimeError):

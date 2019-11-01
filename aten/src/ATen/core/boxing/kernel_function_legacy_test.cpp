@@ -908,7 +908,7 @@ void expectCallsConcatUnboxed(TensorTypeId type_id) {
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, type_id, dummyTensor(type_id), "1", "2", 3);
+  std::string result = callOpUnboxed<std::string, const Tensor&, std::string, const std::string&, int64_t>(*op, dummyTensor(type_id), "1", "2", 3);
   EXPECT_EQ("123", result);
 }
 
