@@ -60,7 +60,6 @@ struct TORCH_API CrossMapLRN2dOptions {
   TORCH_ARG(double, beta) = 0.75;
 
   TORCH_ARG(int64_t, k) = 1;
-
 };
 
 } // namespace nn
