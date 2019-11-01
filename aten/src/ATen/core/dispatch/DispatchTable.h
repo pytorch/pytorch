@@ -47,7 +47,7 @@ namespace detail {
     void operator()(const at::Tensor& x) {
       ts = ts | x.type_set();
     }
-    void operator()(const TensorOptions& x) {
+    void operator()(TensorOptions x) {
       ts = ts | x.type_set();
     }
     void operator()(at::ArrayRef<at::Tensor> xs) {
@@ -61,49 +61,11 @@ namespace detail {
     }
   };
 
-  struct TensorOptionsAccumulator : at::IterArgs<TensorOptionsAccumulator> {
-    TensorOptions options;
-    void operator()(ScalarType dtype) {
-      options = options.dtype(dtype);
-    }
-    void operator()(Device device) {
-      options = options.device(device);
-    }
-    void operator()(Layout layout) {
-      options = options.layout(layout);
-    }
-    template <typename T>
-    void operator()(const T& x) {
-      // do nothing
-    }
-  };
-
-  template<class Arg> using arg_is_tensor_option_arg = guts::typelist::contains<
-    guts::typelist::typelist<ScalarType, Layout, Device>,
-    guts::remove_const_t<guts::remove_reference_t<Arg>>
-  >;
-  template<class... Args> using args_have_tensor_options = guts::disjunction<
-    arg_is_tensor_option_arg<Args>...
-  >;
-
   // NB: take by const reference (Don't do universal forwarding here! You
   // don't want to move into this function!)
   template <typename... Args>
   TensorTypeSet multi_dispatch_tensor_type_set(const Args&... args) {
-    auto type_set = MultiDispatchTensorTypeSet().apply(args...);
-    // If any argument is of type ScalarType, Layout or Device,
-    // we have to create a TensorOptions and also consider that
-    // for dispatch. If none of the arguments has one of these
-    // types (which is true for most ops), the compiler will
-    // optimize this if statement away because it's based on
-    // a compile time constant.
-    if (args_have_tensor_options<Args...>::value) {
-      TensorOptions tensorOptions = TensorOptionsAccumulator().apply(args...).options;
-      if (tensorOptions.has_dtype() && tensorOptions.has_device() && tensorOptions.has_layout()) {
-        type_set(tensorOptions);
-      }
-    }
-    return type_set.ts;
+    return MultiDispatchTensorTypeSet().apply(args...).ts;
   }
 }
 
