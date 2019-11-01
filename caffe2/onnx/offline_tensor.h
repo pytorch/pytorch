@@ -1,11 +1,12 @@
 #pragma once
 
 #include <c10/core/Storage.h>
-#include <caffe2/core/operator.h>
-#include <caffe2/core/tensor.h>
+#include "caffe2/core/operator.h"
+#include "caffe2/core/tensor.h"
 
 namespace caffe2 {
 
+#ifndef C10_MOBILE
 struct OfflineTensor {
   // A shell tensor to record shape and dtype
   Tensor shape_tensor{CPU};
@@ -48,4 +49,5 @@ class OfflineTensorShapeFunctions : public ExternalTensorFunctionsBase {
       size_t* capacity,
       DeviceOption* device) override;
 };
+#endif
 } // namespace caffe2

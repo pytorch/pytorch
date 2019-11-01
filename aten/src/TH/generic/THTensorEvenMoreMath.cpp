@@ -387,6 +387,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   THTensor *tSlice, *sSlice;
   int64_t *index_data;
   scalar_t *tensor_data, *src_data;
+  const int prefdist_T0 = 16;
 
   THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be 1-dimensional");
   THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(src), 4, "Indexing dim %d is out of bounds of tensor", dim);
@@ -430,18 +431,34 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
           }
         });
       } else {
-        at::parallel_for(0, numel, TH_OMP_OVERHEAD_THRESHOLD / rowsize,
+        at::parallel_for(
+            0,
+            numel,
+            TH_OMP_OVERHEAD_THRESHOLD / rowsize,
             [&](int64_t start, int64_t end) {
-          for (auto i = start; i < end; i++) {
-            auto cur_row = index_data[i];
-            scalar_t* cur_dst = tensor_data + i * rowsize;
-            scalar_t* cur_src = src_data + cur_row * rowsize;
-            PRAGMA_SIMD
-            for (auto j = 0; j < rowsize; j++) {
-              cur_dst[j] = cur_src[j];
-            }
-          }
-        });
+              for (auto i = start; i < end; i++) {
+                auto cur_row = index_data[i];
+                scalar_t* cur_dst = tensor_data + i * rowsize;
+                scalar_t* cur_src = src_data + cur_row * rowsize;
+
+                auto next_T0 =
+                    (i < numel - prefdist_T0) ? (i + prefdist_T0) : i;
+                int next_row = index_data[next_T0];
+                scalar_t* next_src = src_data + next_row * rowsize;
+
+                int j = 0;
+                for (; j + 8 <= rowsize; j += 8) {
+                  PRAGMA_SIMD
+                  for (int k = 0; k < 8; k++) {
+                    cur_dst[j + k] = cur_src[j + k];
+                  }
+                  __builtin_prefetch(next_src + j, 0, 1);
+                }
+                for (; j < rowsize; j++) {
+                  cur_dst[j] = cur_src[j];
+                }
+              }
+            });
       }
     }
   }
