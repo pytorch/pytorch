@@ -474,37 +474,38 @@ void AsyncNetBase::finalizeEvents() {
     } else if (status == EventStatus::EVENT_INITIALIZED) {
       event(task_id).SetFinished();
     }
+  }
 
-    // avoid events cancelling each other and causing
-    // a deadlock
-    std::atomic_flag error_happened = ATOMIC_FLAG_INIT;
-    for (auto* pending_op : pending_ops) {
-    pending_op->event().SetCallback(
-        [pending_op, &pending_ops, &error_happened]() {
-          // if one of the async cpu ops failed,
-          // we have to terminate other pending async cpu ops
-          auto status = pending_op->event().Query();
-          TORCH_CHECK(
-              status == EventStatus::EVENT_SUCCESS ||
-              status == EventStatus::EVENT_FAILED);
-          if (status == EventStatus::EVENT_FAILED) {
-            // go through all the ops and terminate them,
-            // we may get an exception in case of multiple
-            // SetFinished() calls
-            if (!error_happened.test_and_set()) {
-              for (auto* op : pending_ops) {
-                if (op != pending_op) {
-                  try {
-                    op->CancelAsyncCallback();
-                    op->event().SetFinished("Cancelled");
-                  } catch (const EnforceNotMet&) {
-                    // ignore
-                  }
+  // avoid events cancelling each other and causing
+  // a deadlock
+  std::atomic_flag error_happened = ATOMIC_FLAG_INIT;
+  for (auto* pending_op : pending_ops) {
+  pending_op->event().SetCallback(
+      [pending_op, &pending_ops, &error_happened]() {
+        // if one of the async cpu ops failed,
+        // we have to terminate other pending async cpu ops
+        auto status = pending_op->event().Query();
+        TORCH_CHECK(
+            status == EventStatus::EVENT_SUCCESS ||
+            status == EventStatus::EVENT_FAILED);
+        if (status == EventStatus::EVENT_FAILED) {
+          // go through all the ops and terminate them,
+          // we may get an exception in case of multiple
+          // SetFinished() calls
+          if (!error_happened.test_and_set()) {
+            for (auto* op : pending_ops) {
+              if (op != pending_op) {
+                try {
+                  op->CancelAsyncCallback();
+                  op->event().SetFinished("Cancelled");
+                } catch (const EnforceNotMet&) {
+                  // ignore
                 }
               }
             }
           }
-        });
+        }
+      });
   }
 
   // wait for all pending ops to be finished or be terminated
