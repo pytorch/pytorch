@@ -2,15 +2,13 @@ from torch.distributed import invoke_rpc_builtin, invoke_rpc_python_udf
 from torch.distributed import invoke_remote_builtin, invoke_remote_python_udf
 from torch.distributed import _start_rpc_agent
 from torch.distributed import _destroy_rref_context, _cleanup_python_rpc_handler
-from torch.distributed import ProcessGroupAgent
 from torch.distributed import WorkerInfo
-from .backend_registry import is_backend_registered, init_backend
+from . import backend_registry
 from .internal import _internal_rpc_pickler, PythonUDF
 
 import functools
 import sys
 import torch
-from enum import Enum
 
 
 _agent = None
@@ -58,16 +56,17 @@ def sync_rpc():
 
     _agent.sync()
 
-class RpcBackend(Enum):
-    PROCESS_GROUP = 1
 
 
 # TODO: add a context manager to wrap _init_rpc and join_rpc
-def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
-              self_name=None,
-              self_rank=-1,
-              init_method=None,
-              num_send_recv_threads=4):
+def _init_rpc(
+    backend=backend_registry.BackendType.PROCESS_GROUP,
+    store=None,
+    self_name=None,
+    self_rank=-1,
+    worker_name_to_id=None,
+    num_send_recv_threads=4,
+):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
 
@@ -76,24 +75,15 @@ def _init_rpc(backend=RpcBackend.PROCESS_GROUP,
     if _agent:
         raise RuntimeError("RPC is already initialized")
 
-    if backend == RpcBackend.PROCESS_GROUP:
-        from torch.distributed.distributed_c10d import _get_default_group
-
-        group = _get_default_group()
-        if (self_rank != -1) and (self_rank != group.rank()):
-            raise RuntimeError("self_rank argument {} doesn't match pg rank {}".format(
-                               self_rank, group.rank()))
-        # TODO: add try-except and destroy _agent in all processes if any fails.
-        _agent = ProcessGroupAgent(self_name, group, num_send_recv_threads)
-    elif is_backend_registered(backend):
-        _agent = init_backend(
-            backend,
-            self_rank=self_rank,
-            self_name=self_name,
-            init_method=init_method
-        )
-    else:
-        raise RuntimeError("Unrecognized RPC backend ", backend)
+    # Initialize RPC.
+    _agent = backend_registry.init_backend(
+        backend,
+        store=store,
+        self_name=self_name,
+        self_rank=self_rank,
+        worker_name_to_id=worker_name_to_id,
+        num_send_recv_threads=num_send_recv_threads,
+    )
     _start_rpc_agent(_agent)
 
 

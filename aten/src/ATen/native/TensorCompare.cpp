@@ -99,6 +99,8 @@ bool is_nonzero(const Tensor& self) {
   Scalar localScalar = self.item();
   if (localScalar.isFloatingPoint()) {
     return localScalar.to<double>() != 0;
+  } else if (localScalar.isComplex()) {
+     return localScalar.to<std::complex<double>>() != std::complex<double>(0.0, 0.0);
   } else if (localScalar.isIntegral(false)){
     return localScalar.to<int64_t>() != 0;
   } else if (localScalar.isBoolean()) {
@@ -123,7 +125,7 @@ std::vector<Tensor> where(const Tensor& condition) {
 
 Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
   Tensor ret = at::empty(self.sizes(), self.options());
-  AT_DISPATCH_ALL_TYPES(ret.scalar_type(), "where_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(ret.scalar_type(), "where_cpu", [&] {
     where_cpu<scalar_t>(ret, condition, self, other);
   });
   return ret;
