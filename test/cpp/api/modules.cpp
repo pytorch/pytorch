@@ -2407,6 +2407,49 @@ TEST_F(ModulesTest, LogSoftmax) {
   }
 }
 
+TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
+  {
+    // log_probs actually returns log_proba
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    auto x = torch::randn({4,8});
+    auto logprob_out = asfm->log_prob(x);
+
+    ASSERT_TRUE(torch::allclose(torch::exp(logprob_out).data().sum(1), torch::ones(4)));
+  }
+  {
+    // test predict
+    AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 10, {4, 8}).div_value(2.).head_bias(true));
+    auto x = torch::randn({64,8});
+    auto logprob_out = asfm->log_prob(x);
+    auto predict_out = asfm->predict(x);
+    ASSERT_TRUE(torch::allclose(predict_out, logprob_out.argmax(1)));
+  }
+  {
+  // cluster sizes
+  AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(16, 20, {4, 10, 15}).div_value(2.));
+  auto x = torch::arange(100, 132, torch::kFloat).reshape({2, 16});
+  auto y = torch::tensor({0, 17},torch::kLong);
+
+  ASSERT_EQ(asfm(x, y).output.sizes(), std::vector<int64_t>({2}));
+  }
+  {
+    //forward returns the same thing as log_probs
+    //----------------------------------------
+    //todo - Waiting for NLLLoss
+    //-----------------------------------------
+
+    //AdaptiveLogSoftmaxWithLoss asfm(AdaptiveLogSoftmaxWithLossOptions(8, 4, {2}).div_value(2.));
+    //auto x = torch::randn({4,8});
+    // auto logprob_out = asfm->log_prob(x);
+
+    //for (int64_t v=0; v<4; ++v) {
+    //  auto y = torch::full({4}, v, torch::kLong);
+    //  auto out = asfm(x, y);
+    //  ASSERT_TRUE(torch::allclose(out.loss, F::nll_loss(logprob_out, y, NLLLossOptions())));
+    //}
+  }
+}
+
 TEST_F(ModulesTest, Softmax2d) {
   Softmax2d m;
   auto input = torch::arange(24, torch::kFloat).reshape({1, 2, 3, 4});

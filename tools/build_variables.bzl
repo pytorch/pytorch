@@ -237,6 +237,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/nn/module.cpp",
     "torch/csrc/api/src/nn/modules/_functions.cpp",
     "torch/csrc/api/src/nn/modules/activation.cpp",
+    "torch/csrc/api/src/nn/modules/adaptive.cpp",
     "torch/csrc/api/src/nn/modules/batchnorm.cpp",
     "torch/csrc/api/src/nn/modules/normalization.cpp",
     "torch/csrc/api/src/nn/modules/instancenorm.cpp",
