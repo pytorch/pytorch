@@ -146,14 +146,14 @@ class TestTypePromotion(TestCase):
                 func(x, y).sum().backward()
 
     def _get_test_tensor(self, dtype, add_zeros=False, remove_zeros=False):
-        tensor = torch.randn([20, 20, 20], device=self.device) * 100
+        tensor = torch.randn([20, 20, 20], device=self.device) * 15
         if add_zeros:
             # add some zeros. This affects boolean tensors which would otherwise be all true
-            first[first < -90] = 0
+            first[first < -15] = 0
         tensor = tensor.to(dtype)
         if remove_zeros:
-            # ensure no div-by-zero.
-            tensor[tensor == 0] = 5
+            # ensures no div-by-zero (with care for low precision uint8/half)
+            tensor[torch.abs(tensor) < 0.05] = 5
         return tensor
 
     # verifies that torch.<op>(first, second) is the same as 
@@ -167,7 +167,7 @@ class TestTypePromotion(TestCase):
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):
                 common_dtype = torch.promote_types(dt1, dt2)
-                if common_dtype == torch.half:
+                if common_dtype == torch.half and self.device == 'cpu':
                     continue
                 if op == torch.sub and common_dtype != torch.bool:
                     # Subtraction, the `-` operator, with a bool tensor is not supported.
