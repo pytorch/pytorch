@@ -765,9 +765,9 @@ class TestCppExtension(common.TestCase):
         # Without error handling, the warnings cannot be catched
         # and the Tensor type names are not cleaned
         warn_mod = torch.utils.cpp_extension.load_inline(name='warn_mod',
-                                             cpp_sources=[source],
-                                             functions=['foo'],
-                                             with_pytorch_error_handling=False)
+                                                         cpp_sources=[source],
+                                                         functions=['foo'],
+                                                         with_pytorch_error_handling=False)
 
         with warnings.catch_warnings(record=True) as w:
             warn_mod.foo(t, 0)
@@ -789,9 +789,9 @@ class TestCppExtension(common.TestCase):
 
 
         warn_mod = torch.utils.cpp_extension.load_inline(name='warn_mod',
-                                             cpp_sources=[source],
-                                             functions=['foo'],
-                                             with_pytorch_error_handling=True)
+                                                         cpp_sources=[source],
+                                                         functions=['foo'],
+                                                         with_pytorch_error_handling=True)
 
 
         with warnings.catch_warnings(record=True) as w:
