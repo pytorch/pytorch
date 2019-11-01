@@ -1677,7 +1677,7 @@ class TestNamedTensor(TestCase):
             self._test_name_inference(
                 torch.bmm, device=device,
                 args=(create('N:3,A:3,B:3'), create('None:3,N:3,B:3')),
-                maybe_raises_regex='Misaligned')
+                maybe_raises_regex='misaligned')
 
     def test_matmul(self):
         for device in torch.testing.get_all_device_types():
@@ -1757,8 +1757,7 @@ class TestNamedTensor(TestCase):
             self._test_name_inference(
                 torch.matmul, device=device,
                 args=(create('N:3,A:3,B:3'), create('A:3,N:3,B:3')),
-                maybe_raises_regex='Misaligned')
-
+                maybe_raises_regex='do not match')
 
     def test_mv(self):
         for device in torch.testing.get_all_device_types():
