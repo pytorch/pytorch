@@ -1331,12 +1331,38 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
   ASSERT_EQ(input2.sizes(), input2.grad().sizes());
 }
 
+TEST_F(ModulesTest, SmoothL1LossDefaultOptions) {
+  SmoothL1Loss loss;
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor(0.0233335, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
 TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
   MultiLabelMarginLoss loss;
   auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = loss->forward(input, target);
   auto expected = torch::tensor({0.8500}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_EQ(input.sizes(), input.grad().sizes());
+}
+
+TEST_F(ModulesTest, SmoothL1LossNoReduction) {
+  SmoothL1Loss loss(/*reduction=*/torch::Reduction::None);
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output = loss(input, target);
+  auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
   auto s = output.sum();
   s.backward();
 
@@ -2004,6 +2030,33 @@ TEST_F(ModulesTest, CTCLoss) {
   ASSERT_TRUE(output.ge(0).all().item<bool>());
   ASSERT_TRUE(torch::allclose(
     -log_probs.sum(0).slice(1, 0, 1).view_as(output), output));
+}
+
+TEST_F(ModulesTest, PoissonNLLLoss) {
+  const auto input = torch::tensor({0.5, 1.5, 2.5});
+  const auto target = torch::tensor({1., 2., 3.});
+  const auto component_wise_loss = torch::exp(input) - target * input;
+  {
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kNone)};
+    ASSERT_TRUE(torch::allclose(
+      component_wise_loss,
+      loss->forward(input, target)
+    ));
+  }
+  {
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kSum)};
+    ASSERT_TRUE(torch::allclose(
+      torch::sum(component_wise_loss),
+      loss->forward(input, target)
+    ));
+  }
+  {
+    PoissonNLLLoss loss {PoissonNLLLossOptions().reduction(torch::kMean)};
+    ASSERT_TRUE(torch::allclose(
+      torch::mean(component_wise_loss),
+      loss->forward(input, target)
+    ));
+  }
 }
 
 TEST_F(ModulesTest, PrettyPrintIdentity) {
@@ -2855,4 +2908,12 @@ TEST_F(ModulesTest, PrettyPrintCTCLoss) {
   ASSERT_EQ(c10::str(CTCLoss(
     CTCLossOptions().blank(42).zero_infinity(false)
       .reduction(torch::kSum))), "torch::nn::CTCLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
+  ASSERT_EQ(c10::str(PoissonNLLLoss()), "torch::nn::PoissonNLLLoss()");
+  ASSERT_EQ(c10::str(PoissonNLLLoss(
+    PoissonNLLLossOptions().log_input(false).full(true).eps(0.42)
+    .reduction(torch::kSum))),
+    "torch::nn::PoissonNLLLoss()");
 }

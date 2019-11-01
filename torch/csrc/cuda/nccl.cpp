@@ -236,10 +236,10 @@ void broadcast(
   ncclDataType_t data_type = get_data_type(tensors[0]);
   int64_t numel = tensors[0].numel();
 
-  AutoNcclGroup nccl_group_guard;
   const auto comms = user_comms.empty() ? get_communicators(tensors)
                                         : ArrayRef<ncclComm_t>(user_comms);
 
+  AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
     int device = tensors[i].get_device();
@@ -282,10 +282,10 @@ void reduce(
   ncclDataType_t data_type = get_data_type(inputs[0]);
 
   const auto count = inputs[0].numel();
-  AutoNcclGroup nccl_group_guard;
   auto comms_ref = user_comms.empty() ? get_communicators(inputs)
                                       : ArrayRef<ncclComm_t>(user_comms);
 
+  AutoNcclGroup nccl_group_guard;
   at::cuda::OptionalCUDAGuard device_guard;
   for (size_t i = 0; i < len; i++) {
     int device = inputs[i].device().index();

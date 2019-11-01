@@ -64,8 +64,11 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
       py::object pyFunction);
   void addModule(
       std::string name,
-      const TypePtr& type,
       std::shared_ptr<ConcreteModuleType> meta);
+
+  void addModule(
+      std::string name,
+      const TypePtr& type);
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
@@ -102,7 +105,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, py::object> getConstantsPy() const;
   std::unordered_map<std::string, std::pair<TypePtr, bool>> getAttributesPy()
       const;
-  std::vector<std::string> getModuleNamesPy() const;
+  std::unordered_map<std::string, TypePtr> getModulesPy() const;
 
   // This determines whether two modules can share a type. The container structs
   // used by ConcreteModuleType have been defined such that operator==
@@ -194,14 +197,27 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
 
   struct ModuleInfo {
     ModuleInfo(std::string name, std::shared_ptr<ConcreteModuleType> meta)
-        : name_(std::move(name)), meta_(std::move(meta)), type_(meta_->getJitType()) {}
+        : name_(std::move(name)), meta_(std::move(meta)), type_(nullptr) {}
 
-    ModuleInfo(std::string name, const TypePtr& type, std::shared_ptr<ConcreteModuleType> meta)
-        : name_(std::move(name)), meta_(std::move(meta)), type_(type) {}
+    ModuleInfo(std::string name, const TypePtr& type)
+        : name_(std::move(name)), meta_(nullptr), type_(type) {}
     friend bool operator==(const ModuleInfo& lhs, const ModuleInfo& rhs) {
-      return *(lhs.meta_) == *(rhs.meta_) && *(lhs.type_) == *(rhs.type_);
+      if (lhs.meta_ != nullptr && rhs.meta_ != nullptr) {
+        return *(lhs.meta_) == *(rhs.meta_);
+      } else if (lhs.type_ != nullptr && rhs.type_ != nullptr) {
+        return  *(lhs.type_) == *(rhs.type_);
+      } else {
+        return false;
+      }
+    }
+
+    TypePtr getJitType() const {
+      return meta_ == nullptr? type_ : meta_->getJitType();
     }
     std::string name_;
+
+    // Module Info contains either an ConcreateModuleType or a type (which is
+    // a Module Interface), these two are union relationship.
     std::shared_ptr<ConcreteModuleType> meta_;
     TypePtr type_;
 

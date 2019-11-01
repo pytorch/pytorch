@@ -114,13 +114,14 @@ def infer_raw_concrete_type(nn_module):
         added_names.add(name)
 
     for name, item in nn_module._modules.items():
-        sub_concrete_type = concrete_type_store.get_or_create_concrete_type(item)
         attr_type = infer_type(name, item)
-        if attr_type is None:
-            # normal module jit type derived from sub_concrete_module_type
-            attr_type = sub_concrete_type.jit_type
-
-        concrete_type.add_module(name, attr_type, sub_concrete_type)
+        if attr_type is not None:
+            # if the type can be inferred, it should be a module interface type
+            concrete_type.add_module(name, attr_type)
+        else:
+            # otherwise we get the concrete module type for item and add it to concrete_type
+            sub_concrete_type = concrete_type_store.get_or_create_concrete_type(item)
+            concrete_type.add_module(name, sub_concrete_type)
 
         added_names.add(name)
 
@@ -358,10 +359,15 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
 
         # 2. Copy the submodules from the original `nn_module` to the new ScriptModule,
         #    recursively scripting them.
-        for name in concrete_type.get_module_names():
+        for name, module_type in concrete_type.get_modules().items():
             orig_value = getattr(nn_module, name)
             assert isinstance(orig_value, Module)
-            scripted = recursive_script(orig_value)
+            if isinstance(module_type, torch._C.InterfaceType):
+                # use the interface inference rule to compile the module
+                scripted = create_script_module(orig_value, infer_interface_methods_to_compile(module_type, orig_value))
+            else:
+                # use the default recursive rule to compile the module
+                scripted = recursive_script(orig_value)
             cpp_module._register_module(name, scripted._c)
 
             script_module._modules[name] = scripted
@@ -514,6 +520,16 @@ def infer_methods_to_compile(nn_module):
     for method in uniqued_methods:
         stubs.append(make_stub_from_method(nn_module, method))
     return overload_stubs + stubs
+
+def infer_interface_methods_to_compile(mod_interface, nn_module):
+    """
+    Rule to infer the methods from the interface type to know which
+    methods need to act as starting points for compilation.
+    """
+    stubs = []
+    for method in mod_interface.getMethodNames():
+        stubs.append(make_stub_from_method(nn_module, method))
+    return stubs
 
 def recursive_script(nn_module):
     """

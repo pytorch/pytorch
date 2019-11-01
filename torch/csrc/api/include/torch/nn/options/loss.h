@@ -190,5 +190,38 @@ struct TORCH_API CTCLossOptions {
   TORCH_ARG(bool, zero_infinity) = false;
 };
 
+// ============================================================================
+
+/// Options for a smooth L1 loss functional and module.
+struct TORCH_API SmoothL1LossOptions {
+  SmoothL1LossOptions(torch::Reduction::Reduction reduction = torch::Reduction::Mean)
+    : reduction_(reduction) {}
+
+  /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+  /// 'none': no reduction will be applied, 'mean': the sum of the output will
+  /// be divided by the number of elements in the output, 'sum': the output will
+  /// be summed. Default: 'mean'
+  TORCH_ARG(torch::Reduction::Reduction, reduction);
+};
+
+// ============================================================================
+
+/// Options for PoissonNLLLoss functional and module.
+struct TORCH_API PoissonNLLLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  /// if true the loss is computed as `exp(input) - target * input`,
+  /// if false the loss is `input - target * log(input + eps)`.
+  TORCH_ARG(bool, log_input) = true;
+  /// whether to compute full loss, i.e. to add the Stirling approximation term
+  /// target * log(target) - target + 0.5 * log(2 * pi * target).
+  TORCH_ARG(bool, full) = false;
+  /// Small value to avoid evaluation of `log(0)` when `log_input = false`.
+  /// Default: 1e-8
+  TORCH_ARG(double, eps) = 1e-8;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
 } // namespace nn
 } // namespace torch

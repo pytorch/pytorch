@@ -296,6 +296,11 @@ class TestScriptPy3(JitTestCase):
                 # type: (Tensor) -> Tensor
                 return self.two(self.one(x, x))
 
+            @torch.jit.export
+            def forward2(self, x):
+                # type: (Tensor) -> Tensor
+                return self.two(self.one(x, x)) + 1
+
         def use_module_interface(mod_list, x):
             # type: (List[OneTwo], Tensor) -> Tensor
             return mod_list[0].forward(x) + mod_list[1].forward(x)
@@ -339,6 +344,14 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "ScriptModule class can be subtype of module interface"):
             as_module_interface(Foo())
 
+        def call_module_interface_on_other_method(mod_interface, x):
+            # type: (OneTwo, Tensor) -> Tensor
+            return mod_interface.forward2(x)
+
+        # ensure error out when we call the module on the method other than the interface specified.
+        with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute or method"):
+            self.checkScript(call_module_interface_on_other_method, (scripted_bar_mod, torch.rand(3, 4),))
+
         class WrongMod(nn.Module):
             def two(self, x):
                 # type: (int) -> int
@@ -364,6 +377,10 @@ class TestScriptPy3(JitTestCase):
     def test_module_interface_swap(self):
         @torch.jit.interface
         class ModuleInterface(nn.Module):
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
             def forward(self, input):
                 # type: (Tensor) -> Tensor
                 pass
@@ -372,17 +389,25 @@ class TestScriptPy3(JitTestCase):
             def __init__(self):
                 super(OrigModule, self).__init__()
 
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                return inp1 + inp2 + 1
+
             def forward(self, input):
                 # type: (Tensor) -> Tensor
-                return input + 5
+                return input + self.one(input, input) + 1
 
         class NewModule(nn.Module):
             def __init__(self):
                 super(NewModule, self).__init__()
 
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                return inp1 * inp2 + 1
+
             def forward(self, input):
                 # type: (Tensor) -> Tensor
-                return input + 1
+                return self.one(input, input + 1)
 
         class NewModuleWrong(nn.Module):
             def __init__(self):
@@ -390,6 +415,31 @@ class TestScriptPy3(JitTestCase):
 
             def forward(self, input):
                 # type: (int) -> int
+                return input + 1
+
+        class NewModuleMethodNotLazyCompile(nn.Module):
+            def __init__(self):
+                super(NewModuleMethodNotLazyCompile, self).__init__()
+
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                return inp1 * inp2 + 1
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return input + 1
+
+        class NewModuleMethodManualExport(nn.Module):
+            def __init__(self):
+                super(NewModuleMethodManualExport, self).__init__()
+
+            @torch.jit.export
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                return inp1 * inp2 + 1
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
                 return input + 1
 
         class TestModule(nn.Module):
@@ -406,15 +456,23 @@ class TestScriptPy3(JitTestCase):
 
         scripted_mod = torch.jit.script(TestModule())
         input = torch.randn(3, 4)
-        self.assertEqual(scripted_mod(input), input + 5)
+        self.assertEqual(scripted_mod(input), 3 * input + 2)
 
-        # module swap with the same interface
+        # module swap with module that have the same interface
         scripted_mod.proxy_mod = torch.jit.script(NewModule())
-        self.assertEqual(scripted_mod(input), input + 1)
+        self.assertEqual(scripted_mod(input), input * (input + 1) + 1)
 
         # module swap with in-compatible interface
         with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
             scripted_mod.proxy_mod = torch.jit.script(NewModuleWrong())
+
+        # module swap with module that have the same interface, but the method not get
+        # lazily compiled from forward, user need to export it explicitly for swap to work
+        with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
+            scripted_mod.proxy_mod = torch.jit.script(NewModuleMethodNotLazyCompile())
+
+        scripted_mod.proxy_mod = torch.jit.script(NewModuleMethodManualExport())
+        self.assertEqual(scripted_mod(input), input + 1)
 
         # module swap with non-scripted module
         with self.assertRaisesRegex(RuntimeError, "a ScriptModule with non-scripted module"):
