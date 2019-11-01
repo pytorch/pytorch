@@ -1631,9 +1631,10 @@ struct to_ir {
       const List<Stmt>& body,
       SugaredValuePtr iterable,
       const List<Expr>& targets) {
-    auto static_len = toIValue(iterable->len(loc, method));
-    TORCH_INTERNAL_ASSERT(static_len, "Static For should have defined length");
-    int64_t len = static_len->toInt();
+    auto static_len = iterable->staticLen();
+    TORCH_INTERNAL_ASSERT(
+        static_len, "Unrolled loop iter should have static length");
+    int64_t len = *static_len;
 
     // In order to support ModuleLists which return different types,
     // as with an nn.Sequential which has a module that returns a Dict and then
@@ -2508,11 +2509,7 @@ struct to_ir {
         auto iterable_value = expr_sv->iter(loc, method);
 
         // range should have the same static length as the other iterable
-        c10::optional<int64_t> iter_static_len = c10::nullopt;
-        if (auto maybe_ival = toIValue(iterable_value->len(loc, method))) {
-          iter_static_len = maybe_ival->toInt();
-        }
-
+        c10::optional<int64_t> iter_static_len = iterable_value->staticLen();
         SugaredValuePtr range_sv = std::make_shared<RangeValue>(
             loc, method, range_inputs, iter_static_len);
 
@@ -2605,7 +2602,7 @@ struct to_ir {
       return val;
     }
 
-    auto maybe_out_stack = tryConstantPropNode(val->node());
+    auto maybe_out_stack = runNodeIfInputsAreConstant(val->node());
     if (!maybe_out_stack) {
       return val;
     }

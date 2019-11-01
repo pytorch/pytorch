@@ -179,7 +179,7 @@ c10::optional<IValue> toIValueProp(const Value* v) {
   }
 
   if (v->node()->kind() == aten::Float) {
-    if (auto maybe_stack = tryConstantPropNode(v->node())) {
+    if (auto maybe_stack = runNodeIfInputsAreConstant(v->node())) {
       return maybe_stack->at(0);
     }
   }

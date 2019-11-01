@@ -293,9 +293,6 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   Graph& g = *m.graph();
   if (val_type->cast<ListType>() || val_type->cast<StringType>() ||
       val_type->isSubtypeOf(TensorType::get())) {
-    if (static_len_) {
-      return insertConstant(*m.graph(), *static_len_, loc);
-    }
     return g.insert(aten::len, {val}, {}, loc);
   } else {
     throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
@@ -342,17 +339,13 @@ SugaredValuePtr SimpleValue::iter(const SourceRange& loc, Function& m) {
     return std::make_shared<SimpleValue>(
         m.graph()->insert(aten::keys, {value}, {}, loc));
   }
-  // we allow iteration over tuples if their types can be unified
   if (auto tup = type->cast<TupleType>()) {
-    auto tuple_type = unifyTypeList(tup->elements());
-    if (!tuple_type) {
-      throw ErrorReport(loc)
-          << "Heterogenous or empty tuples cannot be iterated over. Found "
-          << type->python_str();
+    auto tup_values = createTupleUnpack(value);
+    std::vector<SugaredValuePtr> tup_sugared;
+    for (Value* v : tup_values) {
+      tup_sugared.push_back(std::make_shared<SimpleValue>(v));
     }
-    auto li = m.graph()->createList(*tuple_type, createTupleUnpack(value));
-    auto out = m.graph()->insertNode(li)->output();
-    return std::make_shared<SimpleValue>(out, tup->elements().size());
+    return std::make_shared<SugaredTupleValue>(tup_sugared);
   } else {
     throw ErrorReport(loc) << "'" << type->python_str() << "'"
                            << " object is not iterable";
@@ -396,15 +389,7 @@ RangeValue::RangeValue(
                            << inputs.size();
   }
 
-  if (static_len) {
-    static_len_ = static_len;
-  } else {
-    auto len_node = len(loc, m)->node();
-    auto maybe_out_stack = tryConstantPropNode(len_node);
-    if (maybe_out_stack) {
-      static_len_ = maybe_out_stack->at(0).toInt();
-    }
-  }
+  static_len_ = static_len;
 }
 
 SugaredValuePtr RangeValue::iter(const SourceRange& loc, Function& m) {
@@ -460,10 +445,7 @@ Value* IterableTree::len(const SourceRange& loc, Function& m) {
   // if it's a iterable tree, we get the base iterables that consists of
   // SimpleValue or RangeValue, and then calculate the minimum length of all the
   // base iterables to be max_trip_count_val
-  if (static_len_) {
-    return insertConstant(*m.graph(), *static_len_, loc);
-  }
-
+  TORCH_INTERNAL_ASSERT(!unroll_length_);
   Graph& g = *m.graph();
   std::vector<SugaredValuePtr> base_iters = get_base_iterables();
   std::vector<Value*> lengths;
@@ -484,35 +466,28 @@ SugaredValuePtr IterableTree::getitem(
   for (const SugaredValuePtr& child : children_) {
     child_items.emplace_back(child->getitem(loc, m, idx));
   }
-  return std::make_shared<SugaredTupleValue>(child_items, emit_unrolled_);
+  return std::make_shared<SugaredTupleValue>(child_items);
 }
 
 void IterableTree::addChild(
     const SourceRange& range,
     Function& m,
     const SugaredValuePtr iter_value) {
-  auto child_len_val = iter_value->len(range, m);
-  c10::optional<int64_t> child_len = c10::nullopt;
-  if (auto maybe_ival = toIValue(child_len_val)) {
-    child_len = maybe_ival->toInt();
-  }
-  auto child_unrolled = iter_value->shouldEmitUnrolled();
+  c10::optional<int64_t> child_len = iter_value->staticLen();
   if (children_.size() == 0) {
-    static_len_ = child_len;
-    emit_unrolled_ = child_unrolled;
+    unroll_length_ = child_len;
   } else {
-    if ((emit_unrolled_ && !child_len) || (child_unrolled && !static_len_)) {
+    if ((unroll_length_ && !child_len) || (child_len && !unroll_length_)) {
       throw ErrorReport(range)
-          << "Can not iterate over a module list with a value "
+          << "Can not iterate over a module list or tuple with a value "
              "that does not have a statically determinable length\n";
     }
-    if (child_len && static_len_) {
+    if (unroll_length_ && child_len) {
       // iterables run for the minimum length of all its leaves
-      static_len_ = std::min(*child_len, *static_len_);
+      unroll_length_ = std::min(*child_len, *unroll_length_);
     } else {
-      static_len_ = c10::nullopt;
+      unroll_length_ = c10::nullopt;
     }
-    emit_unrolled_ = emit_unrolled_ || child_unrolled;
   }
   children_.push_back(iter_value);
 }

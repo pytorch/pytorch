@@ -66,12 +66,6 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << kind() << " cannot be used as a type";
   }
 
-  virtual std::shared_ptr<SugaredValue> iter(
-      const SourceRange& loc,
-      Function& m) {
-    throw ErrorReport(loc) << kind() << " cannot be used as an iterable";
-  }
-
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
@@ -97,11 +91,26 @@ struct TORCH_API SugaredValue
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
-  // We handle iteration over Module Containers by unrolling the for loop over
-  // each value. Any Sugared Value that contains a module list should be emitted
-  // unrolled. See comment in `emitUnrolledLoop` for why we do this
-  virtual bool shouldEmitUnrolled() {
-    return false;
+  // This function is called when to convert a SugaredValue to its iterator.
+  // For example, when iterating through a Dict we iterate over its keys
+  virtual std::shared_ptr<SugaredValue> iter(
+      const SourceRange& loc,
+      Function& m) {
+    throw ErrorReport(loc) << kind() << " cannot be used as an iterable";
+  }
+
+  // If we are iterating over a Sugared Value and it returns a value from this
+  // function, then we emit an unrolled loop over the variable. This allows us
+  // to support containers of Heterogenous types, like Module Containers &
+  // Tuples
+  virtual c10::optional<int64_t> staticLen() {
+    return c10::nullopt;
+  }
+
+  // When iterating over this SugaredValue, should we emit the for loop as an
+  // unrolled loop.
+  bool shouldEmitUnrolled() {
+    return staticLen() != c10::nullopt;
   }
 
   // return length of this thing, if not then it can't be iterated.
@@ -128,8 +137,7 @@ struct TORCH_API SugaredValue
 // most things in the environment are just simple value types
 // and not special python syntax sugar types
 struct TORCH_API SimpleValue : public SugaredValue {
-  SimpleValue(Value* value, c10::optional<int64_t> static_len = c10::nullopt)
-      : value_(value), static_len_(static_len) {}
+  SimpleValue(Value* value) : value_(value) {}
   std::string kind() const override {
     std::stringstream ss;
     ss << "value of type '" << value_->type()->python_str() << "'";
@@ -174,7 +182,6 @@ struct TORCH_API SimpleValue : public SugaredValue {
 
  private:
   Value* value_;
-  c10::optional<int64_t> static_len_;
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
@@ -205,10 +212,8 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 };
 
 struct TORCH_API SugaredTupleValue : public SugaredValue {
-  explicit SugaredTupleValue(
-      std::vector<std::shared_ptr<SugaredValue>> tup,
-      bool contains_module_list)
-      : tup_(tup), contains_module_list_(contains_module_list){};
+  explicit SugaredTupleValue(std::vector<std::shared_ptr<SugaredValue>> tup)
+      : tup_(tup){};
 
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
@@ -244,24 +249,22 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
     return tup_.at(index);
   }
 
+  // This function is called when a SugaredValue is used to convert a
+  // SugaredValue to its iterator. For example, when iterating through a Dict we
+  // iterate over its keys
   std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
       override {
     return shared_from_this();
   };
 
-  bool shouldEmitUnrolled() override {
-    return contains_module_list_;
+  // Because this is used to contain SugaredValues of Heterogenous types,
+  // we define staticLen() so that when this is iterated over it is emitted
+  // as an unrolled loop.
+  c10::optional<int64_t> staticLen() override {
+    return static_cast<int64_t>(tup_.size());
   }
 
-  Value* len(const SourceRange& loc, Function& m) {
-    auto static_len = static_cast<int64_t>(tup_.size());
-    return insertConstant(*m.graph(), static_len, loc);
-  };
-
   std::vector<std::shared_ptr<SugaredValue>> tup_;
-  // Any SugaredValue that contains a ModuleList must be unrolled when iterated
-  // over
-  bool contains_module_list_;
 };
 
 struct TORCH_API BuiltinModule : public SugaredValue {
@@ -534,6 +537,12 @@ struct TORCH_API RangeValue : SugaredValue {
   std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
       override;
 
+  // When Range is instantiated via enumerate(iterable_with_static_len),
+  // then it takes the static length of the iterable
+  c10::optional<int64_t> staticLen() override {
+    return static_len_;
+  }
+
  private:
   Value* start_;
   Value* end_;
@@ -586,8 +595,10 @@ struct TORCH_API IterableTree : SugaredValue {
     return children_;
   }
 
-  bool shouldEmitUnrolled() override {
-    return emit_unrolled_;
+  // If this iterable contains a ModuleList or Tuple, then it will have a
+  // static length, and we will emit it as an unrolled for loop.
+  c10::optional<int64_t> staticLen() override {
+    return unroll_length_;
   }
 
   // given a IterableTree node, get all the base iterables/leaves under the
@@ -601,8 +612,7 @@ struct TORCH_API IterableTree : SugaredValue {
       override;
 
  private:
-  c10::optional<int64_t> static_len_ = c10::nullopt;
-  bool emit_unrolled_ = false;
+  c10::optional<int64_t> unroll_length_ = c10::nullopt;
   std::vector<SugaredValuePtr> children_;
 };
 

@@ -14,7 +14,7 @@
 namespace torch {
 namespace jit {
 
-c10::optional<Stack> tryConstantPropNode(const Node* node) {
+c10::optional<Stack> runNodeIfInputsAreConstant(const Node* node) {
   Stack stack;
   for (const Value* input : node->inputs()) {
     if (auto ival = toIValue(input)) {

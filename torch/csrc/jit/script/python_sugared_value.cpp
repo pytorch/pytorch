@@ -251,16 +251,13 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
     }
   }
 
-  bool contains_module_list = true;
   if (get_keys && !get_values) {
-    return std::make_shared<SugaredTupleValue>(keys, contains_module_list);
+    return std::make_shared<SugaredTupleValue>(keys);
   } else if (get_values && !get_keys) {
-    return std::make_shared<SugaredTupleValue>(values, contains_module_list);
+    return std::make_shared<SugaredTupleValue>(values);
   } else if (get_values && get_keys) {
-    auto key_list =
-        std::make_shared<SugaredTupleValue>(keys, contains_module_list);
-    auto value_list =
-        std::make_shared<SugaredTupleValue>(values, contains_module_list);
+    auto key_list = std::make_shared<SugaredTupleValue>(keys);
+    auto value_list = std::make_shared<SugaredTupleValue>(values);
     auto iterator = std::make_shared<IterableTree>();
     iterator->addChild(loc, m, key_list);
     iterator->addChild(loc, m, value_list);
