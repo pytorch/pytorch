@@ -233,7 +233,7 @@
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
   self: grad * (self <= max).to(grad.dtype())
 
-- name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+- name: clone(Tensor self) -> Tensor
   self: grad
 
 - name: coalesce(Tensor self) -> Tensor
@@ -321,9 +321,6 @@
 
 - name: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
   self: fake_quantize_per_tensor_affine_backward(grad, self, scale, zero_point, quant_min, quant_max)
-
-- name: fake_quantize_per_channel_affine(Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max) -> Tensor
-  self: fake_quantize_per_channel_affine_backward(grad, self, scale, zero_point, axis, quant_min, quant_max)
 
 - name: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
   self: zeros_like(grad)
@@ -588,7 +585,10 @@
   save_invstd: not_implemented("native_batch_norm_backward save_invstd")
 
 - name: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
-  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_layer_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, M, N, eps, grad_input_mask) : native_layer_norm_backward(grads[0].is_contiguous() ? grads[0] : grads[0].contiguous(), input, result1, result2, weight, M, N, grad_input_mask)"
+  input, weight, bias: native_layer_norm_backward(grad.contiguous(), input, result1, result2, weight, M, N, grad_input_mask)
+
+- name: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  grad_out, input, weight: native_layer_norm_double_backward(grads[0].contiguous(), grads[1].contiguous(), grads[2].contiguous(), grad_out.contiguous(), input, mean, rstd, weight, M, N, grad_input_mask)
 
 - name: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
@@ -949,10 +949,6 @@
 
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
-
-- name: binary_cross_entropy_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
-  self: binary_cross_entropy_double_backward(grad_output, grad, self, target, weight, reduction)
-  grad_output: binary_cross_entropy_double_backward_grad_output(grad, self, target, weight, reduction)
 
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_with_logits_backward(grad, self, target, weight, pos_weight, reduction)
@@ -1578,7 +1574,4 @@
   output_differentiability: [False]
 
 - name: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
-  output_differentiability: [False]
-
-- name: nonzero(Tensor self) -> Tensor
   output_differentiability: [False]

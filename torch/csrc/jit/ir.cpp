@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/operator.h>
@@ -19,6 +18,8 @@
 
 namespace torch {
 namespace jit {
+
+void printQuotedString(std::ostream& stmt, const std::string& str);
 
 // Constants relating to maintaining the topological index of nodes.
 //
@@ -115,20 +116,7 @@ static void printStrList(
   for (auto& item : items) {
     if (i++ > 0)
       out << ", ";
-    c10::printQuotedString(out, item);
-  }
-  out << "]";
-}
-
-static void printTypeList(
-    std::ostream& out,
-    const std::vector<TypePtr>& items) {
-  out << "[";
-  int i = 0;
-  for (auto& item : items) {
-    if (i++ > 0)
-      out << ", ";
-    out << *item;
+    printQuotedString(out, item);
   }
   out << "]";
 }
@@ -148,7 +136,7 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       printPrimList(out, is(name));
       break;
     case AttributeKind::s:
-      c10::printQuotedString(out, s(name));
+      printQuotedString(out, s(name));
       break;
     case AttributeKind::ss:
       printStrList(out, ss(name));
@@ -186,12 +174,6 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
       break;
     case AttributeKind::gs:
       out << "[<Graphs>]";
-      break;
-    case AttributeKind::ty:
-      out << *ty(name);
-      break;
-    case AttributeKind::tys:
-      printTypeList(out, tys(name));
       break;
   }
 }
@@ -272,13 +254,7 @@ std::ostream &Node::print(std::ostream &out, size_t level,
 
   // In debug print, append file:line:col as a comment after each node
   if (print_source_locations) {
-    SourceRange r = sourceRange();
-    if (sourceRange().source()) {
-      if (auto orig = sourceRange().source()->findSourceRangeThatGenerated(r)) {
-        r = *orig;
-      }
-    }
-    if (auto file_line_col = r.file_line_col()) {
+    if (auto file_line_col = sourceRange().file_line_col()) {
       std::string filename;
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
@@ -840,15 +816,10 @@ bool Node::matches(
 }
 
 bool Node::mustBeNone() const {
-  // We can statically deduce this Node has returning None if:
-  return
-      // It's an AutogradZero node, or ...
-      kind_ == prim::AutogradZero ||
-      // It has only one output and that output is NoneType, or ...
-      (outputs().size() == 1 && output()->type() == NoneType::get()) ||
-      // It's a constant optional with no value in the attributes.
+  return kind_ == prim::AutogradZero ||
       (kind_ == prim::Constant && !this->hasAttributes() &&
-       output()->type()->cast<OptionalType>());
+       (output()->type()->cast<OptionalType>() ||
+        output()->type() == NoneType::get()));
 }
 
 void Node::dump() const {
@@ -939,7 +910,6 @@ bool Node::hasSideEffects() const {
     case prim::CallFunction:
     case prim::CallMethod:
     case prim::BailoutTemplate:
-    case prim::profile:
       return true;
   }
 
@@ -1339,7 +1309,13 @@ Value* Graph::insert(
     at::ArrayRef<NamedValue> kwargs,
     const c10::optional<SourceRange>& range) {
   return script::emitBuiltinCall(
-      range.value_or(fakeRange()), *this, opname, args, kwargs);
+      range.value_or(fakeRange()),
+      *this,
+      opname,
+      c10::nullopt,
+      args,
+      kwargs,
+      /*required=*/true);
 }
 
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
@@ -1522,25 +1498,6 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
   return n;
 }
 
-Node* Graph::createIsInstance(
-    Value* v,
-    at::ArrayRef<TypePtr> types,
-    bool is_list,
-    bool is_tuple) {
-  auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
-  std::vector<std::string> kinds;
-  if (is_list) {
-    kinds.push_back("list");
-  }
-  if (is_tuple) {
-    kinds.push_back("tuple");
-  }
-  n->ss_(attr::kinds, std::move(kinds));
-  n->tys_(attr::types, types.vec());
-  n->output()->setType(BoolType::get());
-  return n;
-}
-
 Value* Graph::insertFunctionCall(
     Function* callee,
     const script::MatchedSchema& matched) {
@@ -1714,14 +1671,6 @@ void ProfileOp::cloneFrom(Node* other_) {
 }
 Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
-}
-
-TypePtr NamedValue::type() const {
-  if (value_) {
-    return value_->type();
-  } else {
-    return ivalue_.type();
-  }
 }
 
 constexpr Symbol ProfileOp::Kind;

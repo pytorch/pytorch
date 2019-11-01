@@ -180,15 +180,15 @@ private:
     #endif
   }
 
-  C10_HOST_DEVICE inline detail::UINT4 single_round(detail::UINT4 ctr, detail::UINT2 in_key) {
+  C10_HOST_DEVICE inline detail::UINT4 single_round(detail::UINT4 ctr, detail::UINT2 key) {
     uint32_t hi0;
     uint32_t hi1;
     uint32_t lo0 = mulhilo32(kPhiloxSA, ctr[0], &hi0);
     uint32_t lo1 = mulhilo32(kPhiloxSB, ctr[2], &hi1);
     detail::UINT4 ret;
-    ret[0] = hi1 ^ ctr[1] ^ in_key[0];
+    ret[0] = hi1 ^ ctr[1] ^ key[0];
     ret[1] = lo1;
-    ret[2] = hi0 ^ ctr[3] ^ in_key[1];
+    ret[2] = hi0 ^ ctr[3] ^ key[1];
     ret[3] = lo0;
     return ret;
   }

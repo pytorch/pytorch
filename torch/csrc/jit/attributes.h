@@ -7,11 +7,6 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-namespace c10 {
-struct Type;
-using TypePtr = std::shared_ptr<Type>;
-} // namespace c10
-
 namespace torch {
 namespace jit {
 
@@ -19,10 +14,10 @@ using ::c10::Symbol;
 
 constexpr int max_tensor_display_size = 10;
 
-enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs, ty, tys };
+enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs };
 static inline const char* toString(AttributeKind kind) {
   static const char* names[] = {
-      "f", "fs", "i", "is", "s", "ss", "t", "ts", "g", "gs", "ty", "tys"};
+      "f", "fs", "i", "is", "s", "ss", "t", "ts", "g", "gs"};
   AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(AttributeKind));
   return names[int(kind)];
 }
@@ -85,9 +80,6 @@ using StringAttr = ScalarAttributeValue<std::string, AttributeKind::s>;
 using StringsAttr = VectorAttributeValue<std::string, AttributeKind::ss>;
 using TensorAttr = ScalarAttributeValue<at::Tensor, AttributeKind::t>;
 using TensorsAttr = VectorAttributeValue<at::Tensor, AttributeKind::ts>;
-using TypeAttr = ScalarAttributeValue<c10::TypePtr, AttributeKind::ty>;
-using TypesAttr = VectorAttributeValue<c10::TypePtr, AttributeKind::tys>;
-
 struct Graph;
 
 // We special case Graph attributes like this because we want to ensure that

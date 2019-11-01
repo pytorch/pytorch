@@ -7,7 +7,6 @@ import android.media.Image;
 import org.pytorch.Tensor;
 
 import java.nio.ByteBuffer;
-import java.nio.FloatBuffer;
 import java.util.Locale;
 
 /**
@@ -27,58 +26,12 @@ public final class TensorImageUtils {
    * @param normStdRGB  standard deviation for RGB channels normalization, length must equal 3, RGB order
    */
   public static Tensor bitmapToFloat32Tensor(
-      final Bitmap bitmap, final float[] normMeanRGB, final float normStdRGB[]) {
+      final Bitmap bitmap, float[] normMeanRGB, float normStdRGB[]) {
     checkNormMeanArg(normMeanRGB);
     checkNormStdArg(normStdRGB);
 
     return bitmapToFloat32Tensor(
         bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), normMeanRGB, normStdRGB);
-  }
-
-  /**
-   * Writes tensor content from specified {@link android.graphics.Bitmap},
-   * normalized with specified in parameters mean and std to specified {@link java.nio.FloatBuffer}
-   * with specified offset.
-   *
-   * @param bitmap      {@link android.graphics.Bitmap} as a source for Tensor data
-   * @param x           - x coordinate of top left corner of bitmap's area
-   * @param y           - y coordinate of top left corner of bitmap's area
-   * @param width       - width of bitmap's area
-   * @param height      - height of bitmap's area
-   * @param normMeanRGB means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB  standard deviation for RGB channels normalization, length must equal 3, RGB order
-   */
-  public static void bitmapToFloatBuffer(
-      final Bitmap bitmap,
-      final int x,
-      final int y,
-      final int width,
-      final int height,
-      final float[] normMeanRGB,
-      final float[] normStdRGB,
-      final FloatBuffer outBuffer,
-      final int outBufferOffset) {
-    checkOutBufferCapacity(outBuffer, outBufferOffset, width, height);
-    checkNormMeanArg(normMeanRGB);
-    checkNormStdArg(normStdRGB);
-
-    final int pixelsCount = height * width;
-    final int[] pixels = new int[pixelsCount];
-    bitmap.getPixels(pixels, 0, width, x, y, width, height);
-    final int offset_g = pixelsCount;
-    final int offset_b = 2 * pixelsCount;
-    for (int i = 0; i < pixelsCount; i++) {
-      final int c = pixels[i];
-      float r = ((c >> 16) & 0xff) / 255.0f;
-      float g = ((c >> 8) & 0xff) / 255.0f;
-      float b = ((c) & 0xff) / 255.0f;
-      float rF = (r - normMeanRGB[0]) / normStdRGB[0];
-      float gF = (g - normMeanRGB[1]) / normStdRGB[1];
-      float bF = (b - normMeanRGB[2]) / normStdRGB[2];
-      outBuffer.put(outBufferOffset + i, rF);
-      outBuffer.put(outBufferOffset + offset_g + i, gF);
-      outBuffer.put(outBufferOffset + offset_b + i, bF);
-    }
   }
 
   /**
@@ -104,9 +57,22 @@ public final class TensorImageUtils {
     checkNormMeanArg(normMeanRGB);
     checkNormStdArg(normStdRGB);
 
-    final FloatBuffer floatBuffer = Tensor.allocateFloatBuffer(3 * width * height);
-    bitmapToFloatBuffer(bitmap, x, y, width, height, normMeanRGB, normStdRGB, floatBuffer, 0);
-    return Tensor.fromBlob(floatBuffer, new long[]{1, 3, height, width});
+    final int pixelsCount = height * width;
+    final int[] pixels = new int[pixelsCount];
+    bitmap.getPixels(pixels, 0, width, x, y, width, height);
+    final float[] floatArray = new float[3 * pixelsCount];
+    final int offset_g = pixelsCount;
+    final int offset_b = 2 * pixelsCount;
+    for (int i = 0; i < pixelsCount; i++) {
+      final int c = pixels[i];
+      float r = ((c >> 16) & 0xff) / 255.0f;
+      float g = ((c >> 8) & 0xff) / 255.0f;
+      float b = ((c) & 0xff) / 255.0f;
+      floatArray[i] = (r - normMeanRGB[0]) / normStdRGB[0];
+      floatArray[offset_g + i] = (g - normMeanRGB[1]) / normStdRGB[1];
+      floatArray[offset_b + i] = (b - normMeanRGB[2]) / normStdRGB[2];
+    }
+    return Tensor.newFloat32Tensor(new long[]{1, 3, height, width}, floatArray);
   }
 
   /**
@@ -128,52 +94,6 @@ public final class TensorImageUtils {
       final int tensorHeight,
       float[] normMeanRGB,
       float[] normStdRGB) {
-    if (image.getFormat() != ImageFormat.YUV_420_888) {
-      throw new IllegalArgumentException(
-          String.format(
-              Locale.US, "Image format %d != ImageFormat.YUV_420_888", image.getFormat()));
-    }
-
-    checkNormMeanArg(normMeanRGB);
-    checkNormStdArg(normStdRGB);
-    checkRotateCWDegrees(rotateCWDegrees);
-    checkTensorSize(tensorWidth, tensorHeight);
-
-    final FloatBuffer floatBuffer = Tensor.allocateFloatBuffer(3 * tensorWidth * tensorHeight);
-    imageYUV420CenterCropToFloatBuffer(
-        image,
-        rotateCWDegrees,
-        tensorWidth,
-        tensorHeight,
-        normMeanRGB, normStdRGB, floatBuffer, 0);
-    return Tensor.fromBlob(floatBuffer, new long[]{1, 3, tensorHeight, tensorWidth});
-  }
-
-  /**
-   * Writes tensor content from specified {@link android.media.Image}, doing optional rotation,
-   * scaling (nearest) and center cropping to specified {@link java.nio.FloatBuffer} with specified offset.
-   *
-   * @param image           {@link android.media.Image} as a source for Tensor data
-   * @param rotateCWDegrees Clockwise angle through which the input image needs to be rotated to be
-   *                        upright. Range of valid values: 0, 90, 180, 270
-   * @param tensorWidth     return tensor width, must be positive
-   * @param tensorHeight    return tensor height, must be positive
-   * @param normMeanRGB     means for RGB channels normalization, length must equal 3, RGB order
-   * @param normStdRGB      standard deviation for RGB channels normalization, length must equal 3, RGB order
-   * @param outBuffer       Output buffer, where tensor content will be written
-   * @param outBufferOffset Output buffer offset with which tensor content will be written
-   */
-  public static void imageYUV420CenterCropToFloatBuffer(
-      final Image image,
-      int rotateCWDegrees,
-      final int tensorWidth,
-      final int tensorHeight,
-      float[] normMeanRGB,
-      float[] normStdRGB,
-      final FloatBuffer outBuffer,
-      final int outBufferOffset) {
-    checkOutBufferCapacity(outBuffer, outBufferOffset, tensorWidth, tensorHeight);
-
     if (image.getFormat() != ImageFormat.YUV_420_888) {
       throw new IllegalArgumentException(
           String.format(
@@ -238,6 +158,7 @@ public final class TensorImageUtils {
     final int channelSize = tensorHeight * tensorWidth;
     final int tensorInputOffsetG = channelSize;
     final int tensorInputOffsetB = 2 * channelSize;
+    final float[] floatArray = new float[3 * channelSize];
     for (int x = 0; x < tensorWidth; x++) {
       for (int y = 0; y < tensorHeight; y++) {
 
@@ -277,22 +198,13 @@ public final class TensorImageUtils {
         int r = clamp((a0 + a1) >> 10, 0, 255);
         int g = clamp((a0 - a2 - a3) >> 10, 0, 255);
         int b = clamp((a0 + a4) >> 10, 0, 255);
-        final int offset = outBufferOffset + y * tensorWidth + x;
-        float rF = ((r / 255.f) - normMeanRGB[0]) / normStdRGB[0];
-        float gF = ((g / 255.f) - normMeanRGB[1]) / normStdRGB[1];
-        float bF = ((b / 255.f) - normMeanRGB[2]) / normStdRGB[2];
-
-        outBuffer.put(offset, rF);
-        outBuffer.put(offset + tensorInputOffsetG, gF);
-        outBuffer.put(offset + tensorInputOffsetB, bF);
+        final int offset = y * tensorWidth + x;
+        floatArray[offset] = ((r / 255.f) - normMeanRGB[0]) / normStdRGB[0];
+        floatArray[tensorInputOffsetG + offset] = ((g / 255.f) - normMeanRGB[1]) / normStdRGB[1];
+        floatArray[tensorInputOffsetB + offset] = ((b / 255.f) - normMeanRGB[2]) / normStdRGB[2];
       }
     }
-  }
-
-  private static void checkOutBufferCapacity(FloatBuffer outBuffer, int outBufferOffset, int tensorWidth, int tensorHeight) {
-    if (outBufferOffset + 3 * tensorWidth * tensorHeight > outBuffer.capacity()) {
-      throw new IllegalStateException("Buffer underflow");
-    }
+    return Tensor.newFloat32Tensor(new long[]{1, 3, tensorHeight, tensorWidth}, floatArray);
   }
 
   private static void checkTensorSize(int tensorWidth, int tensorHeight) {

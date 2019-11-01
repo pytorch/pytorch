@@ -791,7 +791,7 @@ class ShapePropagator {
             "aten::asin(Tensor self) -> Tensor",
             "aten::atan(Tensor self) -> Tensor",
             "aten::ceil(Tensor self) -> Tensor",
-            "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::clone(Tensor self) -> Tensor",
             "aten::contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor",
             "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
             "aten::celu(Tensor self, Scalar alpha) -> Tensor",

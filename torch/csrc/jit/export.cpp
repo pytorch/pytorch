@@ -213,7 +213,7 @@ EncoderBase::EncoderBase(
   // stable. only bump it when it's necessary
   model_proto_.set_ir_version(4);
   // TODO: set the producer version using appropriate function call
-  model_proto_.set_producer_version("1.3");
+  model_proto_.set_producer_version("1.2");
 }
 
 void EncoderBase::EncodeValueInfo(
@@ -543,9 +543,7 @@ class ScriptModuleSerializer {
       bool bytecode_format) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
-    // Serialize the model object
-    writeArchive("data", module.module_object());
-    // Then we werialize all code info.
+    // Serialize all code info.
     writeCode(module.type());
     // The tensor constants from the code are written to a separate archive
     // so loading the code does not depend on loading the data
@@ -555,19 +553,18 @@ class ScriptModuleSerializer {
     if (bytecode_format) {
       writeByteCode(module);
     }
+    // finally we serialize the model
+    writeArchive("data", module.module_object());
   }
 
  private:
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
-    // Vector to capture the run-time class types during pickling the IValues
-    std::vector<c10::ClassTypePtr> memorizedClassTypes;
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
         },
-        nullptr,
-        &memorizedClassTypes);
+        nullptr);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -580,11 +577,6 @@ class ScriptModuleSerializer {
     std::stringstream fname;
     fname << archive_name << ".pkl";
     writer_.writeRecord(fname.str(), data.data(), data.size());
-
-    // serialize all the captured run-time class types
-    for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
-      convertNamedType(wroteType);
-    }
   }
 
   void writeExtraFiles(
@@ -676,41 +668,12 @@ class ScriptModuleSerializer {
     for (const auto& method : methods) {
       const auto& func = method.function();
       torch::jit::Code code(func.graph());
-      // Make a copy of opnames. Some of them may be changed for mobile later.
-      std::vector<c10::OperatorName> opnames;
-      for (size_t i = 0; i < code.instructions().size(); ++i) {
-        Instruction ins = code.instructions()[i];
-        if (ins.op == OP) {
-          auto node = code.instructions_source()[i];
-          opnames.emplace_back(node->schema().operator_name());
-        }
-      }
 
       // instructions
       std::vector<IValue> inss;
-      for (size_t i = 0; i < code.instructions().size(); ++i) {
-        Instruction ins = code.instructions()[i];
+      for (const auto& ins : code.instructions()) {
         TORCH_CHECK(isOpSupportedInMobile(ins.op), toString(ins.op),
                     " is not supported in mobile module.");
-        if (ins.op == OP) {
-          if (opnames[ins.X].name == "prim::ListConstruct") {
-            auto node = code.instructions_source()[i];
-            ins.op = OPN;
-            ins.N = node->inputs().size();
-            ListTypePtr lt = node->output()->type()->expect<ListType>();
-            if (lt->getElementType() == IntType::get()) {
-              opnames[ins.X].overload_name = "int";
-            } else if (lt->getElementType() == FloatType::get()) {
-              opnames[ins.X].overload_name = "float";
-            } else if (lt->getElementType() == BoolType::get()) {
-              opnames[ins.X].overload_name = "bool";
-            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
-              opnames[ins.X].overload_name = "Tensor";
-            } else {
-              opnames[ins.X].overload_name = "generic";
-            }
-          }
-        }
         std::vector<IValue> insv{toString(ins.op), ins.X, ins.N};
         inss.emplace_back(c10::ivalue::Tuple::create(std::move(insv)));
       }
@@ -719,7 +682,7 @@ class ScriptModuleSerializer {
 
       // operators
       std::vector<IValue> opss;
-      for (const auto& opname : opnames) {
+      for (const auto& opname : code.opname_table()) {
         opss.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
       }
       auto operators = c10::ivalue::Tuple::create(std::move(opss));

@@ -671,4 +671,19 @@ Tensor new_ones(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject*
   throw std::runtime_error("new_ones(): invalid arguments");
 }
 
+Tensor new_zeros(c10::TensorTypeId type_id, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "new_zeros(IntArrayRef size, *, ScalarType dtype=None, Device? device=None, bool requires_grad=False)",
+  }, /*traceable=*/true);
+
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    const auto actual_type_id = typeIdWithDefault(r, 2, type_id);
+    const auto actual_scalar_type = r.scalartypeWithDefault(1, scalar_type);
+    return dispatch_zeros(actual_type_id, actual_scalar_type, r.deviceOptional(2), r.intlist(0)).set_requires_grad(r.toBool(3));
+  }
+  throw std::runtime_error("new_zeros(): invalid arguments");
+}
+
 }} // namespace torch::utils

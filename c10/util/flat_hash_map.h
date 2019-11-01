@@ -21,7 +21,6 @@
 #include <iterator>
 #include <utility>
 #include <type_traits>
-#include <stdexcept>
 
 #ifndef _MSC_VER
 #pragma GCC diagnostic push

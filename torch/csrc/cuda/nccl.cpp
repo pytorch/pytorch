@@ -70,7 +70,7 @@ using device_list = std::vector<int>;
 static std::unordered_map<device_list, NcclCommList, torch::hash<device_list>>
     _communicators;
 
-ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
+ArrayRef<ncclComm_t> _get_communicators(TensorList inputs) {
   static auto get_device = [](const at::Tensor& t) -> int {
     return t.get_device();
   };
@@ -81,7 +81,7 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
-ncclDataType_t get_data_type(const Tensor& t) {
+ncclDataType_t _get_data_type(const Tensor& t) {
   if (t.type().backend() != Backend::CUDA) {
     throw std::runtime_error("Unconvertible NCCL type");
   }
@@ -105,7 +105,7 @@ ncclDataType_t get_data_type(const Tensor& t) {
   }
 }
 
-void check_inputs(
+void _check_inputs(
     TensorList inputs,
     TensorList outputs,
     int input_multiplier,
@@ -232,12 +232,12 @@ void broadcast(
     const comm_list& user_comms) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
-  check_inputs(tensors, tensors, 1, 1);
-  ncclDataType_t data_type = get_data_type(tensors[0]);
+  _check_inputs(tensors, tensors, 1, 1);
+  ncclDataType_t data_type = _get_data_type(tensors[0]);
   int64_t numel = tensors[0].numel();
 
   AutoNcclGroup nccl_group_guard;
-  const auto comms = user_comms.empty() ? get_communicators(tensors)
+  const auto comms = user_comms.empty() ? _get_communicators(tensors)
                                         : ArrayRef<ncclComm_t>(user_comms);
 
   at::cuda::OptionalCUDAGuard device_guard;
@@ -276,14 +276,14 @@ void reduce(
   TORCH_CHECK(
       root >= 0 && static_cast<size_t>(root) < inputs.size(), "invalid root");
 
-  check_inputs(inputs, outputs, 1, 1);
+  _check_inputs(inputs, outputs, 1, 1);
   const auto len = inputs.size();
 
-  ncclDataType_t data_type = get_data_type(inputs[0]);
+  ncclDataType_t data_type = _get_data_type(inputs[0]);
 
   const auto count = inputs[0].numel();
   AutoNcclGroup nccl_group_guard;
-  auto comms_ref = user_comms.empty() ? get_communicators(inputs)
+  auto comms_ref = user_comms.empty() ? _get_communicators(inputs)
                                       : ArrayRef<ncclComm_t>(user_comms);
 
   at::cuda::OptionalCUDAGuard device_guard;
