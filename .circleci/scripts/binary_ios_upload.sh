@@ -1,8 +1,8 @@
 #!/bin/bash
-set -ex -o pipefail
+set -eux -o pipefail
 
 echo ""
-echo "DIR: $(pwd)"
+echo "PWD: $(pwd)"
 WORKSPACE=/Users/distiller/workspace
 PROJ_ROOT=/Users/distiller/project
 ARTIFACTS_DIR=${WORKSPACE}/ios

@@ -238,8 +238,8 @@ def _model_to_graph(model, args, verbose=False, training=False,
                 method_graph, tuple(in_vars), False, propagate)
         except AttributeError:
             raise RuntimeError('\'forward\' method must be a script method')
-    elif isinstance(model, torch.jit.ScriptFunction):
-        assert example_outputs is not None, "example_outputs must be provided when exporting a TorchScript ScriptFunction"
+    elif isinstance(model, torch.jit.Function):
+        assert example_outputs is not None, "example_outputs must be provided when exporting a TorchScript Function"
         method = model
         params = ()
         in_vars, in_desc = torch.jit._flatten(tuple(args))
@@ -261,7 +261,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
                             fixed_batch_size=fixed_batch_size)
 
-    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
+    if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.Function):
         out_vars, _ = torch.jit._flatten(tuple(example_outputs))
         graph = _assign_output_shapes(graph, out_vars)
 

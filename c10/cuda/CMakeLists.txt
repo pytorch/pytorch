@@ -17,7 +17,7 @@ configure_file(
 # transitively passed on to all libraries dependent on PyTorch.
 
 # Note: if you add a new source file/header, you will need to update
-# torch/utils/hipify/cuda_to_hip_mappings.py for new files
+# tools/amd_build/pyHIPIFY/cuda_to_hip_mappings.py for new files
 # and headers you add
 set(C10_CUDA_SRCS
     CUDAStream.cpp

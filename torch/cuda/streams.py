@@ -27,13 +27,13 @@ class Stream(torch._C._CudaStreamBase):
         Arguments:
             event (Event): an event to wait for.
 
-        .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
-           `CUDA Stream documentation`_ for more info.
+        .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see `CUDA
+           documentation`_ for more info.
 
            This function returns without waiting for :attr:`event`: only future
            operations are affected.
 
-        .. _CUDA Stream documentation:
+        .. _CUDA documentation:
            http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
         """
         event.wait(self)
@@ -78,7 +78,10 @@ class Stream(torch._C._CudaStreamBase):
         r"""Wait for all the kernels in this stream to complete.
 
         .. note:: This is a wrapper around ``cudaStreamSynchronize()``: see
-           `CUDA Stream documentation`_ for more info.
+           `CUDA documentation`_ for more info.
+
+        .. _CUDA documentation:
+           http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
         """
         super(Stream, self).synchronize()
 
@@ -118,8 +121,8 @@ class Event(torch._C._CudaEventBase):
         interprocess (bool): if ``True``, the event can be shared between processes
             (default: ``False``)
 
-    .. _CUDA Event Documentation:
-    https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
+       .. _CUDA documentation:
+       https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
     """
 
     def __new__(cls, enable_timing=False, blocking=False, interprocess=False):
@@ -171,8 +174,11 @@ class Event(torch._C._CudaEventBase):
         Waits until the completion of all work currently captured in this event.
         This prevents the CPU thread from proceeding until the event completes.
 
-         .. note:: This is a wrapper around ``cudaEventSynchronize()``: see
-            `CUDA Event documentation`_ for more info.
+         .. note:: This is a wrapper around ``cudaEventSynchronize()``: see `CUDA
+           documentation`_ for more info.
+
+        .. _CUDA documentation:
+           https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html
         """
         super(Event, self).synchronize()
 

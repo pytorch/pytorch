@@ -2,7 +2,6 @@
 
 #include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
-#include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/pickler.h>
 #include <vector>
@@ -16,7 +15,7 @@ using torch::jit::Operator;
 // A ScriptCall instance represents an invocation of a builtin operator for a
 // TorchScript function (not implemented yet). If it is a builtin operator, it
 // contains a shared ptr to the `Operator` and a list of arguments.
-class TORCH_API ScriptCall : public RpcCommandBase {
+class TORCH_API ScriptCall {
  public:
   ScriptCall(std::shared_ptr<Operator> op, std::vector<at::IValue>&& args);
 
@@ -25,8 +24,8 @@ class TORCH_API ScriptCall : public RpcCommandBase {
   const std::vector<at::IValue>& stack() const;
   std::vector<at::IValue>& stackRef();
 
-  Message toMessage() && override;
-  static std::unique_ptr<ScriptCall> fromMessage(const Message& message);
+  Message toMessage();
+  static ScriptCall fromMessage(const Message& message);
 
   virtual ~ScriptCall() = default;
 

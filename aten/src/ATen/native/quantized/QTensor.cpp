@@ -155,29 +155,13 @@ Tensor& set_quantizer_(Tensor& self, ConstQuantizerPtr quantizer) {
   return self;
 }
 
-Tensor quantized_clone(const Tensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor quantized_clone(const Tensor& self) {
   // TODO: add per channel support
   TORCH_INTERNAL_ASSERT(
       self.qscheme() == at::kPerTensorAffine,
       "clone for quantized Tensor only works for PerTensorAffine scheme right now");
-
-  auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
-
-  // TODO: To support all features of MemoryFormat::Preserve we need to add
-  // _empty_affine_quantized_strided function and use it similarly to
-  // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format)
-  // if (self.is_non_overlapping_and_dense()) -> _empty_affine_quantized_strided
-  if (memory_format == MemoryFormat::Preserve) {
-    memory_format = self.suggest_memory_format();
-  }
-
   Tensor dst = at::_empty_affine_quantized(
-      self.sizes(),
-      self.options(),
-      self.q_scale(),
-      self.q_zero_point(),
-      memory_format);
+      self.sizes(), self.options(), self.q_scale(), self.q_zero_point());
 
   at::native::copy_(dst, self, false);
 

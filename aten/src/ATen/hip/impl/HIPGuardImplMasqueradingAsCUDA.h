@@ -44,7 +44,7 @@ namespace c10 { namespace hip {
 // we switch PyTorch to calling a HIP a HIP.
 //
 // When you add a new MasqueradingAsCUDA class/function, you need to
-// also update the rewrite rules in torch/utils/hipify/cuda_to_hip_mappings.py
+// also update the rewrite rules in tools/amd_build/pyHIPIFY/cuda_to_hip_mappings.py
 //
 //
 //

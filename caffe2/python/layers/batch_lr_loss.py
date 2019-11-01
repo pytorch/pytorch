@@ -31,8 +31,6 @@ class BatchLRLoss(ModelLayer):
         uncertainty_penalty=1.0,
         focal_gamma=0.0,
         stop_grad_in_focal_factor=False,
-        task_gamma=1.0,
-        task_gamma_lb=0.1,
         **kwargs
     ):
         super(BatchLRLoss, self).__init__(model, name, input_record, **kwargs)
@@ -77,44 +75,6 @@ class BatchLRLoss(ModelLayer):
         self.focal_gamma = focal_gamma
         self.stop_grad_in_focal_factor = stop_grad_in_focal_factor
 
-        self.apply_exp_decay = False
-        if task_gamma < 1.0:
-            self.apply_exp_decay = True
-            self.task_gamma_cur = self.create_param(
-                param_name=('%s_task_gamma_cur' % self.name),
-                shape=[1],
-                initializer=(
-                    'ConstantFill', {
-                        'value': 1.0,
-                        'dtype': core.DataType.FLOAT
-                    }
-                ),
-                optimizer=self.model.NoOptim,
-            )
-
-            self.task_gamma = self.create_param(
-                param_name=('%s_task_gamma' % self.name),
-                shape=[1],
-                initializer=(
-                    'ConstantFill', {
-                        'value': task_gamma,
-                        'dtype': core.DataType.FLOAT
-                    }
-                ),
-                optimizer=self.model.NoOptim,
-            )
-
-            self.task_gamma_lb = self.create_param(
-                param_name=('%s_task_gamma_lb' % self.name),
-                shape=[1],
-                initializer=(
-                    'ConstantFill', {
-                        'value': task_gamma_lb,
-                        'dtype': core.DataType.FLOAT
-                    }
-                ),
-                optimizer=self.model.NoOptim,
-            )
 
     def init_weight(self, jsd_weight, homotopy_weighting):
         if homotopy_weighting:
@@ -235,21 +195,6 @@ class BatchLRLoss(ModelLayer):
                 )
             xent = net.Mul(
                 [xent, focal_factor], net.NextScopedBlob("focallossxent")
-            )
-
-        if self.apply_exp_decay:
-            net.Mul(
-                [self.task_gamma_cur, self.task_gamma],
-                self.task_gamma_cur
-            )
-
-            task_gamma_multiplier = net.Max(
-                [self.task_gamma_cur, self.task_gamma_lb],
-                net.NextScopedBlob("task_gamma_cur_multiplier")
-            )
-
-            xent = net.Mul(
-                [xent, task_gamma_multiplier], net.NextScopedBlob("expdecayxent")
             )
 
         # fuse with JSD

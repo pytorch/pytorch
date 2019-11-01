@@ -10,8 +10,6 @@
 
 namespace pytorch_jni {
 
-// NOTE: Codes must be kept in sync with DType.java.
-// NOTE: Never serialize these, because they can change between releases.
 constexpr static int kTensorDTypeUInt8 = 1;
 constexpr static int kTensorDTypeInt8 = 2;
 constexpr static int kTensorDTypeInt32 = 3;
@@ -166,7 +164,7 @@ class JTensor : public facebook::jni::JavaClass<JTensor> {
   static at::Tensor newAtTensorFromJTensor(
       facebook::jni::alias_ref<JTensor> jtensor) {
     static const auto dtypeMethod =
-        JTensor::javaClassStatic()->getMethod<jint()>("dtypeJniCode");
+        JTensor::javaClassStatic()->getMethod<jint()>("dtype");
     jint jdtype = dtypeMethod(jtensor);
 
     static const auto shapeField =
@@ -218,7 +216,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static auto jMethodTensor =
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(
-                  facebook::jni::local_ref<JTensor>)>("from");
+                  facebook::jni::local_ref<JTensor>)>("tensor");
       return jMethodTensor(
           JIValue::javaClassStatic(),
           JTensor::newJTensorFromAtTensor(ivalue.toTensor()));
@@ -226,26 +224,26 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static auto jMethodBool =
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(jboolean)>(
-                  "from");
+                  "bool");
       return jMethodBool(JIValue::javaClassStatic(), ivalue.toBool());
     } else if (ivalue.isInt()) {
       static auto jMethodInt =
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(jlong)>(
-                  "from");
+                  "long64");
       return jMethodInt(JIValue::javaClassStatic(), ivalue.toInt());
     } else if (ivalue.isDouble()) {
       static auto jMethodDouble =
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(jdouble)>(
-                  "from");
+                  "double64");
       return jMethodDouble(JIValue::javaClassStatic(), ivalue.toDouble());
     } else if (ivalue.isString()) {
       static auto jMethodString =
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(
                   facebook::jni::alias_ref<
-                      facebook::jni::JString::javaobject>)>("from");
+                      facebook::jni::JString::javaobject>)>("string");
       return jMethodString(
           JIValue::javaClassStatic(),
           facebook::jni::make_jstring(ivalue.toStringRef()));
@@ -255,7 +253,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(
                   facebook::jni::alias_ref<facebook::jni::JArrayClass<
-                      JIValue::javaobject>::javaobject>)>("tupleFrom");
+                      JIValue::javaobject>::javaobject>)>("tuple");
       auto jElementsArray =
           facebook::jni::JArrayClass<JIValue::javaobject>::newArray(
               elementsVec.size());
@@ -269,7 +267,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static auto jMethodBoolListArr =
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(
-                  facebook::jni::alias_ref<jbooleanArray>)>("listFrom");
+                  facebook::jni::alias_ref<jbooleanArray>)>("boolList");
       size_t n = list.size();
       auto jArray = facebook::jni::make_boolean_array(n);
       auto jArrayPinned = jArray->pin();
@@ -283,7 +281,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static auto jMethodLongListArr =
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(
-                  facebook::jni::alias_ref<jlongArray>)>("listFrom");
+                  facebook::jni::alias_ref<jlongArray>)>("longList");
       size_t n = list.size();
       auto jArray = facebook::jni::make_long_array(n);
       auto jArrayPinned = jArray->pin();
@@ -297,7 +295,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static auto jMethoDoubleListArr =
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(
-                  facebook::jni::alias_ref<jdoubleArray>)>("listFrom");
+                  facebook::jni::alias_ref<jdoubleArray>)>("doubleList");
       size_t n = list.size();
       auto jArray = facebook::jni::make_double_array(n);
       auto jArrayPinned = jArray->pin();
@@ -312,7 +310,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(
                   facebook::jni::alias_ref<facebook::jni::JArrayClass<
-                      JTensor::javaobject>::javaobject>)>("listFrom");
+                      JTensor::javaobject>::javaobject>)>("tensorList");
       auto jArray = facebook::jni::JArrayClass<JTensor::javaobject>::newArray(
           list.size());
       auto index = 0;
@@ -326,7 +324,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
           JIValue::javaClassStatic()
               ->getStaticMethod<facebook::jni::local_ref<JIValue>(
                   facebook::jni::alias_ref<facebook::jni::JArrayClass<
-                      JIValue::javaobject>::javaobject>)>("listFrom");
+                      JIValue::javaobject>::javaobject>)>("list");
       auto jArray = facebook::jni::JArrayClass<JIValue::javaobject>::newArray(
           list.size());
       auto index = 0;
@@ -353,7 +351,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
                         facebook::jni::alias_ref<
                             facebook::jni::JString::javaobject>,
                         facebook::jni::alias_ref<JIValue::javaobject>>>)>(
-                    "dictStringKeyFrom");
+                    "dictStringKey");
 
         auto jmap = JHashMap<
             facebook::jni::alias_ref<facebook::jni::JString::javaobject>,
@@ -372,7 +370,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
                         facebook::jni::alias_ref<
                             facebook::jni::JLong::javaobject>,
                         facebook::jni::alias_ref<JIValue::javaobject>>>)>(
-                    "dictLongKeyFrom");
+                    "dictLongKey");
         auto jmap = JHashMap<
             facebook::jni::alias_ref<facebook::jni::JLong::javaobject>,
             facebook::jni::alias_ref<JIValue::javaobject>>::create();
@@ -406,32 +404,32 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static const auto jMethodGetTensor =
           JIValue::javaClassStatic()
               ->getMethod<facebook::jni::alias_ref<JTensor::javaobject>()>(
-                  "toTensor");
+                  "getTensor");
       return JTensor::newAtTensorFromJTensor(jMethodGetTensor(jivalue));
     } else if (JIValue::kTypeCodeBool == typeCode) {
       static const auto jMethodGetBool =
-          JIValue::javaClassStatic()->getMethod<jboolean()>("toBool");
+          JIValue::javaClassStatic()->getMethod<jboolean()>("getBool");
       // explicit cast to bool as jboolean is defined as uint8_t, IValue ctor
       // for int will be called for jboolean
       bool b = jMethodGetBool(jivalue);
       return at::IValue{b};
     } else if (JIValue::kTypeCodeLong == typeCode) {
       static const auto jMethodGetLong =
-          JIValue::javaClassStatic()->getMethod<jlong()>("toLong");
+          JIValue::javaClassStatic()->getMethod<jlong()>("getLong");
       return at::IValue{jMethodGetLong(jivalue)};
     } else if (JIValue::kTypeCodeDouble == typeCode) {
       static const auto jMethodGetDouble =
-          JIValue::javaClassStatic()->getMethod<jdouble()>("toDouble");
+          JIValue::javaClassStatic()->getMethod<jdouble()>("getDouble");
       return at::IValue{jMethodGetDouble(jivalue)};
     } else if (JIValue::kTypeCodeString == typeCode) {
       static const auto jMethodGetString =
-          JIValue::javaClassStatic()->getMethod<jstring()>("toStr");
+          JIValue::javaClassStatic()->getMethod<jstring()>("getString");
       return at::IValue{jMethodGetString(jivalue)->toStdString()};
     } else if (JIValue::kTypeCodeTuple == typeCode) {
       static const auto jMethodGetTuple =
           JIValue::javaClassStatic()
               ->getMethod<facebook::jni::JArrayClass<
-                  JIValue::javaobject>::javaobject()>("toTuple");
+                  JIValue::javaobject>::javaobject()>("getTuple");
       auto jarray = jMethodGetTuple(jivalue);
       size_t n = jarray->size();
 
@@ -445,7 +443,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       return c10::ivalue::Tuple::create(std::move(elements));
     } else if (JIValue::kTypeCodeBoolList == typeCode) {
       static const auto jMethodGetBoolList =
-          JIValue::javaClassStatic()->getMethod<jbooleanArray()>("toBoolList");
+          JIValue::javaClassStatic()->getMethod<jbooleanArray()>("getBoolList");
       auto jArray = jMethodGetBoolList(jivalue);
       auto jArrayPinned = jArray->pin();
       size_t n = jArrayPinned.size();
@@ -457,7 +455,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       return at::IValue{std::move(list)};
     } else if (JIValue::kTypeCodeLongList == typeCode) {
       static const auto jMethodGetLongList =
-          JIValue::javaClassStatic()->getMethod<jlongArray()>("toLongList");
+          JIValue::javaClassStatic()->getMethod<jlongArray()>("getLongList");
       auto jArray = jMethodGetLongList(jivalue);
       auto jArrayPinned = jArray->pin();
       size_t n = jArrayPinned.size();
@@ -470,7 +468,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
     } else if (JIValue::kTypeCodeDoubleList == typeCode) {
       static const auto jMethodGetDoubleList =
           JIValue::javaClassStatic()->getMethod<jdoubleArray()>(
-              "toDoubleList");
+              "getDoubleList");
       auto jArray = jMethodGetDoubleList(jivalue);
       auto jArrayPinned = jArray->pin();
       size_t n = jArrayPinned.size();
@@ -484,7 +482,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static const auto jMethodGetTensorList =
           JIValue::javaClassStatic()
               ->getMethod<facebook::jni::JArrayClass<
-                  JTensor::javaobject>::javaobject()>("toTensorList");
+                  JTensor::javaobject>::javaobject()>("getTensorList");
       auto jArray = jMethodGetTensorList(jivalue);
       size_t n = jArray->size();
       c10::List<at::Tensor> list{};
@@ -497,7 +495,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static const auto jMethodGetList =
           JIValue::javaClassStatic()
               ->getMethod<facebook::jni::JArrayClass<
-                  JIValue::javaobject>::javaobject()>("toList");
+                  JIValue::javaobject>::javaobject()>("getList");
       auto jarray = jMethodGetList(jivalue);
       size_t n = jarray->size();
       if (n == 0) {
@@ -520,7 +518,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       static const auto jMethodGetDictStringKey =
           JIValue::javaClassStatic()
               ->getMethod<facebook::jni::JMap<jstring, JIValue::javaobject>::
-                              javaobject()>("toDictStringKey");
+                              javaobject()>("getDictStringKey");
       auto jmap = jMethodGetDictStringKey(jivalue);
       auto it = jmap->begin();
       if (it == jmap->end()) {
@@ -543,7 +541,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
           JIValue::javaClassStatic()
               ->getMethod<facebook::jni::JMap<
                   facebook::jni::JLong::javaobject,
-                  JIValue::javaobject>::javaobject()>("toDictLongKey");
+                  JIValue::javaobject>::javaobject()>("getDictLongKey");
       auto jmap = jMethodGetDictLongKey(jivalue);
       auto it = jmap->begin();
       if (it == jmap->end()) {
