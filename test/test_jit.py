@@ -130,7 +130,7 @@ def doAutodiffCheck(testname):
     ]
 
     if testname in test_exceptions:
-        return False    
+        return False
     return True
 
 func_call = torch._C.ScriptFunction.__call__
@@ -562,7 +562,7 @@ class TestJit(JitTestCase):
 
     def test_peephole_optimize_shape_ops(self):
         def test_input(func, input, result):
-            # if result == 2 we will trigger a bailout and 
+            # if result == 2 we will trigger a bailout and
             # the unprofiled graph should return the correct result
             self.assertEqual(func(input, profile_and_replay=True), result)
             gre = func.graph_for(input)
@@ -11347,9 +11347,6 @@ a")
             def forward(self, x):
                 x2 = x
                 iter = 0
-                for val, mod in zip(range(5), self.mods):
-                    x = mod(x) * val
-                    iter += 1
                 for val, mod in enumerate(self.mods):
                     x2 = mod(x2) * val
                     iter += 1
@@ -11663,13 +11660,13 @@ a")
 
     def test_for_tuple_assign(self):
         def test_simple_assign(x):
-            # type: (Tuple[int, int]) -> float
+            # type: (Tuple[int, float]) -> float
             sum = 0.0
             for a in x:
                 sum += float(a)
             return sum
 
-        self.checkScript(test_simple_assign, ((1, 2),))
+        self.checkScript(test_simple_assign, ((1, 2.5),))
 
         def test_tuple_assign(x):
             # type: (Tuple[Tuple[int, int], Tuple[int, int]]) -> int
@@ -16609,7 +16606,7 @@ def create_traced_fn(self, fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         # `check_trace` is set to False because check_trace is run with @no_grad
-        # Also, `check_against_reference` already does all the checks 
+        # Also, `check_against_reference` already does all the checks
         # against python function
         traced = torch.jit.trace(fn_tensors, inputs_tensors, check_trace=False)
         self.assertExportImport(traced.graph, inputs_tensors)
