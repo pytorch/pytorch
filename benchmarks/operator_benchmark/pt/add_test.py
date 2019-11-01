@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import operator_benchmark as op_bench
 import torch
 
-"""Microbenchmarks for element-wise Add operator. Supports both Caffe2/PyTorch."""
+"""Microbenchmarks for add_ operator. Supports both Caffe2/PyTorch."""
 
 # Configs for PT add operator
 add_long_configs = op_bench.cross_product_configs(
@@ -35,7 +35,7 @@ class AddBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, N, K, device):
         self.input_one = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
         self.input_two = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
-        self.set_module_name("add")
+        self.set_module_name("add_")
 
     def forward(self):
         return torch.add(self.input_one, self.input_two)
