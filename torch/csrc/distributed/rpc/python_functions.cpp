@@ -37,7 +37,6 @@ std::shared_ptr<Operator> matchBuiltinOp(
         // ``createStackForSchema`` to avoid throwing an error.
         stack = torch::jit::createStackForSchema(
             op->schema(), args, kwargs, c10::nullopt);
-
       } catch (std::runtime_error& e) {
         VLOG(1) << "Couldn't match schema: " << op->schema()
                 << " to args: " << args << " and kwargs: " << kwargs
@@ -124,28 +123,8 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
   auto scriptCall = c10::guts::make_unique<ScriptCall>(op, std::move(stack));
-  auto& autogradContainer = DistAutogradContainer::getInstance();
-  if (autogradContainer.hasValidContext()) {
-    // Retrieve the appropriate context to modify.
-    auto& autogradContext = autogradContainer.currentContext();
-
-    // Wrap the original rpc with autograd information.
-    AutogradMetadata autogradMetadata(
-        autogradContext.contextId(), autogradContainer.newAutogradMessageId());
-    RpcWithAutograd rpcWithAutograd(
-        agent.getWorkerInfo().id_,
-        MessageType::FORWARD_AUTOGRAD_REQ,
-        autogradMetadata,
-        std::move(scriptCall));
-
-    // Record autograd information for 'send'.
-    addSendRpcBackward(
-        autogradContext, autogradMetadata, rpcWithAutograd.tensors(), dst.id_);
-
-    return agent.send(dst, std::move(rpcWithAutograd).toMessage());
-  } else {
-    return agent.send(dst, std::move(*scriptCall).toMessage());
-  }
+  return sendMessageWithAutograd(
+      agent, dst, std::move(*scriptCall).toMessage());
 }
 
 PyRRef pyRemoteBuiltin(
@@ -163,11 +142,12 @@ PyRRef pyRemoteBuiltin(
       ctx.getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
   auto userRRef = ctx.createUserRRef<IValue>(dst.id_);
-  auto fm = agent.send(
-      dst,
-      ScriptRemoteCall(
-          op, std::move(stack), userRRef->rrefId(), userRRef->forkId())
-          .toMessage());
+
+  auto scriptRemoteCall = c10::guts::make_unique<ScriptRemoteCall>(
+      op, std::move(stack), userRRef->rrefId(), userRRef->forkId());
+
+  auto fm = sendMessageWithAutograd(
+      agent, dst, std::move(*scriptRemoteCall).toMessage());
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);
@@ -179,12 +159,11 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors) {
-  return agent.send(
-      dst,
-      PythonUDFCall(
-          std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
-          tensors)
-          .toMessage());
+  auto pythonUDFCall = c10::guts::make_unique<PythonUDFCall>(
+      std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
+      tensors);
+  return sendMessageWithAutograd(
+      agent, dst, std::move(*pythonUDFCall).toMessage());
 }
 
 PyRRef pyRemotePythonUdf(
@@ -198,13 +177,20 @@ PyRRef pyRemotePythonUdf(
       ctx.getWorkerId() != dst.id_,
       "Does not support creating RRef on self yet.");
   auto userRRef = ctx.createUserRRef<py::object>(dst.id_);
-  auto fm = agent.send(
+
+  auto pythonRemoteCall = c10::guts::make_unique<PythonRemoteCall>(
+      SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors)),
+      userRRef->rrefId().toIValue(),
+      userRRef->forkId().toIValue());
+
+  // set forceGradRecording to true as even if the args does not contain any
+  // tensor, the return value might still contain tensors.
+  auto fm = sendMessageWithAutograd(
+      agent,
       dst,
-      PythonRemoteCall(
-          SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors)),
-          userRRef->rrefId().toIValue(),
-          userRRef->forkId().toIValue())
-          .toMessage());
+      std::move(*pythonRemoteCall).toMessage(),
+      true /*forceGradRecording*/
+  );
 
   ctx.addPendingUser(userRRef->forkId(), userRRef);
   fm->addCallback(finishAcceptUserRRef);

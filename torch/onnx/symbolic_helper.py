@@ -77,8 +77,8 @@ def _parse_arg(value, desc):
         if desc == 'is':
             for v in value.node().inputs():
                 if v.node().kind() != 'onnx::Constant':
-                    raise RuntimeError("Failed to export an ONNX attribute, "
-                                       "since it's not constant, please try to make "
+                    raise RuntimeError("Failed to export an ONNX attribute '" + v.node().kind() +
+                                       "', since it's not constant, please try to make "
                                        "things (e.g., kernel size) static if possible")
             return [int(v.node()['value']) for v in value.node().inputs()]
         else:
@@ -293,6 +293,10 @@ def _interpolate_get_scales(g, scale_factor, dim):
 def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_corners):
     from torch.onnx.symbolic_opset9 import unsqueeze
     mode = _maybe_get_const(mode, 's')
+    if 'linear' in mode:
+        mode = 'linear'
+    if 'cubic' in mode:
+        mode = 'cubic'
     _interpolate_warning(mode)
 
     align_corners = _maybe_get_const(align_corners, 'b')
