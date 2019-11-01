@@ -12,53 +12,6 @@ class CAFFE2_API OperatorHandle;
 
 namespace detail {
 
-class KernelTable_ final {
- public:
-  void set(TensorTypeId key, const KernelFunction& value, const std::string& operator_name) {
-    auto emplaced = map_.emplace(key, value);
-    if (!emplaced.second) {
-      // Element already existed. Overwrite it.
-      emplaced.first->second = value;
-      TORCH_WARN("Registered a kernel for operator ", operator_name," with dispatch key ", toString(key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
-    }
-  }
-
-  void removeIfExists(TensorTypeId key, const std::string& operator_name) {
-    auto num_removed = map_.erase(key);
-    TORCH_INTERNAL_ASSERT(num_removed <= 1); // This is not a multi-map
-  }
-
-  const KernelFunction* lookup(TensorTypeId key) const {
-    auto found = map_.find(key);
-    if (found != map_.end()) {
-      return &found->second;
-    } else {
-      return nullptr;
-    }
-  }
-
-  size_t size() const {
-    return map_.size();
-  }
-
-  std::string list_all_dispatch_keys() const {
-    if (map_.size() == 0) {
-      return "[]";
-    }
-    std::ostringstream str;
-    str << "[" << toString(map_.begin()->first);
-    for (auto iter = ++map_.begin(); iter != map_.end(); ++iter) {
-      str << ", " << toString(iter->first);
-    }
-    str << "]";
-    return str.str();
-  }
-
- private:
-   ska::flat_hash_map<TensorTypeId, KernelFunction> map_;
-};
-} // namespace detail
-
 /**
  * Implement this interface and register your instance with the dispatcher
  * to get notified when operators are registered or deregistered with
