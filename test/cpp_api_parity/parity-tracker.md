@@ -107,7 +107,7 @@ torch.nn.MSELoss|Yes|No
 torch.nn.CrossEntropyLoss|No|No
 torch.nn.CTCLoss|Yes|No
 torch.nn.NLLLoss|No|No
-torch.nn.PoissonNLLLoss|No|No
+torch.nn.PoissonNLLLoss|Yes|No
 torch.nn.KLDivLoss|Yes|No
 torch.nn.BCELoss|Yes|No
 torch.nn.BCEWithLogitsLoss|No|No
