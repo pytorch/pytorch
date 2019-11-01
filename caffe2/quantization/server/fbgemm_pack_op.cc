@@ -712,6 +712,9 @@ void Int8FCDNNLowpPackedWeightBlobShapeFunctions::SetupExternalTensorDescriptor(
   desc->dimensions = shape.size();
   shapes->emplace_back(shape.cbegin(), shape.cend());
   desc->shape = shapes->back().data();
+
+  // not an offline tensor
+  desc->isOffline = 0;
 }
 
 void Int8ConvDNNLowpPackedWeightBlobShapeFunctions::
@@ -757,6 +760,9 @@ void Int8ConvDNNLowpPackedWeightBlobShapeFunctions::
   desc->dimensions = shape.size();
   shapes->emplace_back(shape.cbegin(), shape.cend());
   desc->shape = shapes->back().data();
+
+  // not an offline tensor
+  desc->isOffline = 0;
 }
 
 // Explicitly register TypeMeta
