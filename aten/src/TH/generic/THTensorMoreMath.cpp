@@ -31,10 +31,13 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
     at::parallel_for(
         0,
         sz,
-        HYPER_TH_OMP_OVERHEAD_THRESHOLD,
+        TH_OMP_OVERHEAD_THRESHOLD,
         [&](int64_t begin, int64_t end) {
           for (auto iter = begin; iter < end; iter++) {
-            if (equal && tap[iter] != tbp[iter]) {
+            if (equal) {
+              break;
+            }
+            if (tap[iter] != tbp[iter]) {
               equal = 0;
               break;
             }
@@ -1001,7 +1004,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(sinh,TH_MATH_NAME(sinh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
