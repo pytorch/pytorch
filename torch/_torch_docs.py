@@ -489,7 +489,7 @@ Args:
 Example::
 
     >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
-    tensor([ 135.,  135,  325])
+    tensor([ 135.,  135,  -45])
 """.format(**common_args))
 
 add_docstr(torch.as_strided,
@@ -2938,7 +2938,7 @@ Example::
 
 add_docstr(torch.matrix_rank,
            r"""
-matrix_rank(input, tol=None, bool symmetric=False) -> Tensor
+matrix_rank(input, tol=None, symmetric=False) -> Tensor
 
 Returns the numerical rank of a 2-D tensor. The method to compute the
 matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
@@ -5257,7 +5257,7 @@ Returns:
 
         - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`. The eigenvalues in ascending order.
         - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
-          If ``eigenvectors=False``, it's a tensor filled with zeros.
+          If ``eigenvectors=False``, it's an empty tensor.
           Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
 Examples::
@@ -6353,12 +6353,12 @@ Please look at `Moore-Penrose inverse`_ for more details
     See :meth:`~torch.svd` for more details.
 
 Arguments:
-    input (Tensor): The input 2D tensor of dimensions :math:`m \times n`
+    input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is zero or more batch dimensions
     rcond (float): A floating point value to determine the cutoff for small singular values.
                    Default: 1e-15
 
 Returns:
-    The pseudo-inverse of :attr:`input` of dimensions :math:`n \times m`
+    The pseudo-inverse of :attr:`input` of dimensions :math:`(*, n, m)`
 
 Example::
 
@@ -6373,6 +6373,17 @@ Example::
             [-0.7124, -0.1631, -0.2272],
             [ 0.1356,  0.3933, -0.5023],
             [-0.0308, -0.1725, -0.5216]])
+    >>> # Batched pinverse example
+    >>> a = torch.randn(2,6,3)
+    >>> b = torch.pinverse(a)
+    >>> torch.matmul(b, a)
+    tensor([[[ 1.0000e+00,  1.6391e-07, -1.1548e-07],
+            [ 8.3121e-08,  1.0000e+00, -2.7567e-07],
+            [ 3.5390e-08,  1.4901e-08,  1.0000e+00]],
+
+            [[ 1.0000e+00, -8.9407e-08,  2.9802e-08],
+            [-2.2352e-07,  1.0000e+00,  1.1921e-07],
+            [ 0.0000e+00,  8.9407e-08,  1.0000e+00]]])
 
 .. _Moore-Penrose inverse: https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
 
@@ -7047,7 +7058,7 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 
 add_docstr(torch.quantize_per_tensor,
            r"""
-quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+quantize_per_tensor(input, scale, zero_point, dtype) -> Tensor
 
 Converts a float tensor to quantized tensor with given scale and zero point.
 
@@ -7072,7 +7083,7 @@ Example::
 
 add_docstr(torch.quantize_per_channel,
            r"""
-quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
+quantize_per_channel(input, scales, zero_points, axis, dtype) -> Tensor
 
 Converts a float tensor to per-channel quantized tensor with given scales and zero points.
 

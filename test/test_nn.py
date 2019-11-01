@@ -889,7 +889,7 @@ class TestNN(NNTestCase):
             # Negative stride check
             module = nn.Conv1d(in_channels=3, out_channels=6, kernel_size=3, stride=-1, bias=True).to(dtype)
             input = torch.randn(1, 3, 4).to(dtype)
-            with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
 
     def test_mismatch_shape_conv2d(self):
@@ -918,7 +918,13 @@ class TestNN(NNTestCase):
             # Negative stride check
             module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=-1, bias=True).to(dtype)
             input = torch.randn(1, 3, 4, 4).to(dtype)
-            with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
+                module(input)
+
+            # Zero stride check
+            module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=0, bias=True).to(dtype)
+            input = torch.randn(1, 3, 4, 4).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
 
     def test_invalid_conv3d(self):
@@ -930,7 +936,7 @@ class TestNN(NNTestCase):
             # Negative stride check
             module = torch.nn.Conv3d(1, 1, kernel_size=3, stride=-2)
             input = torch.empty(1, 1, 4, 4, 4)
-            with self.assertRaisesRegex(RuntimeError, 'negative stride is not supported'):
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
 
     def _test_alpha_dropout(self, cls, input):
@@ -1871,10 +1877,10 @@ class TestNN(NNTestCase):
             for p, g in zip(l.parameters(), grad_list):
                 p._grad = g.clone().view_as(p.data) if g is not None else g
 
-        clip_grad_value_(l.parameters(), clip_value)
-        for p in filter(lambda p: p.grad is not None, l.parameters()):
-            self.assertLessEqual(p.grad.data.max(), clip_value)
-            self.assertGreaterEqual(p.grad.data.min(), -clip_value)
+            clip_grad_value_(l.parameters(), clip_value)
+            for p in filter(lambda p: p.grad is not None, l.parameters()):
+                self.assertLessEqual(p.grad.data.max(), clip_value)
+                self.assertGreaterEqual(p.grad.data.min(), -clip_value)
 
         # Should accept a single Tensor as input
         p1, p2 = torch.randn(10, 10), torch.randn(10, 10)
@@ -2715,6 +2721,49 @@ class TestNN(NNTestCase):
                 output = module(input)
                 self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_pooling_avg_nhwc(self):
+        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32, device="cuda")
+        pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+
+        out = pool(input)
+        out.backward(grad)
+        ref_out = ref_pool(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_pooling_avg_nhwc_non_contiguous(self):
+        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last)
+        input = input[:, ::2, :, :].requires_grad_()
+        grad = torch.randint(1, 10, (4, 8, 7, 7), dtype=torch.float32, device="cuda")
+        grad = grad[:, ::2, :, :]
+        pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_pool = torch.nn.AdaptiveAvgPool2d((7, 7)).cuda()
+
+        out = pool(input)
+        out.backward(grad)
+        ref_out = ref_pool(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(input.grad, ref_input.grad)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_broadcast_double_backwards_gpu(self):
@@ -8079,6 +8128,27 @@ class TestNNDeviceType(NNTestCase):
         test('leaky_relu', 0.2)
         test('threshold', 3, 2)
         test('threshold', 3, 2, inplace=True)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_max_pool2d_nhwc(self, device):
+        input = torch.randint(1, 10, (4, 8, 8, 8), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
+        grad = torch.randint(1, 10, (4, 8, 1, 1), dtype=torch.float32, device="cuda")
+        pool = torch.nn.MaxPool2d((7, 7)).cuda()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_pool = torch.nn.MaxPool2d((7, 7)).cuda()
+
+        out = pool(input)
+        out.backward(grad)
+        ref_out = ref_pool(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertTrue(torch.allclose(out, ref_out))
+        self.assertTrue(torch.allclose(input.grad, ref_input.grad))
 
     def test_embedding_dense_grad(self, device):
         embd = nn.Embedding(20, 20).to(device)

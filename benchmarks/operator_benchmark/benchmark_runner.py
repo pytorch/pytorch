@@ -5,7 +5,6 @@ from __future__ import unicode_literals
 
 import argparse
 
-from caffe2.python import workspace
 import torch
 
 import benchmark_core
@@ -93,21 +92,29 @@ def main():
 
     parser.add_argument(
         "--ai_pep_format",
-        help="Print result when running on AI-PEP",
+        type=benchmark_utils.str2bool,
+        nargs='?',
+        const=True,
         default=False,
-        type=bool
+        help="Print result when running on AI-PEP"
     )
 
     parser.add_argument(
         "--use_jit",
-        help="Run operators with PyTorch JIT mode",
-        action='store_true'
+        type=benchmark_utils.str2bool,
+        nargs='?',
+        const=True,
+        default=False,
+        help="Run operators with PyTorch JIT mode"
     )
 
     parser.add_argument(
         "--forward_only",
-        help="Only run the forward path of operators",
-        action='store_true'
+        type=benchmark_utils.str2bool,
+        nargs='?',
+        const=True,
+        default=False,
+        help="Only run the forward path of operators"
     )
 
     parser.add_argument(
@@ -124,9 +131,6 @@ def main():
 
     args, _ = parser.parse_known_args()
 
-    if benchmark_utils.is_caffe2_enabled(args.framework):
-        workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
-        workspace.ClearGlobalNetObserver()
     if args.omp_num_threads:
         # benchmark_utils.set_omp_threads sets the env variable OMP_NUM_THREADS
         # which doesn't have any impact as C2 init logic has already been called
