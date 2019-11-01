@@ -221,6 +221,8 @@ class AnnotatedConvModel(torch.nn.Module):
     def forward(self, x):
         x = self.quant(x)
         x = self.conv(x)
+        x = self.dequant(x)
+        return x
 
 class ConvBnModel(torch.nn.Module):
     def __init__(self):

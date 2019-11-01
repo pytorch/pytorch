@@ -115,6 +115,9 @@ static std::string typeCastedValueName(
     // cast here, which may end up being a no-op if the tensor's scalar type
     // is `double`.
     return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
+  } else if (t->kind() == TypeKind::NoneType) {
+    // Support None value for optional arguments like memory format
+    return vn;
   } else if (auto scalar_type = t->expect<TensorType>()->scalarType()) {
     if (*scalar_type != outtype) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
