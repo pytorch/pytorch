@@ -74,6 +74,12 @@ class Reducer {
 
   bool has_marked_unused_parameters_;
   std::vector<VariableIndex> unused_parameters_;
+  // locally used parameter maps indicating if parameters are used locally
+  // during the current iteration. One tensor for each model replica and each
+  // tensor is one-dim int32 tensor of number of parameters. These tensors are
+  // marked and allreduced at the end of forward for figuring out the globally
+  // unused parameters.
+  std::vector<at::Tensor> local_used_maps_;
 
   void mark_variable_ready_dense(VariableIndex index);
 

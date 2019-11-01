@@ -159,6 +159,20 @@ Reducer::Reducer(
         backward_stats_.end(),
         [=](std::vector<int64_t>& v) { v.resize(variable_count); });
   }
+
+  // Initialize locally used parameter maps
+  {
+    const auto replica_count = replicas_.size();
+    const auto variable_count = replicas_[0].size();
+    local_used_maps_.resize(replica_count);
+    for (size_t i = 0; i < local_used_maps_.size(); i++) {
+      at::TensorOptions options;
+      options = options.device(replicas_[i][0].device());
+      options = options.dtype(at::kInt);
+      local_used_maps_[i] = torch::autograd::make_variable(
+            at::empty({variable_count}, options));
+    }
+  }
 }
 
 Reducer::~Reducer() noexcept(false) {
@@ -528,6 +542,10 @@ void Reducer::prepare_for_backward(
     bucket.pending = bucket.replicas.size();
   }
 
+  for (auto& local_used: local_used_maps_) {
+    local_used.fill_(1);
+  }
+
   // Reset unused parameter accounting.
   has_marked_unused_parameters_ = false;
   unused_parameters_.clear();
@@ -569,8 +587,14 @@ void Reducer::prepare_for_backward(
       continue;
     }
 
-    unused_parameters_.push_back(it.second);
+    // Mark locally unused parameters for this iteration
+    const auto& var_idx = it.second;
+    unused_parameters_.push_back(var_idx);
+    local_used_maps_[var_idx.replica_index][var_idx.variable_index] = 0;
   }
+
+  // allreduce locally used param maps to get the global consensus
+  process_group_->allreduce(local_used_maps_);
 }
 
 // A bucket with one or more dense tensors needs to be unflattened.
@@ -582,13 +606,23 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       auto& variable = replica.variables[intra_bucket_index];
       const auto offset = replica.offsets[intra_bucket_index];
       const auto length = replica.lengths[intra_bucket_index];
+
+      const VariableIndex& var_idx = func_[variable.grad_accumulator().get()];
+      bool global_unused =
+        local_used_maps_[var_idx.replica_index][var_idx.variable_index]
+          .item<int>() == 0;
+
       auto bucket_view =
           replica.contents.narrow(0, offset, length).view(variable.sizes());
       auto& grad = variable.grad();
-      if (!grad.defined()) {
-        grad = at::empty(bucket_view.sizes(), bucket_view.options());
+
+      // If a parameter is globally unused, we keep its grad untouched.
+      if (!global_unused) {
+        if (!grad.defined()) {
+          grad = at::empty(bucket_view.sizes(), bucket_view.options());
+        }
+        grad.copy_(bucket_view);
       }
-      grad.copy_(bucket_view);
     }
   }
 }

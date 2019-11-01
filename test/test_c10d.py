@@ -2519,6 +2519,65 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             self.fail("Unexpected exception: %s" % ex)
 
     @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_global_local_unused_params_grad(self):
+        """
+        By simulating a multi-task training, this test is to make sure:
+        1) DDP does not touch the grad of globally unused parameters.
+        2) DDP does update the grad of locally unused parameters.
+        """
+        class GlobalLocalUnusedParamModule(nn.Module):
+            class Task(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.p = nn.Parameter(torch.ones(2, 2))
+
+                def forward(self, x):
+                    return self.p
+
+            def __init__(self):
+                super().__init__()
+                self.t0 = self.Task()
+                self.t1 = self.Task()
+                self.task_unused = self.Task()
+
+            def task_parameters(self):
+                return (self.t0.p, self.t1.p, self.task_unused.p)
+
+            def forward(self, x, rank):
+                return self.t0(x) + 2 if rank == 0 else self.t1(x) + 3
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+
+        model = DistributedDataParallel(
+            GlobalLocalUnusedParamModule().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+
+        # Run forward
+        output = model(None, self.rank)
+
+        # The grads of all parameters should be None at this point.
+        t0_p, t1_p, task_unused_p = model.module.task_parameters()
+        self.assertIsNone(t0_p.grad)
+        self.assertIsNone(t1_p.grad)
+        self.assertIsNone(task_unused_p.grad)
+
+        # Run backward
+        loss = output.mean()
+        loss.backward()
+
+        # Now locally unused parameter should have grad updated on all ranks.
+        # However the globally unused parameter should still have None grad.
+        self.assertIsNotNone(t0_p.grad)
+        self.assertIsNotNone(t1_p.grad)
+        self.assertIsNone(task_unused_p.grad)
+
+    @requires_nccl()
     @skip_if_not_multigpu
     @skip_if_rocm
     def test_multiple_outputs_multiple_backward(self):
