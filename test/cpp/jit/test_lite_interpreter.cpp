@@ -74,5 +74,30 @@ void testLiteInterpreterConv() {
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
+
+void testLiteInterpreterModel() {
+  std::vector<torch::jit::IValue> inputs;
+  auto L = c10::List<int64_t>({1, 1, 1});
+  auto length = L.size();
+  auto LL = c10::List<c10::List<int64_t>>({L});
+  inputs.emplace_back(torch::jit::IValue(LL));
+  auto bite_lens = c10::List<int64_t>({3});
+  inputs.emplace_back(torch::jit::IValue(bite_lens));
+
+  auto m = load("/Users/myuan/data/pytext/BI/bi-model.pt1");
+  auto ref = m.forward(inputs);
+  std::cout << ref << std::endl;
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  m._save_for_mobile("/Users/myuan/data/pytext/BI/bi-model.bc");
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.run_method("forward", bcinputs);
+  }
+  std::cout << res << std::endl;
+}
 } // namespace torch
 } // namespace jit
