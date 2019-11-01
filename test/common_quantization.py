@@ -200,6 +200,30 @@ class LSTMDynamicModel(torch.nn.Module):
         x = self.lstm(x)
         return x
 
+
+class ConvModel(torch.nn.Module):
+    def __init__(self):
+        super(ConvModel, self).__init__()
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.conv(x)
+        return x
+
+class AnnotatedConvModel(torch.nn.Module):
+    def __init__(self):
+        super(AnnotatedConvModel, self).__init__()
+        self.qconfig = default_qconfig
+        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv(x)
+        x = self.dequant(x)
+        return x
+
 class TwoLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super(TwoLayerLinearModel, self).__init__()
