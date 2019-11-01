@@ -132,7 +132,7 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
       auto end = r.scalar(1);
       auto step = r.scalar(2);
       // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      c10::optional<ScalarType> scalarType = r.scalartypeOptional(2);
+      c10::optional<ScalarType> scalarType = r.scalartypeOptional(4);
       const auto options = TensorOptions()
           .dtype(scalarType)
           .device(r.device(6))
