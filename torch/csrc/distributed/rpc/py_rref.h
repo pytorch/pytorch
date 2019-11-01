@@ -42,7 +42,7 @@ class PyRRef {
   explicit PyRRef(std::shared_ptr<RRef> rref);
 
   bool isOwner() const;
-  worker_id_t owner() const;
+  WorkerInfo owner() const;
   std::shared_ptr<PyFuture> toHere();
   std::shared_ptr<PyFuture> localValue();
   py::tuple pickle() const;
