@@ -108,12 +108,12 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
 # and then blocks until the ps has verified the grads are correctly accumulated.
 def _run_trainer(rref_t1, t2, ps, rank_diff):
     with dist_autograd.context() as context_id:
-        print("ps=", ps, "rank diff = ", rank_idff, " got autograd context")
+        print("ps=", ps, "rank diff = ", rank_diff, " got autograd context")
 
         ret = rpc.rpc_sync(ps, my_rref_add, args=(rref_t1, t2))
-        print("ps=", ps, "rank diff = ", rank_idff, " done with rpc_sync")
+        print("ps=", ps, "rank diff = ", rank_diff, " done with rpc_sync")
         dist_autograd.backward([ret.sum()])
-        print("ps=", ps, "rank diff = ", rank_idff, " done with backward")
+        print("ps=", ps, "rank diff = ", rank_diff, " done with backward")
         # prevent deleting dist autograd context
         rpc.rpc_sync(ps, _set_rpc_done, args=(context_id, rank_diff))
         rpc.rpc_sync(ps, _check_rpc_done, args=(0, ))
