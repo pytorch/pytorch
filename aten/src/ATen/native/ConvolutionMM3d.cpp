@@ -260,9 +260,9 @@ void slow_conv3d_backward_update_grad_input_frame(
 
 void slow_conv3d_backward_out_cpu_template(
     Tensor& grad_input,
-    const Tensor& grad_output_,
-    const Tensor& input_,
-    const Tensor& weight_,
+    const Tensor& grad_output,
+    const Tensor& input,
+    const Tensor& weight,
     const Tensor& finput,
     Tensor& fgrad_input,
     IntArrayRef kernel_size,
@@ -278,10 +278,9 @@ void slow_conv3d_backward_out_cpu_template(
   const int64_t stride_height = stride[1];
   const int64_t stride_width = stride[2];
 
-  const Tensor weight = view_weight_2d(weight_);
   slow_conv3d_shape_check(
-      input_,
-      grad_output_,
+      input,
+      grad_output,
       weight,
       Tensor(),
       kernel_depth,
@@ -295,36 +294,39 @@ void slow_conv3d_backward_out_cpu_template(
       pad_width,
       false);
 
-  const Tensor input = input_.contiguous();
-  const Tensor grad_output = grad_output_.contiguous();
+  const Tensor weight2d = view_weight_2d(weight);
+  const Tensor grad_output_contiguous = grad_output.contiguous();
   grad_input.resize_as_(input);
+  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous")
   fgrad_input.resize_as_(finput);
+  TORCH_CHECK(fgrad_input.is_contiguous(), "fgrad_input must be contiguous")
   fgrad_input.zero_();
-  const Tensor tweight = weight.transpose(0, 1);
+  const Tensor tweight2d = weight2d.transpose(0, 1);
   const int64_t batch_size = input.size(0);
-  at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-    NoGradGuard no_grad;
-    AutoNonVariableTypeMode non_variable_type_mode;
-    for (int64_t t = start; t < end; t++) {
-      Tensor grad_input_t = grad_input[t];
-      Tensor grad_output_t = grad_output[t];
-      Tensor fgrad_input_t = fgrad_input[t];
-      slow_conv3d_backward_update_grad_input_frame(
-          grad_input_t,
-          grad_output_t,
-          tweight,
-          fgrad_input_t,
-          kernel_depth,
-          kernel_height,
-          kernel_width,
-          stride_depth,
-          stride_height,
-          stride_width,
-          pad_depth,
-          pad_height,
-          pad_width);
-    }
-  });
+  at::parallel_for(
+      0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
+        NoGradGuard no_grad;
+        AutoNonVariableTypeMode non_variable_type_mode;
+        for (int64_t t = start; t < end; t++) {
+          Tensor grad_input_t = grad_input[t];
+          Tensor grad_output_t = grad_output_contiguous[t];
+          Tensor fgrad_input_t = fgrad_input[t];
+          slow_conv3d_backward_update_grad_input_frame(
+              grad_input_t,
+              grad_output_t,
+              tweight2d,
+              fgrad_input_t,
+              kernel_depth,
+              kernel_height,
+              kernel_width,
+              stride_depth,
+              stride_height,
+              stride_width,
+              pad_depth,
+              pad_height,
+              pad_width);
+        }
+      });
 }
 
 void slow_conv3d_backward_parameters_frame(
@@ -333,7 +335,9 @@ void slow_conv3d_backward_parameters_frame(
     Tensor& grad_output,
     const Tensor& finput) {
   auto grad_output_2d = grad_output.view(
-      {grad_output.size(0), grad_output.size(1) * grad_output.size(2)});
+      {grad_output.size(0),
+       grad_output.size(1) * grad_output.size(2) * grad_output.size(3)});
+
   if (grad_weight.defined()) {
     const Tensor tfinput = finput.transpose(0, 1);
     grad_weight.addmm_(grad_output_2d, tfinput);
@@ -383,20 +387,10 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
   const int64_t stride_height = stride[1];
   const int64_t stride_width = stride[2];
 
-  Tensor grad_weight_2d;
-  if (grad_weight.defined()) {
-    checkContiguous(c, grad_weight_arg);
-    grad_weight_2d = view_weight_2d(grad_weight);
-  }
-
-  if (grad_bias.defined()) {
-    checkContiguous(c, grad_bias_arg);
-  }
-
   slow_conv3d_shape_check(
       input_,
       grad_output_,
-      grad_weight_2d,
+      grad_weight,
       grad_bias,
       kernel_depth,
       kernel_height,
@@ -409,20 +403,32 @@ static void slow_conv3d_backward_parameters_out_cpu_template(
       pad_width,
       true);
 
+  Tensor grad_weight_2d;
+  if (grad_weight.defined()) {
+    checkContiguous(c, grad_weight_arg);
+    grad_weight_2d = view_weight_2d(grad_weight);
+  }
+
+  if (grad_bias.defined()) {
+    checkContiguous(c, grad_bias_arg);
+  }
+
   auto input = input_.contiguous();
   auto grad_output = grad_output_.contiguous();
 
   const int64_t batch_size = input.size(0);
-  for (int64_t t = 0; t < batch_size; t++) {
-    Tensor grad_output_t = grad_output[t];
-    Tensor finput_t;
-    if (grad_weight_2d.defined()) {
-      finput_t = finput[t];
-    }
+  at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
+    for (int64_t t = start; t < end; t++) {
+      Tensor grad_output_t = grad_output[t];
+      Tensor finput_t;
+      if (grad_weight_2d.defined()) {
+        finput_t = finput[t];
+      }
 
-    slow_conv3d_backward_parameters_frame(
-        grad_weight_2d, grad_bias, grad_output_t, finput_t);
-  }
+      slow_conv3d_backward_parameters_frame(
+          grad_weight_2d, grad_bias, grad_output_t, finput_t);
+    }
+  });
 }
 
 } // namespace

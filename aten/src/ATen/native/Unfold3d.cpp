@@ -5,8 +5,8 @@
 namespace at {
 namespace native {
 
-//DEFINE_DISPATCH(unfolded3d_copy_stub);
-//DEFINE_DISPATCH(unfolded3d_acc_stub);
+// DEFINE_DISPATCH(unfolded3d_copy_stub);
+// DEFINE_DISPATCH(unfolded3d_acc_stub);
 
 namespace {
 
@@ -66,7 +66,7 @@ static void unfolded3d_copy(
     int64_t outputDepth,
     int64_t outputHeight,
     int64_t outputWidth) {
-  int64_t n =
+  const int64_t n =
       nInputPlane * kT * kH * kW * outputDepth * outputWidth * outputHeight;
   at::parallel_for(0, n, 0, [&](int64_t start, int64_t end) {
     int64_t line_index_offset = start;
@@ -87,10 +87,10 @@ static void unfolded3d_copy(
 
     int64_t count = 0;
     scalar_t* dst = finput_data + line_index_offset;
-    int64_t inputHW = inputHeight * inputWidth;
-    int64_t inputDHW = inputHW * inputDepth;
+    const int64_t inputHW = inputHeight * inputWidth;
+    const int64_t inputDHW = inputHW * inputDepth;
 
-    while (count < line_seg_len) {
+    /*while (count < line_seg_len) {
       int64_t w = w_out * dW - pW + k;
       int64_t h = h_out * dH - pH + j;
       int64_t d = d_out * dT - pT + i;
@@ -129,6 +129,54 @@ static void unfolded3d_copy(
           }
         }
       }
+    }*/
+
+    int64_t h = h_out * dH - pH + j;
+    int64_t d = d_out * dT - pT + i;
+    int64_t ofs = nip * inputDHW + d * inputHW + h * inputWidth;
+    bool d_valid = d >= 0 && d < inputDepth;
+    bool dh_valid = d_valid && h >= 0 && h < inputHeight;
+
+    while (count < line_seg_len) {
+      int64_t w = w_out * dW - pW + k;
+
+      *dst = (dh_valid && w >= 0 && w < inputWidth) ? input_data[ofs + w]
+                                                    : static_cast<scalar_t>(0);
+
+      count++;
+      // if (count < line_seg_len) {
+      dst++;
+      w_out++;
+      if (w_out == outputWidth) {
+        w_out = 0;
+        h_out++;
+        if (h_out == outputHeight) {
+          h_out = 0;
+          d_out++;
+          if (d_out == outputDepth) {
+            d_out = 0;
+            k++;
+            if (k == kW) {
+              k = 0;
+              j++;
+              if (j == kH) {
+                j = 0;
+                i++;
+                if (i == kT) {
+                  i = 0;
+                  nip++;
+                }
+              }
+            }
+          }
+          d = d_out * dT - pT + i;
+          d_valid = d >= 0 && d < inputDepth;
+        }
+        h = h_out * dH - pH + j;
+        dh_valid = d_valid && h >= 0 && h < inputHeight;
+        ofs = nip * inputDHW + d * inputHW + h * inputWidth;
+      }
+      //}
     }
   });
 }
@@ -259,12 +307,15 @@ void unfolded3d_copy_kernel_cpu(
     int64_t output_height,
     int64_t output_width) {
   AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::BFloat16, input.scalar_type(), "unfolded3d_copy_cpu", [&] {
+      at::ScalarType::BFloat16,
+      input.scalar_type(),
+      "unfolded3d_copy_cpu",
+      [&] {
         scalar_t* input_data = input.data_ptr<scalar_t>();
         scalar_t* finput_data = finput.data_ptr<scalar_t>();
         unfolded3d_copy(
-            input_data,
             finput_data,
+            input_data,
             kT,
             kH,
             kW,
