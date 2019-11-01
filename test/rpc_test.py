@@ -957,14 +957,14 @@ class RpcTest(object):
 
         self.assertEqual(result, sum(vals))
 
-    @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    @dist_init
     def test_get_default_rpc_timeout(self):
         timeout = rpc.get_rpc_timeout()
         self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
 
-    @dist_init(setup_model_parallel=False)
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    @dist_init(setup_model_parallel=False)
     def test_set_rpc_timeout(self):
         timeout = timedelta(seconds=1)
         rpc.init_model_parallel(
@@ -978,8 +978,6 @@ class RpcTest(object):
         set_timeout = rpc.get_rpc_timeout()
         self.assertEqual(timeout, set_timeout)
         rpc.join_rpc()
-
-
 
 
     def test_requires_process_group_agent_decorator(self):

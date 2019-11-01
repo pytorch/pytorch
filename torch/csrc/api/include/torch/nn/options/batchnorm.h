@@ -43,8 +43,6 @@ struct TORCH_API BatchNormOptions {
 };
 
 using BatchNorm1dOptions = BatchNormOptions;
-using BatchNorm2dOptions = BatchNormOptions;
-using BatchNorm3dOptions = BatchNormOptions;
 
 } // namespace nn
 } // namespace torch
