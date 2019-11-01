@@ -286,21 +286,24 @@ static IValue addInput(const std::shared_ptr<TracingState> & state, const IValue
 static void gatherParametersAndBuffers(
     const std::shared_ptr<TracingState>& state,
     Value* self_value,
-    const script::Module& self) {
+    const script::Module& self,
+    const std::string& prefix) {
   Graph& g = *self_value->owningGraph();
 
   state->setValue(self.module_object(), self_value);
 
   auto self_ty = self.type();
   for (const script::NameValue& s : self.get_slots()) {
+    auto qualname = prefix + "." + s.name;
+    Value* trace_get_attr = g.insertNode(g.create(prim::TracedAttr))
+                                ->s_(attr::scope, qualname)
+                                ->output()
+                                ->setType(s.value.type());
     if (s.value.type()->isSubtypeOf(TensorType::get())) {
-      addInput(
-          state, s.value, s.value.type(), g.insertGetAttr(self_value, s.name));
+      addInput(state, s.value, s.value.type(), trace_get_attr);
     } else if (self_ty->is_module(self_ty->getAttributeSlot(s.name))) {
       gatherParametersAndBuffers(
-          state,
-          g.insertGetAttr(self_value, s.name),
-          script::Module(s.value.toObject()));
+          state, trace_get_attr, script::Module(s.value.toObject()), qualname);
     }
   }
 }
@@ -326,7 +329,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     if (self) {
       Value* self_value =
           state->graph->insertInput(0, "self")->setType(self->module_object()->type());
-      gatherParametersAndBuffers(state, self_value, *self);
+      gatherParametersAndBuffers(state, self_value, *self, {"__module"});
     }
 
     for (IValue& input : inputs) {

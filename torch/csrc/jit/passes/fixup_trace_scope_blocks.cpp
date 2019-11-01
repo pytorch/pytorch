@@ -20,6 +20,115 @@ bool isEligibleNode(Node* n) {
 
 } // namespace
 
+struct ConvertTracedAttrReferences {
+  void run(const std::shared_ptr<Graph>& graph) {
+    buildAttrMap(graph);
+    addSelfArgToTracedForwardNodes(graph->block());
+    convertAttrReferencesToLocalGetAttrs(
+        graph->block(), "__module", graph->inputs()[0]);
+    destroyTracedAttrNodes(graph);
+  }
+
+ private:
+  void buildAttrMap(const std::shared_ptr<Graph>& graph) {
+    for (Node* n : graph->nodes()) {
+      if (n->kind() == prim::TracedAttr) {
+        attr_qualname_to_value[n->s(attr::scope)] = n->output();
+      }
+    }
+  }
+
+  void addSelfArgToTracedForwardNodes(Block* b) {
+    for (Node* n : b->nodes()) {
+      if (n->kind() == prim::TracedModuleForward) {
+        n->addInput(attr_qualname_to_value.at(n->s(attr::scope)));
+        n->blocks()[0]->addInput("self")->setType(
+            attr_qualname_to_value.at(n->s(attr::scope))->type());
+        addSelfArgToTracedForwardNodes(n->blocks()[0]);
+      }
+      if (n->kind() == prim::TracedFork) {
+        addSelfArgToTracedForwardNodes(n->blocks()[0]);
+      }
+    }
+  }
+
+  std::vector<Value*> convertAttrReferencesToLocalGetAttrs(
+      Block* b,
+      const c10::QualifiedName& prefix,
+      Value* self) {
+    std::vector<Value*> unresolved_tracedattrs;
+    std::unordered_map<Value*, Value*> local_remaps;
+
+    auto prefix_atoms = prefix.atoms();
+    for (Node* n : b->nodes()) {
+      if (n->kind() == prim::TracedModuleForward) {
+        auto sub_unresolved = convertAttrReferencesToLocalGetAttrs(
+            n->blocks()[0], n->s(attr::scope), n->blocks()[0]->inputs()[0]);
+        for (Value* v : sub_unresolved) {
+          n->addInput(v);
+        }
+      } else if (n->blocks().size()) {
+        for (Block* sub_block : n->blocks()) {
+          auto sub_unresolved =
+              convertAttrReferencesToLocalGetAttrs(sub_block, prefix, self);
+          for (Value* v : sub_unresolved) {
+            n->addInput(v);
+          }
+        }
+      }
+
+      for (size_t inp_idx = 0; inp_idx < n->inputs().size(); ++inp_idx) {
+        Value* inp = n->input(inp_idx);
+
+        if (local_remaps.count(inp)) {
+          n->replaceInput(inp_idx, local_remaps[inp]);
+          continue;
+        }
+
+        WithInsertPoint guard(b->param_node()->next());
+        auto inp_node = inp->node();
+        if (inp_node->kind() == prim::TracedAttr) {
+          auto attr_qualname = c10::QualifiedName(inp_node->s(attr::scope));
+          if (prefix.isPrefixOf(attr_qualname)) {
+            auto attr_atoms = attr_qualname.atoms();
+            Value* replaced_value = self;
+            for (size_t i = 0; i < attr_atoms.size(); i++) {
+              if (i < prefix_atoms.size()) {
+                TORCH_INTERNAL_ASSERT(attr_atoms[i] == prefix_atoms[i]);
+              } else {
+                replaced_value = b->owningGraph()->insertGetAttr(
+                    replaced_value, attr_atoms[i]);
+              } // if (i < prefix_atoms.size())
+            } // for (size_t i = 0; i < attr_atoms.size(); i++)
+            n->replaceInput(inp_idx, replaced_value);
+            local_remaps[inp] = replaced_value;
+          } else {
+            Value* remapped = b->addInput()->copyMetadata(inp);
+            n->replaceInput(inp_idx, remapped);
+            unresolved_tracedattrs.push_back(inp);
+            local_remaps[inp] = remapped;
+          } // if (prefix.isPrefixOf(attr_qualname))
+        } // if (inp_node->kind() == prim::TracedAttr)
+      } // for (Value *inp : n->inputs())
+    } // for (Node *n : b->nodes())
+    return unresolved_tracedattrs;
+  }
+
+  void destroyTracedAttrNodes(const std::shared_ptr<Graph>& graph) {
+    for (auto node_itr = graph->nodes().begin();
+         node_itr != graph->nodes().end();) {
+      Node* n = *node_itr++;
+      if (n->kind() == prim::TracedAttr) {
+        n->destroy();
+      }
+    }
+  }
+
+  // For each prim::TracedAttr, record the `scope` value mapped
+  // to the Value* in the graph for that attribute.
+  std::unordered_map<std::string, Value*> attr_qualname_to_value;
+};
+
 // Iterate through all the nodes in program order and--for each use--
 // if the Value referenced is not in a scope that dominates the node,
 // add block and Node outputs to lift it into a scope in which
@@ -166,13 +275,20 @@ namespace {
 // We try {method_name}, {method_name}1, {method_name}2, ...
 std::string mangleMethodName(
     const std::string& method_name,
-    const script::Module& mod) {
+    const ClassTypePtr& mod_type) {
   for (size_t method_idx = 0;; method_idx++) {
     auto mangled = method_name;
     if (method_idx != 0) {
       mangled += std::to_string(method_idx);
     }
-    if (!mod.find_method(mangled)) {
+    bool found = false;
+    for (Function* fn : mod_type->methods()) {
+      if (fn->name() == mangled) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
       return mangled;
     }
   }
@@ -181,92 +297,28 @@ std::string mangleMethodName(
 
 } // namespace
 
-// Add `self` argument with the correct Module type to each scope block. This is
-// necessary downstream when we emit code to dereference Module values before
-// invoking Methods on them.
-void addSelfArgsToBlocks(
-    Block* b,
-    script::Module this_level_self,
-    std::vector<std::string> prefix,
-    Value* self) {
-  // Top level block already has `self`, skip it.
-  if (prefix != std::vector<std::string>{"__module"}) {
-    b->addInput()->setType(this_level_self.type())->setDebugName("self");
-  }
-
-  for (Node* n : b->nodes()) {
-    if (n->kind() == prim::TracedFork) {
-      addSelfArgsToBlocks(n->blocks()[0], this_level_self, prefix, self);
-    } else if (n->kind() == prim::TracedModuleForward) {
-      // First, figure out what module we need to get in scope to call
-      // the method
-      auto sub_atoms = c10::QualifiedName(n->s(attr::scope)).atoms();
-      TORCH_INTERNAL_ASSERT(sub_atoms.size() > prefix.size());
-
-      script::Module callee_mod = this_level_self;
-      Value* callee_val = self;
-
-      WithInsertPoint ip(n);
-
-      for (size_t i = 0; i < sub_atoms.size(); ++i) {
-        if (i < prefix.size()) {
-          TORCH_INTERNAL_ASSERT(sub_atoms[i] == prefix[i]);
-        } else {
-          callee_val =
-              b->owningGraph()->insertGetAttr(callee_val, sub_atoms[i]);
-          callee_mod = callee_mod.get_module(sub_atoms[i]);
-        } // if (i < prefix.size())
-      } // for (size_t i = 0; i < sub_atoms.size(); ++i)
-
-      n->addInput(callee_val);
-
-      addSelfArgsToBlocks(n->blocks()[0], callee_mod, sub_atoms, callee_val);
-    } // if (n->kind() == prim::TracedModuleForward)
-  } // for (Node *n : b->nodes())
-}
-
 // Register the attr::Subgraph Graph values as Functions in the
 // class compilation unit and register that Function as a method
 // on the corresponding Module in the Module hierarchy. Note that we
 // unique the methods by naming them forward, forward1, forward2...
-void createMethodCalls(
-    const std::shared_ptr<Graph>& g,
-    script::Module this_level_self,
-    std::vector<std::string> prefix,
-    Value* self) {
-  TORCH_INTERNAL_ASSERT(self->type()->isSubtypeOf(this_level_self.type()));
-
+void createMethodCalls(const std::shared_ptr<Graph>& g) {
   for (auto node_itr = g->nodes().begin(); node_itr != g->nodes().end();) {
     Node* n = *node_itr++;
     if (n->kind() == prim::TracedFork) {
-      createMethodCalls(n->g(attr::Subgraph), this_level_self, prefix, self);
+      createMethodCalls(n->g(attr::Subgraph));
     } else if (n->kind() == prim::TracedModuleForward) {
-      // First, figure out what module we need to get in scope to call
-      // the method
-      auto sub_atoms = c10::QualifiedName(n->s(attr::scope)).atoms();
-      TORCH_INTERNAL_ASSERT(sub_atoms.size() > prefix.size());
-
       WithInsertPoint ip(n);
 
-      Value* callee_val = n->inputs()[0];
-      script::Module callee_mod = this_level_self;
-      for (size_t i = 0; i < sub_atoms.size(); ++i) {
-        if (i < prefix.size()) {
-          TORCH_INTERNAL_ASSERT(sub_atoms[i] == prefix[i]);
-        } else {
-          callee_mod = callee_mod.get_module(sub_atoms[i]);
-        }
-      }
+      ClassTypePtr callee_mod_type = n->input(0)->type()->expect<ClassType>();
 
-      createMethodCalls(
-          n->g(attr::Subgraph), callee_mod, sub_atoms, callee_val);
+      createMethodCalls(n->g(attr::Subgraph));
 
-      auto mangled_method_name = mangleMethodName("forward", callee_mod);
-      auto qualname =
-          c10::QualifiedName(callee_mod.name(), mangled_method_name);
-      Function* f = callee_mod.class_compilation_unit()->create_function(
+      auto mangled_method_name = mangleMethodName("forward", callee_mod_type);
+      auto qualname = c10::QualifiedName(
+          callee_mod_type->name().value(), mangled_method_name);
+      Function* f = callee_mod_type->compilation_unit()->create_function(
           qualname, n->g(attr::Subgraph));
-      callee_mod.type()->addMethod(f);
+      callee_mod_type->addMethod(f);
 
       std::vector<NamedValue> nvs;
       for (Value* i : n->inputs()) {
@@ -358,6 +410,13 @@ void runCleanupPasses(script::Module* m) {
 void FixupTraceScopeBlocks(
     std::shared_ptr<Graph>& graph,
     script::Module* self) {
+  if (self) {
+    ConvertTracedAttrReferences().run(graph);
+  } else {
+    for (Node* n : graph->nodes()) {
+      TORCH_INTERNAL_ASSERT(n->kind() != prim::TracedAttr);
+    }
+  }
   MakeDefsDominateUses().run(graph->block());
   convertReturnsToTuples(graph->block());
   if (!self) {
@@ -368,10 +427,8 @@ void FixupTraceScopeBlocks(
     lambdaLiftBlocksAndConvertToGraph(graph->block());
     runCleanupPasses(graph);
   } else {
-    addSelfArgsToBlocks(
-        graph->block(), *self, {"__module"}, graph->inputs()[0]);
     lambdaLiftBlocksAndConvertToGraph(graph->block());
-    createMethodCalls(graph, *self, {"__module"}, graph->inputs()[0]);
+    createMethodCalls(graph);
     runCleanupPasses(self);
     // `graph` isn't referenced in `self` yet, so we need to run
     // this separately

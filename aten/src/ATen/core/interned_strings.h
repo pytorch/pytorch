@@ -121,6 +121,7 @@ namespace c10 {
   _(prim, annotate)                  \
   _(prim, TracedModuleForward)       \
   _(prim, TracedFork)                \
+  _(prim, TracedAttr)                \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \

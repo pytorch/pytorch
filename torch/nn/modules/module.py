@@ -6,8 +6,6 @@ import torch
 from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
-import warnings
-
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
@@ -511,13 +509,7 @@ class Module(object):
             name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
             if name:
                 cur_scope_name = tracing_state.current_scope()
-                if not name.startswith(cur_scope_name):
-                    warnings.warn('Called module {} from {}, but these modules are not in a '
-                                  'submodule relation! Module information will not be '
-                                  'recorded in the trace.'.format(name, cur_scope_name))
-                    recording_scopes = False
-                else:
-                    tracing_state.push_scope(name)
+                tracing_state.push_scope(name)
             else:
                 recording_scopes = False
         try:
