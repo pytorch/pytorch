@@ -47,20 +47,19 @@ struct MakeDefsDominateUses {
         Value* v_itr = inp;
         Block* b = inp->node()->owningBlock();
 
+        // Already lifted to this level, switch to remapped value
+        // and continue.
+        if (remap.count(v_itr)) {
+          v_itr = remap[v_itr];
+          b = v_itr->node()->owningBlock();
+        }
+
         // Starting from the initial def for this input, iterate to
         // wider and wider blocks, adding Block outputs and Node outputs
         // along the way. Then, log the lifted values in the remap table
         // so we can make subsequent Uses refer to the lifted value, if
         // the domination condition is met.
         while (b != common_ancestor) {
-          // Already lifted to this level, switch to remapped value
-          // and continue.
-          if (remap.count(v_itr)) {
-            v_itr = remap[inp];
-            b = v_itr->node()->owningBlock();
-            continue;
-          }
-
           b->registerOutput(v_itr);
           Value* remapped = b->owningNode()->addOutput();
           v_itr = remapped;
