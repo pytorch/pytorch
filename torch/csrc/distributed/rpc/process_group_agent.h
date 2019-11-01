@@ -13,8 +13,6 @@ namespace distributed {
 namespace rpc {
 
 constexpr int kDefaultNumSendRecvThreads = 4;
-constexpr std::chrono::milliseconds kDefaultRpcTimeout =
-    std::chrono::seconds(10);
 
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
@@ -56,7 +54,7 @@ class ProcessGroupAgent : public RpcAgent {
   void start() override;
 
   // retrieves the timeout for all RPCs
-  const std::chrono::milliseconds& getRpcTimeout();
+  const std::chrono::milliseconds& getRpcTimeout() const;
 
  protected:
   // This method wraps the destination information and the message into a

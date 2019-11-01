@@ -12,6 +12,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// the default timeout for RPCs that apply to all process group agents.
+constexpr std::chrono::milliseconds kDefaultRpcTimeout =
+    std::chrono::seconds(60);
+
 // A globally unique ID to identify an RpcAgent
 struct TORCH_API WorkerInfo {
   WorkerInfo(std::string name, int id)

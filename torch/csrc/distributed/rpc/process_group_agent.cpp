@@ -174,7 +174,7 @@ const WorkerInfo& ProcessGroupAgent::getWorkerInfo(worker_id_t id) const {
   return allWorkerInfo_[id];
 }
 
-const std::chrono::milliseconds& ProcessGroupAgent::getRpcTimeout() {
+const std::chrono::milliseconds& ProcessGroupAgent::getRpcTimeout() const {
   return rpcTimeout_;
 }
 
@@ -289,11 +289,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       std::lock_guard<std::mutex> lock{futureMutex_};
       futures_[requestId] = std::make_pair(future, futureStartTime);
       // insert future into timeouts map to keep track of its timeout
-      if (futureTimeouts_.find(futureStartTime) != futureTimeouts_.end()) {
-        futureTimeouts_[futureStartTime].emplace_back(requestId);
-      } else {
-        futureTimeouts_[futureStartTime] = std::vector<int64_t>{requestId};
-      }
+      futureTimeouts_[futureStartTime].push_back(requestId);
     }
     message.setId(requestId);
   } else {
