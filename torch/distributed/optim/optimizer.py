@@ -4,7 +4,8 @@ import torch.distributed.autograd as dist_autograd
 from collections import defaultdict
 
 class FunctionalOptimizer:
-    """Base class for functional optimizers.
+    """
+    Base class for functional optimizers.
 
     Functional optimizers are similar to torch.optim optimizers, but
     instead of using params.grad as input, it takes the gradients as input to
@@ -20,7 +21,8 @@ class FunctionalOptimizer:
         self.params = params
 
     def step(self, gradients):
-        """Performs a single optimization step.
+        """
+        Perform a single optimization step.
 
         Arguments:
             gradients (list): a list of gradient tensors to be applied to the
@@ -28,22 +30,6 @@ class FunctionalOptimizer:
                               the self.params list.
         """
         raise NotImplementedError
-
-
-class FunctionalSGD(FunctionalOptimizer):
-    """Simplistic implementation of Stocastic Gradient Descent optimizer.
-
-    Arguments:
-        params (list): list of parameters to optimize
-        lr (float): learning rate
-    """
-    def __init__(self, params, lr=0.01):
-        super(FunctionalSGD, self).__init__(params)
-        self.lr = lr
-
-    def step(self, gradients):
-        for param, grad in zip(self.params, gradients):
-            param.data.add_(-self.lr, grad.data)
 
 
 def _create_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):

@@ -172,7 +172,10 @@ RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
     addForkOfOwner(rfd.rrefId_, rfd.forkId_);
     // ensure that this RRef is in the owners_ list to keep it alive.
     // this is needed for OwnerRRefs that were created locally.
-    owners_[rref->rrefId()] = rref;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      owners_[rref->rrefId()] = rref;
+    }
   } else {
     // Note [Useful Phantom Fork ID for User to Owner Call]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
