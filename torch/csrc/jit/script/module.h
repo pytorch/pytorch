@@ -163,6 +163,12 @@ struct TORCH_API Module {
     type()->addOrCheckAttribute(name, t, is_param);
     module_object()->setAttr(name, v);
   }
+
+  void unsafe_remove_attribute(const std::string& name) {
+    module_object()->unsafeRemoveAttr(name);
+    type()->unsafeRemoveAttribute(name);
+  }
+
   void register_module(const std::string& name, const Module& module) {
     type()->addOrCheckAttribute(name, module.type());
     module_object()->setAttr(name, module.module_object());
