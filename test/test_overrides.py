@@ -704,7 +704,6 @@ class TensorLike(object):
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS_TENSOR_LIKE:
-            breakpoint()
             return NotImplemented
         # In this case _torch_function_ should override TensorLike objects
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
