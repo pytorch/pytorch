@@ -222,5 +222,11 @@ Tensor LPPool1dImpl::forward(const Tensor& input) {
 
 template class LPPoolImpl<1, LPPool1dImpl>;
 
+Tensor LPPool2dImpl::forward(const Tensor& input) {
+  return F::lp_pool2d(input, options);
+}
+
+template class LPPoolImpl<2, LPPool2dImpl>;
+
 } // namespace nn
 } // namespace torch
