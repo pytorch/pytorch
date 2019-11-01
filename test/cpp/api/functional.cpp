@@ -102,7 +102,7 @@ TEST_F(FunctionalTest, CosineSimilarity) {
 }
 
 TEST_F(FunctionalTest, SmoothL1LossDefaultOptions) {
-  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::requires_grad());
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output =
       F::smooth_l1_loss(input, target);
@@ -114,7 +114,7 @@ TEST_F(FunctionalTest, SmoothL1LossDefaultOptions) {
 }
 
 TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
-  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::requires_grad());
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output =
       F::smooth_l1_loss(input, target, /*reduction=*/torch::Reduction::None);

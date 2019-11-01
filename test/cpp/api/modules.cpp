@@ -1333,7 +1333,7 @@ TEST_F(ModulesTest, CosineEmbeddingLoss) {
 
 TEST_F(ModulesTest, SmoothL1LossDefaultOptions) {
   SmoothL1Loss loss;
-  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::requires_grad());
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
   auto expected = torch::tensor(0.0233335, torch::kFloat);
@@ -1359,7 +1359,7 @@ TEST_F(ModulesTest, MultiLabelMarginLossDefaultOptions) {
 
 TEST_F(ModulesTest, SmoothL1LossNoReduction) {
   SmoothL1Loss loss(/*reduction=*/torch::Reduction::None);
-  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::requires_grad());
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
   auto output = loss(input, target);
   auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
