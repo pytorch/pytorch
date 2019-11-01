@@ -391,17 +391,30 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         add_python_modulelist_methods(script_module, nn_module)
 
     if isinstance(nn_module, Sequential):
-        add_sequential_forward(nn_module, script_module)
+        add_sequential_forward(script_module, nn_module)
 
     if isinstance(nn_module, ModuleDict):
         add_python_moduledict_methods(script_module, nn_module)
 
     return script_module
 
+
+# We define shims of certain attributes on the RecursiveScriptModule to support
+# magic methods. To check if a script model defines an attribute we need
+# to also check that the attribute is not the shim
+def script_model_defines_attr(script_model, attr):
+    script_attr = getattr(script_model, attr, None)
+    if script_attr is None:
+        return False
+    default_attr = getattr(torch.jit.RecursiveScriptModule, attr, None)
+    if default_attr is None:
+        return False
+    return script_attr != default_attr
+
 def add_python_attributes_to_scripted_model(script_model, orig, attr_list):
     for method in attr_list:
-        if not hasattr(orig, method):
-            setattr(script_module, method, getattr(orig, method))
+        if hasattr(orig, method) and script_model_defines_attr(script_model, method):
+            setattr(script_model, method, getattr(orig, method))
 
 def add_python_modulelist_methods(script_module, orig):
     exposed_attrs = ['__getitem__', '__len__', '__iter__', '__dir__']
@@ -411,7 +424,7 @@ def add_python_moduledict_methods(script_module, orig):
     exposed_attrs = ['__contains__', '__iter__', '__dir__', 'keys', 'items', 'values']
     add_python_attributes_to_scripted_model(script_module, orig, exposed_attrs)
 
-def add_sequential_forward(nn_module, script_module):
+def add_sequential_forward(script_module, nn_module):
     forward_func = getattr(nn_module.forward, "__func__", None)
     # we aren't currently able to support compiling Sequential.forward
     # so if we encounter it, use this forward instead. support for self._modules.values() is blocking
