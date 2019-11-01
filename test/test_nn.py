@@ -877,20 +877,20 @@ class TestNN(NNTestCase):
                 self.assertFalse(output2.requires_grad)
                 self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
 
-    # def test_invalid_conv1d(self):
-    #     for dtype in [torch.bfloat16, torch.float, torch.double]:
-    #         module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True).to(dtype)
-    #         input = torch.randn(1, 3, 4).to(dtype)
-    #         with self.assertRaisesRegex(RuntimeError,
-    #                                     r'Calculated padded input size per channel: \(4\). ' +
-    #                                     r'Kernel size: \(10\). Kernel size can\'t be greater than actual input size'):
-    #             module(input)
+    def test_invalid_conv1d(self):
+        for dtype in [torch.bfloat16, torch.float, torch.double]:
+            module = nn.Conv1d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True).to(dtype)
+            input = torch.randn(1, 3, 4).to(dtype)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r'Calculated padded input size per channel: \(4\). ' +
+                                        r'Kernel size: \(10\). Kernel size can\'t be greater than actual input size'):
+                module(input)
 
-    #         # Negative stride check
-    #         module = nn.Conv1d(in_channels=3, out_channels=6, kernel_size=3, stride=-1, bias=True).to(dtype)
-    #         input = torch.randn(1, 3, 4).to(dtype)
-    #         with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
-    #             module(input)
+            # Negative stride check
+            module = nn.Conv1d(in_channels=3, out_channels=6, kernel_size=3, stride=-1, bias=True).to(dtype)
+            input = torch.randn(1, 3, 4).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
+                module(input)
 
     def test_mismatch_shape_conv2d(self):
         x = torch.randn(1, 10, 1, 28, 28)
@@ -902,42 +902,42 @@ class TestNN(NNTestCase):
 
             F.conv2d(x, w)
 
-    # def test_invalid_conv2d(self):
-    #     for dtype in [torch.bfloat16, torch.float, torch.double]:
-    #         module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
-    #         input = torch.empty(1, 1, 4, 4).to(dtype)
-    #         self.assertRaises(RuntimeError, lambda: module(input))
+    def test_invalid_conv2d(self):
+        for dtype in [torch.bfloat16, torch.float, torch.double]:
+            module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
+            input = torch.empty(1, 1, 4, 4).to(dtype)
+            self.assertRaises(RuntimeError, lambda: module(input))
 
-    #         module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
-    #         input = torch.randn(1, 3, 1, 1)
-    #         with self.assertRaisesRegex(RuntimeError,
-    #                                     r'Calculated padded input size per channel: \(1 x 1\). ' +
-    #                                     r'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
-    #             module(input)
+            module = nn.Conv2d(in_channels=3, out_channels=33, kernel_size=10, stride=1, bias=True)
+            input = torch.randn(1, 3, 1, 1)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r'Calculated padded input size per channel: \(1 x 1\). ' +
+                                        r'Kernel size: \(10 x 10\). Kernel size can\'t be greater than actual input size'):
+                module(input)
 
-    #         # Negative stride check
-    #         module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=-1, bias=True).to(dtype)
-    #         input = torch.randn(1, 3, 4, 4).to(dtype)
-    #         with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
-    #             module(input)
+            # Negative stride check
+            module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=-1, bias=True).to(dtype)
+            input = torch.randn(1, 3, 4, 4).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
+                module(input)
 
-    #         # Zero stride check
-    #         module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=0, bias=True).to(dtype)
-    #         input = torch.randn(1, 3, 4, 4).to(dtype)
-    #         with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
-    #             module(input)
+            # Zero stride check
+            module = nn.Conv2d(in_channels=3, out_channels=6, kernel_size=4, stride=0, bias=True).to(dtype)
+            input = torch.randn(1, 3, 4, 4).to(dtype)
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
+                module(input)
 
-    # def test_invalid_conv3d(self):
-    #     for dtype in [torch.bfloat16, torch.float, torch.double]:
-    #         module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
-    #         input = torch.empty(1, 1, 4, 4, 4).to(dtype)
-    #         self.assertRaises(RuntimeError, lambda: module(input))
+    def test_invalid_conv3d(self):
+        for dtype in [torch.bfloat16, torch.float, torch.double]:
+            module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2).to(dtype)
+            input = torch.empty(1, 1, 4, 4, 4).to(dtype)
+            self.assertRaises(RuntimeError, lambda: module(input))
 
-    #         # Negative stride check
-    #         module = torch.nn.Conv3d(1, 1, kernel_size=3, stride=-2)
-    #         input = torch.empty(1, 1, 4, 4, 4)
-    #         with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
-    #             module(input)
+            # Negative stride check
+            module = torch.nn.Conv3d(1, 1, kernel_size=3, stride=-2)
+            input = torch.empty(1, 1, 4, 4, 4)
+            with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
+                module(input)
 
     def _test_alpha_dropout(self, cls, input):
         mean = input.mean()
