@@ -9,6 +9,7 @@ Tensors and arbitrary types, and other useful utilities.
 It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
+from __future__ import absolute_import
 
 import os
 import sys
