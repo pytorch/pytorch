@@ -13,6 +13,7 @@ namespace jit {
   _(Attributes)                        \
   _(Blocks)                            \
   _(CallStack)                         \
+  _(CallStackCaching)                  \
   _(CodeTemplate)                      \
   _(ControlFlow)                       \
   _(CreateAutodiffSubgraphs)           \

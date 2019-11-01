@@ -1169,6 +1169,10 @@ def foo(x):
   const Function& foo = cu->get_function("foo");
   for (Node* n : foo.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
+      if (!n->hasAttribute(attr::value) ||
+          n->kindOf(attr::value) != AttributeKind::i) {
+        continue;
+      }
       int v = n->i(attr::value);
       switch (v) {
         case 3: {
@@ -1206,6 +1210,10 @@ def foo(x):
   const Function& baz = cu->get_function("baz");
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
+      if (!n->hasAttribute(attr::value) ||
+          n->kindOf(attr::value) != AttributeKind::i) {
+        continue;
+      }
       int v = n->i(attr::value);
       ASSERT_TRUE(v == 7);
       // Const 7 comes from function 'ham', which gets inlined to 'baz'. 'baz'
@@ -1217,6 +1225,49 @@ def foo(x):
       ASSERT_EQ(callstack_vector[0].first, &cu->get_function("ham"));
     }
   }
+}
+
+void testCallStackCaching() {
+  const auto text = R"(
+
+def a(x):
+    print("a1")
+    print("a2")
+    return x
+
+def b(x):
+    print("b1")
+    print("b2")
+    a(x)
+    return x
+
+def c(x):
+    print("c1")
+    print("c2")
+    b(x)
+    return x
+  )";
+  auto cu = compile(text);
+  const Function& baz = cu->get_function("c");
+  std::unordered_map<std::string, InlinedCallStack*> callstack_objects;
+  for (Node* n : baz.optimized_graph()->nodes()) {
+    if (n->kind() == prim::Constant) {
+      if (!n->hasAttribute(attr::value) ||
+          n->kindOf(attr::value) != AttributeKind::s) {
+        continue;
+      }
+      std::string v = n->s(attr::value);
+      if (n->callstack()) {
+        callstack_objects[v] = n->callstack()->get();
+      }
+    }
+  }
+  // We expect to see nodes prim::Constant[value="a1"] and
+  // prim::Constant[value="a2"] inlined to function 'c'. Their callstacks are
+  // the same (a->b->c), so we want to make sure we're not creating different
+  // callstack entries for them.
+  ASSERT_TRUE(callstack_objects.count("a1") && callstack_objects.count("a2"));
+  ASSERT_TRUE(callstack_objects.at("a1") == callstack_objects.at("a2"));
 }
 
 } // namespace jit
