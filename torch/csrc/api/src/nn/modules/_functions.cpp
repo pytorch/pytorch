@@ -115,6 +115,6 @@ variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_o
   return variable_list{grad_input, Variable(), Variable(), Variable(), Variable()};
 }
 
-}
+} // namespace functions
 } // namespace nn
 } // namespace torch
