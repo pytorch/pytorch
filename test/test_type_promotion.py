@@ -161,9 +161,9 @@ class TestTypePromotion(TestCase):
                 if op == torch.sub and common_dtype != torch.bool:
                     # Subtraction, the `-` operator, with a bool tensor is not supported.
                     continue
-                first = torch.rand([20, 20, 20], device=self.device) * 100
-                second = torch.rand([20, 20, 20], device=self.device) * 100
-                # ensure some zeros, otherwise boolean version is all true
+                first = torch.randn([20, 20, 20], device=self.device) * 100
+                second = torch.randn([20, 20, 20], device=self.device) * 100
+                # add some zeros, otherwise boolean version is all true
                 first[first < -90] = 0
                 first = first.to(dt1)
                 second = second.to(dt2)
@@ -173,9 +173,7 @@ class TestTypePromotion(TestCase):
                 if non_contiguous:
                     first = first.transpose(0, 2)
                     second = second.transpose(2, 1)
-                    # ensure we can catch non-contiguous issues that might only arise when tensors 
-                    # are strided differently
-                    self.assertNotEqual(first.stride(), second.stride())
+                    self.assertNotEqual(first.stride(), second.stride(), "some non-contiguous issues could be missed if tensors have same strides")
 
                 self.assertEqual(not first.is_contiguous(), non_contiguous)
                 self.assertEqual(not second.is_contiguous(), non_contiguous)
