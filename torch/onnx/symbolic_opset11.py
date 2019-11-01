@@ -219,7 +219,9 @@ def _prepare_onnx_paddings(g, dim, pad):
     extension = g.op("Sub", g.op("Mul", g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64)),
                      g.op("Constant", value_t=torch.tensor(2, dtype=torch.int64))), pad_len)
     # Concat pad with extension: paddings = [dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, 0, 0, ... ]
-    paddings = g.op("Concat", pad, g.op("ConstantOfShape", extension, value_t=torch.tensor([0])), axis_i=0)
+    # Currently ONNX only supports int64 type for Pad
+    pad = g.op("Cast", pad, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+    paddings = g.op("Concat", pad, g.op("ConstantOfShape", extension, value_t=torch.tensor([0], dtype=torch.int64)), axis_i=0)
     # Reshape and reverse order and collate first beginnings and then ends
     # paddings = [[..., 0, dim_n-1_begin, dim_n_begin],
     #               [..., 0, dim_n-1_end, dim_n_end]]

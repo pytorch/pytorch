@@ -1434,6 +1434,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
 
+    # Dynamic padding is added in opset 11
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pad_types(self):
+        # Test for different pad integer types
+        class Pad(torch.nn.Module):
+            def forward(self, x, pad):
+                return torch.nn.functional.pad(x, pad)
+
+        x = torch.randn(2, 2, 4, 4)
+        y = pad = (torch.tensor(2, dtype=torch.int32), torch.tensor(4, dtype=torch.int32))
+        self.run_test(Pad(), (x, y))
+
+        y = pad = (torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64))
+        self.run_test(Pad(), (x, y))
+
+
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
         x = torch.randn(2, 4, 4)
