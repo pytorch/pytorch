@@ -756,7 +756,7 @@ class TestOperators(TestCase):
     def test_arange_dynamic(self):
         class TestModel(torch.nn.Module):
             def forward(self, input):
-                return torch.arange(input.shape[0], input.shape[0] + 5, 0.5)
+                return torch.arange(input.shape[0], input.shape[0] + 5, 1)
 
         input = torch.randn(5, 3, 2)
         self.assertONNX(TestModel(), input, opset_version=11)
