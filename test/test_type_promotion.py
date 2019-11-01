@@ -145,6 +145,17 @@ class TestTypePromotion(TestCase):
                 y = torch.ones(10, dtype=dtype2, device=self.device)
                 func(x, y).sum().backward()
 
+    def _get_test_tensor(self, dtype, add_zeros=False, remove_zeros=False):
+        tensor = torch.randn([20, 20, 20], device=self.device) * 100
+        if add_zeros:
+            # add some zeros. This affects boolean tensors which would otherwise be all true
+            first[first < -90] = 0
+        tensor = tensor.to(dtype)
+        if remove_zeros:
+            # ensure no div-by-zero.
+            tensor[tensor == 0] = 5
+        return tensor
+
     # verifies that torch.<op>(first, second) is the same as 
     # torch.<op>(first.to(common_dtype), second.to(common_dtype)) in cases where that should hold.
     def test_many_promotions(self):
@@ -161,14 +172,8 @@ class TestTypePromotion(TestCase):
                 if op == torch.sub and common_dtype != torch.bool:
                     # Subtraction, the `-` operator, with a bool tensor is not supported.
                     continue
-                first = torch.randn([20, 20, 20], device=self.device) * 100
-                second = torch.randn([20, 20, 20], device=self.device) * 100
-                # add some zeros, otherwise boolean version is all true
-                first[first < -90] = 0
-                first = first.to(dt1)
-                second = second.to(dt2)
-                # ensure no div-by-zero
-                second[second == 0] = 5
+                first = self._get_test_tensor(dt1, dt1 == torch.bool)
+                second = self._get_test_tensor(dt2, op != torch.div and dt2 == torch.bool, op == torch.div)
                 # test ops with non-contiguous tensors
                 if non_contiguous:
                     first = first.transpose(0, 2)
