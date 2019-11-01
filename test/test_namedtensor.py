@@ -605,6 +605,23 @@ class TestNamedTensor(TestCase):
             self.assertEqual(x.any().names, [])
             self.assertEqual(x.all().names, [])
 
+    def test_addcmul_addcdiv(self):
+        for device in torch.testing.get_all_device_types():
+            names = ['N']
+            a = torch.rand(3, device=device, names=names)
+            b = torch.rand(3, device=device, names=names)
+            # avoid division by 0
+            c = torch.rand(3, device=device, names=names).clamp_min_(0.1)
+            out = torch.randn(3, device=device, names=names)
+
+            self.assertEqual(torch.addcmul(a, b, c).names, names)
+            self.assertEqual(torch.addcmul(a, b, c, out=out).names, names)
+            self.assertEqual(a.addcmul_(b, c).names, names)
+
+            self.assertEqual(torch.addcdiv(a, b, c).names, names)
+            self.assertEqual(torch.addcdiv(a, b, c, out=out).names, names)
+            self.assertEqual(a.addcdiv_(b, c).names, names)
+
     def test_binary_ops(self):
         def test_basic(op):
             a = torch.empty(2, 3, names=('N', 'C'))
@@ -890,6 +907,11 @@ class TestNamedTensor(TestCase):
 
             # creation functions
             fn('empty_like'),
+            fn('zeros_like'),
+            fn('ones_like'),
+            fn('full_like', 3.14),
+            fn('rand_like'),
+            fn('randn_like'),
 
             # bernoulli variants
             method('bernoulli_', 0.5),
@@ -1660,7 +1682,7 @@ class TestNamedTensor(TestCase):
             self._test_name_inference(
                 torch.bmm, device=device,
                 args=(create('N:3,A:3,B:3'), create('None:3,N:3,B:3')),
-                maybe_raises_regex='Misaligned')
+                maybe_raises_regex='misaligned')
 
     def test_matmul(self):
         for device in torch.testing.get_all_device_types():
@@ -1740,8 +1762,7 @@ class TestNamedTensor(TestCase):
             self._test_name_inference(
                 torch.matmul, device=device,
                 args=(create('N:3,A:3,B:3'), create('A:3,N:3,B:3')),
-                maybe_raises_regex='Misaligned')
-
+                maybe_raises_regex='do not match')
 
     def test_mv(self):
         for device in torch.testing.get_all_device_types():

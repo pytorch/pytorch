@@ -107,14 +107,14 @@ torch.nn.MSELoss|Yes|No
 torch.nn.CrossEntropyLoss|No|No
 torch.nn.CTCLoss|Yes|No
 torch.nn.NLLLoss|No|No
-torch.nn.PoissonNLLLoss|No|No
+torch.nn.PoissonNLLLoss|Yes|No
 torch.nn.KLDivLoss|Yes|No
 torch.nn.BCELoss|Yes|No
 torch.nn.BCEWithLogitsLoss|No|No
 torch.nn.MarginRankingLoss|No|No
 torch.nn.HingeEmbeddingLoss|Yes|No
 torch.nn.MultiLabelMarginLoss|Yes|No
-torch.nn.SmoothL1Loss|No|No
+torch.nn.SmoothL1Loss|Yes|No
 torch.nn.SoftMarginLoss|Yes|No
 torch.nn.MultiLabelSoftMarginLoss|Yes|No
 torch.nn.CosineEmbeddingLoss|Yes|No
