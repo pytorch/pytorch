@@ -33,6 +33,7 @@ class TestJitDisabled(unittest.TestCase):
         with TemporaryFileName() as fname:
             with open(fname, 'w') as f:
                 f.write(src)
+                f.flush()
                 with _jit_disabled():
                     out_disabled = subprocess.check_output([
                         sys.executable,
