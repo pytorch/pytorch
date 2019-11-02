@@ -106,7 +106,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
-    PyObject* torch_function = PyObject_FastGetAttrString(r.get_overloaded_arg(0), "__torch_function__");
+    PyObject* torch_function = PyObject_FastGetAttrString(r.overloaded_args[0], "__torch_function__");
     PyObject* torch_api_function = PyObject_FastGetAttrString(
         (PyObject*)&THPVariableFunctions, const_cast<char*>(r.get_func_name().data()));
     return PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);

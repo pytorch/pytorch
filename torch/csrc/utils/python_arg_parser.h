@@ -127,7 +127,6 @@ struct PythonArgs {
 
   inline bool has_torch_function();
   inline std::string get_func_name();
-  inline PyObject* get_overloaded_arg(int i);
   inline at::Tensor tensor(int i);
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
@@ -243,13 +242,6 @@ inline at::Tensor PythonArgs::tensor(int i) {
     return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
   return tensor_slow(i);
-}
-
-inline PyObject* PythonArgs::get_overloaded_arg(int i) {
-  if (overloaded_args[i]) {
-    return overloaded_args[i];
-  }
-  return Py_None;
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {
