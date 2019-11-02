@@ -606,17 +606,17 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       // so far.
       //
       // If this is the first argument we've seen with __torch_function__
-      // defined, so we unconditionall add obj to the overloaded_args vector.
+      // defined, we unconditionally add obj to the overloaded_args vector.
       //
       // If we've already seen arguments with __torch_function__ defined, then
-      // we first need to check if obj is the same type as any of the previous
-      // arguments with __torch_function__ defined. If so, we can ignore obj
-      // since we already have an entry in overloaded_args with the same
-      // __torch_function__ implementation.
+      // we first need to check if obj is the same type as any of the entries in
+      // overloaded_args.  If so, we can ignore obj since we already have an
+      // entry in overloaded_args with the same __torch_function__
+      // implementation.
       //
       // If it's a different type, we then need to check if it's a subclass of one
-      // of the types we've already seen. If so, we need to replace the entry in
-      // overloaded_args for the superclass instance with obj.
+      // of the types we've already seen. If so, we need to insert an entry in
+      // overloaded_args for this type with higher precedence than the superclass.
       bool class_not_seen_yet = true;
       for (int j = 0; j < num_args_with_torch_function; j++) {
         if (Py_TYPE(obj) == Py_TYPE(overloaded_args[j])) {
