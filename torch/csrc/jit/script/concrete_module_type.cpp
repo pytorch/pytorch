@@ -233,12 +233,13 @@ std::unordered_map<std::string, std::pair<TypePtr, bool>> ConcreteModuleType::
   return ret;
 }
 
-std::unordered_map<std::string, TypePtr> ConcreteModuleType::getModulesPy() const {
+std::vector<std::pair<std::string, TypePtr>> ConcreteModuleType::getModulesPy()
+    const {
   TORCH_INTERNAL_ASSERT(jitType_);
-  std::unordered_map<std::string, TypePtr> ret;
+  std::vector<std::pair<std::string, TypePtr>> ret;
 
   for (const ModuleInfo& info: modules_) {
-    ret.emplace(info.name_, info.getJitType());
+    ret.emplace_back(std::make_pair(info.name_, info.getJitType()));
   }
   return ret;
 }

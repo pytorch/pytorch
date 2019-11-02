@@ -104,7 +104,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, py::object> getConstantsPy() const;
   std::unordered_map<std::string, std::pair<TypePtr, bool>> getAttributesPy()
       const;
-  std::unordered_map<std::string, TypePtr> getModulesPy() const;
+  std::vector<std::pair<std::string, TypePtr>> getModulesPy() const;
 
   // This determines whether two modules can share a type. The container structs
   // used by ConcreteModuleType have been defined such that operator==

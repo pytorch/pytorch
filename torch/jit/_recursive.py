@@ -359,7 +359,7 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
 
         # 2. Copy the submodules from the original `nn_module` to the new ScriptModule,
         #    recursively scripting them.
-        for name, module_type in concrete_type.get_modules().items():
+        for name, module_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
             assert isinstance(orig_value, Module)
             if isinstance(module_type, torch._C.InterfaceType):
