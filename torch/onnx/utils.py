@@ -342,8 +342,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                         do_constant_folding, fixed_batch_size=fixed_batch_size)
 
         graph_out = graph._pretty_print_onnx(params_dict, opset_version, False,
-                                        operator_export_type, google_printer,
-                                        val_keep_init_as_ip)
+                                             operator_export_type, google_printer,
+                                             val_keep_init_as_ip)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
