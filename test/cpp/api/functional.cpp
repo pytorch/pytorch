@@ -1362,6 +1362,66 @@ TEST_F(FunctionalTest, BatchNorm1dDefaultOptions) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, BatchNorm2d) {
+  int num_features = 5;
+  double eps = 1e-05;
+  double momentum = 0.1;
+
+  auto input = torch::randn({2, num_features, 4, 4});
+  auto mean = torch::randn(num_features);
+  auto variance = torch::rand(num_features);
+  auto weight = torch::ones({num_features});
+  auto bias = torch::zeros({num_features});
+  auto output = F::batch_norm(
+    input, mean, variance,
+    BatchNormOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
+    /*training=*/false);
+  auto expected = torch::transpose((torch::transpose(input, 1, 3) - mean) / torch::sqrt(variance + eps), 1, 3);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, BatchNorm2dDefaultOptions) {
+  int num_features = 5;
+  double eps = 1e-05;
+
+  auto input = torch::randn({2, num_features, 4, 4});
+  auto mean = torch::randn(num_features);
+  auto variance = torch::rand(num_features);
+  auto output = F::batch_norm(input, mean, variance);
+  auto expected = torch::transpose((torch::transpose(input, 1, 3) - mean) / torch::sqrt(variance + eps), 1, 3);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, BatchNorm3d) {
+  int num_features = 5;
+  double eps = 1e-05;
+  double momentum = 0.1;
+
+  auto input = torch::randn({2, num_features, 2, 2, 2});
+  auto mean = torch::randn(num_features);
+  auto variance = torch::rand(num_features);
+  auto weight = torch::ones({num_features});
+  auto bias = torch::zeros({num_features});
+  auto output = F::batch_norm(
+    input, mean, variance,
+    BatchNormOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
+    /*training=*/false);
+  auto expected = torch::transpose((torch::transpose(input, 1, 4) - mean) / torch::sqrt(variance + eps), 1, 4);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, BatchNorm3dDefaultOptions) {
+  int num_features = 5;
+  double eps = 1e-05;
+
+  auto input = torch::randn({2, num_features, 2, 2, 2});
+  auto mean = torch::randn(num_features);
+  auto variance = torch::rand(num_features);
+  auto output = F::batch_norm(input, mean, variance);
+  auto expected = torch::transpose((torch::transpose(input, 1, 4) - mean) / torch::sqrt(variance + eps), 1, 4);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
 TEST_F(FunctionalTest, Interpolate) {
   {
     // 1D interpolation
@@ -1653,4 +1713,21 @@ TEST_F(FunctionalTest, CTCLoss) {
       ));
     }
   }
+}
+
+TEST_F(FunctionalTest, PoissonNLLLoss) {
+  const auto input = torch::tensor({0.5, 1.5, 2.5});
+  const auto target = torch::tensor({1., 2., 3.});
+  const auto component_wise_loss = torch::exp(input) - target * input;
+  ASSERT_TRUE(torch::allclose(torch::mean(component_wise_loss),
+    F::poisson_nll_loss(input, target)));
+  ASSERT_TRUE(torch::allclose(component_wise_loss,
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(torch::kNone))));
+  ASSERT_TRUE(torch::allclose(torch::sum(component_wise_loss),
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(torch::kSum))));
+  ASSERT_TRUE(torch::allclose(torch::mean(component_wise_loss),
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(torch::kMean))));
 }
