@@ -26,11 +26,11 @@ The benchmark folder contains two scripts that help you setup the benchmark proj
 4. Again, in the same directory, run `ruby setup.rb` to setup the XCode project.
 5. Open the `TestApp.xcodeproj`, you're ready to go.
 
-The benchmark code is written in C++, see `benchmark.mm` for more details.
+The benchmark code is written in C++, you can use `UI_LOG` to visualize the log. See `benchmark.mm` for more details. 
 
 ### `bootstrap.sh`
 
-For those who want to do perf testing but don't want touch XCode, `bootstrap.sh` is the right tool for you. It'll automatically build and install the app on your device. That being said, it does require you to have 
+For those who want to do perf testing but don't want to touch XCode, `bootstrap.sh` is the right tool for you. It'll automatically build and install the app on your device. That being said, it does require you to have 
 
 1. A valid iOS dev certificate installed on your local machine. 
 2. A valid provisioning profile for code signing
