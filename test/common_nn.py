@@ -3144,7 +3144,6 @@ new_criterion_tests = [
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         reference_fn=lambda i, t, _: (i.exp() - t.mul(i)).mean(),
         desc='no_full_loss',
-        check_forward_only=False,
     ),
     dict(
         module_name='PoissonNLLLoss',
@@ -3153,7 +3152,6 @@ new_criterion_tests = [
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         reference_fn=lambda i, t, _: (i - t.mul((i + 1e-8).log())).mean(),
         desc='no_full_loss_no_log_input',
-        check_forward_only=False,
     ),
     dict(
         module_name='PoissonNLLLoss',
@@ -3163,7 +3161,6 @@ new_criterion_tests = [
         reference_fn=lambda i, t, _:
             (i.exp() - t.mul(i) + (t.mul(t.log()) - t + 0.5 * (2. * pi * t).log()).masked_fill(t <= 1, 0)).mean(),
         desc='full_loss',
-        check_forward_only=False,
     ),
     dict(
         module_name='PoissonNLLLoss',
@@ -3173,7 +3170,6 @@ new_criterion_tests = [
         reference_fn=lambda i, t, _:
             (i - t.mul((i + 1e-8).log()) + (t.mul(t.log()) - t + 0.5 * (2. * pi * t).log()).masked_fill(t <= 1, 0)).mean(),
         desc='full_loss_no_log_input',
-        check_forward_only=False,
     ),
     dict(
         module_name='L1Loss',
