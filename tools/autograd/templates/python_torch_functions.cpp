@@ -518,8 +518,6 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
     PyObject* torch_api_function = PyObject_FastGetAttrString(
         (PyObject*)&THPVariableFunctions, const_cast<char*>(r.get_func_name().data()));
     return PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
-
-    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
   }
 
   if (r.idx == 0) {
@@ -553,8 +551,6 @@ static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* k
     PyObject* torch_api_function = PyObject_FastGetAttrString(
         (PyObject*)&THPVariableFunctions, const_cast<char*>(r.get_func_name().data()));
     return PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
-
-    return PyObject_CallFunctionObjArgs(torch_function, PyUnicode_FromString(r.get_func_name().data()), args, kwargs, NULL);
   }
 
   if (r.idx == 0) {
