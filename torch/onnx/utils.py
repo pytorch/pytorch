@@ -322,24 +322,33 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                              export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
                              google_printer=False, opset_version=None, _retain_param_name=False,
                              do_constant_folding=False, keep_initializers_as_inputs=None, fixed_batch_size=False):
-    from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
-    from torch.onnx.symbolic_helper import _set_operator_export_type
-    if opset_version is None:
-        opset_version = _default_onnx_opset_version
-    _set_opset_version(opset_version)
-    _set_operator_export_type(operator_export_type)
-    val_keep_init_as_ip = True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
-    if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:
-        val_keep_init_as_ip = False
-    graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
-                                                    training, input_names,
-                                                    output_names, operator_export_type,
-                                                    example_outputs, propagate, _retain_param_name,
-                                                    do_constant_folding, fixed_batch_size=fixed_batch_size)
+    global __IN_ONNX_EXPORT
+    assert __IN_ONNX_EXPORT is False
+    __IN_ONNX_EXPORT = True
+    try:
+        from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+        from torch.onnx.symbolic_helper import _set_operator_export_type
+        if opset_version is None:
+            opset_version = _default_onnx_opset_version
+        _set_opset_version(opset_version)
+        _set_operator_export_type(operator_export_type)
+        val_keep_init_as_ip = True if keep_initializers_as_inputs is None else keep_initializers_as_inputs
+        if keep_initializers_as_inputs is None and operator_export_type is OperatorExportTypes.ONNX:
+            val_keep_init_as_ip = False
+        graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
+                                                        training, input_names,
+                                                        output_names, operator_export_type,
+                                                        example_outputs, propagate, _retain_param_name,
+                                                        do_constant_folding, fixed_batch_size=fixed_batch_size)
 
-    return graph._pretty_print_onnx(params_dict, opset_version, False,
-                                    operator_export_type, google_printer,
-                                    val_keep_init_as_ip)
+        graph_out = graph._pretty_print_onnx(params_dict, opset_version, False,
+                                        operator_export_type, google_printer,
+                                        val_keep_init_as_ip)
+    finally:
+        assert __IN_ONNX_EXPORT
+        __IN_ONNX_EXPORT = False
+    return graph_out
+            
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from

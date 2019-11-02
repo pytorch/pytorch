@@ -5,6 +5,7 @@ import warnings
 import math
 
 import torch
+import torch.onnx
 from torch._C import _infer_size, _add_docstr
 from . import _reduction as _Reduction
 from .modules import utils
@@ -2479,7 +2480,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         # math.floor might return float in py2.7
 
         # make scale_factor a tensor in tracing so constant doesn't get baked in
-        if torch._C._get_tracing_state():
+        if torch._C._get_tracing_state() and not torch.onnx.is_in_onnx_export():
             return [(torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i],
                      dtype=torch.float32)).float())) for i in range(dim)]
         else:
