@@ -376,8 +376,16 @@ def prim_ConstantChunk(g, self, chunks, dim):
     return prim_ConstantSplit(g, self, split_size, dim)
 
 
-@parse_args('v', 'i', 'i')
-def split(g, self, split_size, dim):
+def split(g, self, split_size_or_sizes, dim):
+    if sym_help._is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
+        raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`"
+            .format('split_size_or_sizes', split_size_or_sizes))
+    split_val = split_size_or_sizes.node()['value']
+    if split_val.dim() > 0:
+        return split_with_sizes(g, self, split_size_or_sizes, dim)
+    split_size = sym_help._get_const(split_size_or_sizes, 'i', 'split_size')
+    dim = sym_help._get_const(dim, 'i', 'dim')
+
     size = self.type().sizes()[dim]
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
