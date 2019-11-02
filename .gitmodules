@@ -118,3 +118,6 @@
     ignore = dirty
     path = android/libs/fbjni
     url = https://github.com/facebookincubator/fbjni.git
+[submodule "third_party/XNNPACK"]
+	path = third_party/XNNPACK
+	url = https://github.com/google/XNNPACK.git

@@ -379,6 +379,42 @@ if(USE_NNPACK)
   endif()
 endif()
 
+if(INTERN_BUILD_MOBILE)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+
+  if (NOT DEFINED CPUINFO_SOURCE_DIR)
+    set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
+  endif()
+  if (NOT DEFINED FP16_SOURCE_DIR)
+    set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
+  endif()
+  if (NOT DEFINED FXDIV_SOURCE_DIR)
+    set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")
+  endif()
+  if (NOT DEFINED PSIMD_SOURCE_DIR)
+    set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+  endif()
+  if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+  endif()
+  if (NOT DEFINED XNNPACK_SOURCE_DIR)
+    set(XNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/XNNPACK" CACHE STRING "XNNPACK source directory")
+  endif()
+
+  if(NOT TARGET xnnpack)
+    set(XNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
+    set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
+
+    add_subdirectory(
+      "${XNNPACK_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
+  endif()
+
+  include_directories(SYSTEM ${XNNPACK_INCLUDE_DIRS})
+  list(APPEND Caffe2_DEPENDENCY_LIBS xnnpack)
+endif()
+
 # ---[ Caffe2 uses cpuinfo library in the thread pool
 if (NOT TARGET cpuinfo)
   if (NOT DEFINED CPUINFO_SOURCE_DIR)
