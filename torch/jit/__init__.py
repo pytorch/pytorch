@@ -1512,7 +1512,7 @@ class ScriptMeta(type):
                         # today, but it is wrong)
                         continue
                     delattr(self, name)
-                for name in concrete_type.get_module_names():
+                for name in concrete_type.get_modules().keys():
                     delattr(self, name)
                 for name in ("_parameters", "_buffers", "_modules"):
                     delattr(self, name)
