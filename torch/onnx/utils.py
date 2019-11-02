@@ -348,7 +348,6 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
     return graph_out
-            
 
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
