@@ -107,6 +107,9 @@ def validate_cuda_device(location):
         location = str(location)
     if not isinstance(location, _string_classes):
         raise ValueError("location should be a string or torch.device")
+    if len(location) > 4 and location[4] != ':':
+        raise ValueError("location should be specified in the format 'cuda:<device ID>'")
+    
     if location[5:] == '':
         device = 0
     else:
