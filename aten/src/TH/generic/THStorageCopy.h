@@ -14,5 +14,14 @@ TH_API void THStorage_(copyDouble)(THStorage *storage, struct THDoubleStorage *s
 TH_API void THStorage_(copyHalf)(THStorage *storage, struct THHalfStorage *src);
 TH_API void THStorage_(copyBool)(THStorage *storage, struct THBoolStorage *src);
 TH_API void THStorage_(copyBFloat16)(THStorage *storage, struct THBFloat16Storage *src);
+#ifdef THQUINT8
+TH_API void THStorage_(copyQUInt8)(THStorage *storage, struct THQUInt8Storage *src);
+#endif
+#ifdef THQINT8
+TH_API void THStorage_(copyQInt8)(THStorage *storage, struct THQInt8Storage *src);
+#endif
+#ifdef THQINT32
+TH_API void THStorage_(copyQInt32)(THStorage *storage, struct THQInt32Storage *src);
+#endif
 
 #endif
