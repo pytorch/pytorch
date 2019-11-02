@@ -94,11 +94,10 @@ class ScriptModuleDeserializer final {
 };
 
 IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
-  std::stringstream picklename;
-  picklename << archive_name << ".pkl";
+  std::string picklename = archive_name + ".pkl";
   at::DataPtr pickle_ptr;
   size_t pickle_size;
-  std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
+  std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename);
 
   size_t bytes_read = 0;
   auto data = reinterpret_cast<const char*>(pickle_ptr.get());
@@ -153,10 +152,10 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     }
   };
 
+  std::string archive_name_plus_slash = archive_name + "/";
   auto read_record = [&](const std::string& name) {
-    std::stringstream ss;
-    ss << archive_name << "/" << name;
-    return std::get<0>(reader_->getRecord(ss.str()));
+    std::string ss = archive_name_plus_slash + name;
+    return std::get<0>(reader_->getRecord(ss));
   };
 
   Unpickler unpickler(

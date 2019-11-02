@@ -17,7 +17,7 @@ namespace nn {
 
 /// Creates a criterion that measures the mean absolute error (MAE) between each
 /// element in the input : math :`x` and target : `y`.
-struct TORCH_API L1LossImpl : public Cloneable<L1LossImpl> {
+struct TORCH_API L1LossImpl : Cloneable<L1LossImpl> {
   explicit L1LossImpl(const L1LossOptions& options_ = {});
 
   void reset() override;
@@ -38,13 +38,95 @@ struct TORCH_API L1LossImpl : public Cloneable<L1LossImpl> {
 TORCH_MODULE(L1Loss);
 
 // ============================================================================
+/// The `Kullback-Leibler divergence`_ Loss
+///
+/// KL divergence is a useful distance measure for continuous distributions
+/// and is often useful when performing direct regression over the space of
+/// (discretely sampled) continuous output distributions.
+///
+/// As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
+/// *log-probabilities* and is not restricted to a 2D Tensor.
+/// The targets are given as *probabilities* (i.e. without taking the
+/// logarithm).
+///
+/// This criterion expects a `target` `Tensor` of the same size as the
+/// `input` `Tensor`.
+struct TORCH_API KLDivLossImpl : Cloneable<KLDivLossImpl> {
+  explicit KLDivLossImpl(const KLDivLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `KLDivLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  KLDivLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `KLDivLossImpl`.
+/// See the documentation for `KLDivLossImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(KLDivLoss);
+
+// ============================================================================
+
+/// Creates a criterion that measures the mean squared error (squared L2 norm)
+/// between each element in the input :math:`x` and target :math:`y`.
+struct TORCH_API MSELossImpl : Cloneable<MSELossImpl> {
+  explicit MSELossImpl(const MSELossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `MSELoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  MSELossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `MSELossImpl`.
+/// See the documentation for `MSELossImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(MSELoss);
+
+// ============================================================================
+
+/// Creates a criterion that measures the Binary Cross Entropy
+/// between the target and the output.
+struct TORCH_API BCELossImpl : Cloneable<BCELossImpl> {
+  explicit BCELossImpl(const BCELossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `BCELoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  BCELossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `BCELossImpl`.
+/// See the documentation for `BCELossImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(BCELoss);
+
+// ============================================================================
 
 /// Creates a criterion that measures the loss given an input tensor :math:`x`
 /// and a labels tensor :math:`y` (containing 1 or -1). This is usually used for
 /// measuring whether two inputs are similar or dissimilar, e.g. using the L1
 /// pairwise distance as :math:`x`, and is typically used for learning nonlinear
 /// embeddings or semi-supervised learning.
-struct TORCH_API HingeEmbeddingLossImpl : public Cloneable<HingeEmbeddingLossImpl> {
+struct TORCH_API HingeEmbeddingLossImpl : Cloneable<HingeEmbeddingLossImpl> {
   explicit HingeEmbeddingLossImpl(
       const HingeEmbeddingLossOptions& options_ = {});
 
@@ -125,6 +207,33 @@ TORCH_MODULE(CosineEmbeddingLoss);
 
 // ============================================================================
 
+/// Creates a criterion that uses a squared term if the absolute
+/// element-wise error falls below 1 and an L1 term otherwise.
+/// It is less sensitive to outliers than the `MSELoss` and in some cases
+/// prevents exploding gradients (e.g. see `Fast R-CNN` paper by Ross Girshick).
+/// Also known as the Huber loss.
+struct TORCH_API SmoothL1LossImpl : public Cloneable<SmoothL1LossImpl> {
+  explicit SmoothL1LossImpl(const SmoothL1LossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `L1Loss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input, const Tensor& target);
+
+  /// The options with which this `Module` was constructed.
+  SmoothL1LossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `SmoothL1LossImpl`.
+/// See the documentation for `SmoothL1LossImpl` class to learn what methods it
+/// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(SmoothL1Loss);
+
+// ============================================================================
+  
 /// Creates a criterion that optimizes a multi-class multi-classification
 /// hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
 /// and output :math:`y` (which is a 2D `Tensor` of target class indices).
@@ -231,6 +340,58 @@ struct TORCH_API TripletMarginLossImpl : public Cloneable<TripletMarginLossImpl>
 /// methods it provides, or the documentation for `ModuleHolder` to learn about
 /// PyTorch's module storage semantics.
 TORCH_MODULE(TripletMarginLoss);
+
+// ============================================================================
+
+/// Calculates loss between a continuous (unsegmented) time series and a target
+/// sequence. CTCLoss sums over the probability of possible alignments of input
+/// to target, producing a loss value which is differentiable with respect
+/// to each input node. The alignment of input to target is assumed
+/// to be "many-to-one", which limits the length of the target sequence
+/// such that it must be less than or equal to the input length.
+struct TORCH_API CTCLossImpl : public Cloneable<CTCLossImpl> {
+
+  explicit CTCLossImpl(const CTCLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `CTCLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& log_probs, const Tensor& targets,
+                 const Tensor& input_lengths, const Tensor& target_lengths);
+
+  /// The options with which this `Module` was constructed.
+  CTCLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `CTCLossImpl`.
+/// See the documentation for `CTCLoss` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(CTCLoss);
+
+// ============================================================================
+
+struct TORCH_API PoissonNLLLossImpl : public Cloneable<PoissonNLLLossImpl> {
+  explicit PoissonNLLLossImpl(const PoissonNLLLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `PoissonNLLLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& log_input, const Tensor& targets);
+
+  /// The options with which this `Module` was constructed.
+  PoissonNLLLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `PoissonNLLLossImpl`.
+/// See the documentation for `PoissonNLLLoss` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(PoissonNLLLoss);
 
 } // namespace nn
 } // namespace torch

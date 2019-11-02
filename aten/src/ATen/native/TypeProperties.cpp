@@ -68,7 +68,7 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   return lower;
 }
 
-ScalarType result_type(const TensorList& tensors) {
+ScalarType result_type(TensorList tensors) {
   auto dimResult = ScalarType::Undefined;
   auto zeroResult = ScalarType::Undefined;
   auto wrappedResult = ScalarType::Undefined;
