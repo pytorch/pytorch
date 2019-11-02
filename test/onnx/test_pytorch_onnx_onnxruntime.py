@@ -1152,6 +1152,34 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5)
         self.run_test(UnbindModel2(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_unbind_dynamic(self):
+        class UnbindModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.unbind()[1]
+
+        x = torch.randn(3, 4, 5)
+        self.run_test(UnbindModel(), x)
+
+    def test_split(self):
+        class SplitModel(torch.nn.Module):
+            def forward(self, input):
+                return input.split([2, 1, 2])
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_dynamic(self):
+        class SplitModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return input.split(2)[1]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):

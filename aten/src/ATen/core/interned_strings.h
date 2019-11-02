@@ -197,6 +197,9 @@ namespace c10 {
   _(onnx, ConstantOfShape)           \
   _(onnx, Cast)                      \
   _(onnx, Mod)                       \
+  _(onnx, SplitToSequence)           \
+  _(onnx, SequenceConstruct)         \
+  _(onnx, SequenceEmpty)             \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
@@ -226,7 +229,8 @@ namespace c10 {
   _(attr, split)                     \
   _(attr, slot)                      \
   _(attr, kinds)                     \
-  _(attr, types)
+  _(attr, types)                     \
+  _(attr, keepdims)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
