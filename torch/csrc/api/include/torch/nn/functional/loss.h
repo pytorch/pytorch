@@ -289,8 +289,9 @@ inline Tensor nll_loss(
     options.reduction() == Reduction::Sum,
     options.reduction() + " is not valid"
   );
+  torch::Tensor ret;
   if(input.dim() == 2){
-    auto ret = torch::nll_loss(
+    ret = torch::nll_loss(
           input,
           target,
           options.weight(),
@@ -298,7 +299,7 @@ inline Tensor nll_loss(
           get_enum(options.reduction()));
   }
   else if(input.dim() == 4){
-    auto ret = torch::nll_loss2d(
+    ret = torch::nll_loss2d(
           input,
           target,
           options.weight(),
@@ -308,20 +309,21 @@ inline Tensor nll_loss(
   else{
     auto n = input.sizes()[0];
     auto c = input.sizes()[1];
-    auto out_size = torch::Tensor(input.sizes().slice(0, 1)).vec();
-    auto temp = torch::tensor(input.sizes().slice(2, input.dim() - 2)).vec();
+    auto out_size = input.sizes().slice(0, 1).vec();
+    auto temp = input.sizes().slice(2, input.dim() - 2).vec();
     out_size.insert(out_size.end(), temp.begin(), temp.end());
     if(target.sizes().slice(1, target.dim() - 1) != input.sizes().slice(2, input.dim() - 2)){
       TORCH_WARN("Expected target size{", out_size, "} got {", target.sizes().vec(), "}");
-  }
-  input = input.contiguous().view({n, c, 1, -1});
-  target = target.contiguous().view({n, 1, -1});
-  if (options.reduction() != 'None'){
-    auto ret = torch::nll_loss2d(input, target, options.weight(), get_enum(options.reduction()), options.ignore_index());
-  }
-  else{
-    auto out = torch::nll_loss2d(input, target, options.weight(), get_enum(options.reduction()), options.ignore_index());
-    auto ret = out.view(out_size);
+    }
+    torch::Tensor input_reshaped = input.contiguous().view({n, c, 1, -1});
+    torch::Tensor target_reshaped = target.contiguous().view({n, 1, -1});
+    if (options.reduction() != torch::Reduction::None){
+      ret = torch::nll_loss2d(input_reshaped, target_reshaped, options.weight(), get_enum(options.reduction()), options.ignore_index());
+    }
+    else{
+      auto out = torch::nll_loss2d(input_reshaped, target_reshaped, options.weight(), get_enum(options.reduction()), options.ignore_index());
+      ret = out.view(out_size);
+    }
   }
   return ret;
 }
