@@ -22,9 +22,14 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/python_headers.h>
 
+#ifndef WIN32
+#include <pthread.h>
+#endif
+
 using namespace torch;
 
-THCState *state;
+THCState *state = nullptr;
+static bool in_bad_fork = false;  // True for children forked after cuda init
 
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA management methods
@@ -66,11 +71,9 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_set_run_yet_variable_to_false_wrap(PyObject *self, PyObject *noargs)
-{
+static PyObject * THCPModule_isInBadFork(PyObject *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
-  torch::utils::set_run_yet_variable_to_false();
-  Py_RETURN_NONE;
+  return PyBool_FromLong(in_bad_fork);
   END_HANDLE_TH_ERRORS
 }
 
@@ -369,11 +372,25 @@ static void bindCudaDeviceProperties(PyObject* module) {
   }, py::return_value_policy::reference);
 }
 
+#ifndef WIN32
+// Called in the forked child if cuda has already been initialized
+static void THCPModule_forkedChild() {
+  in_bad_fork = true;
+  utils::set_run_yet_variable_to_false();
+  state = nullptr;
+}
+#endif
+
 // Callback for python part. Used for additional initialization of python classes
 static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  TORCH_INTERNAL_ASSERT(!in_bad_fork);  // Handled at python level
   state = at::globalContext().lazyInitCUDA();
+
+#ifndef WIN32
+  pthread_atfork(nullptr, nullptr, THCPModule_forkedChild);
+#endif
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
   if (!m) throw python_error();
@@ -446,8 +463,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       nullptr},
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
-  {"_cuda_set_run_yet_variable_to_false",
-    (PyCFunction)THCPModule_set_run_yet_variable_to_false_wrap, METH_NOARGS, nullptr},
+  {"_cuda_isInBadFork", (PyCFunction)THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",
     (PyCFunction)THCPModule_getCurrentStream_wrap, METH_O, nullptr},
   {"_cuda_getDefaultStream",
