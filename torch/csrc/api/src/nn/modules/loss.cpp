@@ -203,7 +203,6 @@ Tensor SoftMarginLossImpl::forward(const Tensor& input, const Tensor& target) {
 
 // ============================================================================
 
-<<<<<<< HEAD
 SmoothL1LossImpl::SmoothL1LossImpl(
     const torch::nn::SmoothL1LossOptions& options_) : options(options_) {}
 
@@ -246,7 +245,10 @@ void PoissonNLLLossImpl::pretty_print(std::ostream& stream) const {
 Tensor PoissonNLLLossImpl::forward(
   const Tensor& log_input, const Tensor& target) {
   return F::poisson_nll_loss(log_input, target, options);
-=======
+}
+
+// ============================================================================
+
 NLLLossImpl::NLLLossImpl(
     const NLLLossOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {
@@ -265,7 +267,6 @@ Tensor NLLLossImpl::forward(
     const Tensor& input,
     const Tensor& target) {
   return F::nll_loss(input, target, options);
->>>>>>> Add C++ Frontend - NLLLoss
 }
 
 // ============================================================================
