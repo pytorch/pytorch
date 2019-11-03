@@ -9,12 +9,15 @@
 namespace at {
 
 inline Tensor & Tensor::operator=(Tensor const & rhs) && {
+  std::cout << "Tensor::operator=(Tensor const & rhs) && is called" << std::endl;
   return copy_(rhs);
 }
 inline Tensor & Tensor::operator=(Tensor && rhs) && {
+  std::cout << "Tensor::operator=(Tensor && rhs) && is called" << std::endl;
   return copy_(rhs);
 }
 inline Tensor & Tensor::operator=(Scalar v) && {
+  std::cout << "Tensor::operator=(Scalar v) && is called" << std::endl;
   return fill_(v);
 }
 inline Tensor Tensor::operator-() const {
