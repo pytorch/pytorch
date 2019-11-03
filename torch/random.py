@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 
-from torch._C import default_generator, _cuda_isInBadFork
+from torch._C import default_generator
 
 
 def set_rng_state(new_state):
@@ -28,7 +28,7 @@ def manual_seed(seed):
     seed = int(seed)
     import torch.cuda
 
-    if not _cuda_isInBadFork():
+    if not torch.cuda._is_in_bad_fork():
         torch.cuda.manual_seed_all(seed)
 
     return default_generator.manual_seed(seed)
@@ -41,7 +41,7 @@ def seed():
     seed = default_generator.seed()
     import torch.cuda
 
-    if not _cuda_isInBadFork():
+    if not torch.cuda._is_in_bad_fork():
         torch.cuda.manual_seed_all(seed)
 
     return seed

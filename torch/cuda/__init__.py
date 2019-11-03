@@ -20,11 +20,13 @@ import threading
 from torch._six import raise_from
 from subprocess import Popen, PIPE
 from ._utils import _get_device_index
+import torch._C
 
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
+_is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _cudart = None
 
 
@@ -136,7 +138,7 @@ def _check_capability():
 
 def is_initialized():
     r"""Returns whether PyTorch's CUDA state has been initialized."""
-    return _initialized and not torch._C._cuda_isInBadFork()
+    return _initialized and not _is_in_bad_fork()
 
 
 def _lazy_call(callable):
@@ -181,7 +183,7 @@ def _lazy_init():
         # It is important to prevent other threads from entering _lazy_init
         # immediately, while we are still guaranteed to have the GIL, because some
         # of the C calls we make below will release the GIL
-        if torch._C._cuda_isInBadFork():
+        if _is_in_bad_fork():
             from sys import version_info
             if version_info < (3, 4):
                 msg = ("To use CUDA with multiprocessing, you must use Python "
