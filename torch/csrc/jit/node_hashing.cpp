@@ -133,7 +133,7 @@ size_t HashNode::operator()(const Node* k) const {
 bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   if (lhs == nullptr && rhs == nullptr)
     return true;
-  if (lhs == nullptr || rhs == nullptr)
+  if (lhs == nullptr ^ rhs == nullptr)
     return false;
 
   if (lhs->kind() != rhs->kind())
