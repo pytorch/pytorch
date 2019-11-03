@@ -31,9 +31,8 @@ static PyObject* recursive_to_list(
 PyObject* tensor_to_list(const Tensor& tensor) {
   Tensor data = tensor;
   if (data.type().backend() != Backend::CPU) {
-    with_no_gil([&]() {
-      data = data.toBackend(Backend::CPU);
-    });
+    pybind11::gil_scoped_release no_gil;
+    data = data.toBackend(Backend::CPU);
   }
   return recursive_to_list(
       (char*)data.data_ptr(), data.sizes(), data.strides(), 0,
