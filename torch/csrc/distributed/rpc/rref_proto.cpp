@@ -77,18 +77,48 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 
 /////////////////////////// RRef Protocol //////////////////////////////////
 
+Message ScriptRRefFetchCall::toMessage() && {
+  std::vector<at::IValue> ivalues;
+  ivalues.reserve(2);
+  ivalues.emplace_back(rrefId_.toIValue());
+  ivalues.emplace_back(fromWorkerId_);
+  return fromIValues(std::move(ivalues), MessageType::SCRIPT_RREF_FETCH_CALL);
+}
+
 std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
     const Message& message) {
+  auto values = toIValues(message, MessageType::SCRIPT_RREF_FETCH_CALL);
+  TORCH_INTERNAL_ASSERT(
+      values.size() == 2, "ScriptRRefFetchCall expects 2 IValues from message");
+  auto id = values[1].toInt();
+  TORCH_INTERNAL_ASSERT(
+      id >= std::numeric_limits<worker_id_t>::min() &&
+          id <= std::numeric_limits<worker_id_t>::max(),
+      "ScriptRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
   return c10::guts::make_unique<ScriptRRefFetchCall>(
-      RRefId::fromIValue(RRefMessageBase::fromMessage(
-          message, MessageType::SCRIPT_RREF_FETCH_CALL)));
+      worker_id_t(id), RRefId::fromIValue(values[0]));
+}
+
+Message PythonRRefFetchCall::toMessage() && {
+  std::vector<at::IValue> ivalues;
+  ivalues.reserve(2);
+  ivalues.emplace_back(rrefId_.toIValue());
+  ivalues.emplace_back(fromWorkerId_);
+  return fromIValues(std::move(ivalues), MessageType::PYTHON_RREF_FETCH_CALL);
 }
 
 std::unique_ptr<PythonRRefFetchCall> PythonRRefFetchCall::fromMessage(
     const Message& message) {
+  auto values = toIValues(message, MessageType::PYTHON_RREF_FETCH_CALL);
+  TORCH_INTERNAL_ASSERT(
+      values.size() == 2, "PythonRRefFetchCall expects 2 IValues from message");
+  auto id = values[1].toInt();
+  TORCH_INTERNAL_ASSERT(
+      id >= std::numeric_limits<worker_id_t>::min() &&
+          id <= std::numeric_limits<worker_id_t>::max(),
+      "PythonRRefFetchCall fromWorkerId exceeds worker_id_t limit.")
   return c10::guts::make_unique<PythonRRefFetchCall>(
-      RRefId::fromIValue(RRefMessageBase::fromMessage(
-          message, MessageType::PYTHON_RREF_FETCH_CALL)));
+      worker_id_t(id), RRefId::fromIValue(values[0]));
 }
 
 const std::vector<at::IValue>& RRefFetchRet::values() {
