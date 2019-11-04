@@ -778,8 +778,7 @@ class TestCppExtension(common.TestCase):
                 warn_mod.foo(t, 1)
             self.assertEqual(len(w), 0)
 
-            # pybind does not understand our "python_error"
-            with self.assertRaisesRegex(RuntimeError, "std::exception"):
+            with self.assertRaisesRegex(RuntimeError, "bad argument to internal function"):
                 warn_mod.foo(t, 2)
             self.assertEqual(len(w), 0)
 
