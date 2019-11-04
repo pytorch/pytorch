@@ -88,6 +88,25 @@ def shell(command, cwd=None):
         # Always call p.wait() to ensure exit
         p.wait()
 
+ALL_TENSORTYPES = [torch.float,
+                   torch.double,
+                   torch.half]
+
+# Used to run the same test with different tensor types
+def repeat_test_for_types(dtypes):
+    def repeat_helper(f):
+        @wraps(f)
+        def call_helper(self, *args):
+            for dtype in dtypes:
+                if PY34:
+                    with TestCase.subTest(self, dtype=dtype):
+                        f(self, *args, dtype=dtype)
+                else:
+                    f(self, *args, dtype=dtype)
+
+        return call_helper
+    return repeat_helper
+
 
 def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
@@ -443,7 +462,7 @@ try:
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
                 max_examples=100,
-                verbosity=hypothesis.Verbosity.quiet))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -467,7 +486,7 @@ try:
                 database=None,
                 max_examples=100,
                 min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.quiet))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(

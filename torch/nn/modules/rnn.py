@@ -130,7 +130,15 @@ class RNNBase(Module):
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)
+
+        # Resets _flat_weights
+        # Note: be v. careful before removing this, as 3rd party device types
+        # likely rely on this behavior to properly .to() modules like LSTM.
+        self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names]
+
+        # Flattens params (on CUDA)
         self.flatten_parameters()
+
         return ret
 
     def reset_parameters(self):
@@ -366,18 +374,13 @@ class RNN(RNNBase):
     """
 
     def __init__(self, *args, **kwargs):
-        if 'nonlinearity' in kwargs:
-            if kwargs['nonlinearity'] == 'tanh':
-                mode = 'RNN_TANH'
-            elif kwargs['nonlinearity'] == 'relu':
-                mode = 'RNN_RELU'
-            else:
-                raise ValueError("Unknown nonlinearity '{}'".format(
-                    kwargs['nonlinearity']))
-            del kwargs['nonlinearity']
-        else:
+        self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
+        if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
-
+        elif self.nonlinearity == 'relu':
+            mode = 'RNN_RELU'
+        else:
+            raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
         super(RNN, self).__init__(mode, *args, **kwargs)
 
 

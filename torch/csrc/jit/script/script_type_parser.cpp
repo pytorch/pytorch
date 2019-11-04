@@ -19,6 +19,7 @@ const std::unordered_map<std::string, TypePtr>& ident_to_type_lut() {
       // parsing serialized methods that use implicit converions to Scalar
       {"number", NumberType::get()},
       {"None", NoneType::get()},
+      {"Any", AnyType::get()},
   };
   return map;
 }
@@ -269,21 +270,20 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     auto decl_arg = *it;
 
     TypePtr type;
-    c10::optional<int32_t> N;
+    c10::optional<int32_t> N = c10::nullopt;
     bool is_inferred_type = false;
     if (!decl_arg.type().present()) {
       // If this param doesn't have a type, default to "tensor"
       is_inferred_type = true;
       type = TensorType::get();
-      N = c10::nullopt;
     } else {
       // BroadcastList list can only appear at the argument level
-      if (auto maybe_broad_list = parseBroadcastList(decl_arg.type().get())) {
+      Expr type_expr = decl_arg.type().get();
+      if (auto maybe_broad_list = parseBroadcastList(type_expr)) {
         type = maybe_broad_list->first;
         N = maybe_broad_list->second;
       } else {
         type = parseTypeFromExpr(decl_arg.type().get());
-        N = c10::nullopt;
       }
     }
     c10::optional<IValue> default_value = c10::nullopt;

@@ -20,7 +20,7 @@ process and loaded in a process where there is no Python dependency.
 We provide tools to incrementally transition a model from a pure Python program
 to a TorchScript program that can be run independently from Python, such as in a standalone C++ program.
 This makes it possible to train models in PyTorch using familiar tools in Python and then export
-the model via TorchScript to a production environment where Python programs may be disadvantageous.
+the model via TorchScript to a production environment where Python programs may be disadvantageous
 for performance and multi-threading reasons.
 
 For a gentle introduction to TorchScript, see the `Introduction to TorchScript <https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html>`_ tutorial.
@@ -33,6 +33,9 @@ Creating TorchScript Code
 
 .. autoclass:: ScriptModule()
     :members:
+
+
+.. autoclass:: ScriptFunction()
 
 .. autofunction:: script(obj)
 
@@ -154,9 +157,9 @@ methods, and classes that it encounters. Once you call ``torch.jit.script``,
 compilation is "opt-out", rather than "opt-in".
 
 2. ``torch.jit.script(nn_module_instance)`` is now the preferred way to create
-``ScriptModule``\s, instead of inheriting from ``torch.jit.ScriptModule``.
+:class:`ScriptModule`\s, instead of inheriting from ``torch.jit.ScriptModule``.
 These changes combine to provide a simpler, easier-to-use API for converting
-your ``nn.Module``\s into ``ScriptModule``\s, ready to be optimized and executed in a
+your ``nn.Module``\s into :class:`ScriptModule`\s, ready to be optimized and executed in a
 non-Python environment.
 
 The new usage looks like this:
@@ -208,7 +211,7 @@ Modules
     and :func:`@torch.jit.unused<torch.jit.unused>` for details.
 
 When passed to the :func:`torch.jit.script <torch.jit.script>` function, a ``torch.nn.Module``\'s data is
-copied to a ``ScriptModule`` and the TorchScript compiler compiles the module.
+copied to a :class:`ScriptModule` and the TorchScript compiler compiles the module.
 The module's ``forward`` is compiled by default. Methods called from ``forward`` are
 lazily compiled in the order they are used in ``forward``, as well as any
 ``@torch.jit.export`` methods.
@@ -255,6 +258,9 @@ Attributes
 The TorchScript compiler needs to know the types of `module attributes`_. Most types
 can be inferred from the value of the member. Empty lists and dicts cannot have their
 types inferred and must have their types annotated with `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
+If a type cannot be inferred and is not explicilty annotated, it will not be added as an attribute
+to the resulting :class:`ScriptModule`
+
 
 Old API:
 
@@ -311,7 +317,7 @@ If you are stuck on Python 2 and cannot use the class annotation syntax, you can
 
 Constants
 ~~~~~~~~~
-The ``Final`` type constructor can be used to mark members as `constant`_. If members are not marked constant, they will be copied to the resulting ``ScriptModule`` as an attribute. Using ``Final`` opens opportunities for optimization if the value is known to be fixed and gives additional type safety.
+The ``Final`` type constructor can be used to mark members as `constant`_. If members are not marked constant, they will be copied to the resulting :class:`ScriptModule` as an attribute. Using ``Final`` opens opportunities for optimization if the value is known to be fixed and gives additional type safety.
 
 Old API:
 
@@ -1198,9 +1204,11 @@ The ``torch.nn.Parameter`` wrapper and ``register_buffer`` can be used to assign
 tensors to a module. Other values assigned to a module that is compiled
 will be added to the compiled module if their types can be inferred. All `types`_
 available in TorchScript can be used as module attributes. Tensor attributes are
-semantically the same as buffers. The type of empty containers and ``None``
+semantically the same as buffers. The type of empty lists and dictionaries and ``None``
 values cannot be inferred and must be specified via
 `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
+If a type cannot be inferred and is not explicilty annotated, it will not be added as an attribute
+to the resulting :class:`ScriptModule`.
 
 Example:
 
@@ -1209,7 +1217,7 @@ Example:
     from typing import List, Dict
 
     class Foo(nn.Module):
-        # `words` is initialzed as an empty list, so its type must be specified
+        # `words` is initialized as an empty list, so its type must be specified
         words: List[str]
 
         # The type could potentially be inferred if `a_dict` (below) was not
@@ -1295,13 +1303,13 @@ Disable JIT for Debugging
         traced_fn(torch.rand(3, 4))
 
     Debugging this script with ``pdb`` works except for when we invoke the :func:`@torch.jit.script <torch.jit.script>`
-    function. We can globally disable JIT, so that we can call the ``@torch.jit.script``
+    function. We can globally disable JIT, so that we can call the :func:`@torch.jit.script <torch.jit.script>`
     function as a normal Python function and not compile it. If the above script
     is called ``disable_jit_example.py``, we can invoke it like so::
 
         $ PYTORCH_JIT=0 python disable_jit_example.py
 
-    and we will be able to step into the ``@torch.jit.script`` function as a normal Python
+    and we will be able to step into the :func:`@torch.jit.script <torch.jit.script>` function as a normal Python
     function. To disable the TorchScript compiler for a specific function, see
     :func:`@torch.jit.ignore <torch.jit.ignore>`.
 
@@ -1309,7 +1317,7 @@ Disable JIT for Debugging
 Inspecting Code
 ^^^^^^^^^^^^^^^
 
-TorchScript provides a code pretty-printer for all ``ScriptModule`` instances. This
+TorchScript provides a code pretty-printer for all :class:`ScriptModule` instances. This
 pretty-printer gives an interpretation of the script method's code as valid
 Python syntax. For example:
 
@@ -1333,11 +1341,11 @@ Python syntax. For example:
 
     ...
 
-A ``ScriptModule`` with a single ``forward`` method will have an attribute
-``code``, which you can use to inspect the ``ScriptModule``'s code.
-If the ``ScriptModule`` has more than one method, you will need to access
+A :class:`ScriptModule` with a single ``forward`` method will have an attribute
+``code``, which you can use to inspect the :class:`ScriptModule`'s code.
+If the :class:`ScriptModule` has more than one method, you will need to access
 ``.code`` on the method itself and not the module. We can inspect the
-code of a method named ``bar`` on a ScriptModule by accessing ``.bar.code``.
+code of a method named ``foo`` on a ScriptModule by accessing ``.foo.code``.
 The example above produces this output: ::
 
     def foo(len: int) -> Tensor:
@@ -1430,7 +1438,7 @@ operators are formatted to reflect their equivalent source code forms
 to facilitate easy debugging.
 
 Graphs can be inspected as shown to confirm that the computation described
-by a ``ScriptModule`` is correct, in both automated and manual fashion, as
+by a :class:`ScriptModule` is correct, in both automated and manual fashion, as
 described below.
 
 
@@ -1650,7 +1658,7 @@ best practices?
    the correct device information.
 
 
-Q: How do I store attributes on a ``ScriptModule``?
+Q: How do I store attributes on a :class:`ScriptModule`?
 
     Say we have a model like:
 
@@ -1670,7 +1678,7 @@ Q: How do I store attributes on a ``ScriptModule``?
 
     If ``Model`` is instantiated it will result in a compilation error
     since the compiler doesn't know about ``x``. There are 4 ways to inform the
-    compiler of attributes on ``ScriptModule``:
+    compiler of attributes on :class:`ScriptModule`:
 
     1. ``nn.Parameter`` - Values wrapped in ``nn.Parameter`` will work as they
     do on ``nn.Module``\s

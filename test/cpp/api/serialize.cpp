@@ -60,6 +60,37 @@ TEST(SerializeTest, BasicToFile) {
   ASSERT_TRUE(x.allclose(y));
 }
 
+TEST(SerializeTest, BasicViaFunc) {
+  torch::manual_seed(0);
+
+  auto x = torch::randn({5, 5});
+
+  std::string serialized;
+  torch::save(x, [&](const void* buf, size_t n) {
+    serialized.append(reinterpret_cast<const char *>(buf), n);
+    return n;
+  });
+  torch::Tensor y;
+  torch::load(y, serialized.data(), serialized.size());
+
+  ASSERT_TRUE(y.defined());
+  ASSERT_EQ(x.sizes().vec(), y.sizes().vec());
+  ASSERT_TRUE(x.allclose(y));
+
+  torch::Tensor z;
+  torch::load(z, [&](uint64_t pos, void* buf, size_t n) -> size_t {
+    if (pos >= serialized.size()) return 0;
+    size_t nbytes = std::min(static_cast<size_t>(pos) + n,
+                             serialized.size()) - pos;
+    memcpy(buf, serialized.data() + pos, nbytes);
+    return nbytes;
+  },
+  [&]() -> size_t { return serialized.size(); });
+  ASSERT_TRUE(z.defined());
+  ASSERT_EQ(x.sizes().vec(), z.sizes().vec());
+  ASSERT_TRUE(x.allclose(z));
+}
+
 TEST(SerializeTest, Resized) {
   torch::manual_seed(0);
 
@@ -94,6 +125,39 @@ TEST(SerializeTest, NonContiguous) {
   ASSERT_TRUE(y.defined());
   ASSERT_EQ(x.sizes().vec(), y.sizes().vec());
   ASSERT_TRUE(x.allclose(y));
+}
+
+TEST(SerializeTest, ErrorOnMissingKey) {
+  struct B : torch::nn::Module {
+    B(const std::string& name_c) {
+      register_buffer(name_c, torch::ones(5, torch::kFloat));
+    }
+  };
+  struct A : torch::nn::Module {
+    A(const std::string& name_b, const std::string& name_c) {
+      register_module(name_b, std::make_shared<B>(name_c));
+    }
+  };
+  struct M : torch::nn::Module {
+    M(const std::string& name_a,
+      const std::string& name_b,
+      const std::string& name_c) {
+      register_module(name_a, std::make_shared<A>(name_b, name_c));
+    }
+  };
+
+  // create a hierarchy of models with names differing below the top level
+  auto model1 = std::make_shared<M>("a", "b", "c");
+  auto model2 = std::make_shared<M>("a", "b", "x");
+  auto model3 = std::make_shared<M>("a", "x", "c");
+
+  std::stringstream stream;
+  torch::save(model1, stream);
+  // We want the errors to contain hierarchy information, too.
+  ASSERT_THROWS_WITH(
+      torch::load(model2, stream), "No such serialized tensor 'a.b.x'");
+  ASSERT_THROWS_WITH(
+      torch::load(model3, stream), "No such serialized submodule: 'a.x'");
 }
 
 TEST(SerializeTest, XOR) {

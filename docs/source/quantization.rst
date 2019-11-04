@@ -190,10 +190,10 @@ Layers for the quantization-aware training
     * :class:`~torch.quantization.Observer` — Abstract base class for observers
 * Quantization configurations
     * :class:`~torch.quantization.QConfig` — Quantization configuration class
-    * ``default_qconfig`` — Same as ``QConfig(activation=default_observer, weight=default_weight_observer)`` (See :class:`~torch.quantization.QConfig.QConfig`)
-    * :attr:`~torch.quantization.default_qat_qconfig` — Same as ``QConfig(activation=default_fake_quant, weight=default_weight_fake_quant)`` (See :class:`~torch.quantization.QConfig.QConfig`)
-    * :attr:`~torch.quantization.default_dynamic_qconfig` — Same as ``QConfigDynamic(weight=default_weight_observer)`` (See :class:`~torch.quantization.QConfig.QConfigDynamic`)
-    * :attr:`~torch.quantization.float16_dynamic_qconfig` — Same as ``QConfigDynamic(weight=NoopObserver.with_args(dtype=torch.float16))`` (See :class:`~torch.quantization.QConfig.QConfigDynamic`)
+    * :attr:`~torch.quantization.default_qconfig` — Same as ``QConfig(activation=default_observer, weight=default_weight_observer)`` (See :class:`~torch.quantization.qconfig.QConfig`)
+    * :attr:`~torch.quantization.default_qat_qconfig` — Same as ``QConfig(activation=default_fake_quant, weight=default_weight_fake_quant)`` (See :class:`~torch.quantization.qconfig.QConfig`)
+    * :attr:`~torch.quantization.default_dynamic_qconfig` — Same as ``QConfigDynamic(weight=default_weight_observer)`` (See :class:`~torch.quantization.qconfig.QConfigDynamic`)
+    * :attr:`~torch.quantization.float16_dynamic_qconfig` — Same as ``QConfigDynamic(weight=NoopObserver.with_args(dtype=torch.float16))`` (See :class:`~torch.quantization.qconfig.QConfigDynamic`)
 * Stubs
     * :class:`~torch.quantization.DeQuantStub` - placeholder module for dequantize() operation in float-valued models
     * :class:`~torch.quantization.QuantStub` - placeholder module for quantize() operation in float-valued models

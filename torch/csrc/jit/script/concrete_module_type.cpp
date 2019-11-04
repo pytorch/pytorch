@@ -36,6 +36,11 @@ ClassTypePtr ConcreteModuleType::createNewTypeFromThis() {
     cls->addAttribute(name, type, isParameter);
   }
 
+  for (const auto& moduleInfo : modules_) {
+    cls->addAttribute(
+        moduleInfo.name, moduleInfo.meta->getJitType(), /*is_parameter=*/false);
+  }
+
   jitType_ = std::move(cls);
   return jitType_;
 }
@@ -61,7 +66,7 @@ c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
   TORCH_INTERNAL_ASSERT(jitType_);
   const auto it = functionAttributes_.find(name);
   if (it != functionAttributes_.end()) {
-    return it->second->function();
+    return it->second.function_->function();
   }
   return c10::nullopt;
 }
@@ -125,12 +130,21 @@ void ConcreteModuleType::addAttribute(
     bool isParameter) {
   TORCH_INTERNAL_ASSERT(type);
   TORCH_INTERNAL_ASSERT(!jitType_);
-  if (auto functionType = type->cast<FunctionType>()) {
-    functionAttributes_.emplace(std::move(name), std::move(functionType));
-  } else {
-    attributes_.emplace(
-        std::move(name), Attribute(unshapedType(type), isParameter));
-  }
+  // Function attributes should be handled separately
+  TORCH_INTERNAL_ASSERT(type->cast<FunctionType>() == nullptr);
+  attributes_.emplace(
+      std::move(name), Attribute(unshapedType(type), isParameter));
+}
+
+void ConcreteModuleType::addFunctionAttribute(
+    std::string name,
+    const TypePtr& type,
+    py::object pyFunction) {
+  TORCH_INTERNAL_ASSERT(type);
+  TORCH_INTERNAL_ASSERT(!jitType_);
+  functionAttributes_.emplace(
+      std::move(name),
+      FunctionAttribute{type->expect<FunctionType>(), std::move(pyFunction)});
 }
 
 void ConcreteModuleType::addModule(

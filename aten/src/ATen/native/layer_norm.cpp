@@ -16,7 +16,7 @@
 namespace at {
 namespace native {
 
-std::tuple<Tensor, Tensor, Tensor> native_layer_norm(
+std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     const Tensor& X,
     const Tensor& gamma /* optional */,
     const Tensor& beta /* optional */,
@@ -26,12 +26,13 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm(
   Tensor Y = at::native::empty_like(X);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
-  LayerNormKernel(
-      X.device().type(), X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
-  return std::make_tuple(Y, mean, rstd);
+  if (M > 0) {
+    LayerNormKernel(kCPU, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+  }
+  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
-std::tuple<Tensor, Tensor, Tensor> native_layer_norm_backward(
+std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
     const Tensor& dY,
     const Tensor& X,
     const Tensor& mean,
@@ -47,14 +48,16 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm_backward(
     dX = at::native::empty_like(X);
   }
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma);
+    dgamma = M > 0 ? at::native::empty_like(gamma) : at::native::zeros_like(gamma);
   }
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma);
+    dbeta = M > 0 ? at::native::empty_like(gamma) : at::native::zeros_like(gamma);
   }
-  LayerNormBackwardKernel(
-      X.device().type(), dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-  return std::make_tuple(dX, dgamma, dbeta);
+  if (M > 0) {
+    LayerNormBackwardKernel(
+        kCPU, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+  }
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 Tensor layer_norm(

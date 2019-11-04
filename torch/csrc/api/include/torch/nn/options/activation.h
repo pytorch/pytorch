@@ -63,6 +63,21 @@ struct TORCH_API LeakyReLUOptions {
 
 // ============================================================================
 
+/// Options for Gumbel Softmax functional and module.
+struct GumbelSoftmaxOptions {
+  /// non-negative scalar temperature
+  TORCH_ARG(double, tau) = 1.0;
+
+  /// returned samples will be discretized as one-hot vectors,
+  /// but will be differentiated as if it is the soft sample in autograd. Default: False
+  TORCH_ARG(bool, hard) = false;
+
+  /// dimension along which softmax will be computed. Default: -1
+  TORCH_ARG(int, dim) = -1;
+};
+
+// ============================================================================
+
 /// Options for the Softmax functional and module.
 struct TORCH_API SoftmaxOptions {
   SoftmaxOptions(int64_t dim);

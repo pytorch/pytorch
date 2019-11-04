@@ -76,7 +76,7 @@ class TorchBenchmarkBase(object):
         @torch.jit.script
         def _jit_forward_graph(iters, place_holder):
             # type: (int, Tensor)
-            result = torch.jit.annotate(torch.Tensor, None)
+            result = torch.jit.annotate(torch.Tensor, place_holder)
             for _ in range(iters):
                 result = func(place_holder)
             return result
@@ -126,6 +126,7 @@ class PyTorchOperatorTestCase(object):
         self.op_bench = op_bench
         self.place_holder_tensor = torch.ones(1)
         self.framework = "PyTorch"
+        self.time_series = []
 
     def run_jit_forward(self, num_runs, print_per_iter=False):
         """ Run the forward path of an op with JIT mode
@@ -134,26 +135,28 @@ class PyTorchOperatorTestCase(object):
             self.op_bench._jit_forward = self.op_bench._generate_jit_forward_graph()
         self.op_bench._jit_forward(num_runs, self.place_holder_tensor)
 
+    def _print_per_iter(self):
+        # print last 50 values
+        length = min(len(self.time_series), 50)
+        for i in range(length):
+            print("PyTorchObserver " + json.dumps(
+                {
+                    "type": self.test_config.test_name,
+                    "metric": "latency",
+                    "unit": "ms",
+                    "value": str(self.time_series[length - i - 1]),
+                }
+            ))
+
     def run_forward(self, num_runs, print_per_iter):
         """ Run the forward path of an op with eager mode
         """
         if print_per_iter:
-            time_series = []
             for _ in range(num_runs):
                 start_time = time.time()
                 self.output = self.op_bench.forward()
                 end_time = time.time()
-                time_series.append(end_time - start_time)
-
-            for iter_time in time_series:
-                print("PyTorchObserver " + json.dumps(
-                    {
-                        "type": self.test_config.test_name,
-                        "metric": "latency",
-                        "unit": "us",
-                        "value": str(iter_time),
-                    }
-                ))
+                self.time_series.append((end_time - start_time) * 1e3)
         else:
             for _ in range(num_runs):
                 self.output = self.op_bench.forward()

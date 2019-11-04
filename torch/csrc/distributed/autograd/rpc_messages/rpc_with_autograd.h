@@ -18,7 +18,7 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
       rpc::worker_id_t fromWorkerId,
       rpc::MessageType messageType,
       const AutogradMetadata& autogradMetadata,
-      std::unique_ptr<rpc::RpcCommandBase> wrappedRpc);
+      rpc::Message&& wrappedMessage);
 
   // Used when receiving an RPC over the wire.
   RpcWithAutograd(
@@ -57,10 +57,20 @@ class TORCH_API RpcWithAutograd final : public rpc::RpcCommandBase {
   rpc::MessageType messageType_;
 
   AutogradMetadata autogradMetadata_;
+
+  // Since wrappedMessage_ is destructively constructed from wrappedRpc_,
+  // they are valid exclusively. They are used for different purpose.
+  // wrappedRpc_ is used while constructing receive rpcWithAutograd;
+  // wrappedMessage_ is used while constructing send rpcWithAutograd;
+
+  // When receive rpcWithAutograd is constructed fromMessage, it is valid;
+  // When send rpcWithAutograd is constructed before toMessage, it is nullptr;
   std::unique_ptr<RpcCommandBase> wrappedRpc_;
 
   // Serialized message representing wrappedRpc_. Used mostly as a cache to
   // avoid serializing the request twice.
+  // When receive rpcWithAutograd is constructed fromMessage, it is nullptr;
+  // When send rpcWithAutograd is constructed before toMessage, it is valid;
   rpc::Message wrappedMessage_;
 
   // message type of the wrappedMessage, this is stored separately since

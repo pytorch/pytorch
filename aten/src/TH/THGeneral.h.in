@@ -88,8 +88,6 @@ typedef struct {
 } THDescBuff;
 
 
-TH_API double THLog1p(const double x);
-TH_API double THLog2(const double x);
 TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim);
 TH_API TH_NO_RETURN void _THError(const char *file, const int line, const char *fmt, ...);
 TH_API void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...);
@@ -162,18 +160,6 @@ do {                                                                  \
 #define THMax(X, Y)  ((X) > (Y) ? (X) : (Y))
 
 #if (defined(_MSC_VER) || defined(__MINGW32__))
-#if defined(_MSC_VER)
-__inline double log1p(double x) { return THLog1p(x); }
-#else
-inline double log1p(double x) { return THLog1p(x); }
-#endif
-
-#if defined(_MSC_VER)
-__inline double log2(double x) { return THLog2(x); }
-#else
-inline double log2(double x) { return THLog2(x); }
-#endif
-
 #define snprintf _snprintf
 #define popen _popen
 #define pclose _pclose

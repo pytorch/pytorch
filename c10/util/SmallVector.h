@@ -244,19 +244,19 @@ class SmallVectorTemplateBase : public SmallVectorTemplateCommon<T> {
     }
   }
 
-  /// Move the range [I, E) into the uninitialized memory starting with "Dest",
+  /// Move the range [Iit, Eit) into the uninitialized memory starting with "Dest",
   /// constructing elements as needed.
   template <typename It1, typename It2>
-  static void uninitialized_move(It1 I, It1 E, It2 Dest) {
+  static void uninitialized_move(It1 Iit, It1 Eit, It2 Dest) {
     std::uninitialized_copy(
-        std::make_move_iterator(I), std::make_move_iterator(E), Dest);
+        std::make_move_iterator(Iit), std::make_move_iterator(Eit), Dest);
   }
 
-  /// Copy the range [I, E) onto the uninitialized memory starting with "Dest",
+  /// Copy the range [Iit, Eit) onto the uninitialized memory starting with "Dest",
   /// constructing elements as needed.
   template <typename It1, typename It2>
-  static void uninitialized_copy(It1 I, It1 E, It2 Dest) {
-    std::uninitialized_copy(I, E, Dest);
+  static void uninitialized_copy(It1 Iit, It1 Eit, It2 Dest) {
+    std::uninitialized_copy(Iit, Eit, Dest);
   }
 
   /// Grow the allocated memory (without initializing new elements), doubling
@@ -323,38 +323,38 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
   // No need to do a destroy loop for POD's.
   static void destroy_range(T*, T*) {}
 
-  /// Move the range [I, E) onto the uninitialized memory
+  /// Move the range [Iit, Eit) onto the uninitialized memory
   /// starting with "Dest", constructing elements into it as needed.
   template <typename It1, typename It2>
-  static void uninitialized_move(It1 I, It1 E, It2 Dest) {
+  static void uninitialized_move(It1 Iit, It1 Eit, It2 Dest) {
     // Just do a copy.
-    uninitialized_copy(I, E, Dest);
+    uninitialized_copy(Iit, Eit, Dest);
   }
 
-  /// Copy the range [I, E) onto the uninitialized memory
+  /// Copy the range [Iit, Eit) onto the uninitialized memory
   /// starting with "Dest", constructing elements into it as needed.
   template <typename It1, typename It2>
-  static void uninitialized_copy(It1 I, It1 E, It2 Dest) {
+  static void uninitialized_copy(It1 Iit, It1 Eit, It2 Dest) {
     // Arbitrary iterator types; just use the basic implementation.
-    std::uninitialized_copy(I, E, Dest);
+    std::uninitialized_copy(Iit, Eit, Dest);
   }
 
-  /// Copy the range [I, E) onto the uninitialized memory
+  /// Copy the range [Iit, Eit) onto the uninitialized memory
   /// starting with "Dest", constructing elements into it as needed.
   template <typename T1, typename T2>
   static void uninitialized_copy(
-      T1* I,
-      T1* E,
+      T1* Iit,
+      T1* Eit,
       T2* Dest,
       typename std::enable_if<
           std::is_same<typename std::remove_const<T1>::type, T2>::value>::
           type* = nullptr) {
     // Use memcpy for PODs iterated by pointers (which includes SmallVector
     // iterators): std::uninitialized_copy optimizes to memmove, but we can
-    // use memcpy here. Note that I and E are iterators and thus might be
+    // use memcpy here. Note that Iit and Eit are iterators and thus might be
     // invalid for memcpy if they are equal.
-    if (I != E)
-      memcpy(Dest, I, (E - I) * sizeof(T));
+    if (Iit != Eit)
+      memcpy(Dest, Iit, (Eit - Iit) * sizeof(T));
   }
 
   /// Double the size of the allocated memory, guaranteeing space for at
@@ -418,9 +418,9 @@ class SmallVectorImpl
     } else if (N > this->size()) {
       if (this->capacity() < N)
         this->grow(N);
-      auto I = this->end();
-      for (auto E = this->begin() + N; I != E; ++I)
-        new (&*I) T();
+      auto Iit = this->end();
+      for (auto Eit = this->begin() + N; Iit != Eit; ++Iit)
+        new (&*Iit) T();
       this->setEnd(this->begin() + N);
     }
   }
@@ -508,131 +508,131 @@ class SmallVectorImpl
     append(IL);
   }
 
-  iterator erase(const_iterator CI) {
+  iterator erase(const_iterator CIit) {
     // Just cast away constness because this is a non-const member function.
-    iterator I = const_cast<iterator>(CI);
+    iterator Iit = const_cast<iterator>(CIit);
 
-    assert(I >= this->begin() && "Iterator to erase is out of bounds.");
-    assert(I < this->end() && "Erasing at past-the-end iterator.");
+    assert(Iit >= this->begin() && "Iterator to erase is out of bounds.");
+    assert(Iit < this->end() && "Erasing at past-the-end iterator.");
 
-    iterator N = I;
+    iterator Nit = Iit;
     // Shift all elts down one.
-    std::move(I + 1, this->end(), I);
+    std::move(Iit + 1, this->end(), Iit);
     // Drop the last elt.
     this->pop_back();
-    return (N);
+    return (Nit);
   }
 
-  iterator erase(const_iterator CS, const_iterator CE) {
+  iterator erase(const_iterator CSit, const_iterator CEit) {
     // Just cast away constness because this is a non-const member function.
-    iterator S = const_cast<iterator>(CS);
-    iterator E = const_cast<iterator>(CE);
+    iterator Sit = const_cast<iterator>(CSit);
+    iterator Eit = const_cast<iterator>(CEit);
 
-    assert(S >= this->begin() && "Range to erase is out of bounds.");
-    assert(S <= E && "Trying to erase invalid range.");
-    assert(E <= this->end() && "Trying to erase past the end.");
+    assert(Sit >= this->begin() && "Range to erase is out of bounds.");
+    assert(Sit <= Eit && "Trying to erase invalid range.");
+    assert(Eit <= this->end() && "Trying to erase past the end.");
 
-    iterator N = S;
+    iterator Nit = Sit;
     // Shift all elts down.
-    iterator I = std::move(E, this->end(), S);
+    iterator Iit = std::move(Eit, this->end(), Sit);
     // Drop the last elts.
-    this->destroy_range(I, this->end());
-    this->setEnd(I);
-    return (N);
+    this->destroy_range(Iit, this->end());
+    this->setEnd(Iit);
+    return (Nit);
   }
 
-  iterator insert(iterator I, T&& Elt) {
-    if (I == this->end()) { // Important special case for empty vector.
+  iterator insert(iterator Iit, T&& Elt) {
+    if (Iit == this->end()) { // Important special case for empty vector.
       this->push_back(::std::move(Elt));
       return this->end() - 1;
     }
 
-    assert(I >= this->begin() && "Insertion iterator is out of bounds.");
-    assert(I <= this->end() && "Inserting past the end of the vector.");
+    assert(Iit >= this->begin() && "Insertion iterator is out of bounds.");
+    assert(Iit <= this->end() && "Inserting past the end of the vector.");
 
     if (this->EndX >= this->CapacityX) {
-      size_t EltNo = I - this->begin();
+      size_t EltNo = Iit - this->begin();
       this->grow();
-      I = this->begin() + EltNo;
+      Iit = this->begin() + EltNo;
     }
 
     ::new ((void*)this->end()) T(::std::move(this->back()));
     // Push everything else over.
-    std::move_backward(I, this->end() - 1, this->end());
+    std::move_backward(Iit, this->end() - 1, this->end());
     this->setEnd(this->end() + 1);
 
     // If we just moved the element we're inserting, be sure to update
     // the reference.
     T* EltPtr = &Elt;
-    if (I <= EltPtr && EltPtr < this->EndX)
+    if (Iit <= EltPtr && EltPtr < this->EndX)
       ++EltPtr;
 
-    *I = ::std::move(*EltPtr);
-    return I;
+    *Iit = ::std::move(*EltPtr);
+    return Iit;
   }
 
-  iterator insert(iterator I, const T& Elt) {
-    if (I == this->end()) { // Important special case for empty vector.
+  iterator insert(iterator Iit, const T& Elt) {
+    if (Iit == this->end()) { // Important special case for empty vector.
       this->push_back(Elt);
       return this->end() - 1;
     }
 
-    assert(I >= this->begin() && "Insertion iterator is out of bounds.");
-    assert(I <= this->end() && "Inserting past the end of the vector.");
+    assert(Iit >= this->begin() && "Insertion iterator is out of bounds.");
+    assert(Iit <= this->end() && "Inserting past the end of the vector.");
 
     if (this->EndX >= this->CapacityX) {
-      size_t EltNo = I - this->begin();
+      size_t EltNo = Iit - this->begin();
       this->grow();
-      I = this->begin() + EltNo;
+      Iit = this->begin() + EltNo;
     }
     ::new ((void*)this->end()) T(std::move(this->back()));
     // Push everything else over.
-    std::move_backward(I, this->end() - 1, this->end());
+    std::move_backward(Iit, this->end() - 1, this->end());
     this->setEnd(this->end() + 1);
 
     // If we just moved the element we're inserting, be sure to update
     // the reference.
     const T* EltPtr = &Elt;
-    if (I <= EltPtr && EltPtr < this->EndX)
+    if (Iit <= EltPtr && EltPtr < this->EndX)
       ++EltPtr;
 
-    *I = *EltPtr;
-    return I;
+    *Iit = *EltPtr;
+    return Iit;
   }
 
-  iterator insert(iterator I, size_type NumToInsert, const T& Elt) {
+  iterator insert(iterator Iit, size_type NumToInsert, const T& Elt) {
     // Convert iterator to elt# to avoid invalidating iterator when we reserve()
-    size_t InsertElt = I - this->begin();
+    size_t InsertElt = Iit - this->begin();
 
-    if (I == this->end()) { // Important special case for empty vector.
+    if (Iit == this->end()) { // Important special case for empty vector.
       append(NumToInsert, Elt);
       return this->begin() + InsertElt;
     }
 
-    assert(I >= this->begin() && "Insertion iterator is out of bounds.");
-    assert(I <= this->end() && "Inserting past the end of the vector.");
+    assert(Iit >= this->begin() && "Insertion iterator is out of bounds.");
+    assert(Iit <= this->end() && "Inserting past the end of the vector.");
 
     // Ensure there is enough space.
     reserve(this->size() + NumToInsert);
 
     // Uninvalidate the iterator.
-    I = this->begin() + InsertElt;
+    Iit = this->begin() + InsertElt;
 
     // If there are more elements between the insertion point and the end of the
     // range than there are being inserted, we can use a simple approach to
     // insertion.  Since we already reserved space, we know that this won't
     // reallocate the vector.
-    if (size_t(this->end() - I) >= NumToInsert) {
+    if (size_t(this->end() - Iit) >= NumToInsert) {
       T* OldEnd = this->end();
       append(
           std::move_iterator<iterator>(this->end() - NumToInsert),
           std::move_iterator<iterator>(this->end()));
 
       // Copy the existing elements that get replaced.
-      std::move_backward(I, OldEnd - NumToInsert, OldEnd);
+      std::move_backward(Iit, OldEnd - NumToInsert, OldEnd);
 
-      std::fill_n(I, NumToInsert, Elt);
-      return I;
+      std::fill_n(Iit, NumToInsert, Elt);
+      return Iit;
     }
 
     // Otherwise, we're inserting more elements than exist already, and we're
@@ -641,15 +641,15 @@ class SmallVectorImpl
     // Move over the elements that we're about to overwrite.
     T* OldEnd = this->end();
     this->setEnd(this->end() + NumToInsert);
-    size_t NumOverwritten = OldEnd - I;
-    this->uninitialized_move(I, OldEnd, this->end() - NumOverwritten);
+    size_t NumOverwritten = OldEnd - Iit;
+    this->uninitialized_move(Iit, OldEnd, this->end() - NumOverwritten);
 
     // Replace the overwritten part.
-    std::fill_n(I, NumOverwritten, Elt);
+    std::fill_n(Iit, NumOverwritten, Elt);
 
     // Insert the non-overwritten middle part.
     std::uninitialized_fill_n(OldEnd, NumToInsert - NumOverwritten, Elt);
-    return I;
+    return Iit;
   }
 
   template <
@@ -657,17 +657,17 @@ class SmallVectorImpl
       typename = typename std::enable_if<std::is_convertible<
           typename std::iterator_traits<ItTy>::iterator_category,
           std::input_iterator_tag>::value>::type>
-  iterator insert(iterator I, ItTy From, ItTy To) {
+  iterator insert(iterator Iit, ItTy From, ItTy To) {
     // Convert iterator to elt# to avoid invalidating iterator when we reserve()
-    size_t InsertElt = I - this->begin();
+    size_t InsertElt = Iit - this->begin();
 
-    if (I == this->end()) { // Important special case for empty vector.
+    if (Iit == this->end()) { // Important special case for empty vector.
       append(From, To);
       return this->begin() + InsertElt;
     }
 
-    assert(I >= this->begin() && "Insertion iterator is out of bounds.");
-    assert(I <= this->end() && "Inserting past the end of the vector.");
+    assert(Iit >= this->begin() && "Insertion iterator is out of bounds.");
+    assert(Iit <= this->end() && "Inserting past the end of the vector.");
 
     size_t NumToInsert = std::distance(From, To);
 
@@ -675,23 +675,23 @@ class SmallVectorImpl
     reserve(this->size() + NumToInsert);
 
     // Uninvalidate the iterator.
-    I = this->begin() + InsertElt;
+    Iit = this->begin() + InsertElt;
 
     // If there are more elements between the insertion point and the end of the
     // range than there are being inserted, we can use a simple approach to
     // insertion.  Since we already reserved space, we know that this won't
     // reallocate the vector.
-    if (size_t(this->end() - I) >= NumToInsert) {
+    if (size_t(this->end() - Iit) >= NumToInsert) {
       T* OldEnd = this->end();
       append(
           std::move_iterator<iterator>(this->end() - NumToInsert),
           std::move_iterator<iterator>(this->end()));
 
       // Copy the existing elements that get replaced.
-      std::move_backward(I, OldEnd - NumToInsert, OldEnd);
+      std::move_backward(Iit, OldEnd - NumToInsert, OldEnd);
 
-      std::copy(From, To, I);
-      return I;
+      std::copy(From, To, Iit);
+      return Iit;
     }
 
     // Otherwise, we're inserting more elements than exist already, and we're
@@ -700,11 +700,11 @@ class SmallVectorImpl
     // Move over the elements that we're about to overwrite.
     T* OldEnd = this->end();
     this->setEnd(this->end() + NumToInsert);
-    size_t NumOverwritten = OldEnd - I;
-    this->uninitialized_move(I, OldEnd, this->end() - NumOverwritten);
+    size_t NumOverwritten = OldEnd - Iit;
+    this->uninitialized_move(Iit, OldEnd, this->end() - NumOverwritten);
 
     // Replace the overwritten part.
-    for (T* J = I; NumOverwritten > 0; --NumOverwritten) {
+    for (T* J = Iit; NumOverwritten > 0; --NumOverwritten) {
       *J = *From;
       ++J;
       ++From;
@@ -712,11 +712,11 @@ class SmallVectorImpl
 
     // Insert the non-overwritten middle part.
     this->uninitialized_copy(From, To, OldEnd);
-    return I;
+    return Iit;
   }
 
-  void insert(iterator I, std::initializer_list<T> IL) {
-    insert(I, IL.begin(), IL.end());
+  void insert(iterator Iit, std::initializer_list<T> IL) {
+    insert(Iit, IL.begin(), IL.end());
   }
 
   template <typename... ArgTypes>

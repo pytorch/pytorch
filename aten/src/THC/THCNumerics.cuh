@@ -204,15 +204,10 @@ struct THCNumerics<at::Half> {
 
   static inline __host__ __device__ at::Half exp(at::Half a) { return std::exp(a); }
   static inline __host__ __device__ at::Half exp10(at::Half a) { return ::exp10(a); }
-  static inline __host__ __device__ at::Half log1p(at::Half a) { return ::log1p(a); }
-  static inline __host__ __device__ at::Half log2(at::Half a) { return ::log2(a); }
   static inline __host__ __device__ at::Half cos(at::Half a) { return ::cos(a); }
-  static inline __host__ __device__ at::Half sin(at::Half a) { return ::sin(a); }
   static inline __host__ __device__ at::Half sqrt(at::Half a) { return ::sqrt(a); }
   static inline __host__ __device__ at::Half acos(at::Half a) { return ::acos(a); }
   static inline __host__ __device__ at::Half cosh(at::Half a) { return ::cosh(a); }
-  static inline __host__ __device__ at::Half asin(at::Half a) { return ::asin(a); }
-  static inline __host__ __device__ at::Half sinh(at::Half a) { return ::sinh(a); }
   static inline __host__ __device__ at::Half tan(at::Half a) { return ::tan(a); }
   static inline __host__ __device__ at::Half atan(at::Half a) { return ::atan(a); }
   static inline __host__ __device__ at::Half tanh(at::Half a) { return ::tanh(a); }
@@ -277,17 +272,10 @@ struct THCNumerics<float> {
 
   static inline __host__ __device__  float exp  (float a) { return   expf(a); }
   static inline __host__ __device__  float exp10(float a) { return exp10f(a); }
-  static inline __host__ __device__  float log1p(float a) { return log1pf(a); }
-  static inline __host__ __device__  float log2 (float a) { return  log2f(a); }
   static inline __host__ __device__  float cos  (float a) { return   cosf(a); }
-  static inline __host__ __device__  float sin  (float a) { return   sinf(a); }
   static inline __host__ __device__  float sqrt (float a) { return  sqrtf(a); }
   static inline __host__ __device__  float acos (float a) { return  acosf(a); }
   static inline __host__ __device__  float cosh (float a) { return  coshf(a); }
-  static inline __host__ __device__  float acosh(float a) { return acoshf(a); }
-  static inline __host__ __device__  float asin (float a) { return  asinf(a); }
-  static inline __host__ __device__  float sinh (float a) { return  sinhf(a); }
-  static inline __host__ __device__  float asinh(float a) { return asinhf(a); }
   static inline __host__ __device__  float tan  (float a) { return   tanf(a); }
   static inline __host__ __device__  float atan (float a) { return  atanf(a); }
   static inline __host__ __device__  float tanh (float a) { return  tanhf(a); }
@@ -325,17 +313,10 @@ struct THCNumerics<double> {
 
   static inline __host__ __device__  double exp  (double a) { return   ::exp(a); }
   static inline __host__ __device__  double exp10(double a) { return ::exp10(a); }
-  static inline __host__ __device__  double log1p(double a) { return ::log1p(a); }
-  static inline __host__ __device__  double log2 (double a) { return  ::log2(a); }
   static inline __host__ __device__  double cos  (double a) { return   ::cos(a); }
-  static inline __host__ __device__  double sin  (double a) { return   ::sin(a); }
   static inline __host__ __device__  double sqrt (double a) { return  ::sqrt(a); }
   static inline __host__ __device__  double acos (double a) { return  ::acos(a); }
   static inline __host__ __device__  double cosh (double a) { return  ::cosh(a); }
-  static inline __host__ __device__  double acosh(double a) { return ::acosh(a); }
-  static inline __host__ __device__  double asin (double a) { return  ::asin(a); }
-  static inline __host__ __device__  double sinh (double a) { return  ::sinh(a); }
-  static inline __host__ __device__  double asinh(double a) { return ::asinh(a); }
   static inline __host__ __device__  double tan  (double a) { return   ::tan(a); }
   static inline __host__ __device__  double atan (double a) { return  ::atan(a); }
   static inline __host__ __device__  double tanh (double a) { return  ::tanh(a); }

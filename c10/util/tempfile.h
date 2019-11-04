@@ -88,7 +88,9 @@ inline c10::optional<TempFile> try_make_tempfile(
   if (fd == -1) {
     return c10::nullopt;
   }
-  return TempFile(std::string(filename.begin(), filename.end()), fd);
+  // Don't make the string from string(filename.begin(), filename.end(), or
+  // there will be a trailing '\0' at the end.
+  return TempFile(filename.data(), fd);
 #endif // defined(_WIN32)
 }
 

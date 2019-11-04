@@ -13,6 +13,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/types.h>
 
+#include <pybind11/chrono.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -43,6 +45,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &RpcAgent::sync,
               py::call_guard<py::gil_scoped_release>());
 
+  auto pyFuture = shared_ptr_class_<PyFuture>(module, "Future")
+                      .def(
+                          "wait",
+                          &PyFuture::wait,
+                          py::call_guard<py::gil_scoped_release>());
+
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef")
           .def(
@@ -71,6 +79,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
                 return PyRRef::unpickle(t);
               }));
 
+  // future.wait() should not be called after join_rpc(), e.g., pythonRpcHandler
+  // is cleaned up in join_rpc(), after join_rpc(), python objects returned
+  // from rpc python call can not be resolved.
   auto futureMessage =
       shared_ptr_class_<FutureMessage>(module, "FutureMessage")
           .def(
@@ -80,10 +91,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
-          py::init<std::string, std::shared_ptr<::c10d::ProcessGroup>, int>(),
+          py::init<
+              std::string,
+              std::shared_ptr<::c10d::ProcessGroup>,
+              int,
+              std::chrono::milliseconds>(),
           py::arg("name"),
           py::arg("process_group"),
-          py::arg("num_send_recv_threads") = 4)
+          py::arg("num_send_recv_threads"),
+          py::arg("rpc_timeout"))
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
@@ -101,14 +117,23 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "sync",
           &ProcessGroupAgent::sync,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_rpc_timeout",
+          &ProcessGroupAgent::getRpcTimeout,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("_init_rpc_agent", [](std::shared_ptr<RpcAgent> agent) {
-    RpcAgent::setDefaultRpcAgent(std::move(agent));
+  module.def("_start_rpc_agent", [](const std::shared_ptr<RpcAgent>& agent) {
+    RpcAgent::setDefaultRpcAgent(agent);
+    agent->start();
   });
 
   module.def("_destroy_rref_context", []() {
     RRefContext::getInstance().destroyInstance();
+  });
+
+  module.def("_cleanup_python_rpc_handler", []() {
+    PythonRpcHandler::getInstance().cleanup();
   });
 
   module.def(
