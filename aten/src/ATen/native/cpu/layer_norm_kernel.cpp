@@ -66,21 +66,7 @@ void LayerNormKernelImplInternal(
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
       const T scale = rstd_val;
       const T bias = -rstd_val * mean_val;
-      for (j = 0; j < N / kVecSize * kVecSize; j += kVecSize) {
-        const vec256::Vec256<T> gamma_vec = gamma_null
-            ? vec256::Vec256<T>(1)
-            : vec256::Vec256<T>::loadu(gamma_data + j);
-        const vec256::Vec256<T> beta_vec = beta_null
-            ? vec256::Vec256<T>(0)
-            : vec256::Vec256<T>::loadu(beta_data + j);
-        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + j);
-        const vec256::Vec256<T> tmp_vec = vec256::fmadd(
-            x_vec, vec256::Vec256<T>(scale), vec256::Vec256<T>(bias));
-        const vec256::Vec256<T> y_vec =
-            vec256::fmadd(tmp_vec, gamma_vec, beta_vec);
-        y_vec.store(Y_ptr + j);
-      }
-      for (; j < N; ++j) {
+      for (int64_t j = 0; j < N; ++j) {
         const T gamma_v = gamma_null ? T(1) : gamma_data[j];
         const T beta_v = beta_null ? T(0) : beta_data[j];
         Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
