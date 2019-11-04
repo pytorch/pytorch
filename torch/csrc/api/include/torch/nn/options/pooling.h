@@ -167,5 +167,8 @@ struct LPPoolOptions {
 /// `LPPoolOptions` specialized for 1-D lppool.
 using LPPool1dOptions = LPPoolOptions<1>;
 
+/// `LPPoolOptions` specialized for 2-D lppool.
+using LPPool2dOptions = LPPoolOptions<2>;
+
 } // namespace nn
 } // namespace torch

@@ -505,6 +505,7 @@ def softmax(g, input, dim, dtype=None):
     # otherwise compute softmax using a subgraph with other operators
     input_dim = input.type().dim()
     if input_dim:
+        # TODO: remove this as onnx opset 11 spec allows negative axes
         if dim < 0:
             dim = input_dim + dim
         if input_dim == dim + 1:
@@ -615,11 +616,7 @@ def _avg_pool(name, tuple_fn):
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
-        if divisor_override and divisor_override.node().kind() != 'prim::Constant':
-            return _unimplemented(name, "divisor_override")
-        if not stride:
-            stride = kernel_size
-        padding = tuple(tuple_fn(padding))
+        padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
         if count_include_pad:
@@ -690,27 +687,41 @@ adaptive_max_pool2d = _adaptive_pool('adaptive_max_pool2d', "MaxPool", _pair, ma
 adaptive_max_pool3d = _adaptive_pool('adaptive_max_pool3d', "MaxPool", _triple, max_pool3d_with_indices)
 
 
+# Generate paddings in ONNX order based on pad in pytorch.
+# Arguments:
+#     dim: the dimension of the tensor.
+#     pad: the paddings in pytorch.
+#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
+def _prepare_onnx_paddings(dim, pad):
+    assert isinstance(dim, int)
+    # The desired order of paddings is
+    # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
+    # n is the dimension of input.
+    # assume zero-dimensions in the beginning
+    paddings = list(pad[:]) + [0] * (dim * 2 - len(pad))
+    # reverse order and collate first beginnings and then ends
+    paddings = paddings[-2::-2] + paddings[-1::-2]
+    return paddings
+
+
 @parse_args('v', 'is', 'f')
 def constant_pad_nd(g, input, padding, value):
-    from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "constant"
-    paddings = prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
 
 
 @parse_args('v', 'is')
 def reflection_pad(g, input, padding):
-    from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "reflect"
-    paddings = prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
 @parse_args('v', 'is')
 def replication_pad(g, input, padding):
-    from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "edge"
-    paddings = prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
@@ -847,6 +858,7 @@ def where(g, condition, self, other):
 def log_softmax(g, input, dim, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
+    # TODO: remove this as onnx opset 11 spec allows negative axes
     if dim < 0:
         dim = input.type().dim() + dim
     if input.type().dim() != dim + 1:
@@ -1235,8 +1247,8 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1252,8 +1264,8 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def ones_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1274,8 +1286,8 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
                     value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'f', 'i', 'v', 'v', 'v', 'v')
+def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1678,6 +1690,7 @@ def erf(g, input):
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
+    # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0 :
         end_dim = dim + end_dim
     # use ONNX's Flatten operator for cases where the output shape is 2D
@@ -2000,13 +2013,25 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
     return add(g, mul_a, mul_b)
 
 
+def meshgrid(g, tensor_list):
+    tensors = [view(g, t, torch.LongTensor([-1])) for t in sym_help._unpack_list(tensor_list)]
+    tensors_shape = [g.op("Shape", t) for t in tensors]
+    out_shape = g.op("Concat", *tensors_shape, axis_i=0)
+    out = []
+    for i, t in enumerate(tensors):
+        shape_i = [g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))] * len(tensors)
+        shape_i[i] = tensors_shape[i]
+        t_reshaped = _reshape_from_tensor(g, t, g.op("Concat", *shape_i, axis_i=0))
+        out.append(g.op("Expand", t_reshaped, out_shape))
+    return g.op("prim::ListConstruct", *out)
+
+
 def remainder(g, input, other):
     div = g.op("Div", input, other)
     if sym_help._is_fp(input):
         div = g.op("Floor", div)
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
-
 
 def gelu(g, self):
     _sqrt2 = 1.4142135623730951
