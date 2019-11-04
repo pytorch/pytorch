@@ -9,7 +9,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from common_utils import load_tests
+from common_utils import load_tests, TEST_WITH_ASAN
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
 
@@ -668,6 +668,7 @@ class RpcTest(object):
             )
         )
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Test is flaky on ASAN, see https://github.com/pytorch/pytorch/issues/29150")
     @dist_init
     def test_stress_light_rpc(self):
         self._stress_test_rpc(light_rpc)
@@ -759,6 +760,7 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here().wait(), my_function(n, n + 1, n + 2))
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Test is flaky on ASAN, see https://github.com/pytorch/pytorch/issues/29156")
     @dist_init
     def test_multi_py_udf_remote(self):
         def kwargs_fn(n):
@@ -930,6 +932,7 @@ class RpcTest(object):
         )
         self.assertEqual(rref_c.to_here().wait(), torch.ones(n, n) + 4)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipping test under ASAN due to flakiness: https://github.com/pytorch/pytorch/issues/29117")
     @dist_init(setup_model_parallel=True)
     def test_call_method_on_rref(self):
         """
