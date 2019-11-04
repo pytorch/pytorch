@@ -58,7 +58,7 @@ inline at::Tensor from_blob(
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::from_blob(data, sizes, strides, deleter, options.is_variable(false));
+    return at::from_blob(data, sizes, strides, deleter, options);
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
@@ -94,7 +94,7 @@ inline at::Tensor from_blob(
     const at::TensorOptions& options = at::TensorOptions()) {
   at::Tensor tensor = ([&]() {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::from_blob(data, sizes, deleter, options.is_variable(false));
+    return at::from_blob(data, sizes, deleter, options);
   })();
   return autograd::make_variable(tensor, options.requires_grad());
 }
