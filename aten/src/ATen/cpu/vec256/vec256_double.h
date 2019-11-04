@@ -307,10 +307,15 @@ inline void convert(const double* src, double* dst, int64_t n) {
   }
 }
 
-#ifdef __AVX2__
+#if defined(__AVX2__) && defined(__FMA__)
 template <>
 Vec256<double> inline fmadd(const Vec256<double>& a, const Vec256<double>& b, const Vec256<double>& c) {
   return _mm256_fmadd_pd(a, b, c);
+}
+#elif defined(__AVX__)
+template <>
+Vec256<double> inline fmadd(const Vec256<double>& a, const Vec256<double>& b, const Vec256<double>& c) {
+  return _mm256_add_ps(_m256_mul_ps(a, b), c);
 }
 #endif
 
