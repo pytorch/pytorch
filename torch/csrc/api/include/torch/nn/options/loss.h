@@ -230,7 +230,7 @@ struct TORCH_API MarginRankingLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
 
   /// Has a default value of `0`.
-  TORCH_ARG(float, margin) = 0;
+  TORCH_ARG(double, margin) = 0;
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
 };
