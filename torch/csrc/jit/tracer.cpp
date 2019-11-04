@@ -295,7 +295,7 @@ static void gatherParametersAndBuffers(
     if (s.value.type()->isSubtypeOf(TensorType::get())) {
       addInput(
           state, s.value, s.value.type(), g.insertGetAttr(self_value, s.name));
-    } else if (self_ty->is_module(self_ty->getAttributeSlot(s.name))) {
+    } else if (self_ty->getAttribute(s.name)->is_module()) {
       gatherParametersAndBuffers(
           state,
           g.insertGetAttr(self_value, s.name),
