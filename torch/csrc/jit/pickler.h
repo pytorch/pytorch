@@ -31,7 +31,8 @@ enum class PickleOpCode : char {
   STRING = 'S',
   BINSTRING = 'T',
   SHORT_BINSTRING = 'U',
-  UNICODE = 'V',
+  // NB: Avoid using UNICODE as it is a macro in the Windows API
+  UNICODE_ = 'V',
   BINUNICODE = 'X',
   APPEND = 'a',
   BUILD = 'b',
