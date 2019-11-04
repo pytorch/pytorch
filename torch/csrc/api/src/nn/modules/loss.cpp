@@ -231,5 +231,21 @@ Tensor CTCLossImpl::forward(const Tensor& log_probs, const Tensor& targets,
   return F::ctc_loss(log_probs, targets, input_lengths, target_lengths, options);
 }
 
+// ============================================================================
+
+PoissonNLLLossImpl::PoissonNLLLossImpl(const PoissonNLLLossOptions& options_)
+  : options(options_) {}
+
+void PoissonNLLLossImpl::reset() {}
+
+void PoissonNLLLossImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::PoissonNLLLoss()";
+}
+
+Tensor PoissonNLLLossImpl::forward(
+  const Tensor& log_input, const Tensor& target) {
+  return F::poisson_nll_loss(log_input, target, options);
+}
+
 } // namespace nn
 } // namespace torch
