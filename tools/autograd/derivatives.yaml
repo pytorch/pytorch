@@ -673,10 +673,10 @@
 
 - name: pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor
   self: pow_backward_self(grad, self, exponent)
-  exponent: pow_backward_exponent(grad, self, exponent)
+  exponent: pow_backward_exponent(grad, self, result)
 
 - name: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
-  exponent: pow_backward_exponent(grad, self, exponent)
+  exponent: pow_backward_exponent(grad, self, result)
 
 - name: prod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: prod_backward(grad, self.to(grad.scalar_type()), result)
@@ -1039,7 +1039,7 @@
   self: elu_backward(grad, alpha, scale, input_scale, result)
 
 - name: gelu(Tensor self) -> Tensor
-  self: gelu_backward(grad, self)
+  self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)

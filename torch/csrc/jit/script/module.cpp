@@ -68,7 +68,7 @@ ModulePtr Module::module_object() const {
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-thread_local bool inline_everything = true;
+thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
 }
@@ -325,7 +325,7 @@ c10::optional<autograd::Variable> Module::find_parameter(
 c10::optional<IValue> Module::find_attribute(const std::string& name) const {
   auto slot_idx = type()->findAttributeSlot(name);
   if (slot_idx && !type()->is_parameter(*slot_idx) &&
-      !type()->is_module(*slot_idx)) {
+      !type()->getAttribute(*slot_idx)->is_module()) {
     return module_object()->getSlot(*slot_idx);
   }
   return c10::nullopt;
@@ -335,7 +335,7 @@ c10::optional<autograd::Variable> Module::find_buffer(
     const std::string& name) const {
   auto slot_idx = type()->findAttributeSlot(name);
   if (slot_idx && !type()->is_parameter(*slot_idx) &&
-      !type()->is_module(*slot_idx) &&
+      !type()->getAttribute(*slot_idx)->is_module() &&
       type()->getAttribute(*slot_idx)->isSubtypeOf(TensorType::get())) {
     return autograd::as_variable_ref(
         module_object()->getSlot(*slot_idx).toTensor());
@@ -345,7 +345,7 @@ c10::optional<autograd::Variable> Module::find_buffer(
 
 c10::optional<Module> Module::find_module(const std::string& name) const {
   auto slot_idx = type()->findAttributeSlot(name);
-  if (slot_idx && type()->is_module(*slot_idx)) {
+  if (slot_idx && type()->getAttribute(*slot_idx)->is_module()) {
     return Module(module_object()->getAttr(name).toObject());
   }
   return c10::nullopt;

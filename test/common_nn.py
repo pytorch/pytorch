@@ -1,9 +1,11 @@
+import math
 import sys
 import tempfile
 import unittest
+
 from copy import deepcopy
-from itertools import product
 from functools import reduce
+from itertools import product
 from operator import mul
 
 
@@ -2148,6 +2150,17 @@ new_module_tests = [
         desc='dim',
     ),
     dict(
+        module_name='GELU',
+        input_size=(),
+        desc='scalar',
+        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
+    ),
+    dict(
+        module_name='GELU',
+        input_size=(3, 2, 5),
+        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
+    ),
+    dict(
         constructor=wrap_functional(F.softmax, dim=-1),
         input_size=(2, 128),  # trigger the last-dim algo in CUDA
         fullname='softmax_lastdim',
@@ -3560,7 +3573,9 @@ class ModuleTest(TestBase):
         nc_grad_output = self.noncontiguize(grad_output)
         for contig_i, contig_g in product((True, False), repeat=2):
             i = input if contig_i else nc_input
-            go = grad_output if contig_g else nc_grad_output
+            # Some ops, e.g., nn.Flatten, return gradient that shares
+            # storage with the grad_output. Hence we copy here.
+            go = deepcopy(grad_output if contig_g else nc_grad_output)
             test_case._zero_grad_parameters(module)
             test_case._zero_grad_input(i)
             with freeze_rng_state():

@@ -440,6 +440,47 @@ void LayerNormBackwardKernelImpl(
 
 } // namespace
 
+std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
+    const Tensor& X,
+    const Tensor& gamma /* optional */,
+    const Tensor& beta /* optional */,
+    int64_t M,
+    int64_t N,
+    double eps) {
+  Tensor Y = at::native::empty_like(X);
+  Tensor mean = at::empty({M}, X.options());
+  Tensor rstd = at::empty({M}, X.options());
+  LayerNormKernelImpl(X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
+}
+
+std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
+    const Tensor& dY,
+    const Tensor& X,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    std::array<bool, 3> grad_input_mask) {
+  Tensor dX;
+  Tensor dgamma;
+  Tensor dbeta;
+  if (grad_input_mask[0]) {
+    dX = at::native::empty_like(X);
+  }
+  if (grad_input_mask[1]) {
+    dgamma = at::native::empty_like(gamma);
+  }
+  if (grad_input_mask[2]) {
+    dbeta = at::native::empty_like(gamma);
+  }
+  LayerNormBackwardKernelImpl(
+      dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
+}
+
+
 REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
 REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
 

@@ -146,12 +146,12 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
   return at::where(exponent == 0.0, at::zeros({}, grad.options()), grad * exponent * self.pow(exponent - 1));
 }
 
-Tensor pow_backward_exponent(Tensor grad, const Tensor & self, const Tensor & exponent) {
-  return grad * self.pow(exponent) * self.log();
+Tensor pow_backward_exponent(Tensor grad, const Tensor & self, Tensor result) {
+  return grad * result * self.log();
 }
 
-Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor & exponent) {
-  return grad * at::pow(base, exponent) * std::log(base.toDouble());
+Tensor pow_backward_exponent(Tensor grad, const Scalar & base, Tensor result) {
+  return grad * result * std::log(base.toDouble());
 }
 
 Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
@@ -833,6 +833,15 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
   sizes[dim] /= 2;
   auto tmp = grad * glu_backward(at::ones(sizes, input.options()), input, dim);
   return tmp.narrow(dim, 0, sizes[dim]) + tmp.narrow(dim, sizes[dim], sizes[dim]);
+}
+
+Tensor infinitely_differentiable_gelu_backward(
+    const Tensor& grad,
+    const Tensor& self) {
+  constexpr double kAlpha = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+  Tensor cdf = (1.0 + (self * M_SQRT1_2).erf_()).mul_(0.5);
+  Tensor pdf = (-0.5 * self * self).exp_();
+  return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
 }
 
 Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
