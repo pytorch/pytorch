@@ -1426,27 +1426,33 @@ class _DistTestBase(object):
                     ] for rank_iter in group
                 ]
                 assert self._run_all_gather_coalesced_and_verify(
-                    output_tensor_lists, input_tensors, expected_tensors, group_id)
+                    output_tensor_lists, input_tensors,
+                    expected_tensors, group_id
+                ), "output tensors do not match expected ouputs"
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
-    def test_all_gather_coalesced(self):
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+    def test_all_gather_coalesced_simple(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_gather_coalesced_helper(group, group_id, rank)
 
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
     def test_all_gather_coalesced_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_gather_coalesced_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
     def test_all_gather_coalesced_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_gather_coalesced_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
     def test_all_gather_coalesced_with_empty(self):
         group, group_id, rank = self._init_global_test()
         input_tensors = [
