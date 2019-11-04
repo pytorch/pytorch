@@ -16,6 +16,7 @@
 namespace torch {
 
 // yf225 TODO: I need to make a separate PR just for this function
+// See https://github.com/pytorch/pytorch/pull/28918#discussion_r342137228 for how to do it
 /*
 def isinf(tensor):
     if tensor.dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:

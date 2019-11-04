@@ -8,9 +8,7 @@
 using namespace torch::indexing;
 using namespace torch::test;
 
-TEST(TensorIndexingTest, TestIndexedTensor) {
-  // enum class TensorIndexType { None, Ellipsis, Integer, Boolean, Slice, Tensor };
-
+TEST(TensorIndexingTest, TestIndexedTensorSavedHistory) {
   auto t = torch::zeros({4, 4, 4, 4});
   std::vector<TensorIndex> indices = t(None, "...", 0, true, {1, None, 2}, torch::tensor({1, 2})).indices();
   ASSERT_TRUE(indices[0].is_none());
@@ -27,6 +25,25 @@ TEST(TensorIndexingTest, TestIndexedTensor) {
   assert_equal(indices[5].tensor(), torch::tensor({1, 2}));
 
   assert_equal(t(None, "...", 0, true, {1, None, 2}, torch::tensor({1, 2})).original_tensor(), t);
+}
+
+void check_pass_as_reference(torch::Tensor & tensor) {
+  ASSERT_TRUE(tensor.item<int>() == 1);
+}
+
+void check_pass_as_const_reference(const torch::Tensor & tensor) {
+  ASSERT_TRUE(tensor.item<int>() == 1);
+}
+
+void check_pass_as_value(torch::Tensor tensor) {
+  ASSERT_TRUE(tensor.item<int>() == 1);
+}
+
+TEST(TensorIndexingTest, TestIndexedTensorPassAsTensor) {
+  at::IndexedTensor t = torch::tensor(1, torch::kInt)("...");
+  check_pass_as_reference(t);
+  check_pass_as_const_reference(t);
+  check_pass_as_value(t);
 }
 
 /*
@@ -1404,13 +1421,17 @@ TEST(NumpyTests, TestBroadcastSubspace) {
   auto a = torch::zeros({100, 100});
   auto v = torch::arange(0., 100)({}, None);
   auto b = torch::arange(99, -1, -1).to(torch::kLong);
-  // yf225 TODO: the following calls the scalar assignment function? Is it because IndexedTensor rhs can only map to a Scalar type? How does it even make sense??
+  // yf225 TODO:
   // Some investigation:
+  // -1. `a(b) = v` calls the scalar assignment function? Is it because IndexedTensor rhs can only map to a Scalar type? How does it even make sense?? yf225 TODO: how do we ban this conversion? wait it doesn't seem to happen anymore???
   // 0. `auto v = torch::arange(0., 100).view({100, 1})` works!!!!
   // 1. Even if we comment out the `operator=(Scalar v)` overload, the following still won't take the `operator=(Tensor const & rhs)` overload
-  // 2. If we comment out the `operator=(Scalar v)` overload, and change `auto v = torch::arange(0., 100)({}, None);`'s return type to Tensor, `a(b) = v` will call the `operator=(Tensor const & rhs) &&` overload!
-  // 3. Tried to add a Tensor -> IndexedTensor conversion operator `operator Tensor() const` to IndexedTensor class, but it doesn't work!!!
-  // 4. Tried to explicitly add `Tensor & operator=(IndexedTensor const & rhs) &&` and `Tensor & operator=(IndexedTensor && rhs) &&`, and IT WORKS!!!!!
+  // 2. If we comment out the `operator=(Scalar v)` overload, it thorws `error: use of deleted function ‘at::IndexedTensor& at::IndexedTensor::operator=(const at::IndexedTensor&)’`
+  // 3. If we comment out the `operator=(Scalar v)` overload, and change `auto v = torch::arange(0., 100)({}, None);`'s type to Tensor, `a(b) = v` will call the `operator=(Tensor const & rhs) &&` overload!
+  // 4. Tried to add a Tensor -> IndexedTensor conversion operator `operator Tensor() const` to IndexedTensor class, but it doesn't work!!!
+  // [WORKS] 5. Tried to explicitly add `Tensor & operator=(IndexedTensor const & rhs) &&` and `Tensor & operator=(IndexedTensor && rhs) &&`, and IT WORKS!!!!!
+  // [TODO TRY THIS] 5. Add std::unique_ptr<index_history> field to TensorImpl, and check it in the Tensor’s assignment operator. We need to benchmark its effect on the Tensor's assignment operator!
+  // [DOESN'T WORK] 6. Don't think about banning `auto b = a(indices...)`, because even if we ban `auto b = a(indices...)`, `IndexedTensor` type will still be leaked into user space when people do `some_function(a(indices...), ...)`, so this point is moot.
   // yf225 TODO: in light of this problem, we need to add tests for basic operations on IndexedTensor, like `add_` etc. to make sure normal tensor operations on IndexedTensor actually works
   a(b) = v;
   auto expected = b.to(torch::kDouble).unsqueeze(1).expand({100, 100});

@@ -30,7 +30,7 @@ class CAFFE2_API IndexedTensor : public Tensor {
   Tensor & operator=(Tensor && rhs) &&;
   Tensor & operator=(Scalar v) &&;
 
-  void clear_state() {
+  void clear_history() {
     if (indices_.capacity() > 0) {
       indices_ = std::vector<TensorIndex>();
       TORCH_INTERNAL_ASSERT(indices_.capacity() == 0);
@@ -429,20 +429,20 @@ inline Tensor dispatch_index_put_(Tensor& self, const std::vector<Tensor>& indic
   return self.index_put_(converted_indices, value);
 }
 
-inline IndexedTensor get_item(const Tensor& self, const std::vector<TensorIndex>& indices) {
+inline Tensor get_item(const Tensor& self, const std::vector<TensorIndex>& indices) {
   OptionalDeviceGuard device_guard(device_of(self));
 
   // handle simple types: integers, slices, ellipsis
   if (indices.size() == 1) {
     const TensorIndex& index = indices[0];
     if (index.is_none()) {
-      return {self.unsqueeze(0), self, indices};
+      return self.unsqueeze(0);
     } else if (index.is_ellipsis()) {
-      return {self.alias(), self, indices};
+      return self.alias();
     } else if (index.is_integer()) {
-      return {applySelect(self, 0, index.integer()), self, indices};
+      return applySelect(self, 0, index.integer());
     } else if (index.is_slice()) {
-      return {applySlice(self, 0, index.slice(), true), self, indices};
+      return applySlice(self, 0, index.slice(), true);
     }
   }
 
@@ -453,11 +453,11 @@ inline IndexedTensor get_item(const Tensor& self, const std::vector<TensorIndex>
       // ensure we return a shallow copy for things like x[...]
       sliced = sliced.alias();
     }
-    return {sliced, self, indices};
+    return sliced;
   }
 
   // indexing by tensors ("advanced" indexing)
-  return {dispatch_index(sliced, tensorIndices), self, indices};
+  return dispatch_index(sliced, tensorIndices);
 }
 
 inline void set_item(Tensor& self, const std::vector<TensorIndex>& indices, const Tensor& value) {
@@ -541,27 +541,27 @@ if (original_tensor_.defined()) {
 */
 inline Tensor & IndexedTensor::operator=(IndexedTensor const & rhs) && {
   at::indexing::set_item(original_tensor_, indices_, rhs);
-  this->clear_state();
+  this->clear_history();
   return *this;
 }
 inline Tensor & IndexedTensor::operator=(IndexedTensor && rhs) && {
   at::indexing::set_item(original_tensor_, indices_, rhs);
-  this->clear_state();
+  this->clear_history();
   return *this;
 }
 inline Tensor & IndexedTensor::operator=(Tensor const & rhs) && {
   at::indexing::set_item(original_tensor_, indices_, rhs);
-  this->clear_state();
+  this->clear_history();
   return *this;
 }
 inline Tensor & IndexedTensor::operator=(Tensor && rhs) && {
   at::indexing::set_item(original_tensor_, indices_, rhs);
-  this->clear_state();
+  this->clear_history();
   return *this;
 }
 inline Tensor & IndexedTensor::operator=(Scalar v) && {
   at::indexing::set_item(original_tensor_, indices_, v);
-  this->clear_state();
+  this->clear_history();
   return *this;
 }
 
@@ -570,34 +570,44 @@ inline Tensor & IndexedTensor::operator=(Scalar v) && {
 // This means we can get the whole indices list into one `std::vector`, and can have logic very similar to
 // `applySlicing` to handle everything in one function! :D
 inline IndexedTensor Tensor::operator()(const TensorIndex& index_dim1) const {
-  return at::indexing::get_item(*this, {index_dim1});
+  std::vector<TensorIndex> indices = {index_dim1};
+  return {at::indexing::get_item(*this, indices), *this, indices};
 }
 inline IndexedTensor Tensor::operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2) const {
-  return at::indexing::get_item(*this, {index_dim1, index_dim2});
+  std::vector<TensorIndex> indices = {index_dim1, index_dim2};
+  return {at::indexing::get_item(*this, indices), *this, indices};
 }
 inline IndexedTensor Tensor::operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3) const {
-  return at::indexing::get_item(*this, {index_dim1, index_dim2, index_dim3});
+  std::vector<TensorIndex> indices = {index_dim1, index_dim2, index_dim3};
+  return {at::indexing::get_item(*this, indices), *this, indices};
 }
 inline IndexedTensor Tensor::operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4) const {
-  return at::indexing::get_item(*this, {index_dim1, index_dim2, index_dim3, index_dim4});
+  std::vector<TensorIndex> indices = {index_dim1, index_dim2, index_dim3, index_dim4};
+  return {at::indexing::get_item(*this, indices), *this, indices};
 }
 inline IndexedTensor Tensor::operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5) const {
-  return at::indexing::get_item(*this, {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5});
+  std::vector<TensorIndex> indices = {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5};
+  return {at::indexing::get_item(*this, indices), *this, indices};
 }
 inline IndexedTensor Tensor::operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5, const TensorIndex& index_dim6) const {
-  return at::indexing::get_item(*this, {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5, index_dim6});
+  std::vector<TensorIndex> indices = {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5, index_dim6};
+  return {at::indexing::get_item(*this, indices), *this, indices};
 }
 inline IndexedTensor Tensor::operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5, const TensorIndex& index_dim6, const TensorIndex& index_dim7) const {
-  return at::indexing::get_item(*this, {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5, index_dim6, index_dim7});
+  std::vector<TensorIndex> indices = {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5, index_dim6, index_dim7};
+  return {at::indexing::get_item(*this, indices), *this, indices};
 }
 inline IndexedTensor Tensor::operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5, const TensorIndex& index_dim6, const TensorIndex& index_dim7, const TensorIndex& index_dim8) const {
-  return at::indexing::get_item(*this, {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5, index_dim6, index_dim7, index_dim8});
+  std::vector<TensorIndex> indices = {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5, index_dim6, index_dim7, index_dim8};
+  return {at::indexing::get_item(*this, indices), *this, indices};
 }
 inline IndexedTensor Tensor::operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5, const TensorIndex& index_dim6, const TensorIndex& index_dim7, const TensorIndex& index_dim8, const TensorIndex& index_dim9) const {
-  return at::indexing::get_item(*this, {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5, index_dim6, index_dim7, index_dim8, index_dim9});
+  std::vector<TensorIndex> indices = {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5, index_dim6, index_dim7, index_dim8, index_dim9};
+  return {at::indexing::get_item(*this, indices), *this, indices};
 }
 inline IndexedTensor Tensor::operator()(const TensorIndex& index_dim1, const TensorIndex& index_dim2, const TensorIndex& index_dim3, const TensorIndex& index_dim4, const TensorIndex& index_dim5, const TensorIndex& index_dim6, const TensorIndex& index_dim7, const TensorIndex& index_dim8, const TensorIndex& index_dim9, const TensorIndex& index_dim10) const {
-  return at::indexing::get_item(*this, {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5, index_dim6, index_dim7, index_dim8, index_dim9, index_dim10});
+  std::vector<TensorIndex> indices = {index_dim1, index_dim2, index_dim3, index_dim4, index_dim5, index_dim6, index_dim7, index_dim8, index_dim9, index_dim10};
+  return {at::indexing::get_item(*this, indices), *this, indices};
 }
 
 } // namespace at
