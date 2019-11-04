@@ -40,6 +40,8 @@ class PyFutureLocalValue final : public PyFuture {
 class PyRRef {
  public:
   explicit PyRRef(std::shared_ptr<RRef> rref);
+  // creates a local RRef with the given object as value
+  explicit PyRRef(const py::object& value);
 
   bool isOwner() const;
   WorkerInfo owner() const;

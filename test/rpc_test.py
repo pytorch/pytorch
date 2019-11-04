@@ -9,6 +9,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from torch.distributed import RRef
 from common_utils import load_tests
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
@@ -88,7 +89,7 @@ def _call_method_on_rref(method, rref, *args, **kwargs):
 
 
 def get_rref_list(values):
-    return [rpc.RRef(MyClass(a)) for a in values]
+    return [RRef(MyClass(a)) for a in values]
 
 
 def add_rref_to_value(rref, value):
@@ -925,7 +926,7 @@ class RpcTest(object):
 
     @dist_init
     def test_local_rref_no_fork(self):
-        local_rref = rpc.RRef(35)
+        local_rref = RRef(35)
         self.assertEqual(local_rref.local_value().wait(), 35)
 
     @dist_init
@@ -954,7 +955,7 @@ class RpcTest(object):
         dst_rank = n % self.world_size
         dst_worker = "worker{}".format(dst_rank)
 
-        rref = rpc.RRef(40)
+        rref = RRef(40)
         self.assertEqual(
             rpc.rpc_sync(
                 dst_worker, add_rref_to_value, args=(rref, 50)), 90)
