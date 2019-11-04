@@ -24,7 +24,7 @@ static std::unordered_set<Value *> collectLoopCounts(Node *n) {
     it = outerNode->owningBlock();
   }
 
-  return std::move(loopCounts);
+  return loopCounts;
 }
 
 struct BailOutGraphBuilderForNode {

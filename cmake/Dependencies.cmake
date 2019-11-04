@@ -1171,7 +1171,13 @@ function (add_onnx_tensorrt_subdir)
   # We pass the paths we found to onnx tensorrt.
   set(CUDNN_INCLUDE_DIR "${CUDNN_INCLUDE_PATH}")
   set(CUDNN_LIBRARY "${CUDNN_LIBRARY_PATH}")
+  set(CMAKE_VERSION_ORIG "{CMAKE_VERSION}")
+  if (FIND_CUDA_MODULE_DEPRECATED)
+    # TODO: this WAR is for https://github.com/pytorch/pytorch/issues/18524
+    set(CMAKE_VERSION "3.9.0")
+  endif()
   add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt EXCLUDE_FROM_ALL)
+  set(CMAKE_VERSION "{CMAKE_VERSION_ORIG}")
 endfunction()
 if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if (USE_TENSORRT)
