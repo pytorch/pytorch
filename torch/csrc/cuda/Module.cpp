@@ -31,6 +31,25 @@ using namespace torch;
 THCState *state = nullptr;
 static bool in_bad_fork = false;  // True for children forked after cuda init
 
+#ifndef WIN32
+// Called in the forked child if cuda has already been initialized
+static void forked_child() {
+  in_bad_fork = true;
+  utils::set_run_yet_variable_to_false();
+  state = nullptr;
+}
+#endif
+
+// Should be called before the first cuda call.
+// Note: This is distinct from initExtension because a stub cuda implementation
+// has some working functions (e.g. device_count) but cannot fully initialize.
+static void poison_fork() {
+#ifndef WIN32
+  static std::once_flag flag;
+  std::call_once(flag, []{ pthread_atfork(nullptr, nullptr, forked_child); });
+#endif
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
@@ -66,7 +85,7 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
 PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
-  torch::utils::cuda_lazy_init();
+  poison_fork();
   return PyLong_FromLong(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
@@ -372,25 +391,13 @@ static void bindCudaDeviceProperties(PyObject* module) {
   }, py::return_value_policy::reference);
 }
 
-#ifndef WIN32
-// Called in the forked child if cuda has already been initialized
-static void THCPModule_forkedChild() {
-  in_bad_fork = true;
-  utils::set_run_yet_variable_to_false();
-  state = nullptr;
-}
-#endif
-
 // Callback for python part. Used for additional initialization of python classes
 static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork);  // Handled at python level
+  poison_fork();
   state = at::globalContext().lazyInitCUDA();
-
-#ifndef WIN32
-  pthread_atfork(nullptr, nullptr, THCPModule_forkedChild);
-#endif
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
   if (!m) throw python_error();
