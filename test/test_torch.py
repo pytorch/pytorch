@@ -951,6 +951,45 @@ class _TestTorchMixin(object):
             res = torch.where(a > 0)
             self.assertEqual(1, len(res))
 
+    def test_where_tensor(self):
+        def rand_tensor(size, dtype, device):
+            if dtype.is_floating_point:
+                return torch.rand(size=size, dtype=dtype, device=device)
+            elif dtype == torch.uint8:
+                return torch.randint(1, 5, size=size, dtype=dtype, device=device)
+            elif dtype == torch.bool:
+                return torch.randint(0, 1, size=size, dtype=dtype, device=device).bool()
+            else:
+                return torch.randint(-5, 5, size=size, dtype=dtype, device=device)
+
+        def get_tensor(size, dtype, device, contiguous):
+            if not contiguous and len(size) < 2:
+                raise RuntimeError("Unable to generate non contiguous tensor with size < 2")
+            t = rand_tensor(size, dtype, device)
+            if contiguous:
+                return t
+            else:
+                return t.transpose(0, 1)
+
+        height = 5
+        width = 5
+        for device in torch.testing.get_all_device_types():
+            for dt1 in torch.testing.get_all_math_dtypes(device):
+                for dt2 in torch.testing.get_all_math_dtypes(device):
+                    for contiguous in [True, False]:
+                        x1 = get_tensor((height, width), dt1, device, contiguous)
+                        x2 = get_tensor((height, width), dt2, device, contiguous)
+                        if dt1 != dt2:
+                            self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(x1 == 1, x1, x2))
+                        else:
+                            if x1.is_floating_point():
+                                condition = (x1 < 0.5)
+                            else:
+                                condition = (x1 == 1)
+                            expected = condition.to(x1.dtype) * x1 + (~condition).to(x2.dtype) * x2
+                            result = torch.where(condition, x1, x2)
+                            self.assertEqual(expected, result)
+
     def test_all_any_with_dim(self):
         def test(x):
             r1 = x.prod(dim=0, keepdim=False).byte()

@@ -7223,6 +7223,38 @@ class TestNN(NNTestCase):
                          loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target,
                                                                    margin=0.5, reduction='none'))
 
+    def test_cosine_embedding_loss_with_diff_type(self):
+        for device in device_():
+            input1 = torch.tensor([[2, 3, 4], [6, 2, 4]], dtype=torch.double, device=device)
+            input2 = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
+            target = torch.tensor([1, -1], dtype=torch.int, device=device)
+            expected = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+            for dt1 in torch.testing.get_all_math_dtypes(device):
+                for dt2 in torch.testing.get_all_math_dtypes(device):
+                    for dt3 in torch.testing.get_all_math_dtypes(device):
+                        # dt3 is used as dtype for target = [1, -1], so let's skip unsigned type
+                        if dt3 == torch.uint8:
+                            continue
+                        input1 = input1.to(dt1)
+                        input2 = input2.to(dt2)
+                        target = target.to(dt3)
+                        result = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
+                        self.assertEqual(result.item(), expected.item(), 0.001)
+
+    def test_kl_div_with_diff_type(self):
+        for device in device_():
+            input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=torch.double, device=device)
+            target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.double, device=device)
+            expected = torch.nn.functional.kl_div(input, target)
+            for input_dtype in torch.testing.get_all_math_dtypes(device):
+                for target_dtype in [torch.float32, torch.float64, torch.float16]:
+                    if (torch.device(device).type == 'cpu' and target_dtype == torch.float16):
+                        continue
+                    input = input.to(input_dtype)
+                    target = target.to(target_dtype)
+                    result = torch.nn.functional.kl_div(input, target)
+                    self.assertEqual(result.item(), expected.item(), 0.001)
+
     def test_margin_ranking_loss_no_reduce(self):
         input1 = torch.randn(15).mul_(10).requires_grad_()
         input2 = torch.randn(15).mul_(10).requires_grad_()

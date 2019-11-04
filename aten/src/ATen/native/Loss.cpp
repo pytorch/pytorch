@@ -31,7 +31,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   auto denom = (mag_square1 * mag_square2).sqrt_();
   auto cos = prod_sum / denom;
 
-  auto zeros = at::zeros_like(target);
+  auto zeros = at::zeros_like(cos);
   auto pos = 1 - cos;
   auto neg = (cos - margin).clamp_min_(0);
   auto output_pos = at::where(target == 1, pos, zeros);
@@ -67,8 +67,8 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
 }
 
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto zeros = at::zeros_like(target);
   auto output_pos = target * (at::log(target) - input);
+  auto zeros = at::zeros_like(output_pos);
   auto output = at::where(target > 0, output_pos, zeros);
   return apply_loss_reduction(output, reduction);
 }
