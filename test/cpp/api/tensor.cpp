@@ -226,13 +226,6 @@ TEST(TensorTest, TorchTensorCtorScalarIntegralType) {
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
   ASSERT_EQ(tensor.dtype(), at::kLong);
   ASSERT_EQ(tensor.item<int32_t>(), 123);
-
-  // long int (32-bit)
-  tensor = torch::tensor(123l);
-  ASSERT_EQ(tensor.numel(), 1);
-  ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({}));
-  ASSERT_EQ(tensor.dtype(), at::kLong);
-  ASSERT_EQ(tensor.item<int32_t>(), 123);
 }
 
 TEST(TensorTest, TorchTensorCtorScalarFloatingType) {
@@ -367,13 +360,6 @@ TEST(TensorTest, TorchTensorCtorSingleDimBoolType) {
 TEST(TensorTest, TorchTensorCtorMultiDimIntegralType) {
   {
     auto tensor = torch::tensor({{1, 2}});
-    ASSERT_EQ(tensor.dtype(), torch::kLong);
-    ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 2}));
-    ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kLong).view(tensor.sizes())));
-    ASSERT_FALSE(tensor.requires_grad());
-  }
-  {
-    auto tensor = torch::tensor({{1l, 2l}});
     ASSERT_EQ(tensor.dtype(), torch::kLong);
     ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({1, 2}));
     ASSERT_TRUE(torch::allclose(tensor, torch::arange(1, 3, torch::kLong).view(tensor.sizes())));
