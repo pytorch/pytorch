@@ -988,7 +988,8 @@ class _TestTorchMixin(object):
                                 res = torch.where(x1 == 1, x1, x2)
                             for i in range(height):
                                 for j in range(width):
-                                    if (x1.is_floating_point() and x1[i][j] < 0.5) or (not x1.is_floating_point() and x1[i][j] == 1):
+                                    if (x1.is_floating_point() and x1[i][j] < 0.5) or \
+                                            (not x1.is_floating_point() and x1[i][j] == 1):
                                         self.assertTrue(res[i][j].item() == x1[i][j].item())
                                     else:
                                         self.assertTrue(res[i][j].item() == x2[i][j].item())
