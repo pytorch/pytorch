@@ -150,7 +150,7 @@ torch::Tensor EmbeddingBagImpl::forward(
     !per_sample_weights_.defined() || c10::get_if<enumtype::kSum>(&options.mode()),
     "embedding_bag: per_sample_weights was not null. ",
     "per_sample_weights is only supported for mode='kSum' (got mode='",
-    c10::visit(torch::enumtype::enum_name{}, options.mode()), "').Please open a feature request on GitHub.");
+    torch::enumtype::get_enum_name(options.mode()), "').Please open a feature request on GitHub.");
 
   return std::get<0>(
     torch::embedding_bag(
@@ -179,7 +179,7 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
     stream << ", sparse=" << std::boolalpha << options.sparse();
   }
   if (!c10::get_if<enumtype::kMean>(&options.mode())) {
-      stream << ", mode=" << c10::visit(torch::enumtype::enum_name{}, options.mode());
+      stream << ", mode=" << torch::enumtype::get_enum_name(options.mode());
   }
   stream << ")";
 }

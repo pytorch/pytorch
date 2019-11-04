@@ -71,6 +71,12 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(const Message& response) {
     case MessageType::REMOTE_RET: {
       return RemoteRet::fromMessage(response);
     }
+    case MessageType::SCRIPT_RREF_FETCH_RET: {
+      return ScriptRRefFetchRet::fromMessage(response);
+    }
+    case MessageType::PYTHON_RREF_FETCH_RET: {
+      return PythonRRefFetchRet::fromMessage(response);
+    }
     case MessageType::RREF_ACK: {
       return RRefAck::fromMessage(response);
     }
