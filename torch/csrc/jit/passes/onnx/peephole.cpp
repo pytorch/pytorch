@@ -734,13 +734,11 @@ static void convertSplitToDynamic(Block *b, int opset_version) {
     }
 
     if (it->kind() == onnx::Split) {
-      // TODO: check output kind is tensor[]
       if (it->outputs().size() == 1 && it->output()->type()->kind() == TypeKind::ListType) {
         auto dim = it->i(attr::axis);
         auto split = it->is(attr::split);
         Node* split_const_node =
             b->owningGraph()->create(onnx::Constant, 1);
-        // at::from_blob(split.data(), {static_cast<int64_t>(split.size())}, at::kLong)
         auto tensor = at::empty(split.size(), c10::kLong);
         int64_t* data = tensor.data<int64_t>();
         for (size_t i = 0; i < split.size(); ++i) {
