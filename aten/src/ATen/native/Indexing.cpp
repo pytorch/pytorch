@@ -314,6 +314,46 @@ Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone().index_copy_(dim, index, source);
 }
 
+
+Tensor& index_add__cpu(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  auto numel = index.numel();
+  TORCH_CHECK_INDEX(index.dim() <= 1, "index_add_(): Index is supposed to be a vector");
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_add_(): Expected LongTensor for index");
+  TORCH_CHECK(self.scalar_type() == source.scalar_type(),
+              "index_add_(): self and source must have the same scalar type");
+
+  auto index_contig = index.contiguous();
+  auto index_data = index_contig.data_ptr<int64_t>();
+
+  if (self.dim() > 1) {
+    for (auto i = 0; i < numel; i++) {
+      auto selfSlice = self.select(dim, index_data[i]);
+      auto sourceSlice = source.select(dim, i);
+      selfSlice.add_(sourceSlice, 1);
+    }
+  }
+  else {
+    TORCH_CHECK_INDEX(source.dim() <= 1, "source tensor must have one or zero dimensions");
+    TORCH_CHECK_INDEX(
+        numel == source.numel(),
+        "index_add_(): Number of indices (", numel, ") should be equal to source.numel() (", source.numel(), ")");
+
+    AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_add_", [&] {
+      auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
+      auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
+      for (auto i = 0; i < numel; i++) {
+        auto self_i = index_data[i];
+        TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
+        scalar_t *self_ip = self.data<scalar_t>() + self_i * self_stride;
+        *self_ip += *(source.data<scalar_t>() + i * source_stride);
+      }
+    });
+  }
+  return self;
+}
+
 Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   return self.clone().index_add_(dim, index, source);
 }

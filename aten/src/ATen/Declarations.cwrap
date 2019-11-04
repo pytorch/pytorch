@@ -221,6 +221,8 @@
   name: _th_index_add_
   cname: indexAdd
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   arguments:
     - THTensor* self
