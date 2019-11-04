@@ -84,7 +84,7 @@ void TensorNames::append(TensorName&& name) {
   names_.emplace_back(name);
 }
 
-void TensorNames::checkUnique() const {
+void TensorNames::checkUnique(const char* op_name) const {
   // O(N^2), but named tensors can have at most N = 64 dimensions, so this
   // doesn't matter unless benchmarking tells us it does. The alternative is
   // to create some sort of set data structure but the overhead of that
@@ -96,10 +96,11 @@ void TensorNames::checkUnique() const {
     auto dup = std::find_if(it + 1, names_.end(),
         [&](const TensorName& other) { return other.toDimname() == name; });
     TORCH_CHECK(dup == names_.end(),
-      "Attempted to propagate dims ", *it, " and ", dup, " to the output, ",
-      "but that would create a tensor with duplicate names ", toDimnameVec(),
-      ". Please rename your inputs with Tensor.rename to prevent this.");
-}
+        op_name, ": ",
+        "Attempted to propagate dims ", *it, " and ", dup, " to the output, ",
+        "but that would create a tensor with duplicate names ", toDimnameVec(),
+        ". Please rename your inputs with Tensor.rename to prevent this.");
+  }
 }
 
 // Let's say the TensorName represents 'C' in ['N', 'C', 'H, 'W'].

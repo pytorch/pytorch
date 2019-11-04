@@ -239,12 +239,12 @@ TEST(NamedTensorTest, TensorNamesCheckUnique) {
   auto names = nchw();
   {
     // smoke test to check that this doesn't throw
-    TensorNames(names).checkUnique();
+    TensorNames(names).checkUnique("op_name");
   }
   {
     std::vector<Dimname> nchh = { names[0], names[1], names[2], names[2] };
     auto tensornames = TensorNames(nchh);
-    ASSERT_THROW(tensornames.checkUnique(), c10::Error);
+    ASSERT_THROW(tensornames.checkUnique("op_name"), c10::Error);
   }
 }
 
