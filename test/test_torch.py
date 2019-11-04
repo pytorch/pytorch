@@ -4121,7 +4121,7 @@ class _TestTorchMixin(object):
     def test_serialization_save_warnings(self):
         with warnings.catch_warnings(record=True) as warns:
             with tempfile.NamedTemporaryFile() as checkpoint:
-                x = torch.save(torch.nn.Module(), checkpoint)
+                x = torch.save(torch.nn.Linear(2, 3), checkpoint)
                 self.assertEquals(len(warns), 0)
 
 
@@ -11053,7 +11053,7 @@ class TestTorchDeviceType(TestCase):
             ("sinh", doubles, True, True, 'cpu'),
             ("sinh", doubles, False, True, 'cuda'),
             ("sigmoid", doubles, True, True, 'cpu'),
-            ("sigmoid", doubles, False, False, 'cuda'),
+            ("sigmoid", doubles, True, True, 'cuda'),
             ("sqrt", doubles, True, True, 'cpu'),
             ("sqrt", doubles, False, True, 'cuda'),
             ("tan", doubles, True, True, 'cpu'),
