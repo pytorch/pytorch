@@ -255,7 +255,7 @@ MarginRankingLossImpl::MarginRankingLossImpl(
 void MarginRankingLossImpl::reset() {}
 
 void MarginRankingLossImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::PoissonNLLLoss()";
+  stream << "torch::nn::MarginRankingLoss()";
 }
 
 Tensor MarginRankingLossImpl::forward(const Tensor& input1,
