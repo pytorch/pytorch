@@ -1088,8 +1088,13 @@ struct to_ir {
     const auto loc = lc.range();
     const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
     const auto itrs = List<Expr>::create(lc.range(), {lc.iter()});
-    auto placeholder_node = graph->insertNode(create(prim::Print, loc, 0));
-    Value* list_value = nullptr;
+
+    // If there is no type hint, and this is emitted over an iterable that is
+    // unrolled and of length 0, then we emit a List of tensors
+    Value* list_value = graph->insertNode(graph->create(prim::ListConstruct, 1))
+                            ->output()
+                            ->setType(ListType::ofTensors());
+    bool type_set = false;
     if (type_hint) {
       if (!type_hint->cast<ListType>()) {
         throw ErrorReport(loc)
@@ -1097,33 +1102,20 @@ struct to_ir {
                ", found "
             << type_hint->python_str();
       }
-      auto list_node =
-          graph->createList(type_hint->cast<ListType>()->getElementType(), {})
-              ->insertBefore(placeholder_node);
-      list_value = list_node->output();
+      list_value->setType(type_hint);
+      type_set = true;
     }
     auto emit_body = [&]() {
       auto comprehension_out = emitExpr(lc.elt());
-      if (list_value == nullptr) {
-        auto list_node = graph->createList(comprehension_out->type(), {})
-                             ->insertBefore(placeholder_node);
-        list_value = list_node->output();
+      if (!type_set) {
+        list_value->setType(ListType::create(comprehension_out->type()));
+        type_set = true;
       }
       NamedValue self = NamedValue(loc, "self", list_value);
       NamedValue input = NamedValue(loc, "", comprehension_out);
       emitBuiltinCall(loc, *graph, aten::append, {input}, {}, self);
     };
     emitFor(targets_list, itrs, loc, emit_body);
-    placeholder_node->destroy();
-
-    // there was no type hint and this was emitted as a list comprehension over
-    // an iterable containing a module list, and it had length zero
-    // TODO: error or create tensor list ?
-    if (list_value == nullptr) {
-      throw ErrorReport(loc)
-          << "Must provide a type annotation if iterating over a modulelist"
-          << "of size zero in a list comprehension";
-    }
     return list_value;
   }
 

@@ -11482,8 +11482,8 @@ a")
         self.checkModule(mod, (torch.tensor(3),))
 
         mod = M2(nn.ModuleList([]))
-        with self.assertRaisesRegex(Exception, "Must provide a type annotation"):
-            torch.jit.script(mod)
+        # defaults to List of Tensor for empty modulelist
+        self.assertEqual(torch.jit.script(mod)(torch.tensor(.5)), [])
 
         def bad_type_annotation():
             out = torch.jit.annotate(int, [x for x in [1, 2, 3]])
