@@ -232,8 +232,12 @@ class AmpScaler(object):
 
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
+        torch.cuda.synchronize()
+
         if "unscaled" not in optimizer_state:
             self.unscale(optimizer)
+
+        torch.cuda.synchronize()
 
         assert len(optimizer_state["found_inf_per_device"]) > 0, "No inf checks were recorded for this optimizer."
 
