@@ -6,9 +6,10 @@
 #include <queue>
 #include <mutex>
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/THP_export.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/utils/auto_gil.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/Exception.h>
 
@@ -105,7 +106,11 @@ extern PyObject *THPException_FatalError;
 struct python_error : public std::exception {
   python_error() : type(nullptr), value(nullptr), traceback(nullptr) {}
 
-  python_error(const python_error &other) : type(other.type), value(other.value), traceback(other.traceback) {
+  python_error(const python_error& other)
+      : type(other.type),
+        value(other.value),
+        traceback(other.traceback),
+        message(other.message) {
     AutoGIL gil;
     Py_XINCREF(type);
     Py_XINCREF(value);
@@ -116,6 +121,7 @@ struct python_error : public std::exception {
     type = other.type;
     value = other.value;
     traceback = other.traceback;
+    message = std::move(other.message);
     other.type = nullptr;
     other.value = nullptr;
     other.traceback = nullptr;
@@ -130,6 +136,47 @@ struct python_error : public std::exception {
     }
   }
 
+  virtual const char* what() const noexcept override {
+    return message.c_str();
+  }
+
+  void build_message() {
+    // Ensure we have the GIL.
+    AutoGIL gil;
+
+    // No errors should be set when we enter the function since PyErr_Fetch
+    // clears the error indicator.
+    TORCH_INTERNAL_ASSERT(!PyErr_Occurred());
+
+    // Default message.
+    message = "python_error";
+
+    // Try to retrieve the error message from the value.
+    if (value != nullptr) {
+      // Reference count should not be zero.
+      TORCH_INTERNAL_ASSERT(value->ob_refcnt > 0);
+
+      PyObject* pyStr = PyObject_Str(value);
+      if (pyStr != nullptr) {
+        PyObject* encodedString =
+            PyUnicode_AsEncodedString(pyStr, "utf-8", "strict");
+        if (encodedString != nullptr) {
+          char* bytes = PyBytes_AS_STRING(encodedString);
+          if (bytes != nullptr) {
+            // Set the message.
+            message = std::string(bytes);
+          }
+          Py_XDECREF(encodedString);
+        }
+        Py_XDECREF(pyStr);
+      }
+    }
+
+    // Clear any errors since we don't want to propagate errors for functions
+    // that are trying to build a string for the error message.
+    PyErr_Clear();
+  }
+
   /** Saves the exception so that it can be re-thrown on a different thread */
   inline void persist() {
     if (type) return; // Don't overwrite exceptions
@@ -139,6 +186,7 @@ struct python_error : public std::exception {
     Py_XDECREF(value);
     Py_XDECREF(traceback);
     PyErr_Fetch(&type, &value, &traceback);
+    build_message();
   }
 
   /** Sets the current Python error from this exception */
@@ -155,6 +203,9 @@ struct python_error : public std::exception {
   PyObject* type;
   PyObject* value;
   PyObject* traceback;
+
+  // Message to return to the user when 'what()' is invoked.
+  std::string message;
 };
 
 #ifdef _THP_CORE

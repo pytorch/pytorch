@@ -56,6 +56,7 @@ torch.nn.ReLU6|Yes|No
 torch.nn.RReLU|Yes|No
 torch.nn.SELU|Yes|No
 torch.nn.CELU|Yes|No
+torch.nn.GELU|Yes|No
 torch.nn.Sigmoid|Yes|No
 torch.nn.Softplus|Yes|No
 torch.nn.Softshrink|Yes|No
@@ -70,8 +71,8 @@ torch.nn.Softmax2d|Yes|No
 torch.nn.LogSoftmax|Yes|No
 torch.nn.AdaptiveLogSoftmaxWithLoss|No|No
 torch.nn.BatchNorm1d|Yes|No
-torch.nn.BatchNorm2d|No|No
-torch.nn.BatchNorm3d|No|No
+torch.nn.BatchNorm2d|Yes|No
+torch.nn.BatchNorm3d|Yes|No
 torch.nn.GroupNorm|No|No
 torch.nn.SyncBatchNorm|No|No
 torch.nn.InstanceNorm1d|No|No
@@ -107,7 +108,7 @@ torch.nn.MSELoss|Yes|No
 torch.nn.CrossEntropyLoss|No|No
 torch.nn.CTCLoss|Yes|No
 torch.nn.NLLLoss|No|No
-torch.nn.PoissonNLLLoss|No|No
+torch.nn.PoissonNLLLoss|Yes|No
 torch.nn.KLDivLoss|Yes|No
 torch.nn.BCELoss|Yes|No
 torch.nn.BCEWithLogitsLoss|No|No
