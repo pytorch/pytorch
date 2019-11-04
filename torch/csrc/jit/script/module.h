@@ -45,10 +45,10 @@ using ModulePtr = c10::intrusive_ptr<c10::ivalue::Object>;
 struct Module;
 
 template <typename T>
-struct TORCH_API slot_list_impl;
+struct slot_list_impl;
 
 template <typename T>
-struct TORCH_API Named {
+struct Named {
   std::string name;
   T value;
 };
@@ -63,7 +63,7 @@ struct TORCH_API ParameterPolicy;
 struct TORCH_API AttributePolicy;
 struct TORCH_API BufferPolicy;
 template <typename P>
-struct TORCH_API NamedPolicy;
+struct NamedPolicy;
 } // namespace detail
 
 using module_list = slot_list_impl<detail::ModulePolicy>;
@@ -410,7 +410,7 @@ struct TORCH_API SlotCursor {
 // but skip modules, buffers, and other attributes.
 // See ModulePolicy for comments about Policy object's API.
 template <typename Policy>
-struct TORCH_API slot_iterator_impl {
+struct slot_iterator_impl {
   using SlotCursor = detail::SlotCursor;
   using value_type = typename Policy::value_type;
   slot_iterator_impl(
@@ -535,7 +535,7 @@ struct TORCH_API slot_iterator_impl {
 // they are not stored directly in std::vectors but inside the
 // module's IValue object itself.
 template <typename Policy>
-struct TORCH_API slot_list_impl {
+struct slot_list_impl {
   using iterator = slot_iterator_impl<Policy>;
   using const_iterator = slot_iterator_impl<Policy>;
   using value_type = typename iterator::value_type;
@@ -645,7 +645,7 @@ struct TORCH_API AttributePolicy {
 // along with the fully qualified name of that slot. This is used for the named_
 // variants like named_parameters().
 template <typename Policy>
-struct TORCH_API NamedPolicy {
+struct NamedPolicy {
   using value_type = Named<typename Policy::value_type>;
   static value_type create(
       const std::vector<detail::SlotCursor>& cursors,
