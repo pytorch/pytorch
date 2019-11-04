@@ -171,9 +171,9 @@ Node* InsertObserversHelper::insertObserverFor(
     observer_module = std::get<0>(qconfig);
   }
   script::Module observer = observer_module.clone();
-  std::string observer_name = "_observer_" + std::to_string(uid_++);
+  std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.find_module(observer_name)) {
-    observer_name = "_observer_" + std::to_string(uid_++);
+    observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
   // Get handle of observer module
@@ -883,8 +883,12 @@ graph(%self, %x):
       GRAPH_UPDATE("Deleting ", *matched_bn);
 
       auto new_w_b = computeUpdatedConvWeightAndBias(params);
-      params.conv_w.set_data(std::get<0>(new_w_b));
-      params.conv_b.set_data(std::get<1>(new_w_b));
+      conv_submodule.set_parameter("weight", std::get<0>(new_w_b));
+      if (conv_submodule.find_parameter("bias")) {
+        conv_submodule.set_parameter("bias", std::get<1>(new_w_b));
+      } else {
+        conv_submodule.register_parameter("bias", std::get<1>(new_w_b), false);
+      }
     }
 
     // Perform planned rewritings
@@ -1040,9 +1044,9 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
       // unique name for the module based on %w_quant
       int uid = 0;
-      auto module_name = module_name_prefix + std::to_string(uid++);
+      auto module_name = module_name_prefix + c10::to_string(uid++);
       while (module.find_module(module_name)) {
-        module_name_prefix + std::to_string(uid++);
+        module_name_prefix + c10::to_string(uid++);
       }
       module.register_module(module_name, wrapper_module);
 
