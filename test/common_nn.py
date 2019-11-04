@@ -1130,6 +1130,14 @@ new_module_tests = [
         desc='3d_no_elementwise_affine',
     ),
     dict(
+        module_name='LayerNorm',
+        constructor_args=([5], 1e-3),
+        input_size=(0, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_empty_elementwise_affine',
+    ),
+    dict(
         module_name='GroupNorm',
         constructor_args=(3, 6, 1e-3),
         input_size=(4, 6, 5),
