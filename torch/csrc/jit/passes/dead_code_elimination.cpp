@@ -269,7 +269,7 @@ class DeadCodeEliminator {
         GRAPH_UPDATE(
             "Node ",
             it->kind().toQualString(),
-            " w/ output ",
+            " which outputs ",
             (node->outputs().size() > 0 ? node->outputs().at(0)->debugName()
                                         : "n/a"),
             " will be removed");
