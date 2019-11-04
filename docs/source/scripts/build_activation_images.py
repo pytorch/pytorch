@@ -37,6 +37,7 @@ functions = [
     'RReLU',
     'SELU',
     'CELU',
+    'GELU',
     'Sigmoid',
     'Softplus',
     'Softshrink',
