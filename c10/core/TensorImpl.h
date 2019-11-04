@@ -423,8 +423,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    // NB: At the moment, variables have the same TensorTypeId as their
-    // corresponding tensor, but if this ever changes, we need to modify this.
     return type_set_.has(TensorTypeId::SparseCPUTensorId) ||
            type_set_.has(TensorTypeId::SparseCUDATensorId) ||
            type_set_.has(TensorTypeId::SparseHIPTensorId);
@@ -432,23 +430,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    // NB: At the moment, variables have the same TensorTypeId as their
-    // corresponding tensor, but if this ever changes, we need to modify this.
     return type_set_.has(TensorTypeId::QuantizedCPUTensorId);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    // NB: At the moment, variables have the same TensorTypeId as their
-    // corresponding tensor, but if this ever changes, we need to modify this.
     return type_set_.has(TensorTypeId::CUDATensorId) ||
            type_set_.has(TensorTypeId::SparseCUDATensorId);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    // NB: At the moment, variables have the same TensorTypeId as their
-    // corresponding tensor, but if this ever changes, we need to modify this.
     return type_set_.has(TensorTypeId::HIPTensorId) ||
            type_set_.has(TensorTypeId::SparseHIPTensorId);
   }
@@ -540,11 +532,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // ~~~~~ Autograd API ~~~~~
   // Some methods below are defined in TensorImpl.cpp because Tensor is an
   // incomplete type.
-  //
-  // Note [Tensor versus Variable in C++]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Autograd methods are only valid for Variables (i.e. Tensors that contain
-  // autograd metadata).
 
   /**
    * Set whether or not a tensor requires gradient.
@@ -822,11 +809,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual int64_t stride(int64_t d) const;
 
   /**
-   * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
+   * True if we will dispatch to the Variable handler for this tensor.  This has
+   * nothing to do with the variable-ness of a tensor (as every tensor is a
+   * variable; see also the invariant on type_set_), it just consults thread
+   * local state.
+   *
+   * TODO: Remove this in favor of a more direct test that doesn't mention
+   * Tensor at all.
    */
   bool is_variable() const {
-    return type_set_.has(TensorTypeId::VariableTensorId) &&
-           !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
+    return !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
   }
 
   /**
@@ -846,15 +838,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * Set the pointer to autograd metadata.  Without a call to this function, you
-   * have a non-Variable tensor.  With a call to this function, you are
-   * transforming this into a variable: a nullptr autograd metadata means
-   * that you are setting this variable to not require grad and not track
-   * gradients.
-   *
-   * NB: In the period of time when we still have Variable and
-   * non-Variable tensors, explicitly setting null is still useful as it
-   * turns a tensor into a variable.
+   * Set the pointer to autograd metadata.
    */
   void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta);
 
@@ -937,9 +921,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
              ts.has(TensorTypeId::SparseCUDATensorId) ||
              ts.has(TensorTypeId::SparseHIPTensorId);
     };
-    // TODO: This is going to be wrong when we introduce Variable; need to
-    // factor this to be agnostic to Variable.  Maybe the correct fix
-    // is to introduce another RTTI code for subclasses.
     return (type_set_ == from) || (is_dense(type_set_) && is_dense(from)) || (is_sparse(type_set_) && is_sparse(from));
   }
 
@@ -1641,6 +1622,22 @@ protected:
   c10::optional<c10::Device> device_opt_;
 
   // The set of TensorTypeIds which describe this tensor
+  //
+  // INVARIANT: type_set_.has(TensorTypeId::VariableTensorId) (every tensor
+  // is a variable).  Historically this was not the case (there was a
+  // distinction between plain tensors and variables), but because
+  // we merged Variable and Tensor, this invariant now always holds.
+  // This invariant is currently enforced in the constructor of TensorImpl.
+  //
+  // You might be wondering why we don't just not include VariableTensorId
+  // from the type set, if it is always set.  The answer is, we still need
+  // to dispatch differently from variables, and then mask out the variable
+  // id once we are done handling autograd.  If the boolean here was
+  // inverted, we wouldn't be able to get autograd codepath (since there's
+  // be no TensorTypeId to dispatch to!)  We cannot set VariableTensorId
+  // as the default value contained in the *included* tensor type id set
+  // as TLS requires our state to be zero-initialized (i.e., it is not
+  // included).
   TensorTypeSet type_set_;
 
   // You get to have eight byte-size fields here, before you
