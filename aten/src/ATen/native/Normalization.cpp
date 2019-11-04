@@ -354,7 +354,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
 // of backends, while enabling it to keep the information about the used backend, so that it can
 // use its corresponding backward implementation.
 // XXX: The indices of backends need to be kept synchronized between this function and its _backward.
-std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
+std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool training, double momentum, double eps, bool cudnn_enabled) {
@@ -390,13 +390,15 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
     return std::tuple_cat(
              at::cudnn_batch_norm(
-               input.contiguous(), weight.contiguous(),
+               input.contiguous(input.suggest_memory_format()), weight.contiguous(),
                bias.contiguous(),
                running_mean.defined() ? running_mean.contiguous() : running_mean,
                running_var.defined() ? running_var.contiguous() : running_var,
                training, momentum, eps),
              std::make_tuple(1));
   }
+
+  Tensor reserve = at::empty({0}, input.options().dtype(kByte));
 
   bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
@@ -415,12 +417,14 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                running_mean.defined() ? running_mean.contiguous() : running_mean,
                running_var.defined() ? running_var.contiguous() : running_var,
                training, momentum, eps),
+             std::tuple<Tensor>(reserve),
              std::make_tuple(2));
   }
 
   return std::tuple_cat(
            at::native_batch_norm(
              input, weight, bias, running_mean, running_var, training, momentum, eps),
+           std::tuple<Tensor>(reserve),
            std::make_tuple(0));
 }
 
@@ -429,11 +433,13 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
     const Tensor& input, const Tensor& grad_output, const Tensor& weight /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     const Tensor& save_mean /* optional */, const Tensor& save_var_transform /* optional */,
-    bool train, double epsilon, std::array<bool, 3> output_mask) {
+    bool train, double epsilon, std::array<bool, 3> output_mask, const Tensor &reservedSpace) {
   if (impl_index == 0) {
     return at::native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var_transform, train, epsilon, output_mask);
   } else if (impl_index == 1) {
-    return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);
+    // TODO: _batch_norm_impl_index_backward is only used in JIT. cudnn NHWC
+    // format conversion is done inside cudnn_batch_norm_backward instead
+    return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon, reservedSpace);
   } else if (impl_index == 2) {
     return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var_transform, epsilon);
   }

@@ -76,6 +76,16 @@ class MyClass:
     def my_static_method(f):
         return f > 10
 
+    def increment_value(self, increment):
+        self.a += increment
+
+    def get_value(self):
+        return self.a
+
+
+def _call_method_on_rref(method, rref, *args, **kwargs):
+    return method(rref.local_value().wait(), *args, **kwargs)
+
 
 def run_nested_pickle(pickle_cls_instance, tensor):
     return pickle_cls_instance.t + tensor
@@ -919,6 +929,34 @@ class RpcTest(object):
             "worker{}".format(dst_rank), my_rref_function, args=(rref_a, rref_b)
         )
         self.assertEqual(rref_c.to_here().wait(), torch.ones(n, n) + 4)
+
+    @dist_init(setup_model_parallel=True)
+    def test_call_method_on_rref(self):
+        """
+        Tests that it is possible to call an instance method on a remote objet
+        by using rref.owner() as destination of the call.
+        """
+        vals = [10, 2, 5, 7]
+        dst_rank = (self.rank + 1) % self.world_size
+        dst_worker = "worker{}".format(dst_rank)
+
+        # creates a remote object
+        rref = rpc.remote(dst_worker, MyClass, args=(vals[0], ))
+
+        # modifies state of the remote object
+        rpc.rpc_sync(rref.owner(), _call_method_on_rref, args=(
+            MyClass.increment_value, rref, vals[1]))
+        rpc.rpc_async(rref.owner(), _call_method_on_rref, args=(
+            MyClass.increment_value, rref, vals[2])).wait()
+        rpc.remote(rref.owner(), _call_method_on_rref, args=(
+            MyClass.increment_value, rref, vals[3])).to_here().wait()
+
+        # queries state of the remote object
+        result = rpc.rpc_sync(dst_worker, _call_method_on_rref, args=(
+            MyClass.get_value, rref))
+
+        self.assertEqual(result, sum(vals))
+
 
     def test_requires_process_group_agent_decorator(self):
         @requires_process_group_agent("test_func did not run")

@@ -135,7 +135,7 @@
 
 - name: _thnn_conv2d(Tensor self, Tensor weight, IntArrayRef[2] kernel_size, Tensor? bias, IntArrayRef[2] stride, IntArrayRef[2] padding)
   cname: SpatialConvolutionMM
-  buffers: [finput, fgrad_input]
+  buffers: [columns, ones]
   CPU:
     forward_scalar_types: ['Float', 'Double', 'Long', 'BFloat16']
     backward_scalar_types: ['Float', 'Double', 'BFloat16']
