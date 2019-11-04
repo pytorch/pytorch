@@ -398,6 +398,7 @@ Tensor ones_like(
   return native::ones_like(
       self, self.options(), optional_memory_format);
 }
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
