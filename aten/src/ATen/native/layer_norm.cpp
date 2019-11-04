@@ -26,7 +26,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   Tensor Y = at::native::empty_like(X);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
-  LayerNormKernel(kCPU, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+  if (M > 0) {
+    LayerNormKernel(kCPU, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+  }
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
@@ -46,13 +48,15 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
     dX = at::native::empty_like(X);
   }
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma);
+    dgamma = M > 0 ? at::native::empty_like(gamma) : at::native::zeros_like(gamma);
   }
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma);
+    dbeta = M > 0 ? at::native::empty_like(gamma) : at::native::zeros_like(gamma);
   }
-  LayerNormBackwardKernel(
-      kCPU, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+  if (M > 0) {
+    LayerNormBackwardKernel(
+        kCPU, dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+  }
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 

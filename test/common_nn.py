@@ -1,9 +1,11 @@
+import math
 import sys
 import tempfile
 import unittest
+
 from copy import deepcopy
-from itertools import product
 from functools import reduce
+from itertools import product
 from operator import mul
 
 
@@ -1128,6 +1130,14 @@ new_module_tests = [
         desc='3d_no_elementwise_affine',
     ),
     dict(
+        module_name='LayerNorm',
+        constructor_args=([5], 1e-3),
+        input_size=(0, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_empty_elementwise_affine',
+    ),
+    dict(
         module_name='GroupNorm',
         constructor_args=(3, 6, 1e-3),
         input_size=(4, 6, 5),
@@ -2146,6 +2156,17 @@ new_module_tests = [
         constructor_args=(1,),
         input_size=(5, 6, 7),
         desc='dim',
+    ),
+    dict(
+        module_name='GELU',
+        input_size=(),
+        desc='scalar',
+        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
+    ),
+    dict(
+        module_name='GELU',
+        input_size=(3, 2, 5),
+        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=-1),

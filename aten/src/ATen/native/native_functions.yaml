@@ -2327,15 +2327,12 @@
   supports_named_tensor: True
   variants: function, method
   dispatch:
-    CPU: _sigmoid__cpu
-    CUDA: _sigmoid__cuda
+    CPU: sigmoid_
+    CUDA: sigmoid_
     MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _sigmoid_out_cpu
-    CUDA: _sigmoid_out_cuda
 
 - func: sin(Tensor self) -> Tensor
   use_c10_dispatcher: full
