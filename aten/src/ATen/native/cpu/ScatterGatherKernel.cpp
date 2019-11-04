@@ -16,7 +16,7 @@ void gather_kernel_cpu(Tensor & result, const Tensor & self, int64_t dim, const 
   ensure_nonempty(result_sizes);
 
   int64_t elems_per_row = (index.dim() == 0 ? 1 : index.size(dim));
-  int64_t self_dim_size = self.size(dim);
+  int64_t self_dim_size = (self.dim() == 0 ? 1 : self.size(dim));
 
   AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Bool, ScalarType::Half, self.scalar_type(), "gather_out_cpu", [&](){
     scalar_t *result_data = result.data_ptr<scalar_t>();
