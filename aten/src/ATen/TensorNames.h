@@ -41,7 +41,10 @@ struct CAFFE2_API TensorName {
   ArrayRef<Dimname> origin_;
   int origin_idx_;
   Dimname name_;
+  friend std::ostream& operator<<(std::ostream& out, const TensorName& tensorname);
 };
+
+CAFFE2_API std::ostream& operator<<(std::ostream& out, const TensorName& tensorname);
 
 using TensorNameVec = SmallVector<TensorName, 10>;
 
@@ -55,6 +58,7 @@ struct CAFFE2_API TensorNames {
   TensorNames unifyFromRight(const TensorNames& other, const char* op_name) const;
 
   void append(TensorName&& name);
+  void checkUnique() const;
   std::vector<Dimname> toDimnameVec() const;
 
  private:
@@ -62,6 +66,7 @@ struct CAFFE2_API TensorNames {
 
   TensorNameVec names_;
 };
+
 #endif
 
 }} // namespace at::namedinference
