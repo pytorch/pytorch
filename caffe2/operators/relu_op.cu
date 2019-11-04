@@ -49,7 +49,7 @@ __global__ void ReluCUDAKernel<half2>(const int N, const half2* X, half2* Y) {
 #if __CUDA_ARCH__ >= 530
     Y[i] = __hmul2(__hgt2(__ldg(X + i), kZero), __ldg(X + i));
 #elif defined __HIP_PLATFORM_HCC__
-    Y[i] = __hmul2(__hneg2(__hgt2(__ldg(X + i), kZero)), __ldg(X + i));
+    Y[i] =  __hmul2(__hgt2(__ldg(X + i), kZero) * __hgt2(__ldg(X + i), kZero), __ldg(X + i));
 #else
     const float2 xx = __half22float2(X[i]);
     Y[i] =
@@ -100,7 +100,7 @@ __global__ void ReluGradientCUDAKernel<half2>(
 #if __CUDA_ARCH__ >= 530 || defined __HIP_PLATFORM_HCC__
     dX[i] = __hmul2(__hgt2(__ldg(Y + i), kZero), __ldg(dY + i));
 #elif defined __HIP_PLATFORM_HCC__
-    dX[i] = __hmul2(__hneg2(__hgt2(__ldg(Y + i), kZero)), __ldg(dY + i));
+    dX[i] =  __hmul2(__hgt2(__ldg(Y + i), kZero) * __hgt2(__ldg(Y + i), kZero), __ldg(dY + i));
 #else
     const float2 dy = __half22float2(dY[i]);
     const float2 yy = __half22float2(Y[i]);
