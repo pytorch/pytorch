@@ -267,6 +267,18 @@ void CELUImpl::pretty_print(std::ostream& stream) const {
 
 // ============================================================================
 
+Tensor GELUImpl::forward(const Tensor& input) {
+  return F::gelu(input);
+}
+
+void GELUImpl::reset() {}
+
+void GELUImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::GELU()";
+}
+
+// ============================================================================
+
 Tensor SigmoidImpl::forward(const Tensor& input) {
   return torch::sigmoid(input);
 }
