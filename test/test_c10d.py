@@ -1306,6 +1306,43 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allgather_stress(inputs, lambda t: t.clone().cuda())
 
+    def test_allgather_coalesced_checks(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        dummy_input = [torch.zeros([1], dtype=torch.float32)]
+        dummy_output_lists = [
+            [torch.zeros([1], dtype=torch.float32)] for _ in range(self.world_size)
+        ]
+
+        # One of output tensors does not match input list.
+        dummy_output_lists[0] = [torch.zeros([0], dtype=torch.float32)]
+        with self.assertRaisesRegex(ValueError,
+                                    "invalid size of output tensor at index 0"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+        # One of output tensors does not match input list.
+        dummy_output_lists[0] = [torch.zeros([1], dtype=torch.float64)]
+        with self.assertRaisesRegex(ValueError,
+                                    "invalid tensor type at index 0"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+        # Output lists have too many elements
+        dummy_output_lists = [
+            [
+                torch.zeros([1], dtype=torch.float32)
+            ] for _ in range(self.world_size + 1)
+        ]
+        with self.assertRaisesRegex(ValueError,
+                                    "output lists should be equal to world size"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+        # Output is not a list of lists.
+        dummy_output_lists = [torch.zeros([0], dtype=torch.float32)]
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Invalid function argument.*output_tensor_lists"):
+            c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
+
+
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())

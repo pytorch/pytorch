@@ -203,7 +203,8 @@ def is_jit_arg(i, arg):
 
 def is_jit_op(decl):
     # We currently don't support functions that return nothing
-    if all(r['type'] == 'void' for r in decl['returns']):
+    assert all(r['type'] != 'void' for r in decl['returns'])
+    if len(decl['returns']) == 0:
         return False
 
     arguments = decl['arguments']

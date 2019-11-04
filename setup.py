@@ -351,7 +351,7 @@ def build_deps():
 install_requires = []
 
 if sys.version_info <= (2, 7):
-    install_requires += ['future']
+    install_requires += ['future', 'typing']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -793,6 +793,7 @@ if __name__ == '__main__':
                 'include/ATen/cudnn/*.h',
                 'include/ATen/detail/*.h',
                 'include/caffe2/utils/*.h',
+                'include/caffe2/utils/**/*.h',
                 'include/c10/*.h',
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',
