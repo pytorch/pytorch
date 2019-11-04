@@ -169,8 +169,8 @@ Reducer::Reducer(
       at::TensorOptions options;
       options = options.device(replicas_[i][0].device());
       options = options.dtype(at::kInt);
-      local_used_maps_[i] = torch::autograd::make_variable(
-            at::empty({variable_count}, options));
+      local_used_maps_[i] =
+          torch::autograd::make_variable(at::empty({variable_count}, options));
     }
   }
 }
@@ -542,7 +542,7 @@ void Reducer::prepare_for_backward(
     bucket.pending = bucket.replicas.size();
   }
 
-  for (auto& local_used: local_used_maps_) {
+  for (auto& local_used : local_used_maps_) {
     local_used.fill_(1);
   }
 
@@ -609,8 +609,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 
       const VariableIndex& var_idx = func_[variable.grad_accumulator().get()];
       bool global_unused =
-        local_used_maps_[var_idx.replica_index][var_idx.variable_index]
-          .item<int>() == 0;
+          local_used_maps_[var_idx.replica_index][var_idx.variable_index]
+              .item<int>() == 0;
 
       auto bucket_view =
           replica.contents.narrow(0, offset, length).view(variable.sizes());
