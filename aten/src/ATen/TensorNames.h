@@ -42,10 +42,10 @@ struct CAFFE2_API TensorName {
   ArrayRef<Dimname> origin_;
   int origin_idx_;
   Dimname name_;
-  friend std::ostream& operator<<(std::ostream& out, const TensorName& tensorname);
+  CAFFE2_API friend std::ostream& operator<<(
+      std::ostream& out,
+      const TensorName& tensorname);
 };
-
-CAFFE2_API std::ostream& operator<<(std::ostream& out, const TensorName& tensorname);
 
 using TensorNameVec = SmallVector<TensorName, 10>;
 
