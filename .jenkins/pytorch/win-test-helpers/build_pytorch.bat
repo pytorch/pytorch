@@ -66,7 +66,7 @@ set PATH=%CUDA_PATH%\bin;%CUDA_PATH%\libnvvp;%PATH%
 set PATH=%TMP_DIR_WIN%\bin;%PATH%
 
 :: Target only our CI GPU machine's CUDA arch to speed up the build
-set TORCH_CUDA_ARCH_LIST=5.2
+set TORCH_CUDA_ARCH_LIST=7.5
 
 sccache --stop-server
 sccache --start-server

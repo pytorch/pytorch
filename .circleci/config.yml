@@ -438,7 +438,6 @@ jobs:
       SCCACHE_BUCKET: "ossci-compiler-cache"
       CUDA_VERSION: "10"
       USE_CUDA: "1"
-      TORCH_CUDA_ARCH_LIST: "7.5"
     steps:
       - checkout
       - run:
@@ -471,7 +470,6 @@ jobs:
       BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
       SCCACHE_BUCKET: "ossci-compiler-cache"
       CUDA_VERSION: "10"
-      TORCH_CUDA_ARCH_LIST: "7.5"
     steps:
       - checkout
       - run:
