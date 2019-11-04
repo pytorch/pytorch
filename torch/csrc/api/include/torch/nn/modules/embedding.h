@@ -45,16 +45,14 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
 
   static Embedding from_pretrained(const torch::Tensor& embeddings, EmbeddingOptions options = {}, bool freeze = true) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
-    if(options.num_embeddings()) {
-      TORCH_WARN(*options.num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", *options.num_embeddings());
+    if (options.num_embeddings()) {
+      TORCH_WARN(*options.num_embeddings() == embeddings.size(0), "`num_embeddings` options parameter is ignored in `torch::nn::Embedding::from_pretrained`.");
     }
-    if(options.embedding_dim()) {
-      TORCH_WARN(*options.embedding_dim() == embeddings.size(1), "Expects options.num_embeddings to be ", embeddings.size(1) , "but found ", *options.embedding_dim());
+    if (options.embedding_dim()) {
+      TORCH_WARN(*options.embedding_dim() == embeddings.size(1), "`embedding_dim` options parameter is ignored in `torch::nn::Embedding::from_pretrained`.");
     }
-    options.num_embeddings(embeddings.size(0));
-    options.embedding_dim(embeddings.size(1));
 
-    Embedding embedding(options._weight(embeddings));
+    Embedding embedding(options.num_embeddings(embeddings.size(0)).embedding_dim(embeddings.size(1))._weight(embeddings));
     embedding->weight.set_requires_grad(!freeze);
     return embedding;
   }
@@ -89,15 +87,13 @@ class EmbeddingBag : public torch::nn::ModuleHolder<EmbeddingBagImpl> {
 
   static EmbeddingBag from_pretrained(const torch::Tensor& embeddings, EmbeddingBagOptions options = {}, bool freeze = true) {
     TORCH_CHECK(embeddings.dim() == 2, "Embeddings parameter is expected to be 2-dimensional");
-    if(options.num_embeddings()) {
-      TORCH_WARN(*options.num_embeddings() == embeddings.size(0), "Expects options.num_embeddings to be ", embeddings.size(0) , "but found ", *options.num_embeddings());
+    if (options.num_embeddings()) {
+      TORCH_WARN(*options.num_embeddings() == embeddings.size(0), "`num_embeddings` options parameter is ignored in `torch::nn::EmbeddingBag::from_pretrained`.");
     }
-    if(options.embedding_dim()) {
-      TORCH_WARN(*options.embedding_dim() == embeddings.size(1), "Expects options.num_embeddings to be ", embeddings.size(1) , "but found ", *options.embedding_dim());
+    if (options.embedding_dim()) {
+      TORCH_WARN(*options.embedding_dim() == embeddings.size(1), "`embedding_dim` options parameter is ignored in `torch::nn::EmbeddingBag::from_pretrained`.");
     }
-    options.num_embeddings(embeddings.size(0));
-    options.embedding_dim(embeddings.size(1));
-    EmbeddingBag embeddingbag(options._weight(embeddings));
+    EmbeddingBag embeddingbag(options.num_embeddings(embeddings.size(0)).embedding_dim(embeddings.size(1))._weight(embeddings));
     embeddingbag->weight.set_requires_grad(!freeze);
     return embeddingbag;
   }

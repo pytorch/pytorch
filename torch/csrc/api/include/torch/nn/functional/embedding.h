@@ -75,7 +75,6 @@ inline Tensor embedding_bag(
   }
 
   if (options.max_norm() != c10::nullopt) {
-    torch::NoGradGuard no_grad;
     _no_grad_embedding_renorm_(weight, input, *options.max_norm(), options.norm_type());
   }
 
