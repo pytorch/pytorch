@@ -12,7 +12,7 @@ HANDLED_FUNCTIONS = {}
 def implements(torch_function):
     "Register an implementation of a torch function for a Tensor-like object."
     def decorator(func):
-        HANDLED_FUNCTIONS[torch_function.__name__] = func
+        HANDLED_FUNCTIONS[torch_function] = func
         return func
     return decorator
 
@@ -23,25 +23,31 @@ class SubTensor(Tensor):
 
         if func not in HANDLED_FUNCTIONS:
             return NotImplemented
-        # Note: this allows subclasses that don't override
-        # __torch_function__ to handle DiagonalTensor objects.
+
         return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
+# define these at module scope since we want them to be
+# available in SubTensor's implementation of add and mm
+t1 = torch.tensor([[1, 1], [1, 1.]])
+t2 = torch.tensor([[0, 0], [0, 0.]])
+
+# define add and mm to use global versions of t1 and t2 so that we do an
+# apples-to-apples comparison with the pure-tensor case. This means any
+# excess time in the benchmarks using SubTensor is overhead for calling
+# the __torch_function__ implementation
 @implements(torch.add)
 def add(mat1, mat2):
-    "Implementation of torch.mm for DiagonalTensor objects"
-    return 0
+    return torch.add(t1, t2)
 
 @implements(torch.mm)
 def mm(mat1, mat2):
-    "Implementation of torch.mm for DiagonalTensor objects"
-    return 1
+    return torch.mm(t1, t2)
 
 class TorchFunction(Benchmark):
 
     def setup(self):
-        self.t1 = torch.ones(2, 2, dtype=torch.float32)
-        self.t2 = torch.zeros(2, 2, dtype=torch.float32)
+        self.t1 = torch.tensor([[1, 1], [1, 1.]])
+        self.t2 = torch.tensor([[0, 0], [0, 0.]])
         self.t3 = SubTensor([[1, 1], [1, 1.]])
         self.t4 = SubTensor([[0, 0], [0, 0.]])
 

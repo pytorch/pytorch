@@ -37,34 +37,46 @@ Benchmarking PyTorch with Airspeed Velocity.
 Usage
 -----
 
-Airspeed Velocity manages building and Python virtualenvs or conda envs by
-itself, unless told otherwise (e.g. with `--python=same`).
-To run the benchmarks, you do not need to install a development version of
-PyTorch to your current Python environment.
-TODO: check that the isolated build feature works, so far just used
-`--python=same`.
+Run a benchmark on the branch heads configured in `asv.conf.json`::
 
-Run a benchmark against currently installed PyTorch version (don't
-record the result)::
+    asv run
 
-    asv run --python=same
+Right now only `master` is included, although you can add other branches
+if you would like to compare those. Pass `-v` if you would like to monitor
+the build progress.
 
-Compare change in benchmark results to another version::
+Note that this will build an isolated conda environment to run the
+benchmarks in and might take some time, use `--python=same` to use the
+python version that `asv` is installed with. This will be much faster if
+pytorch is already installed in that environment.
 
-    TODO
+You can also pass `asv run` the `--skip-existing-commits` argument to
+skip commits where the benchmarks have already run and there are results
+present in the `asv` results database.
 
-Run ASV commands (record results and generate HTML)::
+To compare change in benchmark results across a set of revisions
 
-    cd benchmarks
-    asv run --skip-existing-commits --steps 10 ALL
+    asv run first_revision..second_revision
+
+Where first_revision is a ref pointing to the first revision to test and
+second_revision is a ref pointing to the second revision. You can pass
+`--steps` to limit the number of commits in between that get benchmarked.
+
+To generate and view the benchmark results locally, do::
+
     asv publish
     asv preview
 
-More on how to use ``asv`` can be found in the
-[ASV documentation](https://asv.readthedocs.io).
-Command-line help is available as usual via `asv --help` and `asv run --help`.
+You can also do::
 
+    asv compare rev1 rev2
 
+Where rev1 and rev2 are commit refs or hashes of commits that are
+present in the results database.
+
+More on how to use ``asv`` can be found in the [ASV
+documentation](https://asv.readthedocs.io).  Command-line help is
+available as usual via `asv --help` and `asv run --help`.
 
 Writing benchmarks
 ------------------

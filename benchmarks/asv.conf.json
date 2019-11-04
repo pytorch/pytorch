@@ -43,6 +43,8 @@
     // version.
     "matrix": {
         "six": [],
+        "pyyaml": [],
+        "numpy": [],
     },
 
     // The directory (relative to the current directory) that benchmarks are
