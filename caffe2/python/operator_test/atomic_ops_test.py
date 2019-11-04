@@ -7,6 +7,7 @@ from caffe2.python.test_util import TestCase
 
 
 class TestAtomicOps(TestCase):
+    @unittest.skip("Test is flaky: https://github.com/pytorch/pytorch/issues/28179")
     def test_atomic_ops(self):
         """
         Test that both countdown and checksum are update atomically by having
