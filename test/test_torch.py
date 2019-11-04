@@ -758,8 +758,8 @@ class _TestTorchMixin(object):
             res = torch.where(a > 0)
             self.assertEqual(1, len(res))
 
-    def test_where_tensor_cpu(self):
-        def rand_tensor(size, dtype, device, cont):
+    def test_where_tensor(self):
+        def rand_tensor(size, dtype, device):
             if dtype.is_floating_point:
                 return torch.rand(size=size, dtype=dtype, device=device)
             elif dtype == torch.uint8:
@@ -769,11 +769,11 @@ class _TestTorchMixin(object):
             else:
                 return torch.randint(-5, 5, size=size, dtype=dtype, device=device)
 
-        def get_tensor(size, dtype, device, cont):
-            if not cont and len(size) < 2:
+        def get_tensor(size, dtype, device, contiguous):
+            if not contiguous and len(size) < 2:
                 raise RuntimeError("Unable to generate non contiguous tensor with size < 2")
-            t = rand_tensor(size, dtype, device, cont)
-            if cont:
+            t = rand_tensor(size, dtype, device)
+            if contiguous:
                 return t
             else:
                 return t.transpose(0, 1)
@@ -783,16 +783,19 @@ class _TestTorchMixin(object):
         for device in torch.testing.get_all_device_types():
             for dt1 in torch.testing.get_all_math_dtypes(device):
                 for dt2 in torch.testing.get_all_math_dtypes(device):
-                    for cont in [True, False]:
-                        x1 = get_tensor((height, width), dt1, device, cont)
-                        x2 = get_tensor((height, width), dt2, device, cont)
+                    for contiguous in [True, False]:
+                        x1 = get_tensor((height, width), dt1, device, contiguous)
+                        x2 = get_tensor((height, width), dt2, device, contiguous)
                         if dt1 != dt2:
                             self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(x1 == 1, x1, x2))
                         else:
-                            res = torch.where(x1 == 1, x1, x2)
+                            if x1.is_floating_point():
+                                res = torch.where(x1 < 0.5, x1, x2)
+                            else:
+                                res = torch.where(x1 == 1, x1, x2)
                             for i in range(height):
                                 for j in range(width):
-                                    if x1[i][j] == 1:
+                                    if (x1.is_floating_point() and x1[i][j] < 0.5) or (not x1.is_floating_point() and x1[i][j] == 1):
                                         self.assertTrue(res[i][j].item() == x1[i][j].item())
                                     else:
                                         self.assertTrue(res[i][j].item() == x2[i][j].item())
