@@ -192,7 +192,7 @@ struct FunctionSignature {
 struct FunctionParameter {
   FunctionParameter(const std::string& fmt, bool keyword_only);
 
-  bool check(PyObject* obj, bool is_exact);
+  bool check(PyObject* obj, bool is_exact_class);
 
   void set_default_str(const std::string& str);
   std::string type_name() const;
