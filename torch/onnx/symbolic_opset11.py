@@ -48,17 +48,14 @@ def pixel_shuffle(g, self, upscale_factor):
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, align_corners=None):
         align_corners = sym_help._maybe_get_scalar(align_corners)
-        output_size = sym_help._maybe_get_const(output_size, 'is')
-        if sym_help._is_value(output_size):
-            offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.int64))
-            output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
-            output_size = g.op("Concat", offsets, output_size, axis_i=0)
-        else:
-            output_size = [1 if i < 2 else output_size[-(dim - i)] for i in range(0, dim)]
-            output_size = g.op("Constant", value_t=torch.tensor(output_size))
         coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \
             else "align_corners" if align_corners else "pytorch_half_pixel"
         empty_tensor = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+        input_size = input.type().sizes()
+        input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
+        output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
+        output_size = g.op("Concat", input_size, output_size, axis_i=0)
+
         return g.op("Resize",
                     input,
                     empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
@@ -80,32 +77,48 @@ upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners):
+def __interpolate(g, input, size, scale_factor, mode, align_corners):
     mode = sym_help._maybe_get_const(mode, 's')
+    if 'linear' in mode:
+        mode = 'linear'
+    if 'cubic' in mode:
+        mode = 'cubic'
     align_corners = sym_help._maybe_get_const(align_corners, 'b')
-    align_corners = False if _is_none(align_corners) else align_corners
+    align_corners = False if sym_help._is_none(align_corners) else align_corners
     coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
         else "align_corners" if align_corners else "pytorch_half_pixel"
     # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
     roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
 
     if not sym_help._is_none(size) :
-        offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.int64))
-        size = g.op("Cast", size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
-        size = g.op("Concat", offsets, size, axis_i=0)
+        input_size = input.type().sizes()
+        input_size = g.op("Constant", value_t=torch.tensor(input_size[0:2], dtype=torch.int64))
+        is_scalar = ((sym_help._maybe_get_const(size, 't').dim() == 0))
+        if is_scalar:
+            size = unsqueeze(g, size, 0)
+            size = [size for i in range(input.type().dim() - 2)]
+            size = g.op("Concat", *size, axis_i=0)
+        size = g.op("Concat", input_size, size, axis_i=0)
         scales = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-    elif not sym_help._is_none(scales) :
-        scales = sym_help._interpolate_get_scales(g, scale_factor, 4)
-        size = g.op("Constant", value_t=torch.tensor([], dtype=torch.int64))
-    return g.op("Resize",
-                input,
-                roi,
-                scales,
-                size,
-                coordinate_transformation_mode_s=coordinate_transformation_mode,
-                cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-                mode_s=mode,  # nearest, linear, or cubic
-                nearest_mode_s="floor")  # only valid when mode="nearest"
+        return g.op("Resize",
+                    input,
+                    roi,
+                    scales,
+                    size,
+                    coordinate_transformation_mode_s=coordinate_transformation_mode,
+                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                    mode_s=mode,  # nearest, linear, or cubic
+                    nearest_mode_s="floor")
+    else:  # if not sym_help._is_none(scales)
+        scales = sym_help._interpolate_get_scales(g, scale_factor, input.type().dim())
+        return g.op("Resize",
+                    input,
+                    roi,
+                    scales,
+                    coordinate_transformation_mode_s=coordinate_transformation_mode,
+                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                    mode_s=mode,  # nearest, linear, or cubic
+                    nearest_mode_s="floor")  # only valid when mode="nearest"
 
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):
@@ -180,6 +193,10 @@ def round(g, self):
     return g.op("Round", self)
 
 
+def det(g, self):
+    return g.op("Det", self)
+
+
 def arange(g, *args):
     def _get_arange_dtype(dtype):
         dtype = sym_help._maybe_get_const(dtype, 'i')
@@ -206,6 +223,7 @@ def arange(g, *args):
     else:
         raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
     return arange_tensor
+
 
 @parse_args('v', 'i')
 def _dim_arange(g, like, dim):
