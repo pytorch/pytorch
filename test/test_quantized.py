@@ -519,9 +519,9 @@ class TestQuantizedOps(TestCase):
 
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
-        oH = pool_output_shape(iH, kernel, padding, stride, 0)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation=1)
         assume(oH > 0)
-        oW = pool_output_shape(iW, kernel, padding, stride, 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation=1)
         assume(oW > 0)
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
@@ -570,8 +570,16 @@ class TestQuantizedOps(TestCase):
         X, (scale, zero_point, torch_type) = X
         H, W = X.shape[-2:]
 
+
         if X.shape[1] < 176:
             X = np.repeat(X, 176 / X.shape[1], 1)
+
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation=1)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation=1)
+        assume(oW > 0)
 
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
 
