@@ -140,7 +140,8 @@ class TestUtilityFuns(TestCase):
                 a = torch.tensor([[1., 2., 3.]])
                 b = torch.tensor([[4., 5., 6.]])
                 c = torch.cat((a, b), 0)
-                return b + c
+                d = b + c
+                return x + d
 
         _set_opset_version(self.opset_version)
         x = torch.ones(2, 3)
@@ -151,7 +152,7 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Concat"
             assert node.kind() != "onnx::Cast"
             assert node.kind() != "onnx::Constant"
-        assert len(list(graph.nodes())) == 1
+        assert len(list(graph.nodes())) == 2
 
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
