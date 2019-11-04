@@ -757,15 +757,30 @@ class TestTorchFunctionOverride(TestCase):
         self.assertEqual(torch.div(t1, t2), 1)
         self.assertEqual(torch.div(t2, t1), 1)
 
-    def test_unrelated_class_notimplemented_return(self):
         # SubTensor has an implementation that returns NotImplemented as
         # well so it should behave exactly like SubDiagonalTensor in the
         # test above
-        t1 = DiagonalTensor(5, 2)
-        t2 = SubTensor([[1, 2], [1, 2]])
-        self.assertEqual(torch.div(t1, t2), 1)
-        self.assertEqual(torch.div(t2, t1), 1)
+        t3 = SubTensor([[1, 2], [1, 2]])
+        self.assertEqual(torch.div(t1, t3), 1)
+        self.assertEqual(torch.div(t3, t1), 1)
 
+        # div between SubTensor and SubDiagonalTensor should return
+        # NotImplemented since both have an implementation that
+        # explicitly returns NotImplemented
+        self.assertEqual(torch.div(t2, t3), NotImplemented)
+        self.assertEqual(torch.div(t3, t2), NotImplemented)
+
+        # neither DiagonalTensor, SubdiagonalTensor, or SubTensor has a
+        # mul implmentation so all ops should return NotImplemented
+        self.assertEqual(torch.mul(t1, t1), NotImplemented)
+        self.assertEqual(torch.mul(t1, t2), NotImplemented)
+        self.assertEqual(torch.mul(t1, t3), NotImplemented)
+        self.assertEqual(torch.mul(t2, t1), NotImplemented)
+        self.assertEqual(torch.mul(t2, t2), NotImplemented)
+        self.assertEqual(torch.mul(t2, t3), NotImplemented)
+        self.assertEqual(torch.mul(t3, t1), NotImplemented)
+        self.assertEqual(torch.mul(t3, t2), NotImplemented)
+        self.assertEqual(torch.mul(t3, t3), NotImplemented)
 
 def generate_tensor_like_override_tests(cls):
     def test_generator(func, override):
