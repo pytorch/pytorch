@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/arg.h>
+#include <torch/enum.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
 
@@ -45,10 +46,10 @@ struct TORCH_API RNNOptionsBase {
 
 } // namespace detail
 
-enum class RNNActivation : uint32_t {ReLU, Tanh};
-
 /// Options for RNN modules.
 struct TORCH_API RNNOptions {
+  typedef c10::variant<enumtype::kReLU, enumtype::kTanh> nonlinearity_t;
+
   RNNOptions(int64_t input_size, int64_t hidden_size);
 
   /// The number of expected features in the input `x`.
@@ -81,7 +82,7 @@ struct TORCH_API RNNOptions {
   TORCH_ARG(bool, bidirectional) = false;
 
   /// The non-linearity to use. Can be either `Tanh` or `ReLU`. Default: `Tanh`
-  TORCH_ARG(RNNActivation, nonlinearity) = RNNActivation::Tanh;
+  TORCH_ARG(nonlinearity_t, nonlinearity) = torch::kTanh;
 };
 
 using LSTMOptions = detail::RNNOptionsBase;

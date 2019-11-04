@@ -219,32 +219,30 @@ RNNImpl::RNNImpl(const RNNOptions& options_)
               .dropout(options_.dropout())
               .bidirectional(options_.bidirectional())
               .batch_first(options_.batch_first()),
-          static_cast<CuDNNMode>(options_.nonlinearity())),
+          cudnnmode_get_enum(options_.nonlinearity())),
       options(options_) {}
 
 void RNNImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::RNN(input_size=" << options.input_size()
          << ", hidden_size=" << options.hidden_size()
          << ", layers=" << options.num_layers() << ", dropout=" << options.dropout()
-         << ", activation="
-         << (options.nonlinearity() == RNNActivation::Tanh ? "tanh" : "relu")
+         << ", activation=" << enumtype::get_enum_name(options.nonlinearity())
          << ")";
 }
 
 RNNOutput RNNImpl::forward(const Tensor& input, Tensor state) {
-  switch (options.nonlinearity()) {
-    case RNNActivation::ReLU:
-      return generic_forward(
-          static_cast<RNNFunctionSignature*>(&torch::rnn_relu),
-          input,
-          std::move(state));
-    case RNNActivation::Tanh:
-      return generic_forward(
-          static_cast<RNNFunctionSignature*>(&torch::rnn_tanh),
-          input,
-          std::move(state));
-    default:
-      AT_ERROR("Unhandled RNN activation function!");
+  if (c10::get_if<enumtype::kReLU>(&options.nonlinearity())) {
+    return generic_forward(
+      static_cast<RNNFunctionSignature*>(&torch::rnn_relu),
+      input,
+      std::move(state));
+  } else if (c10::get_if<enumtype::kTanh>(&options.nonlinearity())) {
+    return generic_forward(
+      static_cast<RNNFunctionSignature*>(&torch::rnn_tanh),
+      input,
+      std::move(state));
+  } else {
+    AT_ERROR("Unhandled RNN activation function!");
   }
 }
 

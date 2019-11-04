@@ -175,12 +175,12 @@ TEST_F(RNNTest, EndToEndGRU) {
 
 TEST_F(RNNTest, EndToEndRNNRelu) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
-      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(RNNActivation::ReLU).num_layers(2)); }));
+      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kReLU).num_layers(2)); }));
 }
 
 TEST_F(RNNTest, EndToEndRNNTanh) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
-      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(RNNActivation::Tanh).num_layers(2)); }));
+      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kTanh).num_layers(2)); }));
 }
 
 TEST_F(RNNTest, Sizes_CUDA) {
@@ -217,11 +217,11 @@ TEST_F(RNNTest, EndToEndGRU_CUDA) {
 
 TEST_F(RNNTest, EndToEndRNNRelu_CUDA) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
-      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(RNNActivation::ReLU).num_layers(2)); }, true));
+      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kReLU).num_layers(2)); }, true));
 }
 TEST_F(RNNTest, EndToEndRNNTanh_CUDA) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
-      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(RNNActivation::Tanh).num_layers(2)); }, true));
+      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(torch::kTanh).num_layers(2)); }, true));
 }
 
 TEST_F(RNNTest, PrettyPrintRNNs) {
@@ -232,7 +232,7 @@ TEST_F(RNNTest, PrettyPrintRNNs) {
       c10::str(GRU(GRUOptions(128, 64).num_layers(3).dropout(0.5))),
       "torch::nn::GRU(input_size=128, hidden_size=64, layers=3, dropout=0.5)");
   ASSERT_EQ(
-      c10::str(RNN(RNNOptions(128, 64).num_layers(3).dropout(0.2).nonlinearity(RNNActivation::Tanh))),
+      c10::str(RNN(RNNOptions(128, 64).num_layers(3).dropout(0.2).nonlinearity(torch::kTanh))),
       "torch::nn::RNN(input_size=128, hidden_size=64, layers=3, dropout=0.2, activation=tanh)");
 }
 

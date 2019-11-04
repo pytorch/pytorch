@@ -36,6 +36,19 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
   /// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
   enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
+  template <typename V>
+  CuDNNMode cudnnmode_get_enum(V variant_enum) {
+    if (c10::get_if<enumtype::kReLU>(&variant_enum)) {
+      return CuDNNMode::RNN_RELU;
+    } else if (c10::get_if<enumtype::kTanh>(&variant_enum)) {
+      return CuDNNMode::RNN_RELU;
+    } else {
+      TORCH_CHECK(
+      false,
+      get_enum_name(variant_enum), " is not a valid value for CuDNNMode");
+    }
+  }
+
   explicit RNNImplBase(
       const RNNOptionsBase& options_,
       optional<CuDNNMode> cudnn_mode = nullopt,
