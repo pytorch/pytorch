@@ -95,7 +95,7 @@ TEST(OperatorRegistrationTest, whenCallingOpWithWrongDispatchKey_thenFails) {
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
-  }, "Could not run '_test::dummy' with its input from the 'CUDATensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'CUDATensorId'"
   " backend. '_test::dummy' is only available for these backends:"
   " [CPUTensorId].");
 }
@@ -184,7 +184,7 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringWithSchema_t
   ASSERT_TRUE(op.has_value()); // assert schema is registered
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
   " backend. '_test::dummy' is only available for these backends: [].");
 }
 
@@ -235,7 +235,7 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterw
   ASSERT_TRUE(op.has_value()); // assert schema is registered
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
   " backend. '_test::dummy' is only available for these backends: [].");
 }
 
@@ -398,7 +398,7 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenOlder
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
   " backend. '_test::dummy' is only available for these backends: [].");
 }
 
@@ -417,7 +417,7 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenOlderAndThenNewe
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
   " backend. '_test::dummy' is only available for these backends: [].");
 }
 
@@ -436,7 +436,7 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenNewer
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
   " backend. '_test::dummy' is only available for these backends: [].");
 }
 
@@ -455,7 +455,7 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenNewerAndThenOlde
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
   " backend. '_test::dummy' is only available for these backends: [].");
 }
 
@@ -481,7 +481,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCall
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::XLATensorId));
-  }, "Could not run '_test::dummy' with its input from the 'XLATensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'XLATensorId'"
   " backend. '_test::dummy' is only available for these backends: [");
 
   // also assert that the error message contains the available tensor type ids, but don't assert their order
@@ -508,17 +508,17 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallOutOfSc
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'CPUTensorId'"
   " backend. '_test::dummy' is only available for these backends: [].");
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
-  }, "Could not run '_test::dummy' with its input from the 'CUDATensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'CUDATensorId'"
   " backend. '_test::dummy' is only available for these backends: [].");
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::XLATensorId));
-  }, "Could not run '_test::dummy' with its input from the 'XLATensorId'"
+  }, "Could not run '_test::dummy' with arguments from the 'XLATensorId'"
   " backend. '_test::dummy' is only available for these backends: [].");
 }
 

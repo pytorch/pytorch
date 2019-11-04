@@ -292,7 +292,7 @@ private:
       }
 
       const std::string dispatch_key_str = toString(*dispatch_key);
-      TORCH_CHECK(false, "Could not run '", operator_name_, "' with its input",
+      TORCH_CHECK(false, "Could not run '", operator_name_, "' with arguments",
                   " from the '", dispatch_key_str, "' backend. '",
                   operator_name_, "' is only available for these backends: ",
                   listAllDispatchKeys(), ".");
