@@ -28,10 +28,7 @@ inline c10::ScalarType compute_desired_dtype(c10::ScalarType scalar_type) {
     // In C++, an integer literal without suffix (e.g. `1` instead of `1u`) can be one of
     // `int` / `long int` / `long long int` types. When we find that `scalar_type` is one
     // of those types, we always use `torch.int64` type, because In Python `torch.tensor(1)`
-    // always gives a tensor of `torch.int64` dtype. (Note that this means that `long int`
-    // integer literals such as `1l` will also be promoted to `torch.int64` type, because
-    // we can't differentiate between the `long int` from an integer literal without suffix
-    // and the `long int` from an integer literal with suffix `l`.)
+    // always gives a tensor of `torch.int64` dtype.
     //
     // Note that this dtype computation only takes effect when the user passes an integer
     // literal or a braced-init-list to `torch::tensor` constructor. It doesn't affect
