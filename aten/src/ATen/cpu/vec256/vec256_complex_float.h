@@ -13,7 +13,7 @@ namespace {
 
 #if defined(__AVX__) && !defined(_MSC_VER)
 
-template <> class Vec256<std::complex<float>> {
+template <> class Vec256<std::complex<float>> { 
 private:
   __m256 values;
 public:
