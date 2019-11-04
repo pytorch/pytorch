@@ -36,9 +36,9 @@ void LayerNormKernelImplInternal(
   T* mean_data = mean->data_ptr<T>();
   T* rstd_data = rstd->data_ptr<T>();
   const T c = T(1) / static_cast<T>(N);
-  constexpr int64_t VEC_SIZE = vec256::Vec256<T>::size();
-  std::array<T, VEC_SIZE> mean_arr;
-  std::array<T, VEC_SIZE> rstd_arr;
+  constexpr int64_t kVecSize = vec256::Vec256<T>::size();
+  std::array<T, kVecSize> mean_arr;
+  std::array<T, kVecSize> rstd_arr;
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
   at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
@@ -48,8 +48,8 @@ void LayerNormKernelImplInternal(
       vec256::Vec256<T> mean_vec(0);
       vec256::Vec256<T> rstd_vec(0);
       int64_t j = 0;
-      for (j = 0; j < N / VEC_SIZE * VEC_SIZE; j += VEC_SIZE) {
-        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(&X_ptr[j]);
+      for (j = 0; j < N / kVecSize * kVecSize; j += kVecSize) {
+        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + j);
         mean_vec = mean_vec + x_vec;
         rstd_vec = rstd_vec + x_vec * x_vec;
       }
@@ -66,7 +66,21 @@ void LayerNormKernelImplInternal(
       rstd_val = T(1) / std::sqrt(rstd_val + eps);
       const T scale = rstd_val;
       const T bias = -rstd_val * mean_val;
-      for (int64_t j = 0; j < N; ++j) {
+      for (j = 0; j < N / kVecSize * kVecSize; j += kVecSize) {
+        const vec256::Vec256<T> gamma_vec = gamma_null
+            ? vec256::Vec256<T>(1)
+            : vec256::Vec256<T>::loadu(gamma_data + j);
+        const vec256::Vec256<T> beta_vec = beta_null
+            ? vec256::Vec256<T>(0)
+            : vec256::Vec256<T>::loadu(beta_data + j);
+        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + j);
+        const vec256::Vec256<T> tmp_vec = vec256::fmadd(
+            x_vec, vec256::Vec256<T>(scale), vec256::Vec256<T>(bias));
+        const vec256::Vec256<T> y_vec =
+            vec256::fmadd(tmp_vec, gamma_vec, beta_vec);
+        y_vec.store(Y_ptr + j);
+      }
+      for (; j < N; ++j) {
         const T gamma_v = gamma_null ? T(1) : gamma_data[j];
         const T beta_v = beta_null ? T(0) : beta_data[j];
         Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
@@ -126,9 +140,9 @@ void LayerNormBackwardKernelImplInternal(
     std::memset(dbeta_data, 0, N * sizeof(T));
   }
   const T scale = T(1) / static_cast<T>(N);
-  constexpr int64_t VEC_SIZE = vec256::Vec256<T>::size();
-  std::array<T, VEC_SIZE> ds_arr;
-  std::array<T, VEC_SIZE> db_arr;
+  constexpr int64_t kVecSize = vec256::Vec256<T>::size();
+  std::array<T, kVecSize> ds_arr;
+  std::array<T, kVecSize> db_arr;
   const bool gamma_null = gamma_data == nullptr;
   for (int64_t i = 0; i < M; ++i) {
     const T* dY_ptr = dY_data + i * N;
@@ -138,12 +152,12 @@ void LayerNormBackwardKernelImplInternal(
       vec256::Vec256<T> ds_vec(0);
       vec256::Vec256<T> db_vec(0);
       int64_t j = 0;
-      for (j = 0; j < N / VEC_SIZE * VEC_SIZE; j += VEC_SIZE) {
-        const vec256::Vec256<T> dy_vec = vec256::Vec256<T>::loadu(&dY_ptr[j]);
-        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(&X_ptr[j]);
+      for (j = 0; j < N / kVecSize * kVecSize; j += kVecSize) {
+        const vec256::Vec256<T> dy_vec = vec256::Vec256<T>::loadu(dY_ptr + j);
+        const vec256::Vec256<T> x_vec = vec256::Vec256<T>::loadu(X_ptr + j);
         const vec256::Vec256<T> gamma_vec = gamma_null
             ? vec256::Vec256<T>(1)
-            : vec256::Vec256<T>::loadu(&gamma_data[j]);
+            : vec256::Vec256<T>::loadu(gamma_data + j);
         ds_vec = ds_vec + dy_vec * x_vec * gamma_vec;
         db_vec = db_vec + dy_vec * gamma_vec;
       }
