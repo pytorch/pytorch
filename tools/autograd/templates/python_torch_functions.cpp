@@ -499,6 +499,22 @@ void initTorchFunctions(PyObject* module) {
   }
 }
 
+PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyTypeObject &torch_api) {
+  PyObject* torch_api_function =
+    PyObject_FastGetAttrString((PyObject*)&torch_api, const_cast<char*>(r.get_func_name().data()));
+    PyObject* ret;
+    // there must be at least one overloaded argument at this point, since r.has_torch_function() is true
+    // so ret will never be returned unset
+    for (auto it = r.overloaded_args.begin(); it != r.overloaded_args.end(); ++it) {
+      PyObject* torch_function = PyObject_FastGetAttrString(*it, "__torch_function__");
+      ret = PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
+      if (ret != Py_NotImplemented) {
+        return ret;
+      }
+    }
+    return ret;
+}
+
 // generated methods start here
 
 ${py_methods}
@@ -514,10 +530,7 @@ static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* 
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
-    PyObject* torch_function = PyObject_FastGetAttrString(r.overloaded_args[0], "__torch_function__");
-    PyObject* torch_api_function = PyObject_FastGetAttrString(
-        (PyObject*)&THPVariableFunctions, const_cast<char*>(r.get_func_name().data()));
-    return PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
+    return handle_torch_function(r, args, kwargs, THPVariableFunctions);
   }
 
   if (r.idx == 0) {
@@ -547,10 +560,7 @@ static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* k
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if(r.has_torch_function()){
-    PyObject* torch_function = PyObject_FastGetAttrString(r.overloaded_args[0], "__torch_function__");
-    PyObject* torch_api_function = PyObject_FastGetAttrString(
-        (PyObject*)&THPVariableFunctions, const_cast<char*>(r.get_func_name().data()));
-    return PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
+    return handle_torch_function(r, args, kwargs, THPVariableFunctions);
   }
 
   if (r.idx == 0) {

@@ -116,6 +116,10 @@ def mean(mat):
 def diagonal_mm(mat1, mat2):
     return 0
 
+@implements_diagonal(torch.div)
+def diagonal_div(input, other, out=None):
+    return 1
+
 # The dispatch table for SubTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_SUB = {}
 
@@ -162,6 +166,10 @@ class SubTensor(torch.Tensor):
 def sub_mm(mat1, mat2):
     return 0
 
+@implements_sub(torch.div)
+def sub_div(input, other, out=None):
+    return NotImplemented
+
 # The dispatch table for SubDiagonalTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_SUB_DIAGONAL = {}
 
@@ -197,6 +205,9 @@ def sub_diagonal_mean(mat):
 def sub_diagonal_mm(mat1, mat2):
     return 1
 
+@implements_sub_diagonal(torch.div)
+def sub_diagonal_div(input, other, out=None):
+    return NotImplemented
 
 # The dispatch table for SubDiagonalTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_TENSOR_LIKE = {}
@@ -735,6 +746,26 @@ class TestTorchFunctionOverride(TestCase):
         self.assertEqual(torch.mm(t1, t3), 0)
         self.assertEqual(torch.mm(t3, t2), 1)
         self.assertEqual(torch.mm(t2, t3), 1)
+
+    def test_subclass_notimplemented_return(self):
+        # DiagonalTensor has a valid override for torch.div and
+        # SubDiagonal has an override that returns NotImplemented so
+        # torch.div on t1 and t2 below should call the DiagonalTensor
+        # implementation, returning 1
+        t1 = DiagonalTensor(5, 2)
+        t2 = SubDiagonalTensor(5, 2)
+        self.assertEqual(torch.div(t1, t2), 1)
+        self.assertEqual(torch.div(t2, t1), 1)
+
+    def test_unrelated_class_notimplemented_return(self):
+        # SubTensor has an implementation that returns NotImplemented as
+        # well so it should behave exactly like SubDiagonalTensor in the
+        # test above
+        t1 = DiagonalTensor(5, 2)
+        t2 = SubTensor([[1, 2], [1, 2]])
+        self.assertEqual(torch.div(t1, t2), 1)
+        self.assertEqual(torch.div(t2, t1), 1)
+
 
 def generate_tensor_like_override_tests(cls):
     def test_generator(func, override):
