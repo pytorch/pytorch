@@ -15,6 +15,8 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
+const int OPSET_VERSION_11 = 11;
+
 bool isRNN(const Node* node) {
   auto k = node->kind();
   return k == onnx::RNN || k == onnx::LSTM || k == onnx::GRU;
@@ -563,7 +565,7 @@ static void eraseListConstruct(Block* block, int opset_version) {
               i, std::vector<Value*>({concat_node->output()}));
 
         } else {
-          if (opset_version < 11) {
+          if (opset_version < OPSET_VERSION_11) {
             // Tensor lists are used mostly for inputs to cat/stack. They are
             // already handled in those symbolics, and should become dead
             // afterwards.
@@ -699,7 +701,7 @@ static void convertDynamicUnbindToSplitToSequence(Block *b, int opset_version) {
     }
 
     if (it->kind() == aten::unbind) {
-      if (opset_version < 11) {
+      if (opset_version < OPSET_VERSION_11) {
         AT_ERROR("Dynamic unbind(dynamic number of outputs) is not exportable in opset version ", opset_version,
             ". Please try exporting with opset version >= 11.");
       }
@@ -724,7 +726,7 @@ static void convertUnbindToSplit(Block *b, int opset_version) {
 }
 
 static void convertSplitToDynamic(Block *b, int opset_version) {
-  if (opset_version < 11) {
+  if (opset_version < OPSET_VERSION_11) {
     return;
   }
 
@@ -741,8 +743,8 @@ static void convertSplitToDynamic(Block *b, int opset_version) {
             b->owningGraph()->create(onnx::Constant, 1);
         auto tensor = at::empty(split.size(), c10::kLong);
         int64_t* data = tensor.data<int64_t>();
-        for (size_t i = 0; i < split.size(); ++i) {
-          *data++ = split[i];
+        for (auto split_size : split) {
+          *data++ = split_size;
         }
         split_const_node->t_(
             attr::value,
