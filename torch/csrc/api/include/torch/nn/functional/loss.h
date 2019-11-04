@@ -245,6 +245,13 @@ inline Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets,
     options.zero_infinity());
 }
 
+inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
+                               const PoissonNLLLossOptions& options = {}) {
+  return torch::poisson_nll_loss(input, target, options.log_input(),
+    options.full(), options.eps(),
+    enumtype::reduction_get_enum(options.reduction()));
+}
+
 } // namespace functional
 } // namespace nn
 } // namespace torch
