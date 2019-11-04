@@ -2120,14 +2120,11 @@ t2.start()
                 loss = loss_fn(output, target)
                 loss = loss / iters_to_accumulate
                 if try_scaling_api:
-                    torch.cuda.synchronize()
                     scaler.scale(loss).backward()
-                    torch.cuda.synchronize()
                 else:
                     loss.backward()
                 if (i + 1) % iters_to_accumulate == 0:
                     if try_scaling_api:
-                        torch.cuda.synchronize()
                         scaler.step(optimizer)
                         scaler.update()
                         optimizer.zero_grad()
