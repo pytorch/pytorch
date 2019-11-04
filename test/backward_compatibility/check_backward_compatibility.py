@@ -26,6 +26,7 @@ white_list = [
     ('rand_like', datetime.date(2019, 11, 11)),
     ('ones_like', datetime.date(2019, 11, 11)),
     ('full_like', datetime.date(2019, 11, 11)),
+    ('AutogradAnyNonZero', datetime.date(2019, 11, 11)),
 ]
 
 

@@ -20,13 +20,7 @@ graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %pad
   std::string quantized_conv2d = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
         %r_quant = quantized::conv2d(%a_quant, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
-        %0 : int = prim::Constant[value=0]()
-        %1 : int = prim::Constant[value=1]()
-        %2 : int = prim::Constant[value=2]()
-        %3 : int = prim::Constant[value=3]()
-        %out_param : int[] = prim::ListConstruct(%0, %3, %1, %2)
-        %r_perm = aten::permute(%r_quant, %out_param)
-        return (%r_perm) )";
+        return (%r_quant) )";
 
   std::string addmm = R"(
 graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype, %4):
