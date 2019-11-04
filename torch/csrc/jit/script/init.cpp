@@ -648,6 +648,25 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def("_get_parameters", get_generic_list<script::detail::ParameterPolicy>)
       .def("_get_buffers", get_generic_list<script::detail::BufferPolicy>)
+      .def(
+          "_replicate_for_data_parallel",
+          [](Module& module) {
+            Module replica(
+                *module.module_object()->type()->name(),
+                module.module_object()->compilation_unit(),
+                /*should_mangle*/ true);
+            ClassTypePtr module_cls = module.module_object()->type();
+            for (size_t i = 0, N = module_cls->numAttributes(); i < N; ++i) {
+              if (LegacyAttributePolicy::valid(module_cls, i) &&
+                  !detail::BufferPolicy::valid(module_cls, i)) {
+                replica.register_attribute(
+                    module_cls->getAttributeName(i),
+                    module_cls->getAttribute(i),
+                    module.module_object()->getSlot(i));
+              }
+            }
+            return replica;
+          })
       .def("_has_attribute", has_generic<LegacyAttributePolicy>)
       .def("_has_parameter", has_generic<script::detail::ParameterPolicy>)
       .def("_has_buffer", has_generic<script::detail::BufferPolicy>)
