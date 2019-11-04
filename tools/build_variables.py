@@ -108,6 +108,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/canonicalize_ops.cpp",
     "torch/csrc/jit/passes/decompose_ops.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
+    "torch/csrc/jit/passes/clear_undefinedness.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/jit/passes/constant_propagation.cpp",
     "torch/csrc/jit/passes/constant_pooling.cpp",

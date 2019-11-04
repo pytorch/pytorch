@@ -57,6 +57,28 @@ inline float clip_grad_norm_(
   return clip_grad_norm_(params, max_norm, norm_type);
 }
 
+// Clips gradient of an iterable of parameters at specified value.
+// Gradients are modified in-place.
+// See https://pytorch.org/docs/stable/nn.html#clip-grad-value
+// for more details about this module.
+inline void clip_grad_value_(
+    std::vector<Tensor>& parameters,
+    float clip_value) {
+
+  for (const auto& param : parameters) {
+    if (param.grad().defined()) {
+      param.grad().data().clamp_(-clip_value, clip_value);
+    }
+  }
+}
+
+// A wrapper around clip_grad_value_ that allows us to call the function with a
+// single Tensor.
+inline void clip_grad_value_(Tensor& parameters, float clip_value) {
+  std::vector<Tensor> params = {parameters};
+  clip_grad_value_(params, clip_value);
+}
+
 } // namespace utils
 } // namespace nn
 } // namespace torch

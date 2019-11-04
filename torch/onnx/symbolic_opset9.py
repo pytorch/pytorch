@@ -1212,8 +1212,8 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1229,8 +1229,8 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def ones_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1251,8 +1251,8 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
                     value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'f', 'i', 'v', 'v', 'v', 'v')
+def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
