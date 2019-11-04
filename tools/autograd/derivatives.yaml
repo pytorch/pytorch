@@ -1039,7 +1039,7 @@
   self: elu_backward(grad, alpha, scale, input_scale, result)
 
 - name: gelu(Tensor self) -> Tensor
-  self: gelu_backward(grad, self)
+  self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)

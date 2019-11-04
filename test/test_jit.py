@@ -18453,6 +18453,21 @@ class TestClassType(JitTestCase):
                 li.sort()
                 return li
 
+    def test_class_inheritance(self):
+        @torch.jit.script
+        class Base(object):
+            def __init__(self):
+                self.b = 2
+
+            def two(self, x):
+                return x + self.b
+
+        with self.assertRaisesRegex(RuntimeError, "does not support inheritance"):
+            @torch.jit.script
+            class Derived(Base):
+                def two(self, x):
+                    return x + self.b + 2
+
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):
         import jit._imported_class_test.foo

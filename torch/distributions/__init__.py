@@ -107,6 +107,7 @@ from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *
 from .uniform import Uniform
+from .von_mises import VonMises
 from .weibull import Weibull
 
 __all__ = [
@@ -142,6 +143,7 @@ __all__ = [
     'StudentT',
     'Poisson',
     'Uniform',
+    'VonMises',
     'Weibull',
     'TransformedDistribution',
     'biject_to',
