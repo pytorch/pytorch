@@ -8392,6 +8392,42 @@ class TestNNDeviceType(NNTestCase):
                 self._test_rnn_retain_variables(device, dtype)
 
     @onlyCUDA
+    def test_upsamplingNearest1d_launch_config(self, device):
+        m = nn.Upsample(scale_factor=2)
+        inp = torch.rand(2**25, 1, 1, device=device)
+        out = m(inp)
+        inp_ref = inp.cpu()
+        out_ref = m(inp_ref)
+        self.assertEqual(out_ref, out)
+
+    @onlyCUDA
+    def test_upsamplingNearest2d_launch_config(self, device):
+        m = nn.Upsample(scale_factor=2)
+        inp = torch.rand(2**25, 1, 1, 1, device=device)
+        out = m(inp)
+        inp_ref = inp.cpu()
+        out_ref = m(inp_ref)
+        self.assertEqual(out_ref, out)
+
+    @onlyCUDA
+    def test_upsamplingNearest3d_launch_config(self, device):
+        m = nn.Upsample(scale_factor=2)
+        inp = torch.rand(2**25, 1, 1, 1, 1, device=device)
+        out = m(inp)
+        inp_ref = inp.cpu()
+        out_ref = m(inp_ref)
+        self.assertEqual(out_ref, out)
+
+    @unittest.expectedFailure
+    @skipIfRocm
+    @onlyCUDA
+    def test_upsamplingNearest2d_launch_fail(self, device):
+        m = nn.Upsample(scale_factor=2)
+        # launch grid_y == 2**16 (larger than maximum y-dimension limit 65535)
+        inp = torch.rand(1, 1, 2**15, 2**8, device=device)
+        out = m(inp)
+
+    @onlyCUDA
     @skipCUDAIfCudnnVersionLessThan(7600)
     def test_CTCLoss_cudnn(self, device):
         target_lengths = [30, 25, 20]
