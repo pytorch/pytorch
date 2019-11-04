@@ -658,8 +658,6 @@ if (NOT INTERN_BUILD_MOBILE)
 endif()
 
 if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
-  target_compile_definitions(torch PUBLIC _THP_CORE)
-
 
   # until they can be unified, keep these lists synced with setup.py
   if(MSVC)
