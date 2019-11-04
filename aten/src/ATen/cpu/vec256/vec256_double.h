@@ -315,7 +315,7 @@ Vec256<double> inline fmadd(const Vec256<double>& a, const Vec256<double>& b, co
 #elif defined(__AVX__)
 template <>
 Vec256<double> inline fmadd(const Vec256<double>& a, const Vec256<double>& b, const Vec256<double>& c) {
-  return _mm256_add_ps(_m256_mul_ps(a, b), c);
+  return a * b + c;
 }
 #endif
 
