@@ -483,6 +483,12 @@ optional<std::vector<Dimname>> compute_cdist_outnames(
   const auto other_batch = TensorNames(other_names, 0, num_batch_dims(other_names));
 
   auto result = self_batch.unifyFromRight(other_batch, "cdist");
+
+  // cdist treats self and other like batches of M x D and N X D tensors, respectively.
+  // It computes the pairwise distance between each of the M vectors (of size D)
+  // in `self` and each of the N vectors in `other`, returning a batch of M x N
+  // distance values. We propagate the names of the dimension of size M (in self)
+  // and the dimension of size N (in other), both of which are second-from-last.
   result.append(TensorName(self_names, -2));
   result.append(TensorName(other_names, -2));
   result.checkUnique("cdist");
