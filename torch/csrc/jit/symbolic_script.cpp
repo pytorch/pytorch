@@ -923,11 +923,11 @@ const std::vector<std::string> functions = {
 
             return torch.log2(self), backward
 
-        def rand_like(self):
+        def rand_like(self, *, memory_format: Optional[int]):
             def backward(grad_output):
                 return None
 
-            return torch.rand_like(self), backward
+            return torch.rand_like(self, memory_format=memory_format), backward
 
         def reciprocal(self):
             result = torch.reciprocal(self)
@@ -1078,7 +1078,7 @@ const std::vector<std::string> functions = {
                        eps : float,
                        cudnn_enabled : bool):
 
-            output, save1, save2, impl_idx = torch._batch_norm_impl_index(
+            output, save1, save2, reserve, impl_idx = torch._batch_norm_impl_index(
                 input, weight, bias, running_mean, running_var, training,
                 momentum, eps, cudnn_enabled)
             has_weight = weight is not None
@@ -1087,7 +1087,7 @@ const std::vector<std::string> functions = {
             def backward(grad_output):
                 dinput, dweight, dbias = torch._batch_norm_impl_index_backward(
                     impl_idx, input, grad_output, weight, running_mean, running_var,
-                    save1, save2, training, eps, [True, has_weight, has_bias])
+                    save1, save2, training, eps, [True, has_weight, has_bias], reserve)
                 return dinput, dweight, dbias, None, None, None, None, None, None
 
             return output, backward
@@ -1108,7 +1108,7 @@ const std::vector<std::string> functions = {
 
             input_reshape = input.contiguous().view(1, n, -1)
 
-            bn_out, save1, save2, impl_idx = torch._batch_norm_impl_index(
+            bn_out, save1, save2, reserve, impl_idx = torch._batch_norm_impl_index(
                 input_reshape, None, None, None, None, True,
                 0.0, eps, cudnn_enable)
 
@@ -1145,7 +1145,7 @@ const std::vector<std::string> functions = {
 
                 grad_input, _, _ = torch._batch_norm_impl_index_backward(
                     impl_idx, input_reshape, grad_bn_out, None, None, None,
-                    save1, save2, True, eps, [True, False, False])
+                    save1, save2, True, eps, [True, False, False], reserve)
 
                 grad_input = grad_input.view(input.size())
                 return grad_input, None, grad_weight, grad_bias, None, None
@@ -1309,7 +1309,7 @@ const std::vector<std::string> functions = {
 
             return torch.__interpolate(input, size, scale_factor, mode, align_corners), backward
       )",
-      R"(
+    R"(
         def AD_sizes_if_not_equal_multi_1(t1, t2, res):
             return torch._size_if_not_equal(t1.size(), res.size()), torch._size_if_not_equal(t2.size(), res.size())
 

@@ -397,7 +397,7 @@ class TORCH_API MaxUnpool3dImpl : public MaxUnpoolImpl<3, MaxUnpool3dImpl> {
 /// module storage semantics.
 TORCH_MODULE(MaxUnpool3d);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LPPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LPPool ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Base class for all (dimension-specialized) lppool modules.
 template <size_t D, typename Derived>
@@ -427,6 +427,19 @@ class TORCH_API LPPool1dImpl : public LPPoolImpl<1, LPPool1dImpl> {
 };
 
 TORCH_MODULE(LPPool1d);
+
+/// Applies the LPPool2d function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LPPool2d to learn
+/// about the exact behavior of this module.
+class TORCH_API LPPool2dImpl : public LPPoolImpl<2, LPPool2dImpl> {
+ public:
+  using LPPoolImpl<2, LPPool2dImpl>::LPPoolImpl;
+
+  Tensor forward(const Tensor& input);
+
+};
+
+TORCH_MODULE(LPPool2d);
 
 } // namespace nn
 } // namespace torch
