@@ -816,7 +816,7 @@ TEST_F(ModulesTest, Linear) {
 TEST_F(ModulesTest, LocalResponseNorm) {
   {
     LocalResponseNorm model(LocalResponseNormOptions(2));
-    const auto x = torch::arange(100, 136, torch::requires_grad()).reshape({2, 3, 3, 2});
+    const auto x = torch::arange(100., 136, torch::requires_grad()).reshape({2, 3, 3, 2});
     auto y = model(x);
     const auto y_exp = torch::tensor(
       {{{{73.7788, 74.1462},
@@ -917,7 +917,7 @@ TEST_F(ModulesTest, Fold) {
 TEST_F(ModulesTest, Unfold) {
   {
     Unfold model(UnfoldOptions({2, 2}).padding(1).stride(2));
-    auto input = torch::arange(2, 14, torch::requires_grad()).view({1, 2, 2, 3});
+    auto input = torch::arange(2., 14, torch::requires_grad()).view({1, 2, 2, 3});
     auto output = model(input);
     auto expected = torch::tensor(
         {{{0.0, 0.0, 0.0, 6.0},
