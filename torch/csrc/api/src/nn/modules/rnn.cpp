@@ -36,14 +36,14 @@ template <typename Derived>
 void RNNImplBase<Derived>::reset() {
   const auto num_directions = options.bidirectional() ? 2 : 1;
 
-  w_ih.resize(options.layers() * num_directions);
-  w_hh.resize(options.layers() * num_directions);
-  b_ih.resize(options.layers() * num_directions);
-  b_hh.resize(options.layers() * num_directions);
+  w_ih.resize(options.num_layers() * num_directions);
+  w_hh.resize(options.num_layers() * num_directions);
+  b_ih.resize(options.num_layers() * num_directions);
+  b_hh.resize(options.num_layers() * num_directions);
 
   const int64_t gate_size = options.hidden_size() * number_of_gates_;
 
-  for (int64_t layer = 0; layer < options.layers(); ++layer) {
+  for (int64_t layer = 0; layer < options.num_layers(); ++layer) {
     for (auto direction = 0; direction < num_directions; direction++) {
       const auto layer_input_size = layer == 0 ? options.input_size() :
         options.hidden_size() * num_directions;
@@ -56,7 +56,7 @@ void RNNImplBase<Derived>::reset() {
           "weight_hh_l" + std::to_string(layer) + suffix,
           torch::empty({gate_size, options.hidden_size()}));
 
-      if (options.with_bias()) {
+      if (options.bias()) {
         b_ih[layer_idx] = this->register_parameter(
           "bias_ih_l" + std::to_string(layer) + suffix,
           torch::empty({gate_size}));
@@ -97,12 +97,12 @@ template <typename Derived>
 void RNNImplBase<Derived>::to(torch::Device device, bool non_blocking) {
   nn::Module::to(device, non_blocking);
   const auto num_directions = options.bidirectional() ? 2 : 1;
-  for (int64_t layer = 0; layer < options.layers(); layer++) {
+  for (int64_t layer = 0; layer < options.num_layers(); layer++) {
     for (auto direction = 0; direction < num_directions; direction++) {
       const auto layer_idx = (layer * num_directions) + direction;
       w_ih[layer_idx] = w_ih[layer_idx].to(device, non_blocking);
       w_hh[layer_idx] = w_hh[layer_idx].to(device, non_blocking);
-      if (options.with_bias()) {
+      if (options.bias()) {
         b_ih[layer_idx] = b_ih[layer_idx].to(device, non_blocking);
         b_hh[layer_idx] = b_hh[layer_idx].to(device, non_blocking);
       }
@@ -117,7 +117,7 @@ void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
   const std::string name_without_impl = name.substr(0, name.size() - 4);
   stream << name_without_impl << "(input_size=" << options.input_size()
          << ", hidden_size=" << options.hidden_size()
-         << ", layers=" << options.layers() << ", dropout=" << options.dropout()
+         << ", layers=" << options.num_layers() << ", dropout=" << options.dropout()
          << ")";
 }
 
@@ -133,11 +133,11 @@ void RNNImplBase<Derived>::flatten_parameters() {
   NoGradGuard no_grad;
   torch::_cudnn_rnn_flatten_weight(
       flat_weights_,
-      /*weight_stride0=*/options.with_bias() ? 4 : 2,
+      /*weight_stride0=*/options.bias() ? 4 : 2,
       options.input_size(),
       static_cast<int64_t>(*cudnn_mode_),
       options.hidden_size(),
-      options.layers(),
+      options.num_layers(),
       /*batch_first=*/options.batch_first(),
       /*bidirectional=*/options.bidirectional());
 }
@@ -152,7 +152,7 @@ RNNOutput RNNImplBase<Derived>::generic_forward(
     const auto batch_size = input.size(options.batch_first() ? 0 : 1);
     const auto num_directions = options.bidirectional() ? 2 : 1;
     state = torch::zeros(
-      {options.layers() * num_directions, batch_size, options.hidden_size()},
+      {options.num_layers() * num_directions, batch_size, options.hidden_size()},
       input.options());
   }
   Tensor output, new_state;
@@ -160,8 +160,8 @@ RNNOutput RNNImplBase<Derived>::generic_forward(
       input,
       std::move(state),
       flat_weights_,
-      options.with_bias(),
-      options.layers(),
+      options.bias(),
+      options.num_layers(),
       options.dropout(),
       this->is_training(),
       options.bidirectional(),
@@ -175,12 +175,12 @@ std::vector<Tensor> RNNImplBase<Derived>::flat_weights() const {
   // (w_ih, w_hh, b_ih, b_hh), repeated for each layer (next to each other).
   std::vector<Tensor> flat;
   const auto num_directions = options.bidirectional() ? 2 : 1;
-  for (int64_t layer = 0; layer < options.layers(); layer++) {
+  for (int64_t layer = 0; layer < options.num_layers(); layer++) {
     for (auto direction = 0; direction < num_directions; direction++) {
       const auto layer_idx = (layer * num_directions) + direction;
       flat.push_back(w_ih[layer_idx]);
       flat.push_back(w_hh[layer_idx]);
-      if (options.with_bias()) {
+      if (options.bias()) {
         flat.push_back(b_ih[layer_idx]);
         flat.push_back(b_hh[layer_idx]);
       }
@@ -214,25 +214,25 @@ template class RNNImplBase<RNNImpl>;
 RNNImpl::RNNImpl(const RNNOptions& options_)
     : detail::RNNImplBase<RNNImpl>(
           detail::RNNOptionsBase(options_.input_size(), options_.hidden_size())
-              .layers(options_.layers())
-              .with_bias(options_.with_bias())
+              .num_layers(options_.num_layers())
+              .bias(options_.bias())
               .dropout(options_.dropout())
               .bidirectional(options_.bidirectional())
               .batch_first(options_.batch_first()),
-          static_cast<CuDNNMode>(options_.activation())),
+          static_cast<CuDNNMode>(options_.nonlinearity())),
       options(options_) {}
 
 void RNNImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::RNN(input_size=" << options.input_size()
          << ", hidden_size=" << options.hidden_size()
-         << ", layers=" << options.layers() << ", dropout=" << options.dropout()
+         << ", layers=" << options.num_layers() << ", dropout=" << options.dropout()
          << ", activation="
-         << (options.activation() == RNNActivation::Tanh ? "tanh" : "relu")
+         << (options.nonlinearity() == RNNActivation::Tanh ? "tanh" : "relu")
          << ")";
 }
 
 RNNOutput RNNImpl::forward(const Tensor& input, Tensor state) {
-  switch (options.activation()) {
+  switch (options.nonlinearity()) {
     case RNNActivation::ReLU:
       return generic_forward(
           static_cast<RNNFunctionSignature*>(&torch::rnn_relu),
@@ -268,7 +268,7 @@ RNNOutput LSTMImpl::forward(const Tensor& input, Tensor state) {
     const auto batch_size = input.size(options.batch_first() ? 0 : 1);
     const auto num_directions = options.bidirectional() ? 2 : 1;
     state = torch::zeros(
-        {2, options.layers() * num_directions, batch_size, options.hidden_size()},
+        {2, options.num_layers() * num_directions, batch_size, options.hidden_size()},
         input.options());
   }
   Tensor output, hidden_state, cell_state;
@@ -276,8 +276,8 @@ RNNOutput LSTMImpl::forward(const Tensor& input, Tensor state) {
       input,
       {state[0], state[1]},
       flat_weights_,
-      options.with_bias(),
-      options.layers(),
+      options.bias(),
+      options.num_layers(),
       options.dropout(),
       this->is_training(),
       options.bidirectional(),

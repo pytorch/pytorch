@@ -83,7 +83,7 @@ void check_lstm_sizes(RNNOutput output) {
 struct RNNTest : torch::test::SeedingFixture {};
 
 TEST_F(RNNTest, CheckOutputSizes) {
-  LSTM model(LSTMOptions(128, 64).layers(3).dropout(0.2));
+  LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2));
   // Input size is: sequence length, batch size, input size
   auto x = torch::randn({10, 16, 128}, torch::requires_grad());
   auto output = model->forward(x);
@@ -165,27 +165,27 @@ TEST_F(RNNTest, CheckOutputValuesMatchPyTorch) {
 
 TEST_F(RNNTest, EndToEndLSTM) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
-      [](int s) { return LSTM(LSTMOptions(s, s).layers(2)); }));
+      [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2)); }));
 }
 
 TEST_F(RNNTest, EndToEndGRU) {
   ASSERT_TRUE(
-      test_RNN_xor<GRU>([](int s) { return GRU(GRUOptions(s, s).layers(2)); }));
+      test_RNN_xor<GRU>([](int s) { return GRU(GRUOptions(s, s).num_layers(2)); }));
 }
 
 TEST_F(RNNTest, EndToEndRNNRelu) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
-      [](int s) { return RNN(RNNOptions(s, s).relu().layers(2)); }));
+      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(RNNActivation::ReLU).num_layers(2)); }));
 }
 
 TEST_F(RNNTest, EndToEndRNNTanh) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
-      [](int s) { return RNN(RNNOptions(s, s).tanh().layers(2)); }));
+      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(RNNActivation::Tanh).num_layers(2)); }));
 }
 
 TEST_F(RNNTest, Sizes_CUDA) {
   torch::manual_seed(0);
-  LSTM model(LSTMOptions(128, 64).layers(3).dropout(0.2));
+  LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2));
   model->to(torch::kCUDA);
   auto x =
       torch::randn({10, 16, 128}, torch::requires_grad().device(torch::kCUDA));
@@ -207,32 +207,32 @@ TEST_F(RNNTest, Sizes_CUDA) {
 
 TEST_F(RNNTest, EndToEndLSTM_CUDA) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
-      [](int s) { return LSTM(LSTMOptions(s, s).layers(2)); }, true));
+      [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2)); }, true));
 }
 
 TEST_F(RNNTest, EndToEndGRU_CUDA) {
   ASSERT_TRUE(test_RNN_xor<GRU>(
-      [](int s) { return GRU(GRUOptions(s, s).layers(2)); }, true));
+      [](int s) { return GRU(GRUOptions(s, s).num_layers(2)); }, true));
 }
 
 TEST_F(RNNTest, EndToEndRNNRelu_CUDA) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
-      [](int s) { return RNN(RNNOptions(s, s).relu().layers(2)); }, true));
+      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(RNNActivation::ReLU).num_layers(2)); }, true));
 }
 TEST_F(RNNTest, EndToEndRNNTanh_CUDA) {
   ASSERT_TRUE(test_RNN_xor<RNN>(
-      [](int s) { return RNN(RNNOptions(s, s).tanh().layers(2)); }, true));
+      [](int s) { return RNN(RNNOptions(s, s).nonlinearity(RNNActivation::Tanh).num_layers(2)); }, true));
 }
 
 TEST_F(RNNTest, PrettyPrintRNNs) {
   ASSERT_EQ(
-      c10::str(LSTM(LSTMOptions(128, 64).layers(3).dropout(0.2))),
+      c10::str(LSTM(LSTMOptions(128, 64).num_layers(3).dropout(0.2))),
       "torch::nn::LSTM(input_size=128, hidden_size=64, layers=3, dropout=0.2)");
   ASSERT_EQ(
-      c10::str(GRU(GRUOptions(128, 64).layers(3).dropout(0.5))),
+      c10::str(GRU(GRUOptions(128, 64).num_layers(3).dropout(0.5))),
       "torch::nn::GRU(input_size=128, hidden_size=64, layers=3, dropout=0.5)");
   ASSERT_EQ(
-      c10::str(RNN(RNNOptions(128, 64).layers(3).dropout(0.2).tanh())),
+      c10::str(RNN(RNNOptions(128, 64).num_layers(3).dropout(0.2).nonlinearity(RNNActivation::Tanh))),
       "torch::nn::RNN(input_size=128, hidden_size=64, layers=3, dropout=0.2, activation=tanh)");
 }
 
@@ -240,7 +240,7 @@ TEST_F(RNNTest, PrettyPrintRNNs) {
 // when bidirectional is set to true
 // https://github.com/pytorch/pytorch/issues/19545
 TEST_F(RNNTest, BidirectionalFlattenParameters) {
-  GRU gru(GRUOptions(100, 256).layers(2).bidirectional(true));
+  GRU gru(GRUOptions(100, 256).num_layers(2).bidirectional(true));
   gru->flatten_parameters();
 }
 
@@ -264,7 +264,7 @@ void BidirectionalGRUReverseForward(bool cuda) {
   auto input = torch::tensor({1, 2, 3, 4, 5}, opt).reshape({5, 1, 1});
   auto input_reversed = torch::tensor({5, 4, 3, 2, 1}, opt).reshape({5, 1, 1});
 
-  auto gru_options = GRUOptions(1, 1).layers(1).batch_first(false);
+  auto gru_options = GRUOptions(1, 1).num_layers(1).batch_first(false);
   GRU bi_grus {gru_options.bidirectional(true)};
   GRU reverse_gru {gru_options.bidirectional(false)};
 
@@ -315,7 +315,7 @@ void BidirectionalLSTMReverseForwardTest(bool cuda) {
   auto input = torch::tensor({1, 2, 3, 4, 5}, opt).reshape({5, 1, 1});
   auto input_reversed = torch::tensor({5, 4, 3, 2, 1}, opt).reshape({5, 1, 1});
 
-  auto lstm_opt = GRUOptions(1, 1).layers(1).batch_first(false);
+  auto lstm_opt = GRUOptions(1, 1).num_layers(1).batch_first(false);
 
   LSTM bi_lstm {lstm_opt.bidirectional(true)};
   LSTM reverse_lstm {lstm_opt.bidirectional(false)};
@@ -363,7 +363,7 @@ TEST_F(RNNTest, BidirectionalLSTMReverseForward_CUDA) {
 
 TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
   // Create two GRUs with the same options
-  auto opt = GRUOptions(2, 4).layers(3).batch_first(false).bidirectional(true);
+  auto opt = GRUOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true);
   GRU gru_cpu {opt};
   GRU gru_cuda {opt};
 
@@ -371,7 +371,7 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
   {
     at::NoGradGuard guard;
     const auto num_directions = gru_cpu->options.bidirectional() ? 2 : 1;
-    for (int64_t layer = 0; layer < gru_cpu->options.layers(); layer++) {
+    for (int64_t layer = 0; layer < gru_cpu->options.num_layers(); layer++) {
       for (auto direction = 0; direction < num_directions; direction++) {
         const auto layer_idx = (layer * num_directions) + direction;
         copyParameters(gru_cuda, layer_idx, gru_cpu, layer_idx);
@@ -418,7 +418,7 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
 
 TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
   // Create two LSTMs with the same options
-  auto opt = LSTMOptions(2, 4).layers(3).batch_first(false).bidirectional(true);
+  auto opt = LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true);
   LSTM lstm_cpu {opt};
   LSTM lstm_cuda {opt};
 
@@ -426,7 +426,7 @@ TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
   {
     at::NoGradGuard guard;
     const auto num_directions = lstm_cpu->options.bidirectional() ? 2 : 1;
-    for (int64_t layer = 0; layer < lstm_cpu->options.layers(); layer++) {
+    for (int64_t layer = 0; layer < lstm_cpu->options.num_layers(); layer++) {
       for (auto direction = 0; direction < num_directions; direction++) {
         const auto layer_idx = (layer * num_directions) + direction;
         copyParameters(lstm_cuda, layer_idx, lstm_cpu, layer_idx);
