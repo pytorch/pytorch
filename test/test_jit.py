@@ -10391,9 +10391,37 @@ a")
             for sub in m.mods:
                 v = sub(v)
             self.assertEqual(o, v)
-
             with self.assertRaisesRegex(Exception, "object is not iterable"):
                 print(list(m))
+                
+    def test_script_modulelist_index(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__()
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.mods = nn.ModuleList([Sub() for i in range(10)])
+
+            @torch.jit.script_method
+            def forward(self, v):
+                return self.mods[4].forward(v)
+
+
+            @torch.jit.script_method
+            def forward2(self, v):
+                return self.mods[2](v)
+
+        print(M().forward.graph)
+        # torch.jit.script(M().forward2)
 
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
