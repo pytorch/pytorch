@@ -154,11 +154,11 @@ void ConcreteModuleType::addModule(
   modules_.emplace_back(ModuleInfo{std::move(name), std::move(meta)});
 }
 
-void ConcreteModuleType::addModule(
+void ConcreteModuleType::addModuleInterface(
     std::string name,
     const TypePtr& type) {
   TORCH_INTERNAL_ASSERT(!jitType_);
-  TORCH_INTERNAL_ASSERT(type->is_module());
+  TORCH_INTERNAL_ASSERT(type->cast<InterfaceType>() && type->is_module());
   modules_.emplace_back(ModuleInfo{std::move(name), type});
 }
 

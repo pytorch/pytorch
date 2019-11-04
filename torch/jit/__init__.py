@@ -1384,7 +1384,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         # Note: the value to be swapped in has to be ScriptModule instead of nn.Module,
         # otherwise it's illegal and we throw error.
         if isinstance(v, ScriptModule):
-            self.module._setattr(k, v)
+            self.module._set_attribute(k, v)
             self._python_modules[k] = v
         else:
             raise RuntimeError("Cannot re-assign modules in a ScriptModule with non-scripted "

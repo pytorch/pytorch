@@ -117,7 +117,7 @@ def infer_raw_concrete_type(nn_module):
         attr_type = infer_type(name, item)
         if attr_type is not None:
             # if the type can be inferred, it should be a module interface type
-            concrete_type.add_module(name, attr_type)
+            concrete_type.add_module_interface(name, attr_type)
         else:
             # otherwise we get the concrete module type for item and add it to concrete_type
             sub_concrete_type = concrete_type_store.get_or_create_concrete_type(item)
@@ -364,7 +364,7 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
             assert isinstance(orig_value, Module)
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
-                scripted = create_script_module(orig_value, infer_interface_methods_to_compile(module_type, orig_value))
+                scripted = interface_script(module_type, orig_value)
             else:
                 # use the default recursive rule to compile the module
                 scripted = recursive_script(orig_value)
@@ -530,6 +530,21 @@ def infer_interface_methods_to_compile(mod_interface, nn_module):
     for method in mod_interface.getMethodNames():
         stubs.append(make_stub_from_method(nn_module, method))
     return stubs
+
+def interface_script(mod_interface, nn_module):
+    """
+    Makes a ScriptModule from an nn.Module, using the interface methods rule for
+    determining which methods to compile.
+
+    Arguments:
+        mod_interface: the interface type that the module have
+        nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
+    """
+    if isinstance(nn_module, torch.jit.ScriptModule):
+        return nn_module
+
+    check_module_initialized(nn_module)
+    return create_script_module(nn_module, infer_interface_methods_to_compile(mod_interface, nn_module))
 
 def recursive_script(nn_module):
     """

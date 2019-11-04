@@ -66,7 +66,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   // add a submodule to the ConcreteModuleType can either be ConcreteModuleType
   // that get constructed recursively, or InterfaceType (Module)
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
-  void addModule(std::string name, const TypePtr& type);
+  void addModuleInterface(std::string name, const TypePtr& type);
 
   void addOverload(
       std::string methodName,

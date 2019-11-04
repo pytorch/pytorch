@@ -181,10 +181,6 @@ struct TORCH_API Module {
   }
 
   void set_attribute(const std::string& name, IValue v) const {
-    return module_object()->setAttr(name, v);
-  }
-
-  void setattr(const std::string& name, IValue v) {
     size_t slot = module_object()->type()->getAttributeSlot(name);
     const TypePtr& expected = module_object()->type()->getAttribute(slot);
     // TODO: give better error message when subtyping check fails, and python_str
@@ -198,7 +194,7 @@ struct TORCH_API Module {
         "', but found '",
         v.type()->python_str(),
         "'");
-    module_object()->setSlot(slot, std::move(v));
+    return module_object()->setSlot(slot, std::move(v));
   }
 
   autograd::Variable get_buffer(const std::string& name) const {

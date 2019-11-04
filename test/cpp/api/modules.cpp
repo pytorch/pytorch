@@ -1858,6 +1858,14 @@ TEST_F(ModulesTest, CELU) {
   }
 }
 
+TEST_F(ModulesTest, GELU) {
+  GELU model;
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
+  const auto y = model(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
+}
+
 TEST_F(ModulesTest, Sigmoid) {
   Sigmoid model;
   auto x = torch::randn(100) * 10;
