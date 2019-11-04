@@ -58,12 +58,12 @@ using NameValue = Named<IValue>;
 using NameTensor = Named<at::Tensor>;
 
 namespace detail {
-struct ModulePolicy;
-struct ParameterPolicy;
-struct AttributePolicy;
-struct BufferPolicy;
+struct TORCH_API ModulePolicy;
+struct TORCH_API ParameterPolicy;
+struct TORCH_API AttributePolicy;
+struct TORCH_API BufferPolicy;
 template <typename P>
-struct NamedPolicy;
+struct TORCH_API NamedPolicy;
 } // namespace detail
 
 using module_list = slot_list_impl<detail::ModulePolicy>;
