@@ -5423,7 +5423,7 @@ class TestNN(NNTestCase):
                         input2 = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=dt2)
                         target = torch.tensor([1, -1], dtype=dt3)
                         result = torch.nn.functional.cosine_embedding_loss(input1, input2, target)
-                        self.assertEqual(result.item, 0.4672, 0.001)
+                        self.assertEqual(result.item(), 0.4672, 0.001)
 
     def test_kl_div_with_diff_type(self):
         for device in device_():
@@ -5431,10 +5431,10 @@ class TestNN(NNTestCase):
                 for target_dtype in [torch.float32, torch.float64, torch.float16]:
                     if not device.startswith('cuda') and target_dtype == torch.float16:
                         continue
-                    input = torch.tensor([[2, 3, 5], [3, 2, 1]],  dtype=input_dtype)
-                    target = torch.tensor([[1, 2, 3], [4, 5, 6]],  dtype=target_dtype)
+                    input = torch.tensor([[2, 3, 5], [3, 2, 1]], dtype=input_dtype)
+                    target = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=target_dtype)
                     result = torch.nn.functional.kl_div(input, target)
-                    self.assertEqual(result.item, -3.6625, 0.001)
+                    self.assertEqual(result.item(), -3.6625, 0.001)
 
     def test_cosine_embedding_loss_no_reduce(self):
         input1 = torch.randn(15, 10, requires_grad=True)
