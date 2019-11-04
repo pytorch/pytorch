@@ -793,6 +793,7 @@ if __name__ == '__main__':
                 'include/ATen/cudnn/*.h',
                 'include/ATen/detail/*.h',
                 'include/caffe2/utils/*.h',
+                'include/caffe2/utils/**/*.h',
                 'include/c10/*.h',
                 'include/c10/macros/*.h',
                 'include/c10/core/*.h',

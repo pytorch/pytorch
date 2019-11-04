@@ -82,7 +82,7 @@ Message RequestCallbackImpl::processRpc(
 
       ownerRRef->setValue(std::move(stack.front()));
       ctx.addForkOfOwner(src.retRRefId(), src.retForkId());
-      return std::move(RemoteRet(src.retRRefId(), src.retForkId())).toMessage();
+      return RemoteRet(src.retRRefId(), src.retForkId()).toMessage();
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -96,7 +96,7 @@ Message RequestCallbackImpl::processRpc(
       ownerRRef->setValue(
           PythonRpcHandler::getInstance().runPythonUDF(prc.serializedPyObj()));
       ctx.addForkOfOwner(rrefId, forkId);
-      return std::move(RemoteRet(rrefId, forkId)).toMessage();
+      return RemoteRet(rrefId, forkId).toMessage();
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
@@ -104,7 +104,7 @@ Message RequestCallbackImpl::processRpc(
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return std::move(ScriptRRefFetchRet({rref->getValue()})).toMessage();
+      return ScriptRRefFetchRet({rref->getValue()}).toMessage();
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
@@ -114,7 +114,7 @@ Message RequestCallbackImpl::processRpc(
           ctx.getOrCreateOwnerRRef<py::object>(prf.rrefId());
       SerializedPyObj result =
           PythonRpcHandler::getInstance().serialize(rref->getValue());
-      return std::move(PythonRRefFetchRet(result.toIValues())).toMessage();
+      return PythonRRefFetchRet(result.toIValues()).toMessage();
     }
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
@@ -132,7 +132,7 @@ Message RequestCallbackImpl::processRpc(
       auto& rfr = static_cast<RRefForkRequest&>(rpc);
       auto& ctx = RRefContext::getInstance();
       ctx.addForkOfOwner(rfr.rrefId(), rfr.forkId());
-      return std::move(RRefAck()).toMessage();
+      return RRefAck().toMessage();
     }
     case MessageType::FORWARD_AUTOGRAD_REQ: {
       auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);

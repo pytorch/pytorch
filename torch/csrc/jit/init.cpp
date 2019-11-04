@@ -325,7 +325,18 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_set_profiling_mode",
-          [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
+          [](bool profiling_flag) {
+            bool oldState = getProfilingMode();
+            getProfilingMode() = profiling_flag;
+            return oldState;
+          })
+      .def(
+          "_jit_set_profiling_executor",
+          [](bool profiling_flag) {
+            bool oldState = getExecutorMode();
+            getExecutorMode() = profiling_flag;
+            return oldState;
+          })
       .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
