@@ -293,10 +293,9 @@ private:
 
       const std::string dispatch_key_str = toString(*dispatch_key);
       TORCH_CHECK(false, "Could not run '", operator_name_, "' with its input",
-                  " registered as '", dispatch_key_str, "'. '", operator_name_,
-                  "' is registered with these keys only: ",
-                  listAllDispatchKeys(), ". Please, make sure the input and",
-                  " the operation are registered with the same dispatch key.");
+                  " from the '", dispatch_key_str, "' backend. '",
+                  operator_name_, "' is only available for these backends: ",
+                  listAllDispatchKeys(), ".");
   }
 
   detail::KernelTable_ kernels_;

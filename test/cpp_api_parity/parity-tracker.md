@@ -56,6 +56,7 @@ torch.nn.ReLU6|Yes|No
 torch.nn.RReLU|Yes|No
 torch.nn.SELU|Yes|No
 torch.nn.CELU|Yes|No
+torch.nn.GELU|Yes|No
 torch.nn.Sigmoid|Yes|No
 torch.nn.Softplus|Yes|No
 torch.nn.Softshrink|Yes|No
@@ -107,7 +108,7 @@ torch.nn.MSELoss|Yes|No
 torch.nn.CrossEntropyLoss|No|No
 torch.nn.CTCLoss|Yes|No
 torch.nn.NLLLoss|No|No
-torch.nn.PoissonNLLLoss|No|No
+torch.nn.PoissonNLLLoss|Yes|No
 torch.nn.KLDivLoss|Yes|No
 torch.nn.BCELoss|Yes|No
 torch.nn.BCEWithLogitsLoss|No|No

@@ -95,10 +95,9 @@ TEST(OperatorRegistrationTest, whenCallingOpWithWrongDispatchKey_thenFails) {
   ASSERT_TRUE(op.has_value());
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'CUDATensorId'."
-  " '_test::dummy' is registered with these keys only: [CPUTensorId]. Please,"
-  " make sure the input and the operation are registered with the same dispatch"
-  " key.");
+  }, "Could not run '_test::dummy' with its input from the 'CUDATensorId'"
+  " backend. '_test::dummy' is only available for these backends:"
+  " [CPUTensorId].");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithCatchallKernel_whenCallingOp_thenCallsCatchallKernel) {
@@ -185,9 +184,8 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringWithSchema_t
   ASSERT_TRUE(op.has_value()); // assert schema is registered
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'CPUTensorId'. "
-  "'_test::dummy' is registered with these keys only: []. Please, make sure the"
-  " input and the operation are registered with the same dispatch key.");
+  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringWithoutSchema_thenFails) {
@@ -237,9 +235,8 @@ TEST(OperatorRegistrationTest, givenOpWithoutKernels_whenRegisteringKernelAfterw
   ASSERT_TRUE(op.has_value()); // assert schema is registered
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'CPUTensorId'. "
-  "'_test::dummy' is registered with these keys only: []. Please, make sure the"
-  " input and the operation are registered with the same dispatch key.");
+  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, givenOpWithoutKernelsWithoutTensorInputs_whenRegistering_thenRegisters) {
@@ -401,9 +398,8 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenOlder
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'CPUTensorId'. "
-  "'_test::dummy' is registered with these keys only: []. Please, make sure the"
-  " input and the operation are registered with the same dispatch key.");
+  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenOlderAndThenNewerKernelDeletedAndOpCalled_thenFails) {
@@ -421,9 +417,8 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenOlderAndThenNewe
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'CPUTensorId'. "
-  "'_test::dummy' is registered with these keys only: []. Please, make sure the"
-  " input and the operation are registered with the same dispatch key.");
+  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
@@ -441,9 +436,8 @@ TEST(OperatorRegistrationTest, givenMultipleKernelsWithSameDispatchKey_whenNewer
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'CPUTensorId'. "
-  "'_test::dummy' is registered with these keys only: []. Please, make sure the"
-  " input and the operation are registered with the same dispatch key.");
+  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenNewerAndThenOlderKernelDeletedAndOpCalled_thenFails) {
@@ -461,9 +455,8 @@ TEST(OperatorRegistrationTest, givenMultipleCatchallKernels_whenNewerAndThenOlde
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'CPUTensorId'. "
-  "'_test::dummy' is registered with these keys only: []. Please, make sure the"
-  " input and the operation are registered with the same dispatch key.");
+  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCalling_thenCallsCorrectKernel) {
@@ -488,8 +481,8 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallAndCall
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::XLATensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'XLATensorId'. "
-  "'_test::dummy' is registered with these keys only: [");
+  }, "Could not run '_test::dummy' with its input from the 'XLATensorId'"
+  " backend. '_test::dummy' is only available for these backends: [");
 
   // also assert that the error message contains the available tensor type ids, but don't assert their order
   expectThrows<c10::Error>([&] {
@@ -515,21 +508,18 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallOutOfSc
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CPUTensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'CPUTensorId'. "
-  "'_test::dummy' is registered with these keys only: []. Please, make sure the"
-  " input and the operation are registered with the same dispatch key.");
+  }, "Could not run '_test::dummy' with its input from the 'CPUTensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::CUDATensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'CUDATensorId'. "
-  "'_test::dummy' is registered with these keys only: []. Please, make sure the"
-  " input and the operation are registered with the same dispatch key.");
+  }, "Could not run '_test::dummy' with its input from the 'CUDATensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::XLATensorId));
-  }, "Could not run '_test::dummy' with its input registered as 'XLATensorId'. "
-  "'_test::dummy' is registered with these keys only: []. Please, make sure the"
-  " input and the operation are registered with the same dispatch key.");
+  }, "Could not run '_test::dummy' with its input from the 'CLATensorId'"
+  " backend. '_test::dummy' is only available for these backends: [].");
 }
 
 bool called_stackbased_kernel = false;
