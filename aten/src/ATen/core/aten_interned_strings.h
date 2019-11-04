@@ -337,6 +337,7 @@ _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
 _(aten, ge) \
+_(aten, gelu) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, ger) \
