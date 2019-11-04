@@ -353,16 +353,16 @@ Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar 
 
 
 Tensor gelu_cpu(const Tensor& self) {
-  const auto X = self.contiguous();
-  Tensor Y = at::native::empty_like(X);
-  GeluKernel(kCPU, X, &Y);
+  Tensor Y = at::native::empty_like(self);
+  auto it = TensorIterator::unary_op(Y, self);
+  GeluKernel(kCPU, it);
   return Y;
 }
 
 Tensor gelu_backward_cpu(const Tensor& grad, const Tensor& self) {
-  const auto X = self.contiguous();
-  Tensor dX = at::native::empty_like(X);
-  GeluBackwardKernel(kCPU, grad.contiguous(), X, &dX);
+  Tensor dX = at::native::empty_like(self);
+  auto it = TensorIterator::binary_op(dX, grad, self);
+  GeluBackwardKernel(kCPU, it);
   return dX;
 }
 
