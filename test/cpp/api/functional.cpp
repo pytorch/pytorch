@@ -950,8 +950,8 @@ TEST_F(FunctionalTest, Linear) {
     ASSERT_TRUE(torch::allclose(y, y_exp));
   }
   {
-    const auto x = torch::arange(100, 118).resize_({3, 3, 2});
-    const auto w = torch::arange(200, 206).resize_({3, 2});
+    const auto x = torch::arange(100., 118).resize_({3, 3, 2});
+    const auto w = torch::arange(200., 206).resize_({3, 2});
     const auto y = F::linear(x, w);
     ASSERT_EQ(y.ndimension(), 3);
     ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 3}));
