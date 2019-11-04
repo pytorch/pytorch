@@ -598,6 +598,7 @@ static void fuseSplitListUnpack(Block* b) {
       fuseSplitListUnpack(child_block);
     }
     if (it->kind() == prim::ListUnpack &&
+        it->inputs().size() == 1 &&
         it->input()->node()->kind() == onnx::Split) {
       auto origSplitNode = it->input()->node();
 
@@ -639,6 +640,7 @@ static void fuseUnbindListUnpack(Block *b) {
       fuseUnbindListUnpack(child_block);
     }
     if (it->kind() == prim::ListUnpack &&
+        it->inputs().size() == 1 &&
         it->input()->node()->kind() == aten::unbind) {
       Node* orig_unbind_node = it->input()->node();
       auto dim = orig_unbind_node->i(attr::axis);
