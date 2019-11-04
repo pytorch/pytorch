@@ -1,5 +1,6 @@
 import sys
 import io
+import inspect
 import os
 import math
 import random
@@ -11044,7 +11045,7 @@ class TestTorchDeviceType(TestCase):
             ("sinh", doubles, True, True, 'cpu'),
             ("sinh", doubles, False, True, 'cuda'),
             ("sigmoid", doubles, True, True, 'cpu'),
-            ("sigmoid", doubles, False, False, 'cuda'),
+            ("sigmoid", doubles, True, True, 'cuda'),
             ("sqrt", doubles, True, True, 'cpu'),
             ("sqrt", doubles, False, True, 'cuda'),
             ("tan", doubles, True, True, 'cpu'),
@@ -11409,7 +11410,7 @@ class TestTorchDeviceType(TestCase):
                                                   [2., 1.]]],
                                                 dtype=dtype,
                                                 device=device)
-            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]], 
+            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]],
                                                       [[False, True], [True, True]]],
                                                      dtype=torch.bool,
                                                      device=device)
@@ -11471,7 +11472,7 @@ class TestTorchDeviceType(TestCase):
                 x,
                 return_inverse=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_inverse_dim1_bool, x_inverse)
             else:
@@ -11483,7 +11484,7 @@ class TestTorchDeviceType(TestCase):
                 return_inverse=False,
                 return_counts=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_counts_dim1_bool, x_counts)
             else:
@@ -11495,7 +11496,7 @@ class TestTorchDeviceType(TestCase):
                 return_inverse=True,
                 return_counts=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_inverse_dim1_bool, x_inverse)
                 self.assertEqual(expected_counts_dim1_bool, x_counts)
@@ -11589,7 +11590,7 @@ class TestTorchDeviceType(TestCase):
             expected_y_inverse_bool = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 3, 3], dtype=dtype, device=device)
             expected_y_counts_bool = torch.tensor([3, 3, 2, 2], dtype=dtype, device=device)
             y_unique, y_inverse, y_counts = torch.unique_consecutive(y, return_inverse=True, return_counts=True, dim=0)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_y_inverse_bool, y_inverse)
                 self.assertEqual(expected_y_counts_bool, y_counts)
             else:
@@ -11895,6 +11896,88 @@ class TestTorchDeviceType(TestCase):
         sparse = x.to_sparse()
         with self.assertRaises(RuntimeError):
             z = torch.empty_like(sparse, memory_format=torch.preserve_format)
+
+    def test_memory_format_operators(self, device):
+        def chunk_op(x, y):
+            x1, x2 = x.chunk(2, dim=1)
+            y1, y2 = x.chunk(2, dim=1)
+            y1 = y1.contiguous()
+            return y1 + x1
+
+        def unsqueeze_op_add(x, y):
+            return x[0].unsqueeze(0) + 3
+
+        def unsqueeze_op_clone(x, y):
+            return x[0].unsqueeze(0).clone()
+
+        x = torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last)
+        y = abs(torch.randn((4, 3, 8, 8), device=device)) + 1
+        fns = [
+            # lambda x, y: x.clone(),
+            lambda x, y: x + 3,
+            lambda x, y: 3 * x,
+            lambda x, y: x + y,
+            lambda x, y: y + x,
+            lambda x, y: x * y,
+            lambda x, y: y * x,
+            lambda x, y: x.sin(),
+            lambda x, y: x.sinh(),
+            lambda x, y: x.sqrt(),
+            # lambda x, y: abs(x), # https://github.com/pytorch/pytorch/issues/24531
+            # lambda x, y: x.abs(), # https://github.com/pytorch/pytorch/issues/24531
+            # lambda x, y: x.acos(), # https://github.com/pytorch/pytorch/issues/24532
+            lambda x, y: x.add(y, alpha=3),
+            lambda x, y: x.addcdiv(2, y, y),
+            lambda x, y: x.addcmul(2, y, y),
+            lambda x, y: x.asin(),
+            # lambda x, y: x.atan(), # https://github.com/pytorch/pytorch/issues/24538
+            lambda x, y: x.atan2(y),
+            lambda x, y: x.ceil(),
+            # lambda x, y: x.clamp(-1, 1), # https://github.com/pytorch/pytorch/issues/24544
+            # lambda x, y: x.cos(), # https://github.com/pytorch/pytorch/issues/24545
+            # lambda x, y: x.cosh(), # https://github.com/pytorch/pytorch/issues/24546
+            lambda x, y: x.div(0.5),
+            lambda x, y: x.div(y),
+            lambda x, y: x.digamma(),
+            # lambda x, y: x.erf(), # https://github.com/pytorch/pytorch/issues/24558
+            # lambda x, y: x.erfc(), # https://github.com/pytorch/pytorch/issues/24559
+            lambda x, y: x.erfinv(),
+            # lambda x, y: x.exp(), # https://github.com/pytorch/pytorch/issues/24561
+            lambda x, y: x.expm1(),
+            lambda x, y: x.floor(),
+            # lambda x, y: x.fmod(2), # https://github.com/pytorch/pytorch/issues/24565
+            # lambda x, y: x.frac(), # https://github.com/pytorch/pytorch/issues/24566
+            # lambda x, y: x.lerp(y, 0.5), #  Need to update Lerp.cu with TensorIterator
+            lambda x, y: x.log(),
+            lambda x, y: x.log10(),
+            lambda x, y: x.log1p(),
+            lambda x, y: x.log2(),
+            lambda x, y: x.mul(3),
+            lambda x, y: x.neg(),
+            lambda x, y: x.pow(3),
+            # lambda x, y: x.pow(0.0), # Need to make resize_as_ memory format aware
+            # lambda x, y: x.pow(1.0), # Need to make resize_as_ memory format aware
+            # lambda x, y: x.reciprocal(), # Not migrated for CUDA
+            # lambda x, y: x.remainder(2),  # https://github.com/pytorch/pytorch/issues/24615
+            lambda x, y: x.round(),
+            lambda x, y: x.rsqrt(),
+            # lambda x, y: x.sigmoid(), # https://github.com/pytorch/pytorch/issues/24624
+            lambda x, y: x.sign(),
+            lambda x, y: x.sin(),
+            lambda x, y: x.sinh(),
+            lambda x, y: x.sqrt(),
+            # lambda x, y: x.tan(), # https://github.com/pytorch/pytorch/issues/24641
+            # lambda x, y: x.tanh(), # https://github.com/pytorch/pytorch/issues/24642
+            lambda x, y: x.trunc(),
+            chunk_op,
+            unsqueeze_op_add,
+            # unsqueeze_op_clone,
+        ]
+        for fn in fns:
+            result = fn(x, y)
+            self.assertTrue(
+                result.is_contiguous(memory_format=torch.channels_last),
+                "result of the '{}' is not in channels_last format".format(inspect.getsource(fn).strip()))
 
     def test_unique(self, device):
         x = torch.tensor([1, 2, 3, 2, 8, 5, 2, 3], device=device)

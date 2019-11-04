@@ -305,6 +305,7 @@ void LayerNormKernelImplInternal(
           N, eps, X_data, mean_data, rstd_data);
   LayerNormForwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
       N, X_data, mean_data, rstd_data, gamma_data, beta_data, Y_data);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 void LayerNormKernelImpl(
@@ -450,7 +451,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   Tensor Y = at::native::empty_like(X);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
-  LayerNormKernelImpl(X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+  if (M > 0) {
+    LayerNormKernelImpl(X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+  }
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
@@ -470,13 +473,15 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     dX = at::native::empty_like(X);
   }
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma);
+    dgamma = M > 0 ? at::native::empty_like(gamma) : at::native::zeros_like(gamma);
   }
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma);
+    dbeta = M > 0 ? at::native::empty_like(gamma) : at::native::zeros_like(gamma);
   }
-  LayerNormBackwardKernelImpl(
-      dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+  if (M > 0) {
+    LayerNormBackwardKernelImpl(
+        dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+  }
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 

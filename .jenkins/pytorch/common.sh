@@ -168,6 +168,10 @@ function pip_uninstall() {
   pip uninstall -y "$@" || pip uninstall -y "$@"
 }
 
+retry () {
+  $*  || (sleep 1 && $*) || (sleep 2 && $*)
+}
+
 function get_exit_code() {
   set +e
   "$@"
