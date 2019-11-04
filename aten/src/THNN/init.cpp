@@ -67,12 +67,6 @@
 #include <THNN/generic/BCECriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/ClassNLLCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/ClassNLLCriterion.c>
-#include <TH/THGenerateBFloat16Type.h>
-
 #include <THNN/generic/ELU.c>
 #include <TH/THGenerateFloatTypes.h>
 
@@ -88,13 +82,7 @@
 #include <THNN/generic/LogSigmoid.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/MSECriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/SoftMarginCriterion.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/MultiLabelMarginCriterion.c>
 #include <TH/THGenerateFloatTypes.h>
 
 #include <THNN/generic/RReLU.c>
@@ -111,24 +99,6 @@
 
 #include <THNN/generic/Tanh.c>
 #include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/unfold.c>
-#include <TH/THGenerateLongType.h>
-
-#include <THNN/generic/unfold.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/unfold.c>
-#include <TH/THGenerateBFloat16Type.h>
-
-#include <THNN/generic/SpatialConvolutionMM.c>
-#include <TH/THGenerateLongType.h>
-
-#include <THNN/generic/SpatialConvolutionMM.c>
-#include <TH/THGenerateFloatTypes.h>
-
-#include <THNN/generic/SpatialConvolutionMM.c>
-#include <TH/THGenerateBFloat16Type.h>
 
 #include <THNN/generic/VolumetricConvolutionMM.c>
 #include <TH/THGenerateLongType.h>

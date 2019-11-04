@@ -1212,8 +1212,8 @@ def zeros(g, sizes, dtype, layout, device, pin_memory=False):
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1229,8 +1229,8 @@ def ones(g, sizes, dtype, layout, device, pin_memory=False):
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def ones_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1251,8 +1251,8 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
                     value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'f', 'i', 'v', 'v', 'v', 'v')
+def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     if dtype is None:
         dtype = 6  # float
@@ -1383,12 +1383,6 @@ def pixel_shuffle(g, self, upscale_factor):
     return view(g, after_transpose,
                 [-1, output_channel, dims[2] * upscale_factor, dims[3] *
                  upscale_factor])
-
-
-@parse_args('v', 'i', 'v', 'v', 'f', 'i')
-def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
-    return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
-                eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
@@ -1974,12 +1968,27 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
 
+
 def baddbmm(g, self, batch1, batch2, beta, alpha):
     dtype = self.type().scalarType()
     batch_mul = matmul(g, batch1, batch2)
     mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     mul_b = mul(g, self, g.op("Cast", beta, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     return add(g, mul_a, mul_b)
+
+
+def meshgrid(g, tensor_list):
+    tensors = [view(g, t, torch.LongTensor([-1])) for t in sym_help._unpack_list(tensor_list)]
+    tensors_shape = [g.op("Shape", t) for t in tensors]
+    out_shape = g.op("Concat", *tensors_shape, axis_i=0)
+    out = []
+    for i, t in enumerate(tensors):
+        shape_i = [g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))] * len(tensors)
+        shape_i[i] = tensors_shape[i]
+        t_reshaped = _reshape_from_tensor(g, t, g.op("Concat", *shape_i, axis_i=0))
+        out.append(g.op("Expand", t_reshaped, out_shape))
+    return g.op("prim::ListConstruct", *out)
+
 
 def remainder(g, input, other):
     div = g.op("Div", input, other)
@@ -1988,9 +1997,45 @@ def remainder(g, input, other):
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
 
-
 def gelu(g, self):
     _sqrt2 = 1.4142135623730951
     erf = g.op('Erf', div(g, self, torch.tensor(_sqrt2)))
     erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
     return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
+
+
+@parse_args('v', 'i', 'v', 'v', 'f', 'i')
+def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
+                    eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
+
+    input_sizes = input.type().sizes()
+    assert input_sizes[1] % num_groups == 0
+    # 0 in the shape list keeps dimension value unchanged.
+    shape = [0, num_groups, -1]
+    input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(shape)))
+
+    # C is always divisible by num_groups
+    # Due to shape difference. we need to apply weight and bias after
+    # instance norm computation and reshape
+    weight_ = g.op("Constant", value_t=torch.tensor([1.] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
+    bias_ = g.op("Constant", value_t=torch.tensor([0.] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
+
+    norm_reshaped = g.op("InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps)
+    norm = g.op('Reshape', norm_reshaped, g.op("Shape", input))
+
+    if weight is None or weight.node().mustBeNone():
+        weight_value = torch.tensor([1.]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or bias.node().mustBeNone():
+        bias_value = torch.tensor([0.]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        bias = g.op("Constant", value_t=bias_value)
+
+    # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
+    axes = [i for i in range(1, len(input_sizes) - 1)]
+    return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
