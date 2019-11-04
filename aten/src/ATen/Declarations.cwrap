@@ -664,20 +664,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_sigmoid
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: sigmoid
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_exp
   cname: exp
   types:

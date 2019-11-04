@@ -2337,6 +2337,7 @@ graph(%Ra, %Rb):
         self.assertEqual(len(list(g.inputs())), 2)
         FileCheck().check("mul").check("add").run(str(g))
 
+    @unittest.skipIf(IS_WINDOWS, 'Caffe2 ops not built by default on Windows; see https://github.com/pytorch/pytorch/issues/27215')
     def test_trace_c10_ops(self):
         try:
             _ = torch.ops._caffe2.GenerateProposals
@@ -18452,6 +18453,21 @@ class TestClassType(JitTestCase):
                 li = [WrongLt(), WrongLt()]
                 li.sort()
                 return li
+
+    def test_class_inheritance(self):
+        @torch.jit.script
+        class Base(object):
+            def __init__(self):
+                self.b = 2
+
+            def two(self, x):
+                return x + self.b
+
+        with self.assertRaisesRegex(RuntimeError, "does not support inheritance"):
+            @torch.jit.script
+            class Derived(Base):
+                def two(self, x):
+                    return x + self.b + 2
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):

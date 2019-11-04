@@ -167,7 +167,7 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 
 #### Install Dependencies
 
-Common
+Common (only install `typing` for Python <3.5)
 ```
 conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing
 ```
