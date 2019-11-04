@@ -56,6 +56,7 @@ torch.nn.ReLU6|Yes|No
 torch.nn.RReLU|Yes|No
 torch.nn.SELU|Yes|No
 torch.nn.CELU|Yes|No
+torch.nn.GELU|Yes|No
 torch.nn.Sigmoid|Yes|No
 torch.nn.Softplus|Yes|No
 torch.nn.Softshrink|Yes|No
