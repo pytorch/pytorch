@@ -518,7 +518,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallOutOfSc
 
   expectThrows<c10::Error>([&] {
     callOp(*op, dummyTensor(c10::TensorTypeId::XLATensorId));
-  }, "Could not run '_test::dummy' with its input from the 'CLATensorId'"
+  }, "Could not run '_test::dummy' with its input from the 'XLATensorId'"
   " backend. '_test::dummy' is only available for these backends: [].");
 }
 
