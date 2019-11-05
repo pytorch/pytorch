@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/script/concrete_module_type.h>
+#include <torch/csrc/jit/pybind_utils.h>
 
 namespace torch {
 namespace jit {
@@ -34,6 +35,12 @@ ClassTypePtr ConcreteModuleType::createNewTypeFromThis() {
     const auto& isParameter = pr.second.isParam_;
 
     cls->addAttribute(name, type, isParameter);
+  }
+
+  for (const auto& pr : constants_) {
+    const auto& name = pr.first;
+    const auto& val = pr.second.v_;
+    cls->addConstant(name, toTypeInferredIValue(val));
   }
 
   for (const auto& moduleInfo : modules_) {
