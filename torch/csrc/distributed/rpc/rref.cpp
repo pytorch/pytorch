@@ -154,23 +154,32 @@ const ForkId& UserRRef<T>::forkId() const {
 
 template <>
 std::shared_ptr<ivalue::Future> UserRRef<IValue>::toHere() {
+  std::cout << rrefId_ <<  "==== in rref to_here()\n" << std::flush;
   auto future = std::make_shared<ivalue::Future>(nullptr);
   auto agent = RpcAgent::getDefaultRpcAgent();
 
   // ScriptRRefFetchCall message always carries autograd context id even if
   // the message itself does not contain any tensor, because the response would
   // potentially contain tensors.
+  std::cout << rrefId_ <<  "==== before sendMessageWithAutograd() \n" << std::flush;
   auto futureResponse = autograd::sendMessageWithAutograd(
       *agent,
       agent->getWorkerInfo(ownerId_),
       ScriptRRefFetchCall(ownerId_, rrefId()).toMessage(),
       true /* forceGradRecording */);
+  std::cout << rrefId_ <<  "==== after sendMessageWithAutograd() \n" << std::flush;
 
-  futureResponse->addCallback([future](const Message& message) {
+  auto rrefId = rrefId_;
+  futureResponse->addCallback([future, rrefId](const Message& message) {
+    std::cout << rrefId << " ==== in callback \n" << std::flush;
     RRefContext::handleException(message);
     auto response = deserializeResponse(message);
     auto& rfr = unwrapAutogradMessage<ScriptRRefFetchRet>(message, response);
+    std::cout << rrefId << " ==== before mark compelte \n" << std::flush;
+
     future->markCompleted(rfr.values().front());
+    std::cout << rrefId << " ==== done with callback \n" << std::flush;
+
   });
   return future;
 }

@@ -301,7 +301,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
   threadPool_.run(std::bind(
       [&](const SendWork& work) {
         auto id = work.message_.id();
-        std::cout << "=== sending message with id " << id << std::endl << std::flush;
+        std::cout << pg_->getRank() << " === sending message with id " << id << std::endl << std::flush;
         std::string serializedPayload = serialize(work.message_);
 
         std::vector<torch::Tensor> preamble = {torch::tensor(
@@ -342,7 +342,7 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         for (auto& pendingSend : pendingSends) {
           pendingSend->wait();
         }
-        std::cout << "=== fisnished sending message with id " << id << std::endl << std::flush;
+        std::cout << pg_->getRank() << " === fisnished sending message with id " << id << std::endl << std::flush;
 
       },
       std::move(work)));
@@ -355,7 +355,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         Message message =
             deserialize(work.type_, payload.storage().data(), payload.numel());
         auto tmpId = message.id();
-        std::cout << "=== receiving message with id " << tmpId << std::endl << std::flush;
+        std::cout << pg_->getRank() << " === receiving message with id " << tmpId << std::endl << std::flush;
 
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
@@ -381,7 +381,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         }
 
         recvCounts_.increment(work.from_.id_);
-        std::cout << "=== fisnished receiving message with id " << tmpId << std::endl << std::flush;
+        std::cout << pg_->getRank() << " === fisnished receiving message with id " << tmpId << std::endl << std::flush;
 
       },
       std::move(work)));
