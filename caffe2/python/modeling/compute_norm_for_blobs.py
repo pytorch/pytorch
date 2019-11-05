@@ -49,9 +49,7 @@ class ComputeNormForBlobs(NetModifier):
         blob_to_device = blob_to_device or {}
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
-            if not net.BlobIsDefined(blob):
-                raise Exception('blob {0} is not defined in net {1}'.format(
-                    blob, net.Name()))
+            assert net.BlobIsDefined(blob), 'blob {} is not defined in net {} whose proto is {}'.format(blob, net.Name(), net.Proto())
             if blob in blob_to_device:
                 device = blob_to_device[blob]
             else:

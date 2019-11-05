@@ -513,13 +513,13 @@ static Value* packOutputs(
     return values[0];
   }
   std::shared_ptr<FunctionSchema> schema;
+  TupleTypePtr named_tuple = nullptr;
   if (field_names) {
-    schema = TupleType::namedTupleSchemaFromNamesAndTypes(c10::QualifiedName(), field_names.value(), fmap(values, [](Value* v) { return v->type(); }));
+    auto types = fmap(values, [](Value* v) { return v->type(); });
+    named_tuple = TupleType::createNamed(
+        c10::nullopt, field_names.value(), std::move(types));
   }
-  return g
-      .insertNode(
-          g.createTuple(values, c10::nullopt, std::move(schema)))
-      ->output();
+  return g.insertNode(g.createTuple(values, named_tuple))->output();
 }
 
 // Given a successful match between operator schema and symbol, emit a node

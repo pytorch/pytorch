@@ -108,6 +108,7 @@ void PyTorchStreamReader::init() {
     CAFFE_THROW("file in archive is not in a subdirectory: ", buf);
   }
   archive_name_ = buf.substr(0, pos);
+  archive_name_plus_slash_ = archive_name_ + "/";
 
   // version check
   at::DataPtr version_ptr;
@@ -171,9 +172,8 @@ static std::string getPadding(size_t cursor, const std::string& filename, size_t
 }
 
 bool PyTorchStreamReader::hasRecord(const std::string& name) {
-  std::stringstream ss;
-  ss << archive_name_ << "/" << name;
-  mz_zip_reader_locate_file(ar_.get(), ss.str().c_str(), nullptr, 0);
+  std::string ss = archive_name_plus_slash_ + name;
+  mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
   bool result = ar_->m_last_error != MZ_ZIP_FILE_NOT_FOUND;
   if (!result) {
     ar_->m_last_error = MZ_ZIP_NO_ERROR;
@@ -183,11 +183,10 @@ bool PyTorchStreamReader::hasRecord(const std::string& name) {
 }
 
 size_t PyTorchStreamReader::getRecordID(const std::string& name) {
-  std::stringstream ss;
-  ss << archive_name_ << "/" << name;
-  size_t result = mz_zip_reader_locate_file(ar_.get(), ss.str().c_str(), nullptr, 0);
+  std::string ss = archive_name_plus_slash_ + name;
+  size_t result = mz_zip_reader_locate_file(ar_.get(), ss.c_str(), nullptr, 0);
   if (ar_->m_last_error == MZ_ZIP_FILE_NOT_FOUND) {
-    CAFFE_THROW("file not found: ", ss.str());
+    CAFFE_THROW("file not found: ", ss);
   }
   valid("locating file ", name.c_str());
   return result;
@@ -285,7 +284,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());
 
-  std::stringstream version;
+  std::ostringstream version;
   version << kProducedFileFormatVersion << "\n";
   writeRecord("version", version.str().c_str(), version.str().size());
 }

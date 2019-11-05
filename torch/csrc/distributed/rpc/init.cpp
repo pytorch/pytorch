@@ -13,6 +13,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/types.h>
 
+#include <pybind11/chrono.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -42,6 +44,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
               "sync",
               &RpcAgent::sync,
               py::call_guard<py::gil_scoped_release>());
+
+  auto pyFuture = shared_ptr_class_<PyFuture>(module, "Future")
+                      .def(
+                          "wait",
+                          &PyFuture::wait,
+                          py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef")
@@ -83,10 +91,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
-          py::init<std::string, std::shared_ptr<::c10d::ProcessGroup>, int>(),
+          py::init<
+              std::string,
+              std::shared_ptr<::c10d::ProcessGroup>,
+              int,
+              std::chrono::milliseconds>(),
           py::arg("name"),
           py::arg("process_group"),
-          py::arg("num_send_recv_threads") = 4)
+          py::arg("num_send_recv_threads"),
+          py::arg("rpc_timeout"))
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
@@ -104,6 +117,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "sync",
           &ProcessGroupAgent::sync,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_rpc_timeout",
+          &ProcessGroupAgent::getRpcTimeout,
           py::call_guard<py::gil_scoped_release>());
 
   module.def("_start_rpc_agent", [](const std::shared_ptr<RpcAgent>& agent) {

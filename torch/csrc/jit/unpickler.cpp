@@ -705,14 +705,13 @@ inline bool is_valid_python_id_char(char c) {
 
 // Read a newline terminated string
 std::string Unpickler::readString() {
-  std::stringstream ss;
+  std::string ss;
   while (true) {
     char c = read<char>();
     if (c == '\n') {
       break;
     }
-
-    ss << c;
+    ss.push_back(c);
 
     // Simple check just in case there is no terminating '\n'
     TORCH_CHECK(
@@ -722,7 +721,7 @@ std::string Unpickler::readString() {
         "' in string, ",
         "strings must be qualified Python identifiers");
   }
-  return ss.str();
+  return ss;
 }
 
 } // namespace jit

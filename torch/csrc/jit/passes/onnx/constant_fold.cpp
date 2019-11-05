@@ -322,6 +322,12 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 
 // This method updates the block in-place to fold all the one-time
 // constant-based computations/ops into an initializer node.
+//
+// NB: This is not constant folding in the traditional sense, as we
+// don't try particularly hard to evaluate operations on constant nodes.
+// This is more of a partial evaluation  analysis, where operations on constant
+// nodes can be lifted so we run them earlier, before the usual parameters are
+// known.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
   if (opset_version != 9 && opset_version != 10) {
     // Number of elements of 'axes' and 'ends' 1-D input tensors should be the same
