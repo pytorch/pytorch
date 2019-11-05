@@ -502,7 +502,7 @@ void initTorchFunctions(PyObject* module) {
 PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyTypeObject &torch_api) {
   PyObject* torch_api_function =
     PyObject_FastGetAttrString((PyObject*)&torch_api, const_cast<char*>(r.get_func_name().data()));
-  PyObject* ret;
+  PyObject* ret = nullptr;
   // there must be at least one overloaded argument at this point, since r.has_torch_function() is true
   // so ret will never be returned unset
   for (auto it = r.overloaded_args.begin(); it != r.overloaded_args.end(); ++it) {
@@ -512,6 +512,7 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
       return ret;
     }
   }
+  TORCH_INTERNAL_ASSERT(ret != nullptr, "__torch_function__ return value cannot be nullptr");
   return ret;
 }
 
