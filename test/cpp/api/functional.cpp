@@ -101,8 +101,32 @@ TEST_F(FunctionalTest, CosineSimilarity) {
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
+TEST_F(FunctionalTest, SmoothL1LossDefaultOptions) {
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output =
+      F::smooth_l1_loss(input, target);
+  auto expected = torch::tensor(0.0233335, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
+TEST_F(FunctionalTest, SmoothL1LossNoReduction) {
+  auto input = torch::tensor({0.1, 1.2, 4.7}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto target = torch::tensor({0., 1., 5.}, torch::kFloat);
+  auto output =
+      F::smooth_l1_loss(input, target, /*reduction=*/torch::Reduction::None);
+  auto expected = torch::tensor({0.005, 0.02, 0.045}, torch::kFloat);
+  auto s = output.sum();
+  s.backward();
+  ASSERT_TRUE(output.allclose(expected));
+  ASSERT_TRUE(input.sizes() == input.grad().sizes());
+}
+
 TEST_F(FunctionalTest, SoftMarginLossDefaultOptions) {
-  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output =
       F::soft_margin_loss(input, target);
@@ -115,7 +139,7 @@ TEST_F(FunctionalTest, SoftMarginLossDefaultOptions) {
 }
 
 TEST_F(FunctionalTest, MultiLabelSoftMarginLossDefaultOptions) {
-  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto output =
       F::multilabel_soft_margin_loss(input, target);
@@ -128,7 +152,7 @@ TEST_F(FunctionalTest, MultiLabelSoftMarginLossDefaultOptions) {
 }
 
 TEST_F(FunctionalTest, SoftMarginLossNoReduction) {
-  auto input = torch::tensor({2., 4., 1., 3.}, torch::requires_grad());
+  auto input = torch::tensor({2., 4., 1., 3.}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({-1., 1., 1., -1.}, torch::kFloat);
   auto output =
       F::soft_margin_loss(input, target, torch::kNone);
@@ -141,7 +165,7 @@ TEST_F(FunctionalTest, SoftMarginLossNoReduction) {
 }
 
 TEST_F(FunctionalTest, MultiLabelSoftMarginLossWeightedNoReduction) {
-  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::requires_grad());
+  auto input = torch::tensor({{0., 2., 2., 0.}, {2., 1., 0., 1.}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{0., 0., 1., 0.}, {1., 0., 1., 1.}}, torch::kFloat);
   auto weight = torch::tensor({0.1, 0.6, 0.4, 0.8}, torch::kFloat);
   auto options = MultiLabelSoftMarginLossOptions().reduction(torch::kNone).weight(weight);
@@ -455,7 +479,9 @@ TEST_F(FunctionalTest, AffineGrid) {
 
 TEST_F(FunctionalTest, MultiMarginLoss) {
   auto weight = torch::tensor({0.3, 0.3, 0.4}, torch::kFloat);
-  auto input = torch::tensor({{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}}, torch::requires_grad());
+  auto input = torch::tensor(
+    {{0.2, 0.2, 0.6}, {0.1, 0.8, 0.1}, {0.9, 0.09, 0.01}},
+    torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({2, 1, 0}, torch::kLong);
   auto output = F::multi_margin_loss(
     input, target, MultiMarginLossOptions().margin(2).weight(weight));
@@ -476,7 +502,7 @@ TEST_F(FunctionalTest, CosineEmbeddingLoss) {
 }
 
 TEST_F(FunctionalTest, MultiLabelMarginLossDefaultOptions) {
-  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = F::multilabel_margin_loss(input, target);
   auto expected = torch::tensor({0.8500}, torch::kFloat);
@@ -488,7 +514,7 @@ TEST_F(FunctionalTest, MultiLabelMarginLossDefaultOptions) {
 }
 
 TEST_F(FunctionalTest, MultiLabelMarginLossNoReduction) {
-  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::requires_grad());
+  auto input = torch::tensor({{0.1, 0.2, 0.4, 0.8}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto target = torch::tensor({{3, 0, -1, 1}}, torch::kLong);
   auto output = F::multilabel_margin_loss(
     input, target, torch::kNone);
@@ -512,7 +538,7 @@ TEST_F(FunctionalTest, TripletMarginLoss) {
 }
 
 TEST_F(FunctionalTest, MaxUnpool1d) {
-  auto x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   auto y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3));
 
@@ -521,7 +547,7 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
       y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
-  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   y = F::max_unpool1d(
       x, indices, MaxUnpool1dOptions(3), std::vector<int64_t>({1, 1, 9}));
@@ -531,7 +557,7 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
       y, torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat)));
   ASSERT_EQ(y.sizes(), std::vector<int64_t>({1, 1, 9}));
 
-  x = torch::tensor({{{2, 4, 5}}}, torch::requires_grad());
+  x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   y = F::max_unpool1d(x, indices, MaxUnpool1dOptions(3).stride(2).padding(1));
 
@@ -555,7 +581,7 @@ TEST_F(FunctionalTest, MaxUnpool2d) {
     {21, 23, 24}}},
   {{{31, 33, 34},
     {41, 43, 44},
-    {46, 48, 49}}}}, torch::requires_grad());
+    {46, 48, 49}}}}, torch::dtype(torch::kFloat).requires_grad(true));
   auto y = F::max_unpool2d(x, indices, MaxUnpool2dOptions(3).stride(2).padding(1));
 
   ASSERT_EQ(y.dim(), 4);
@@ -617,6 +643,14 @@ TEST_F(FunctionalTest, SELU) {
     auto expected = F::selu(input, false);
     ASSERT_TRUE(output.allclose(expected));
   }
+}
+
+TEST_F(FunctionalTest, GELU) {
+  GELU model;
+  const auto x = torch::linspace(-3.0, 3.0, 100);
+  const auto y_exp = x * 0.5 * (1.0 + torch::erf(x / std::sqrt(2.0)));
+  const auto y = F::gelu(x);
+  ASSERT_TRUE(torch::allclose(y, y_exp));
 }
 
 TEST_F(FunctionalTest, Hardshrink) {
@@ -993,16 +1027,6 @@ TEST_F(FunctionalTest, Normalize) {
   }
 }
 
-TEST_F(FunctionalTest, GeLU) {
-  auto x = torch::tensor({{2., 3.}, {4., 5.}});
-  auto y_exp = torch::tensor({{1.9545, 2.9960}, {3.9999, 5.0000}}) +
-        torch::tensor({{-2.3842e-07, -4.9829e-05}, {-2.6703e-05, -1.4305e-06}});
-  auto y = F::gelu(x);
-  ASSERT_EQ(y.ndimension(), 2);
-  ASSERT_EQ(y.sizes(), std::vector<int64_t>({2, 2}));
-  ASSERT_TRUE(torch::allclose(y, y_exp));
-}
-
 TEST_F(FunctionalTest, ReLU) {
   const auto size = 3;
   for (const auto inplace : {false, true}) {
@@ -1336,6 +1360,66 @@ TEST_F(FunctionalTest, BatchNorm1dDefaultOptions) {
   ASSERT_TRUE(output.allclose(expected));
 }
 
+TEST_F(FunctionalTest, BatchNorm2d) {
+  int num_features = 5;
+  double eps = 1e-05;
+  double momentum = 0.1;
+
+  auto input = torch::randn({2, num_features, 4, 4});
+  auto mean = torch::randn(num_features);
+  auto variance = torch::rand(num_features);
+  auto weight = torch::ones({num_features});
+  auto bias = torch::zeros({num_features});
+  auto output = F::batch_norm(
+    input, mean, variance,
+    BatchNormOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
+    /*training=*/false);
+  auto expected = torch::transpose((torch::transpose(input, 1, 3) - mean) / torch::sqrt(variance + eps), 1, 3);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, BatchNorm2dDefaultOptions) {
+  int num_features = 5;
+  double eps = 1e-05;
+
+  auto input = torch::randn({2, num_features, 4, 4});
+  auto mean = torch::randn(num_features);
+  auto variance = torch::rand(num_features);
+  auto output = F::batch_norm(input, mean, variance);
+  auto expected = torch::transpose((torch::transpose(input, 1, 3) - mean) / torch::sqrt(variance + eps), 1, 3);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, BatchNorm3d) {
+  int num_features = 5;
+  double eps = 1e-05;
+  double momentum = 0.1;
+
+  auto input = torch::randn({2, num_features, 2, 2, 2});
+  auto mean = torch::randn(num_features);
+  auto variance = torch::rand(num_features);
+  auto weight = torch::ones({num_features});
+  auto bias = torch::zeros({num_features});
+  auto output = F::batch_norm(
+    input, mean, variance,
+    BatchNormOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
+    /*training=*/false);
+  auto expected = torch::transpose((torch::transpose(input, 1, 4) - mean) / torch::sqrt(variance + eps), 1, 4);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
+TEST_F(FunctionalTest, BatchNorm3dDefaultOptions) {
+  int num_features = 5;
+  double eps = 1e-05;
+
+  auto input = torch::randn({2, num_features, 2, 2, 2});
+  auto mean = torch::randn(num_features);
+  auto variance = torch::rand(num_features);
+  auto output = F::batch_norm(input, mean, variance);
+  auto expected = torch::transpose((torch::transpose(input, 1, 4) - mean) / torch::sqrt(variance + eps), 1, 4);
+  ASSERT_TRUE(output.allclose(expected));
+}
+
 TEST_F(FunctionalTest, Interpolate) {
   {
     // 1D interpolation
@@ -1561,4 +1645,87 @@ TEST_F(FunctionalTest, Pad) {
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 1, 3}));
     auto expected = torch::tensor({{{{0., 1., 0.}}}}, torch::kDouble);
   }
+}
+
+TEST_F(FunctionalTest, CTCLoss) {
+  { // test CTCLoss typechecks
+    const auto target_lengths = torch::tensor({30, 25, 20});
+    const auto input_lengths = torch::tensor({50, 50, 50});
+    const auto targets =
+      torch::randint(1, 15, {target_lengths.sum().item<int>()}, torch::kInt);
+    const auto log_probs = torch::randn({50, 3, 15}, torch::kFloat).log_softmax(2);
+
+    const auto _input_lengths = input_lengths.to(torch::kFloat);
+    ASSERT_THROWS_WITH(
+      F::ctc_loss(
+        log_probs, targets, _input_lengths, target_lengths),
+        "input_lengths must be integral");
+
+    const auto target_lengths_ = target_lengths.to(torch::kFloat);
+    ASSERT_THROWS_WITH(
+      F::ctc_loss(
+        log_probs, targets, input_lengths, target_lengths_),
+        "target_lengths must be integral");
+  }
+  { // test CTCLoss length checks
+    const auto target_lengths = torch::tensor({30, 25, 20});
+    const auto input_lengths = torch::tensor({50, 50, 50});
+    const auto targets = torch::randint(1, 15, {3, 29}, torch::kInt);
+    const auto log_probs = torch::randn({50, 3, 15}, torch::kFloat)
+      .log_softmax(2);
+    ASSERT_THROWS_WITH(
+      F::ctc_loss(
+        log_probs, targets, input_lengths, target_lengths),
+        "Expected tensor to have size at least 30 at dimension 1");
+  }
+  { // test CTCLoss empty target
+    {
+      const auto target_lengths = torch::tensor({0, 0, 0});
+      const auto input_lengths = torch::tensor({50, 50, 50});
+      const auto targets =
+        torch::randint(1, 15, at::IntArrayRef({0}), torch::kLong);
+      const auto log_probs =
+        torch::randn({50, 3, 15}, torch::kDouble).log_softmax(2);
+      const auto loss = F::ctc_loss(
+        log_probs, targets, input_lengths, target_lengths,
+        CTCLossOptions().reduction(torch::kNone));
+      ASSERT_TRUE(loss.ge(0).all().item<bool>());
+      ASSERT_TRUE(torch::allclose(
+        -log_probs.sum(0).slice(1, 0, 1).view_as(loss), loss));
+    }
+    {
+      const auto target_lengths = torch::tensor({0, 9, 0});
+      const auto input_lengths = torch::tensor({50, 50, 50});
+      const auto targets = torch::randint(1, 15, {9}, torch::kLong);
+      const auto log_probs =
+        torch::randn({50, 3, 15}, torch::kDouble).log_softmax(2);
+      const auto loss = F::ctc_loss(
+        log_probs, targets, input_lengths, target_lengths,
+        CTCLossOptions().reduction(torch::kNone));
+      ASSERT_TRUE(loss.ge(0).all().item<bool>());
+      ASSERT_TRUE(torch::allclose(
+          -log_probs.sum(0)
+            .index_select(0, torch::tensor({0, 2}, torch::kLong))
+            .slice(1, 0, 1).view({2}),
+          loss.index_select(0, torch::tensor({0, 2}, torch::kLong))
+      ));
+    }
+  }
+}
+
+TEST_F(FunctionalTest, PoissonNLLLoss) {
+  const auto input = torch::tensor({0.5, 1.5, 2.5});
+  const auto target = torch::tensor({1., 2., 3.});
+  const auto component_wise_loss = torch::exp(input) - target * input;
+  ASSERT_TRUE(torch::allclose(torch::mean(component_wise_loss),
+    F::poisson_nll_loss(input, target)));
+  ASSERT_TRUE(torch::allclose(component_wise_loss,
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(torch::kNone))));
+  ASSERT_TRUE(torch::allclose(torch::sum(component_wise_loss),
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(torch::kSum))));
+  ASSERT_TRUE(torch::allclose(torch::mean(component_wise_loss),
+    F::poisson_nll_loss(input, target,
+    PoissonNLLLossOptions().reduction(torch::kMean))));
 }

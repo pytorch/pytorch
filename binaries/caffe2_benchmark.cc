@@ -5,10 +5,6 @@
 #include "binaries/benchmark_args.h"
 #include "binaries/benchmark_helper.h"
 
-using std::make_shared;
-using std::map;
-using std::string;
-using std::vector;
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);

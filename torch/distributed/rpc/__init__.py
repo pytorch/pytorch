@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import sys
 
 from . import backend_registry
+from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 
 
 if sys.version_info >= (3, 0):
@@ -17,7 +18,8 @@ if sys.version_info >= (3, 0):
         init_method=None,
         self_rank=-1,
         worker_name_to_id=None,
-        num_send_recv_threads=4,
+        num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
+        rpc_timeout=DEFAULT_RPC_TIMEOUT,
     ):
         r"""
         Initializes model parallel primitives such as the local rpc agent
@@ -42,6 +44,7 @@ if sys.version_info >= (3, 0):
             self_rank (int): a globally unique id/rank of this node.
             init_method(str): backend specific init arguments.
             num_send_recv_threads(int): Number of threads for send/recv work.
+            rpc_timeout (datetime.timedelta): Timeout for RPCs. Defaults to 10 seconds.
         """
         # Rendezvous.
         world_size = len(worker_name_to_id)
@@ -58,6 +61,7 @@ if sys.version_info >= (3, 0):
             self_rank,
             worker_name_to_id,
             num_send_recv_threads,
+            rpc_timeout,
         )
 
         # Initialize Autograd.
