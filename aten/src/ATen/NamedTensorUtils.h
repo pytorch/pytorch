@@ -43,15 +43,41 @@ unify_from_right(DimnameList names, DimnameList other, const char* action = "bro
 
 namespace namedinference {
 
-// Names get propagated via the following rules:
-// 1) If result does not have names, then `names` get propagated.
-// 2) If result has names, then `names` must be equal to result.names
-void propagate_names(Tensor& result, optional<DimnameList> names);
-void propagate_names(Tensor& result, std::vector<Dimname>&& names, bool validate_names);
-CAFFE2_API void propagate_names(Tensor& result, optional<std::vector<Dimname>>&& maybe_names, bool validate_names);
-void propagate_names(TensorImpl* result, optional<DimnameList> names);
-void propagate_names(TensorImpl* result, std::vector<Dimname>&& names, bool validate_names);
-void propagate_names(TensorImpl* result, optional<std::vector<Dimname>>&& maybe_names, bool validate_names);
+// Operators that support named tensors generally look like the following:
+//
+// Tensor op(...) {
+//   perform_shape_checks(...);
+//   # (1)
+//   auto maybe_outnames = compute_outnames(...);
+//   auto result = [&]() {
+//     NoNamesGuard guard;
+//     return op_impl(...);
+//   }();
+//   # (2)
+//   propagate_names_if_nonempty(result, maybe_outnames);
+//
+// Each op has (1) a compute outnames step and (2) a propagate names step.
+//
+// compute_outnames is responsible for checking that input names match and
+// determining what the output names should be. It returns either:
+// - {} (if the inputs tensors are unnamed)
+// - non-empty outnames.
+// propagate_names_if_nonempty propagates the outnames if they exist to the result
+// tensors.
+
+// Propagates `names` to `result` if `names` is not empty.
+// If `names` is not empty, `names.size()` should equal `result.dim()`.
+CAFFE2_API Tensor& propagate_names_if_nonempty(
+    Tensor& result,
+    DimnameList maybe_names,
+    bool validate_names = false);
+
+// Propagates `names` to `result`. Only use this if we are certain that there are
+// names to propagate (that names is not empty).
+CAFFE2_API Tensor& propagate_names(
+    Tensor& result,
+    DimnameList names,
+    bool validate_names = false);
 
 // Propagates all names from src to result.
 CAFFE2_API void propagate_names(Tensor& result, const Tensor& src);
@@ -80,13 +106,13 @@ void check_names_for_dot(TensorImpl* vec1, TensorImpl* vec2);
 
 void propagate_names_for_expand(Tensor& result, const Tensor& self);
 
-optional<std::vector<Dimname>> compute_cat_outnames(TensorList tensors);
+std::vector<Dimname> compute_cat_outnames(TensorList tensors);
 
-optional<std::vector<Dimname>> compute_broadcast_outnames(
+std::vector<Dimname> compute_broadcast_outnames(
     const Tensor& self,
     const Tensor& other);
 
-optional<std::vector<Dimname>> broadcast_to_outnames(
+std::vector<Dimname> broadcast_to_outnames(
     const Tensor& tensor,
     const Tensor& reference_tensor,
     const char* op_name);
@@ -97,16 +123,16 @@ optional<std::vector<Dimname>> compute_baddbmm_outnames(
     TensorImpl* other,
     TensorImpl* bias);
 
-optional<std::vector<Dimname>> compute_matmul_outnames(const Tensor& self, const Tensor& other);
+std::vector<Dimname> compute_matmul_outnames(const Tensor& self, const Tensor& other);
 
-optional<std::vector<Dimname>> compute_cdist_outnames(const Tensor& self, const Tensor& other);
+std::vector<Dimname> compute_cdist_outnames(const Tensor& self, const Tensor& other);
 
-optional<std::vector<Dimname>> compute_bmm_outnames(
+std::vector<Dimname> compute_bmm_outnames(
     Tensor& result,
     const Tensor& self,
     const Tensor& other);
 
-optional<std::vector<Dimname>> compute_squeeze_outnames(const Tensor& tensor);
+std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor);
 
 } // namespace namedinference
 

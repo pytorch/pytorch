@@ -786,7 +786,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   }
 #ifdef BUILD_NAMEDTENSOR
   }
-  at::namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  at::namedinference::propagate_names(result, outnames);
 #endif
 
 #else
