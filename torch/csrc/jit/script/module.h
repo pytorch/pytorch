@@ -163,13 +163,6 @@ struct TORCH_API Module {
     type()->addOrCheckAttribute(name, t, is_param);
     module_object()->setAttr(name, v);
   }
-
-  // Remove attribute by name, caller is responsible for
-  // the safety of this operation
-  void unsafe_remove_attribute(const std::string& name) {
-    module_object()->unsafeRemoveAttr(name);
-  }
-
   void register_module(const std::string& name, const Module& module) {
     type()->addOrCheckAttribute(name, module.type());
     module_object()->setAttr(name, module.module_object());
@@ -359,10 +352,8 @@ struct TORCH_API Module {
       return EntityType::PARAMETER;
     }
     at::TypePtr t = type()->getAttribute(offset_);
-    if (auto cls = t->cast<at::ClassType>()) {
-      if (cls->is_module()) {
-        return EntityType::MODULE;
-      }
+    if (t->is_module()) {
+      return EntityType::MODULE;
     }
     return EntityType::ATTRIBUTE;
   }
