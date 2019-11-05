@@ -76,7 +76,8 @@ class QReLUBenchmark(_ActivationBenchmarkBase):
 class QReLU6Benchmark(_ActivationBenchmarkBase):
     def init(self, dims, permute_dims, inplace, dtype):
         super(QReLU6Benchmark, self).setup(dims, permute_dims, dtype)
-        self.qop = nnq.ReLU6(inplace=False)  # inplace is not yet supported
+        # TODO(z-a-f): Enable `inplace` after #29245
+        self.qop = nnq.ReLU6(inplace=False)
         self.set_module_name("QReLU6")
 
 
