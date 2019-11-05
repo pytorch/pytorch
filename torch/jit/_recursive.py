@@ -387,6 +387,7 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
     # In order to continue to expose module container functions to python,
     # we add on the methods that we had previously exposed in the previous
     # version of this api.
+
     if isinstance(nn_module, (ModuleList, Sequential)):
         add_python_modulelist_methods(script_module, nn_module)
 

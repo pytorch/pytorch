@@ -1731,13 +1731,13 @@ if _enabled:
                 "Mixed serialization of script and non-script modules is not supported. " +
                 "For purely script modules use my_script_module.save(<filename>) instead.")
 
-        # Python magic methods do lookups on an object's class type, instead of looking up
-        # the desugared attribute. In order to continue to expose the magic methods
+        # Python magic methods do method lookups on an object's class type, instead of looking up
+        # the method defines on the class instance. In order to continue to expose the magic methods
         # of builtin-containers (ModuleList, Sequential, ModuleDict) to python we
         # define magic methods here as a shim to the correct attribute.
         def forward_magic_method(self, method_name, *args, **kwargs):
             self_method = getattr(self, method_name)
-            if self_method == getattr(RecursiveScriptModule, method_name):
+            if self_method.__func__ == getattr(RecursiveScriptModule, method_name):
                 raise NotImplementedError()
             return self_method(*args, **kwargs)
 
@@ -1750,11 +1750,16 @@ if _enabled:
         def __len__(self):
             return self.forward_magic_method("__len__")
 
-        def __dir__(self):
-            return self.forward_magic_method("__dir__")
-
         def __contains__(self, key):
             return self.forward_magic_method("__contains__", key)
+
+        # dir is defined by the base nn.Module, so instead of throwing if
+        # it is not overriden, we call into the nn.Module __dir__ method
+        def __dir__(self):
+            self_method = getattr(self, "__dir__")
+            if self_method.__func__ == getattr(RecursiveScriptModule, "__dir__"):
+                return super().__dir__()
+            return self_method()
 
     # Need to copy all RecursiveScriptModule methods to ScriptModule.
     #
