@@ -138,6 +138,15 @@ class TestQuantizedOps(TestCase):
             qY_hat = op(qX)
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
+        ops_under_test = {
+            'inplace ops.quantized': torch.ops.quantized.relu6_,
+            'inplace module': torch.nn.quantized.ReLU6(inplace=True),
+        }
+
+        for name, op in ops_under_test.items():
+            qY_hat = op(qX)
+            self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
+
     """Tests the correctness of the scalar addition."""
     @no_deadline
     @given(A=hu.tensor(shapes=hu.array_shapes(1, 4, 1, 5),
