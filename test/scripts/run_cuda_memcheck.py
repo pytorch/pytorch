@@ -54,7 +54,7 @@ def is_ignored_only(output):
     return count_ignored_errors == report.num_errors
 
 # Set environment UNDER_CUDA_MEMCHECK=1 to allow skipping some tests
-os.environ['UNDER_CUDA_MEMCHECK'] = 1
+os.environ['UNDER_CUDA_MEMCHECK'] = '1'
 
 # Discover tests:
 # To get a list of tests, run:
