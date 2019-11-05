@@ -4117,9 +4117,18 @@ class _TestTorchMixin(object):
                 self.assertEqual(x.size(), load_x.size())
                 self.assertEqual(x.stride(), load_x.stride())
 
+
+    def test_serialization_save_warnings(self):
+        with warnings.catch_warnings(record=True) as warns:
+            with tempfile.NamedTemporaryFile() as checkpoint:
+                x = torch.save(torch.nn.Linear(2, 3), checkpoint)
+                self.assertEquals(len(warns), 0)
+
+
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.
     def _test_serialization_container(self, unique_key, filecontext_lambda):
+
         tmpmodule_name = 'tmpmodule{}'.format(unique_key)
 
         def import_module(name, filename):
@@ -5550,6 +5559,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         do_test(torch.tensor([[1, 2]]).data)
         do_test(torch.tensor([[1, 2]]).detach())
 
+    @unittest.skipIf(IS_WINDOWS, 'Caffe2 ops not built by default on Windows; see https://github.com/pytorch/pytorch/issues/27215')
     def test_c10_layer_norm(self):
         # test that we can call c10 ops and they return a reasonable result
         X = torch.rand(5, 5, dtype=torch.float)
@@ -11044,7 +11054,7 @@ class TestTorchDeviceType(TestCase):
             ("sinh", doubles, True, True, 'cpu'),
             ("sinh", doubles, False, True, 'cuda'),
             ("sigmoid", doubles, True, True, 'cpu'),
-            ("sigmoid", doubles, False, False, 'cuda'),
+            ("sigmoid", doubles, True, True, 'cuda'),
             ("sqrt", doubles, True, True, 'cpu'),
             ("sqrt", doubles, False, True, 'cuda'),
             ("tan", doubles, True, True, 'cpu'),
@@ -11409,7 +11419,7 @@ class TestTorchDeviceType(TestCase):
                                                   [2., 1.]]],
                                                 dtype=dtype,
                                                 device=device)
-            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]], 
+            expected_unique_dim1_bool = torch.tensor([[[False, True], [True, True]],
                                                       [[False, True], [True, True]]],
                                                      dtype=torch.bool,
                                                      device=device)
@@ -11471,7 +11481,7 @@ class TestTorchDeviceType(TestCase):
                 x,
                 return_inverse=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_inverse_dim1_bool, x_inverse)
             else:
@@ -11483,7 +11493,7 @@ class TestTorchDeviceType(TestCase):
                 return_inverse=False,
                 return_counts=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_counts_dim1_bool, x_counts)
             else:
@@ -11495,7 +11505,7 @@ class TestTorchDeviceType(TestCase):
                 return_inverse=True,
                 return_counts=True,
                 dim=1)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_unique_dim1_bool, x_unique)
                 self.assertEqual(expected_inverse_dim1_bool, x_inverse)
                 self.assertEqual(expected_counts_dim1_bool, x_counts)
@@ -11589,7 +11599,7 @@ class TestTorchDeviceType(TestCase):
             expected_y_inverse_bool = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 3, 3], dtype=dtype, device=device)
             expected_y_counts_bool = torch.tensor([3, 3, 2, 2], dtype=dtype, device=device)
             y_unique, y_inverse, y_counts = torch.unique_consecutive(y, return_inverse=True, return_counts=True, dim=0)
-            if x.dtype == torch.bool:   
+            if x.dtype == torch.bool:
                 self.assertEqual(expected_y_inverse_bool, y_inverse)
                 self.assertEqual(expected_y_counts_bool, y_counts)
             else:

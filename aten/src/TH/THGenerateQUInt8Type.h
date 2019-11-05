@@ -7,6 +7,7 @@
 #define Real QUInt8
 #define RealUnderlying Byte
 #define THQUANTIZED
+#define THQUINT8
 #define TH_REAL_IS_BYTE
 #line 1 TH_GENERIC_FILE
 #include TH_GENERIC_FILE
@@ -15,6 +16,7 @@
 #undef Real
 #undef RealUnderlying
 #undef TH_REAL_IS_BYTE
+#undef THQUINT8
 #undef THQUANTIZED
 
 #ifndef THGenerateManyTypes
