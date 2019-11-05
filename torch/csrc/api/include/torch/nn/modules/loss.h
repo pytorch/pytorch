@@ -371,5 +371,50 @@ struct TORCH_API CTCLossImpl : public Cloneable<CTCLossImpl> {
 /// PyTorch's module storage semantics.
 TORCH_MODULE(CTCLoss);
 
+// ============================================================================
+
+struct TORCH_API PoissonNLLLossImpl : public Cloneable<PoissonNLLLossImpl> {
+  explicit PoissonNLLLossImpl(const PoissonNLLLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `PoissonNLLLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& log_input, const Tensor& targets);
+
+  /// The options with which this `Module` was constructed.
+  PoissonNLLLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `PoissonNLLLossImpl`.
+/// See the documentation for `PoissonNLLLoss` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(PoissonNLLLoss);
+
+// ============================================================================
+
+struct TORCH_API MarginRankingLossImpl : public Cloneable<MarginRankingLossImpl> {
+  explicit MarginRankingLossImpl(const MarginRankingLossOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `MarginRankingLoss` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(const Tensor& input1,
+    const Tensor& input2, const Tensor& targets);
+
+  /// The options with which this `Module` was constructed.
+  MarginRankingLossOptions options;
+};
+
+/// A `ModuleHolder` subclass for `MarginRankingLossImpl`.
+/// See the documentation for `MarginRankingLoss` class to learn what
+/// methods it provides, or the documentation for `ModuleHolder` to learn about
+/// PyTorch's module storage semantics.
+TORCH_MODULE(MarginRankingLoss);
+
 } // namespace nn
 } // namespace torch
