@@ -858,18 +858,17 @@ def sort_declarations(grouped_decls):
         return grouped_decls
 
     # Use a topological sort to sort decls according to the partial order.
-    processing_set = [(i, decl) for i, decl in enumerate(grouped_decls)
-                      if i not in larger_than]
+    processing_set = [i for i in range(len(grouped_decls)) if i not in larger_than]
     sorted_deps = []
     while processing_set:
-        i, decl = processing_set.pop()
+        i = processing_set.pop()
         sorted_deps.append((i, grouped_decls[i]))
         for i2 in sorted(larger_than.keys()):
             larger = larger_than[i2]
             larger.discard(i)
             if not larger:
                 del larger_than[i2]
-                processing_set.append((i2, grouped_decls[i2]))
+                processing_set.append(i2)
 
     return [decl for i, decl in reversed(sorted_deps)]
 
