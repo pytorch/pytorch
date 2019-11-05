@@ -36,12 +36,18 @@ class QReLUBenchmark(op_bench.TorchBenchmarkBase):
         f_input = (torch.rand(*dims) - 0.5) * 1e6
 
         # Get quantization paramerters and quantize
-        observer = tq.MinMaxObserver(dtype=dtype,
-                                     qscheme=torch.per_tensor_affine,
-                                     reduce_range=False)
-        observer.forward(f_input)
-        scale, zero_point = observer.calculate_qparams()
-        scale, zero_point = scale.item(), zero_point.item()
+        if dtype in (torch.qint8, torch.quint8):
+            observer = tq.MinMaxObserver(dtype=dtype,
+                                         qscheme=torch.per_tensor_affine,
+                                         reduce_range=False)
+            observer.forward(f_input)
+            scale, zero_point = observer.calculate_qparams()
+            scale, zero_point = scale.item(), zero_point.item()
+        else:
+            zero_point = 0
+            qinfo = torch.iinfo(dtype)
+            fmin, fmax = f_input.min(), f_input.max()
+            scale = (fmax - fmin).item() / (qinfo.max() - qinfo.min())
 
         # Quantize the tensor
         self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
