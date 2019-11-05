@@ -1,8 +1,8 @@
-from torch.distributed import invoke_rpc_builtin, invoke_rpc_python_udf
-from torch.distributed import invoke_remote_builtin, invoke_remote_python_udf
-from torch.distributed import _start_rpc_agent
-from torch.distributed import _destroy_rref_context, _cleanup_python_rpc_handler
-from torch.distributed import WorkerInfo
+from . import invoke_rpc_builtin, invoke_rpc_python_udf
+from . import invoke_remote_builtin, invoke_remote_python_udf
+from . import _start_rpc_agent
+from . import _destroy_rref_context, _cleanup_python_rpc_handler
+from . import WorkerInfo
 from . import backend_registry
 from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 from .internal import _internal_rpc_pickler, PythonUDF
