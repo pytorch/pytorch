@@ -26,8 +26,8 @@ INT_SIZE = struct.Struct('=i').size
 SHORT_SIZE = struct.Struct('=h').size
 
 MAGIC_NUMBER = 0x1950a86a20f9469cfc6c
-LEGACY_PICKLE_PROTOCOL_VERSION = 1001
-PROTOCOL_VERSION = 1002
+PROTOCOL_VERSION = 1001
+ZIPFILE_PROTOCOL_VERSION = 1002
 STORAGE_KEY_SEPARATOR = ','
 
 
@@ -48,11 +48,11 @@ def read_first_bytes(f, n):
     read_bytes = []
     start = f.tell()
 
-    f.seek(0)
+    # f.seek(0)
     byte = f.read(1)
     while byte != "":
         read_bytes.append(byte)
-        if len(read_bytes) == 4:
+        if len(read_bytes) == n:
             break
         byte = f.read(1)
     f.seek(start)
@@ -95,7 +95,7 @@ def _is_legacy_picklefile(f):
     read_bytes = read_first_bytes(f, 2)
 
     # TODO: Check for magic number, this check is tied to a specific protocol version
-    return read_bytes == 'b\x80\x02'
+    return read_bytes == [b'\x80', b'\x02']
 
 
 def register_package(priority, tagger, deserializer):
@@ -303,7 +303,7 @@ def _check_seekable(f):
         raise_err_msg(["seek", "tell"], e)
 
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
@@ -338,8 +338,92 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
                    'Please use something like io.BytesIO for torch.save instead.')
             raise RuntimeError(msg)
 
-    with _open_zipfile_writer(name_or_buffer=f, mode='w') as opened_file:
-        return _save(obj, opened_file, pickle_module, pickle_protocol)
+    if _use_new_zipfile_serialization:
+        with _open_zipfile_writer(name_or_buffer=f, mode='w') as opened_file:
+            return _save(obj, opened_file, pickle_module, pickle_protocol)
+    else:
+        with _open_file_like(name_or_buffer=f, mode='w') as opened_file:
+            return _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
+
+
+# When _use_new_zipfile_serialization is deleted, delete this method as well
+def _legacy_save(obj, f, pickle_module, pickle_protocol):
+    if sys.version_info[0] == 2:
+        import StringIO
+        if isinstance(f, StringIO.StringIO):
+            msg = ('torch.save received unsupported StringIO.StringIO file object, whose '
+                   'write method does not return the number of bytes written. '
+                   'Please use something like io.BytesIO for torch.save instead.')
+            raise RuntimeError(msg)
+
+    import torch.nn as nn
+    serialized_container_types = {}
+    serialized_storages = {}
+
+    def persistent_id(obj):
+        # FIXME: the docs say that persistent_id should only return a string
+        # but torch store returns tuples. This works only in the binary protocol
+        # see
+        # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
+        # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
+        if isinstance(obj, type) and issubclass(obj, nn.Module):
+            if obj in serialized_container_types:
+                return None
+            serialized_container_types[obj] = True
+            source_file = source = None
+            try:
+                source_lines, _, source_file = get_source_lines_and_file(obj)
+                source = ''.join(source_lines)
+            except Exception:  # saving the source is optional, so we can ignore any errors
+                warnings.warn("Couldn't retrieve source code for container of "
+                              "type " + obj.__name__ + ". It won't be checked "
+                              "for correctness upon loading.")
+            return ('module', obj, source_file, source)
+
+        elif torch.is_storage(obj):
+            storage_type = normalize_storage_type(type(obj))
+            # Offset is always 0, but we keep it for backwards compatibility
+            # with the old serialization format (which supported storage views)
+            offset = 0
+            obj_key = str(obj._cdata)
+            location = location_tag(obj)
+            serialized_storages[obj_key] = obj
+            is_view = obj._cdata != obj._cdata
+            if is_view:
+                view_metadata = (str(obj._cdata), offset, obj.size())
+            else:
+                view_metadata = None
+
+            return ('storage',
+                    storage_type,
+                    obj_key,
+                    location,
+                    obj.size(),
+                    view_metadata)
+        return None
+
+    sys_info = dict(
+        protocol_version=PROTOCOL_VERSION,
+        little_endian=sys.byteorder == 'little',
+        type_sizes=dict(
+            short=SHORT_SIZE,
+            int=INT_SIZE,
+            long=LONG_SIZE,
+        ),
+    )
+
+    pickle_module.dump(MAGIC_NUMBER, f, protocol=pickle_protocol)
+    pickle_module.dump(PROTOCOL_VERSION, f, protocol=pickle_protocol)
+    pickle_module.dump(sys_info, f, protocol=pickle_protocol)
+    pickler = pickle_module.Pickler(f, protocol=pickle_protocol)
+    pickler.persistent_id = persistent_id
+    pickler.dump(obj)
+
+    serialized_storage_keys = sorted(serialized_storages.keys())
+    pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
+    f.flush()
+    for key in serialized_storage_keys:
+        serialized_storages[key]._write_file(f, _should_read_directly(f))
 
 
 def _save(obj, zip_file, pickle_module, pickle_protocol):
@@ -485,17 +569,13 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             with _open_zipfile_reader(name_or_buffer=f, mode='rb') as zip_file:
                 return _load(zip_file, map_location, pickle_module, **pickle_load_args)
 
-        f_should_read_directly = _should_read_directly(opened_file)
+        if _is_legacy_picklefile(opened_file):
+            return _legacy_pickle_load(opened_file, map_location, pickle_module, **pickle_load_args)
 
-        # The file wasn't a zip, so dispatch to a legacy loader
-        if f_should_read_directly and opened_file.tell() == 0:
-            # _legacy_tar_load requires that opened_file has fileno()
-            # only if offset is zero we can attempt the legacy tar file loader
-            try:
-                return _legacy_tar_load(opened_file, map_location, pickle_module, **pickle_load_args)
-            except tarfile.TarError:
-                if _is_legacy_picklefile(opened_file):
-                    return _legacy_pickle_load(opened_file, map_location, pickle_module, **pickle_load_args)
+        try:
+            return _legacy_tar_load(opened_file, map_location, pickle_module, **pickle_load_args)
+        except (tarfile.TarError, KeyError):
+            pass
         raise RuntimeError("Unknown file type (expected a legacy tar file, legacy pickle file, or zip file)")
 
 
@@ -684,7 +764,7 @@ def _legacy_pickle_load(f, map_location, pickle_module, **pickle_load_args):
     if magic_number != MAGIC_NUMBER:
         raise RuntimeError("Invalid magic number; corrupt file?")
     protocol_version = pickle_module.load(f, **pickle_load_args)
-    if protocol_version != LEGACY_PICKLE_PROTOCOL_VERSION:
+    if protocol_version != PROTOCOL_VERSION:
         raise RuntimeError("Invalid protocol version: %s" % protocol_version)
 
     _sys_info = pickle_module.load(f, **pickle_load_args)
