@@ -583,7 +583,11 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
         import torch.onnx.symbolic_registry as sym_registry
 
-        sym_registry.register_version('', opset_version)
+        if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            sym_registry.register_quantized_ops('caffe2', opset_version)
+        else:
+            sym_registry.register_version('', opset_version)
+
 
         # See Note [Export inplace]
         # TODO: I think this is not necessary anymore
@@ -654,6 +658,16 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 symbolic_fn = sym_registry.get_registered_op(symbolic_name, '', opset_version)
                 attrs = {k: n[k] for k in n.attributeNames()}
                 return symbolic_fn(g, *inputs, **attrs)
+
+        elif ns == "quantized":
+            if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
+                attrs = {k: n[k] for k in n.attributeNames()}
+                if not sym_registry.is_registered_op(op_name, 'caffe2', opset_version):
+                    warnings.warn("ONNX export failed on quantized operator {}::{} because "
+                                  "torch.onnx.symbolic_opset{}.{} does not exist. "
+                                  .format(ns, op_name, opset_version, op_name))
+                op_fn = sym_registry.get_registered_op(op_name, 'caffe2', opset_version)
+                return op_fn(g, *inputs, **attrs)
 
         # custom ops
         elif sym_registry.is_registered_version(ns, opset_version):
