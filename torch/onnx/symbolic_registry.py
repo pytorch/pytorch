@@ -1,9 +1,7 @@
 import warnings
 import importlib
-import torch
 
 from inspect import getmembers, isfunction
-import torch.onnx.symbolic_helper as sym_help
 
 # The symbolic registry "_registry" is a dictionary that maps operators
 # (for a specific domain and opset version) to their symbolic functions.
@@ -18,9 +16,6 @@ from torch.onnx.symbolic_helper import _onnx_stable_opsets
 for opset_version in _onnx_stable_opsets:
     module = importlib.import_module('torch.onnx.symbolic_opset{}'.format(opset_version))
     _symbolic_versions[opset_version] = module
-#if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-#    module = importlib.import_module('torch.onnx.symbolic_caffe2')
-#    _symbolic_versions['caffe2'] = module
 
 def register_quantized_ops(domain, version):
     # Register all the non-quantized ops
