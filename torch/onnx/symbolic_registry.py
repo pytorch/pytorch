@@ -1,6 +1,5 @@
 import warnings
 import importlib
-
 from inspect import getmembers, isfunction
 
 # The symbolic registry "_registry" is a dictionary that maps operators
