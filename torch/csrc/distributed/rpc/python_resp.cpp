@@ -1,32 +1,32 @@
-#include <torch/csrc/distributed/rpc/python_udf_resp.h>
+#include <torch/csrc/distributed/rpc/python_resp.h>
+
 #include <c10/util/C++17.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-PythonUDFResp::PythonUDFResp(
+PythonResp::PythonResp(
     std::vector<char> pickledPayload,
     std::vector<torch::Tensor> tensors)
     : pickledPayload_(std::move(pickledPayload)),
       tensors_(std::move(tensors)) {}
 
-Message PythonUDFResp::toMessage() && {
+Message PythonResp::toMessage() && {
   return Message(
       std::move(pickledPayload_), std::move(tensors_), MessageType::PYTHON_RET);
 }
 
-std::unique_ptr<PythonUDFResp> PythonUDFResp::fromMessage(
-    const Message& message) {
-  return c10::guts::make_unique<PythonUDFResp>(
+std::unique_ptr<PythonResp> PythonResp::fromMessage(const Message& message) {
+  return c10::guts::make_unique<PythonResp>(
       message.payload(), message.tensors());
 }
 
-const std::vector<char>& PythonUDFResp::pickledPayload() const {
+const std::vector<char>& PythonResp::pickledPayload() const {
   return pickledPayload_;
 }
 
-const std::vector<torch::Tensor>& PythonUDFResp::tensors() const {
+const std::vector<torch::Tensor>& PythonResp::tensors() const {
   return tensors_;
 }
 
