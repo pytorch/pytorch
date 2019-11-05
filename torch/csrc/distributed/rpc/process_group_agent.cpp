@@ -300,6 +300,8 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
   threadPool_.run(std::bind(
       [&](const SendWork& work) {
+        auto id = work.message_.id();
+        std::cout << "=== sending message with id " << id << std::endl << std::flush;
         std::string serializedPayload = serialize(work.message_);
 
         std::vector<torch::Tensor> preamble = {torch::tensor(
@@ -340,6 +342,8 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
         for (auto& pendingSend : pendingSends) {
           pendingSend->wait();
         }
+        std::cout << "=== fisnished sending message with id " << id << std::endl << std::flush;
+
       },
       std::move(work)));
 }
@@ -350,6 +354,9 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         torch::Tensor& payload = work.payload_;
         Message message =
             deserialize(work.type_, payload.storage().data(), payload.numel());
+        auto tmpId = message.id();
+        std::cout << "=== receiving message with id " << tmpId << std::endl << std::flush;
+
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
@@ -374,6 +381,8 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
         }
 
         recvCounts_.increment(work.from_.id_);
+        std::cout << "=== fisnished receiving message with id " << tmpId << std::endl << std::flush;
+
       },
       std::move(work)));
 }
@@ -401,6 +410,7 @@ void ProcessGroupAgent::listenLoop() {
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
 
+    std::cout << "=== " << pg_->getRank() << " received message of type " << type << "availble tasks " << threadPool_.c10::TaskThreadPoolBase::numAvailable() << std::endl << std::flush;
     enqueueRecv(RecvWork(allWorkerInfo_[srcRank], type, std::move(tensors[0])));
   }
 }
