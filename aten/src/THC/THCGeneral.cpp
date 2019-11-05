@@ -111,11 +111,6 @@ void THCudaShutdown(THCState* state)
     THCudaCheck(cudaSetDevice(dev));
     THCCudaResourcesPerDevice* res = &(state->resourcesPerDevice[dev]);
 
-    // Frees BLAS handle
-    if (res->blasHandle) {
-      THCublasCheck(cublasDestroy(res->blasHandle));
-    }
-
     // Frees sparse handle
     if (res->sparseHandle) {
       THCusparseCheck(cusparseDestroy(res->sparseHandle));
@@ -196,27 +191,6 @@ cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
 // TODO: delete me
 cudaStream_t THCState_getCurrentStream(THCState *state) {
   return at::cuda::getCurrentCUDAStream().stream();
-}
-
-cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
-{
-  // Short-circuits if state is NULL
-  // Note: possible in debugging code or improperly instrumented kernels
-  if (!state) {
-    THError("THCState and sparseHandles must be set as there is no default sparseHandle");
-    return NULL;
-  }
-
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
-
-  // Creates the BLAS handle if not created yet
-  THCCudaResourcesPerDevice* res = THCState_getDeviceResourcePtr(state, device);
-  if (!res->blasHandle) {
-    THCublasCheck(cublasCreate(&res->blasHandle));
-  }
-
-  return res->blasHandle;
 }
 
 cusparseHandle_t THCState_getCurrentSparseHandle(THCState *state)

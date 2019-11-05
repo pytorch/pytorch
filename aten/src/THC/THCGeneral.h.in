@@ -33,8 +33,6 @@ typedef struct THCState THCState;
 struct THCState;
 
 typedef struct _THCCudaResourcesPerDevice {
-  /* cuBLAS handle is lazily initialized */
-  cublasHandle_t blasHandle;
   /* cuSparse handle is lazily initialized */
   cusparseHandle_t sparseHandle;
   /* Size of scratch space per each stream on this device available */
@@ -61,8 +59,7 @@ THC_API int THCState_getNumDevices(THCState* state);
 THC_API cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
 THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
 
-/* BLAS and sparse handles */
-THC_API cublasHandle_t THCState_getCurrentBlasHandle(THCState *state);
+/* sparse handles */
 THC_API cusparseHandle_t THCState_getCurrentSparseHandle(THCState *state);
 
 /* For the current device and stream, returns the allocated scratch space */
