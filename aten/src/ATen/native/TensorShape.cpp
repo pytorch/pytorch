@@ -30,7 +30,7 @@ Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
 }
 
 Tensor _shape_as_tensor(const Tensor& self) {
-  auto options = TensorOptions(at::kLong).is_variable(self.options().is_variable());
+  auto options = TensorOptions(at::kLong);
   return at::tensor(self.sizes(), options);
 }
 
@@ -495,8 +495,16 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     return at::_mkldnn_reshape(self, shape);
   }
 
-  if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
-    return self.as_strided(shape, *stride);
+  if (THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
+    // `THTensor_compute_stride` returns the proper strides to use if this 
+    // `reshape` can be just a view.
+    //
+    // NB: Even though we have viewable geometry and the target strides here,
+    //     we do not just call `as_strided` on `self` because the backward
+    //     for `as_strided` is not as efficient as that of `view` (since the
+    //     former is meant to handle general cases). We will redo a
+    //     `THTensor_compute_stride` in `view` but that is quite cheap anyways.
+    return self.view(shape);
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }

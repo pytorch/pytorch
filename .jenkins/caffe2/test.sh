@@ -124,6 +124,7 @@ pip install --user pytest-sugar
   --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
   --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
   --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
+  --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
   ${rocm_ignore_test[@]} \
   "$caffe2_pypath/python" \
   "${EXTRA_TESTS[@]}"
