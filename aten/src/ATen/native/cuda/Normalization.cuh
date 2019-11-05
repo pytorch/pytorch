@@ -511,24 +511,25 @@ static GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> packed_acc
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
-std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
+std::tuple<Tensor, Tensor> batch_norm_cuda_template(Tensor& output_, const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
                                                             const Tensor& running_mean_, const Tensor& running_var_,
                                                             bool train, double momentum, double epsilon) {
 
-  TensorArg input_arg{ input_, "input", 1 },
-            weight_arg{ weight_, "weight", 2 },
-            bias_arg{ bias_, "bias", 3 },
-            run_mean_arg{ running_mean_, "running_mean", 4 },
-            run_var_arg{ running_var_, "running_var", 5 };
+  TensorArg output_arg{ output_, "output", 1 },
+            input_arg{ input_, "input", 2 },
+            weight_arg{ weight_, "weight", 3 },
+            bias_arg{ bias_, "bias", 4 },
+            run_mean_arg{ running_mean_, "running_mean", 5 },
+            run_var_arg{ running_var_, "running_var", 6 };
   CheckedFrom c = "batch_norm_cuda";
-  checkAllSameGPU(c, {input_arg, weight_arg, bias_arg, run_mean_arg, run_var_arg});
+  checkAllSameGPU(c, {output_arg, input_arg, weight_arg, bias_arg, run_mean_arg, run_var_arg});
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
   int64_t n_input = input_.size(1);
   Tensor save_mean_;
   Tensor save_invstd_;
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
-  auto output_reshaped = at::empty_like(input_reshaped, at::MemoryFormat::Contiguous);
+  auto output_reshaped = output_.view({input_.size(0), input_.size(1), -1});
 
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
@@ -579,7 +580,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
       (input, output, save_mean, save_invstd, weight, bias, epsilon);
   }
   THCudaCheck(cudaGetLastError());
-  return std::make_tuple(output_reshaped.view(input_.sizes()), save_mean_, save_invstd_);
+  return std::make_tuple(save_mean_, save_invstd_);
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
