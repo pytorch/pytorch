@@ -343,7 +343,7 @@ class LegacyTracedModule(Module):
         except Exception as e:
             torch._C._tracer_abandon()
             raise e
-        ret_inputs = tuple(x.clone(memory_format=torch.contiguous_format) for x in all_trace_inputs)
+        ret_inputs = tuple(x.clone(memory_format=torch.preserve_format) for x in all_trace_inputs)
         torch._C._tracer_set_force_outplace(self._force_outplace)
         torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
         try:
@@ -379,12 +379,12 @@ def _clone_inputs(args):
             return None
         elif isinstance(a, torch.Tensor):
             # TODO: figure out one liner to .clone() and set requires_grad
-            v = Variable(a.data.clone(memory_format=torch.contiguous_format), requires_grad=a.requires_grad)
+            v = Variable(a.data.clone(memory_format=torch.preserve_format), requires_grad=a.requires_grad)
             if a.grad is not None:
                 v.grad = clone_input(v.grad)
             return v
         else:
-            return a.clone(memory_format=torch.contiguous_format)
+            return a.clone(memory_format=torch.preserve_format)
     return function._nested_map(lambda x: isinstance(x, torch.Tensor),
                                 clone_input, condition_msg="tensors")(args)
 
@@ -490,11 +490,11 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
             raise ValueError(("Model returns {} outputs, but default loss function "
                               "(torch.sum) can only handle a single output").format(len(out)))
         out_vars, _ = _flatten(out)
-        saved_outs = [v.data.clone(memory_format=torch.contiguous_format) for v in out_vars]
+        saved_outs = [v.data.clone(memory_format=torch.preserve_format) for v in out_vars]
         loss = loss_fn(*out)
         grads = torch.autograd.grad([loss], in_vars)
         # TODO: I'm not sure if the clone here is necessary but it is safer
-        saved_grads = [v.data.clone(memory_format=torch.contiguous_format) for v in grads]
+        saved_grads = [v.data.clone(memory_format=torch.preserve_format) for v in grads]
         return (saved_outs, saved_grads)
 
     with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
