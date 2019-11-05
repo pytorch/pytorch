@@ -23,7 +23,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_out(Tensor& output, const Ten
         }
       }
     });
-  return std::make_tuple(output, std::get<0>(res), std::get<1>(res))
+  return std::make_tuple(output, std::get<0>(res), std::get<1>(res));
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const Tensor& weight, const Tensor& bias,
