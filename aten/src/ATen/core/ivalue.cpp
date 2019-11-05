@@ -202,7 +202,6 @@ void ivalue::Object::setAttr(const std::string& name, IValue v) {
 void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
   const size_t slot = type_.type_->getAttributeSlot(name);
   unsafeRemoveSlot(slot);
-  type_.type_->unsafeRemoveAttribute(name);
 }
 
 void ivalue::Object::resizeObject(size_t slot) {

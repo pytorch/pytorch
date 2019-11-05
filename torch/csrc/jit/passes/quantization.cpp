@@ -171,9 +171,9 @@ Node* InsertObserversHelper::insertObserverFor(
     observer_module = std::get<0>(qconfig);
   }
   script::Module observer = observer_module.clone();
-  std::string observer_name = "_observer_" + std::to_string(uid_++);
+  std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.find_module(observer_name)) {
-    observer_name = "_observer_" + std::to_string(uid_++);
+    observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
   // Get handle of observer module
@@ -467,7 +467,8 @@ void QuantizeHelper::removeObserver(
     Value* v,
     const std::string& observer_name) {
   // remove observer_module
-  module_.unsafe_remove_attribute(observer_name);
+  module_.module_object()->unsafeRemoveAttr(observer_name);
+  module_.type()->unsafeRemoveAttribute(observer_name);
   // remove observer forward call
   for (const Use& u : v->uses()) {
     Node* user = u.user;
@@ -1043,9 +1044,9 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
       // unique name for the module based on %w_quant
       int uid = 0;
-      auto module_name = module_name_prefix + std::to_string(uid++);
+      auto module_name = module_name_prefix + c10::to_string(uid++);
       while (module.find_module(module_name)) {
-        module_name_prefix + std::to_string(uid++);
+        module_name_prefix + c10::to_string(uid++);
       }
       module.register_module(module_name, wrapper_module);
 
