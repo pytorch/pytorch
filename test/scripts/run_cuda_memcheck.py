@@ -19,6 +19,7 @@ import argparse
 import subprocess
 import tqdm
 import re
+import os
 import cuda_memcheck_common as cmc
 
 ALL_TESTS = []
@@ -51,6 +52,9 @@ def is_ignored_only(output):
         if 'libcublas' in ''.join(e.stack) or 'libcudnn' in ''.join(e.stack):
             count_ignored_errors += 1
     return count_ignored_errors == report.num_errors
+
+# Set environment UNDER_CUDA_MEMCHECK=1 to allow skipping some tests
+os.environ['UNDER_CUDA_MEMCHECK'] = 1
 
 # Discover tests:
 # To get a list of tests, run:
