@@ -44,7 +44,7 @@ void expectCallsIncrementUnboxed(TensorTypeId type_id) {
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
-  int64_t result = callOpUnboxed<int64_t, at::Tensor, int64_t>(*op, type_id, dummyTensor(type_id), 5);
+  int64_t result = callOpUnboxed<int64_t, at::Tensor, int64_t>(*op, dummyTensor(type_id), 5);
   EXPECT_EQ(6, result);
 }
 
