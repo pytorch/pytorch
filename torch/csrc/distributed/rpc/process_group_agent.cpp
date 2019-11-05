@@ -410,7 +410,7 @@ void ProcessGroupAgent::listenLoop() {
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
 
-    std::cout << "=== " << pg_->getRank() << " received message of type " << type << "availble tasks " << threadPool_.c10::TaskThreadPoolBase::numAvailable() << std::endl << std::flush;
+    std::cout << "=== " << pg_->getRank() << " received message of type " << type << std::endl << std::flush;
     enqueueRecv(RecvWork(allWorkerInfo_[srcRank], type, std::move(tensors[0])));
   }
 }
