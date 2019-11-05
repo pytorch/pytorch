@@ -33,6 +33,8 @@ void decrementKernel(OperatorKernel* functor, const OperatorHandle&, Stack* stac
 }
 
 void expectCallsIncrement(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
@@ -42,6 +44,8 @@ void expectCallsIncrement(TensorTypeId type_id) {
 }
 
 void expectCallsIncrementUnboxed(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
@@ -50,6 +54,8 @@ void expectCallsIncrementUnboxed(TensorTypeId type_id) {
 }
 
 void expectCallsDecrement(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
