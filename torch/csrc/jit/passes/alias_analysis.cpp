@@ -365,6 +365,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeConservative(node);
     case prim::Print:
     case prim::Uninitialized:
+      giveFreshAlias(node->output());
+      return;
     case prim::isinstance:
       // These ops do nothing
       return;

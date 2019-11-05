@@ -495,6 +495,11 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   }
 
   ExecutionPlan getPlanFor(Stack& stack) override {
+
+    static const char* prof_opt = std::getenv("PYTORCH_GRAPH");
+    if (prof_opt) {
+      TORCH_INTERNAL_ASSERT(false);
+    }
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }

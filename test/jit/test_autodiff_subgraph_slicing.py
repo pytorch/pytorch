@@ -1,6 +1,7 @@
 import os
 import sys
-
+import unittest
+from common_utils import GRAPH_EXECUTOR, ProfilingMode
 import torch
 
 # Make the helper files in test/ importable
@@ -21,18 +22,21 @@ if __name__ == '__main__':
 def pyfn(a, b):
     return a * b
 
+@unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.EXECUTOR, "Simple Executor doesn't support gradients")
 class TestAutodiffSubgraphSlicing(JitTestCase):
     # TODO: It is better if we can test directly on graphs instead of the current
     # end-to-end fashion.
     def _perform_ad_subgraph_slicing(self, fn, *input_sizes):
         with disable_autodiff_subgraph_inlining():
-            ge = torch.jit.script(fn)
-            inputs = [torch.randn(size, requires_grad=True) for size in input_sizes]
-            ge(*inputs)
-            return ge.graph_for(*inputs)
+            with enable_profiling_mode():
+                ge = torch.jit.script(fn)
+                inputs = [torch.randn(size, requires_grad=True) for size in input_sizes]
+                ge(*inputs, profile_and_replay=True)
+                return ge.graph_for(*inputs)
 
     def assertGraphSize(self, graph, size):
-        self.assertEqual(len(list(graph.nodes())), size)
+        nodes = list(filter(lambda n : n.kind() != "prim::BailOut" and n.kind() != "prim::BailoutTemplate", graph.nodes()))
+        self.assertEqual(len(list(nodes)), size)
 
     def test_chunk_constant_script_ad(self):
         @torch.jit.script
@@ -42,8 +46,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         input = torch.rand(6, 10).requires_grad_()
         with disable_autodiff_subgraph_inlining():
-            output = func(input)
-            self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
+            with enable_profiling_mode():
+                output = func(input, profile_and_replay=True)
+                self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
 
     def test_simple_merge(self):
         # o --> o
@@ -156,8 +161,13 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
-        self.assertGraphSize(graph, 3)
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
+        # GuardElimination can't get rid of a prim::BailOut on ^pyfn
+        # which makes us create two `prim::DifferentiableGraph`s
+        # instead of just one
+        num_nodes = 4 if GRAPH_EXECUTOR == ProfilingMode.FULL else 3
+        self.assertGraphSize(graph, num_nodes)
+        num_diff_nodes = 2 if GRAPH_EXECUTOR == ProfilingMode.FULL else 1
+        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', num_diff_nodes)
 
     def test_respects_lexical_scoping(self):
         def fn(x, k):

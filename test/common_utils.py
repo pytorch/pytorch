@@ -39,17 +39,32 @@ from torch._utils_internal import get_writable_path
 from torch._six import string_classes, inf
 import torch.backends.cudnn
 import torch.backends.mkl
-
+from enum import Enum
 
 torch.backends.disable_global_flags()
 
+
+class ProfilingMode(Enum):
+    OFF = 1
+    EXECUTOR = 2
+    FULL = 3
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
+parser.add_argument('--ge_config', type=str)
+
+GRAPH_EXECUTOR = ProfilingMode.FULL
 args, remaining = parser.parse_known_args()
+if args.ge_config == 'legacy':
+    GRAPH_EXECUTOR = ProfilingMode.OFF
+    print("legacy")
+elif args.ge_config == 'simple':
+    GRAPH_EXECUTOR = ProfilingMode.EXECUTOR
+    print("simple")
+
 TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
 if not expecttest.ACCEPT:

@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-
+from jit_utils import enable_profiling_mode
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -228,8 +228,9 @@ class TestModels(JitTestCase):
     @staticmethod
     def _test_mnist(self, device, check_export_import=True):
         # eval() is present because dropout makes this nondeterministic
-        self.checkTrace(MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),),
-                        export_import=check_export_import)
+        with enable_profiling_mode():
+            self.checkTrace(MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),),
+                            export_import=check_export_import)
 
     def test_mnist(self):
         self._test_mnist(self, device='cpu')
@@ -277,8 +278,9 @@ class TestModels(JitTestCase):
                 action_scores = self.affine2(x)
                 return F.softmax(action_scores, dim=1)
 
-        self.checkTrace(Policy().to(device), (torch.rand(1, 4, device=device),),
-                        export_import=test_export_import)
+        with enable_profiling_mode():
+            self.checkTrace(Policy().to(device), (torch.rand(1, 4, device=device),),
+                            export_import=test_export_import)
 
     def test_reinforcement_learning(self):
         self._test_reinforcement_learning(self, device='cpu')
@@ -526,9 +528,10 @@ class TestModels(JitTestCase):
                             export_import=False, allow_unused=True,
                             inputs_require_grads=False)
         else:
-            # eval() is present because randn_like makes this nondeterministic
-            self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
-                            export_import=check_export_import)
+            with enable_profiling_mode():
+                # eval() is present because randn_like makes this nondeterministic
+                self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
+                                export_import=check_export_import)
 
     def test_vae(self):
         self._test_vae(self, device='cpu')
