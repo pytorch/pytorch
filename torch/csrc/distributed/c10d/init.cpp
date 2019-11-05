@@ -5,6 +5,7 @@
 #include <c10d/ProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
+#include <c10d/GlooDeviceFactory.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #endif
 
@@ -431,19 +432,24 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   processGroupGloo.def_static(
       "create_device",
-      [](const std::string& hostname, const std::string& interface)
+      [](const std::string& hostname,
+         const std::string& interface,
+         const std::string& transport)
           -> std::shared_ptr<::gloo::transport::Device> {
         if (!hostname.empty()) {
-          return ::c10d::ProcessGroupGloo::createDeviceForHostname(hostname);
+          return ::c10d::GlooDeviceFactory::makeDeviceForHostname(
+              hostname, transport);
         }
         if (!interface.empty()) {
-          return ::c10d::ProcessGroupGloo::createDeviceForInterface(interface);
+          return ::c10d::GlooDeviceFactory::makeDeviceForInterface(
+              interface, transport);
         }
         throw std::invalid_argument(
             "Specify either `hostname` or `interface` argument.");
       },
       py::arg("hostname") = "",
-      py::arg("interface") = "");
+      py::arg("interface") = "",
+      py::arg("transport") = "");
 
   processGroupGloo
       .def(py::init<
@@ -455,7 +461,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::init([](const std::shared_ptr<::c10d::Store>& store,
                       int rank,
                       int size,
-                      std::chrono::milliseconds timeout) {
+                      std::chrono::milliseconds timeout,
+                      const std::string& transport) {
             ::c10d::ProcessGroupGloo::Options options;
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
@@ -463,14 +470,15 @@ They are used in specifying strategies for reduction collectives, e.g.,
             if (ifnameEnv) {
               for (const auto& iface : split(',', ifnameEnv)) {
                 options.devices.push_back(
-                    ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
+                    ::c10d::GlooDeviceFactory::makeDeviceForInterface(
+                        iface, transport));
               }
             } else {
               // If no hostname is specified, this function looks up
               // the machine's hostname and returns a device instance
               // associated with the address that the hostname resolves to.
               options.devices.push_back(
-                  ::c10d::ProcessGroupGloo::createDefaultDevice());
+                  ::c10d::GlooDeviceFactory::makeDefaultDevice(transport));
             }
 
             options.timeout = timeout;
@@ -481,7 +489,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000));
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000),
+          py::arg("transport") = "");
 #endif
 
 #ifdef USE_C10D_NCCL
