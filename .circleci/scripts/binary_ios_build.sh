@@ -17,6 +17,8 @@ conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing re
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 # sync submodules
 cd ${PROJ_ROOT}
+git fetch
+git checkout v1.3.1
 git submodule sync
 git submodule update --init --recursive
 # run build script

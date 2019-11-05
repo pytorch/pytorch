@@ -27,7 +27,8 @@ lipo -i ${ZIP_DIR}/install/lib/*.a
 cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/
 cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
-ZIPFILE=libtorch_ios_nightly_build.zip
+# ZIPFILE=libtorch_ios_nightly_build.zip
+ZIPFILE=libtorch_ios_1.3.1.zip
 cd ${ZIP_DIR}
 #for testing
 touch version.txt
@@ -41,4 +42,5 @@ export AWS_SECRET_ACCESS_KEY=${AWS_S3_ACCESS_SECRET_FOR_PYTORCH_BINARY_UPLOAD}
 set +x
 # echo "AWS KEY: ${AWS_ACCESS_KEY_ID}"
 # echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"
-aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
+# aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
+aws s3 cp ${ZIPFILE} s3://ossci-ios/ --acl public-read
