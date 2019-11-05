@@ -16,25 +16,25 @@ from torch._utils_internal import get_source_lines_and_file
 boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
 
 
-def createResolutionCallback(frames_up=0):
+def createResolutionCallbackFromFrame(frames_up=0):
     """
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
-    the function which called createResolutionCallback (by default).
+    the function which called createResolutionCallbackFromFrame (by default).
 
     This is used to enable access in-scope Python variables inside
     TorchScript fragments.
 
     frames_up is number of additional frames to go up on the stack.
     The default value is 0, which correspond to the frame of the caller
-    of createResolutionCallback. Also for example, if frames_up is set
-    to 1, then the frame of the caller's caller of createResolutionCallback
+    of createResolutionCallbackFromFrame. Also for example, if frames_up is set
+    to 1, then the frame of the caller's caller of createResolutionCallbackFromFrame
     will be taken.
 
     For example, the following program prints 2::
 
         def bar():
-            cb = createResolutionCallback(1)
+            cb = createResolutionCallbackFromFrame(1)
             print(cb("foo"))
 
         def baz():
@@ -74,6 +74,48 @@ def get_closure(fn):
         captures[captured_name] = fn.__closure__[index].cell_contents
 
     return captures
+
+# [local resolution in python]
+# Depending on where a variable is defined, and where it is used, we may
+# or may not be able to recover its value when recursively compiling a
+# script function. Remember in the general case, a module or function is
+# first defined and then later scripted. This means we do not have a
+# chance to capture the active frames when the function is defined. Hence any
+# name resolution has to happen later on the created closure. The way
+# python captures type annotations restricts what we can recover. The
+# follow example illustrates the different cases:
+#
+#         class MyGlobalClass:
+#         ...
+#         def my_local_scope():
+#             @torch.jit.script
+#             class MyClass:
+#                 ...
+#             @torch.jit.script
+#             class MyClassUsedAsVar:
+#                 ...
+#             def eg(x: MyClass, y: MyGlobalClass):
+#                 a_local_capture : Foo
+#                 return MyClassUsedAsVar(x)
+#
+# MyGlobalClass is defined in the __globals__ dictionary of function
+# 'eg', so it is always recoverable. my_local_scope introduces a new local
+# variable scope in the function. Classes defined here are only visible as
+# local variables. For the case of MyClassUsedAsVar, it is captured
+# because it is used as a variable inside the body of the function, and we
+# can resolve it using the captures returned from `get_closure`. However,
+# the type annotations are not captured by the closure. In Python
+# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be availiable as
+# annotations on `eg``, but starting in Python 4.0, they will represented as
+# strings and no longer present. Furthermore, since the body of `eg` does
+# not reference those names, they do not appear in the list of closed over
+# variables. In Python 2.x, type annotations are in comments, leading to a
+# similar situation where their definitions are not available. We anticipate
+# that most users will not run into this issue because their modules and
+# functions will be defined at a global scope like MyGlobalClass. In cases
+# where they are not, it is possible to work around issues by declaring the
+# values global in the function.
+
 
 
 def createResolutionCallbackFromClosure(fn):
@@ -178,11 +220,12 @@ class FunctionModifiers(object):
 
 def export(fn):
     """
-    This decorator indicates that a method is used as an entry point into a
-    ``ScriptModule`` and should be compiled. ``forward`` implicitly is assumbed to be an
-    entry point, so it does not need this decorator. Functions and methods
-    called from ``forward`` are compiled as they are seen, so they do not need
-    this decorator either.
+    This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
+    :class:`ScriptModule` and should be compiled.
+
+    ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
+    Functions and methods called from ``forward`` are compiled as they are seen
+    by the compiler, so they do not need this decorator either.
 
     Example (using ``@torch.jit.export`` on a method):
 
@@ -373,7 +416,6 @@ def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
-
 def get_torchscript_modifier(fn):
     if not callable(fn):
         return None
@@ -381,18 +423,11 @@ def get_torchscript_modifier(fn):
         fn = fn.__func__
     return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
-
-def _parameter_list(parameter_names_fn):
-    """
-    Decorator to denote that a function returns a list of all the parameters
-    in a module
-    """
-    def decorator(fn):
-        fn._parameter_names_fn = parameter_names_fn
-        return fn
-
-    return decorator
-
+def copy_torchscript_modifier(orig, new):
+    attr = get_torchscript_modifier(orig)
+    if attr is None:
+        return
+    new._torchscript_modifier = attr
 
 # overloading registration
 # overloads get registered in this file, and compiled in torch/jit/__init__.py
@@ -487,7 +522,7 @@ def _get_overloaded_methods(method, mod_class):
 
 try:
     import typing
-    from typing import Tuple, List, Dict, Optional
+    from typing import Tuple, List, Dict, Optional, Any
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -573,10 +608,14 @@ except ImportError:
         def __getitem__(self, types):
             return OptionalInstance(types)
 
+    class AnyCls(object):
+        pass
+
     Tuple = TupleCls()  # noqa: T484
     List = ListCls()  # noqa: T484
     Dict = DictCls()  # noqa: T484
     Optional = DictCls()  # noqa: T484
+    Any = AnyCls()  # noqa: T484
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/autograd/context/dist_autograd_context.h>
-#include <torch/csrc/distributed/rpc/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 
 namespace torch {
 namespace distributed {
@@ -15,8 +15,9 @@ namespace autograd {
 // autograd information for the recipient.
 TORCH_API void addSendRpcBackward(
     DistAutogradContext& autogradContext,
-    const torch::distributed::rpc::AutogradMetadata& autogradMetadata,
-    std::vector<torch::Tensor>& tensors);
+    const AutogradMetadata& autogradMetadata,
+    std::vector<torch::Tensor>& tensors,
+    const rpc::worker_id_t dst);
 
 // This method is used to attach the 'recv' autograd function to the autograd
 // graph when we use RPC. This method creates a new 'recv' autograd function
@@ -27,8 +28,29 @@ TORCH_API void addSendRpcBackward(
 // Returns a pointer to the autograd context created (nullptr in case of no
 // autograd information was needed.)
 TORCH_API DistAutogradContext* addRecvRpcBackward(
-    const torch::distributed::rpc::AutogradMetadata& autogradMetadata,
-    std::vector<torch::Tensor>& tensors);
+    const AutogradMetadata& autogradMetadata,
+    std::vector<torch::Tensor>& tensors,
+    rpc::worker_id_t fromWorkerId);
+
+// This method is a wrapper utility used internally to wrap autograd info
+// and attach autograd function for each type of rpc call if it has valid
+// context and tensors require grads or forceGradRecording is true, in this
+// case, return RpcWithAutograd message; otherwise return original rpc message.
+// NB: forceGradRecording is useful when the request does not contain any tensor
+// but the corresponding response does.
+TORCH_API rpc::Message getMessageWithAutograd(
+    const rpc::worker_id_t dstId,
+    rpc::Message&& wrappedRpcMsg,
+    rpc::MessageType msgType,
+    bool forceGradRecording = false);
+
+// Send message after autograd checking
+TORCH_API std::shared_ptr<torch::distributed::rpc::FutureMessage>
+sendMessageWithAutograd(
+    rpc::RpcAgent& agent,
+    const rpc::WorkerInfo& dst,
+    rpc::Message&& wrappedRpcMsg,
+    bool forceGradRecording = false);
 
 } // namespace autograd
 } // namespace distributed

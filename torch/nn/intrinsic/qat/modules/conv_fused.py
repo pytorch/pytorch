@@ -23,8 +23,7 @@ class ConvBn2d(nn.Conv2d):
 
     Attributes:
         freeze_bn:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
+        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
 
     """
@@ -59,7 +58,7 @@ class ConvBn2d(nn.Conv2d):
         self.register_buffer('running_mean', torch.zeros(out_channels))
         self.register_buffer('running_var', torch.ones(out_channels))
         self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
-        self.observer = self.qconfig.activation()
+        self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
         self.reset_bn_parameters()
 
@@ -140,7 +139,7 @@ class ConvBn2d(nn.Conv2d):
         return super(ConvBn2d, self).extra_repr()
 
     def forward(self, input):
-        return self.observer(self._forward(input))
+        return self.activation_post_process(self._forward(input))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -215,7 +214,8 @@ class ConvBnReLU2d(ConvBn2d):
                                            qconfig)
 
     def forward(self, input):
-        return self.observer(F.relu(super(ConvBnReLU2d, self)._forward(input)))
+        return self.activation_post_process(
+            F.relu(super(ConvBnReLU2d, self)._forward(input)))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -231,8 +231,7 @@ class ConvReLU2d(nnqat.Conv2d):
     :class:`~torch.nn.BatchNorm2d`.
 
     Attributes:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow
+        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
 
     """
@@ -248,12 +247,12 @@ class ConvReLU2d(nnqat.Conv2d):
                                          qconfig=qconfig)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.observer = self.qconfig.activation()
+        self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
-        return self.observer(F.relu(super(ConvReLU2d, self).conv2d_forward(input,
-                             self.weight_fake_quant(self.weight))))
+        return self.activation_post_process(F.relu(
+            super(ConvReLU2d, self).conv2d_forward(input, self.weight_fake_quant(self.weight))))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

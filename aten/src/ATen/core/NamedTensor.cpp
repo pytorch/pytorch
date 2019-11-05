@@ -42,12 +42,6 @@ DimnameList default_names(size_t len) {
   return DimnameList(&all_unnamed.front(), len);
 }
 
-void check_names_valid_for(const Tensor& tensor, DimnameList names) {
-  return impl::check_names_valid_for(tensor.unsafeGetTensorImpl(), names);
-}
-
-namespace impl {
-
 static void check_unique_names(DimnameList names) {
   // Strategy: Compare each element with the ones that come after it.
   // Although this is O(N^2), in practice N is small (no more than 25).
@@ -61,6 +55,24 @@ static void check_unique_names(DimnameList names) {
     }
   }
 }
+
+void check_names_valid_for(const Tensor& tensor, DimnameList names) {
+  return impl::check_names_valid_for(tensor.unsafeGetTensorImpl(), names);
+}
+
+void check_names_valid_for(int64_t tensor_dim, DimnameList names) {
+  TORCH_CHECK(
+      tensor_dim <= kMaxNamedTensorDim,
+      "Named tensors only support up to ", kMaxNamedTensorDim, " dims: "
+      "Attempted to create a tensor with dim ", tensor_dim, " with names ", names);
+  TORCH_CHECK(tensor_dim == names.size(),
+      "Number of names (", names.size(), ") and "
+      "number of dimensions in tensor (", tensor_dim, ") ",
+      "do not match. Attempted to create a tensor with names ", names);
+  check_unique_names(names);
+}
+
+namespace impl {
 
 static NamedTensorMeta* get_named_tensor_meta(TensorImpl* impl) {
   if (!NamesMode::is_enabled()) {
@@ -77,16 +89,7 @@ static const NamedTensorMeta* get_named_tensor_meta(const TensorImpl* impl) {
 }
 
 void check_names_valid_for(TensorImpl* impl, DimnameList names) {
-  auto ndim = impl->dim();
-  TORCH_CHECK(
-      ndim <= kMaxNamedTensorDim,
-      "Named tensors only support up to ", kMaxNamedTensorDim, " dims: "
-      "Attempted to create a tensor with dim ", ndim, " with names ", names);
-  TORCH_CHECK(ndim == names.size(),
-      "Number of names (", names.size(), ") and "
-      "number of dimensions in tensor (", ndim, ") ",
-      "do not match. Attempted to create a tensor with names ", names);
-  check_unique_names(names);
+  check_names_valid_for(impl->dim(), names);
 }
 
 void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names) {

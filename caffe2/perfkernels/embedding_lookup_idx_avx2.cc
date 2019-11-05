@@ -47,9 +47,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -163,9 +161,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -239,9 +235,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -295,9 +289,7 @@ static bool EmbeddingLookupIdx_int32_t_float_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -499,9 +491,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -615,9 +605,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -691,9 +679,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -747,9 +733,7 @@ static bool EmbeddingLookupIdx_int64_t_float_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -951,9 +935,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -1127,9 +1109,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -1233,9 +1213,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -1304,9 +1282,7 @@ static bool EmbeddingLookupIdx_int32_t_half_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -1523,9 +1499,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -1699,9 +1673,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -1805,9 +1777,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -1876,9 +1846,7 @@ static bool EmbeddingLookupIdx_int64_t_half_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -2095,9 +2063,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -2273,9 +2239,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -2382,9 +2346,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -2457,9 +2419,7 @@ static bool EmbeddingLookupIdx_int32_t_uint8_t_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -2680,9 +2640,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       __m256 vop104 = _mm256_setzero_ps();
       __m256 vop112 = _mm256_setzero_ps();
       __m256 vop120 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -2858,9 +2816,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       __m256 vop40 = _mm256_setzero_ps();
       __m256 vop48 = _mm256_setzero_ps();
       __m256 vop56 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -2967,9 +2923,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       __m256 vop8 = _mm256_setzero_ps();
       __m256 vop16 = _mm256_setzero_ps();
       __m256 vop24 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);
@@ -3042,9 +2996,7 @@ static bool EmbeddingLookupIdx_int64_t_uint8_t_float__avx2_fma(
       float* op = &out[rangeIndex * block_size];
       __m256 vop0 = _mm256_setzero_ps();
       __m256 vop8 = _mm256_setzero_ps();
-      if (dataInd != offsets[rangeIndex]) {
-        return false;
-      }
+      dataInd = offsets[rangeIndex];
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
                                          : offsets[rangeIndex + 1]);

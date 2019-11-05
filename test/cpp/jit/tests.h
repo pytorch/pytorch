@@ -62,8 +62,8 @@ namespace jit {
   _(SaveExtraFilesHook)                \
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
-  _(ImportTooNew)                      \
   _(ClassDerive)                       \
+  _(ModuleInterfaceSerialization)      \
   _(Inliner)                           \
   _(LiteInterpreterAdd)                \
   _(LiteInterpreterConv)

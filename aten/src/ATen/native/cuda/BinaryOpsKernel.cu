@@ -4,7 +4,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
-#include <THC/THCNumerics.cuh>
 #include <limits>
 
 
@@ -65,15 +64,25 @@ void mul_kernel_cuda(TensorIterator& iter) {
 void atan2_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "atan2_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return THCNumerics<scalar_t>::atan2(a, b);
+      return ::atan2(a, b);
     });
   });
 }
 
 void logical_xor_kernel_cuda(TensorIterator& iter) {
-  gpu_kernel(iter, []GPU_LAMBDA(bool a, bool b) -> bool {
-    return a != b;
-  });
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.input_dtype(), "logical_xor_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
+        return bool(a) != bool(b);
+      });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "logical_xor_cuda", [&]() {
+      gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+        return static_cast<scalar_t>(bool(a) != bool(b));
+      });
+    });
+  }
 }
 
 void lt_kernel_cuda(TensorIterator& iter) {
@@ -172,6 +181,24 @@ void ne_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+void smooth_l1_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "smooth_l1_cuda", [&]() {
+    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      auto z = fabs(a - b);
+      return z < scalar_t(1.) ? scalar_t(0.5) * z * z : z - scalar_t(0.5);
+    });
+  });
+}
+
+void mse_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      auto diff = a - b;
+      return diff * diff;
+    });
+  });
+}
+
 REGISTER_DISPATCH(add_stub, &add_kernel_cuda);
 REGISTER_DISPATCH(sub_stub, &sub_kernel_cuda);
 REGISTER_DISPATCH(div_stub, &div_kernel_cuda);
@@ -184,5 +211,7 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel_cuda);
 REGISTER_DISPATCH(ge_stub, &ge_kernel_cuda);
 REGISTER_DISPATCH(eq_stub, &eq_kernel_cuda);
 REGISTER_DISPATCH(ne_stub, &ne_kernel_cuda);
+REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
+REGISTER_DISPATCH(mse_stub, &mse_kernel_cuda);
 
 }} // namespace at::native

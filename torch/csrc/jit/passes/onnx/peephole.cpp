@@ -519,6 +519,8 @@ static void replaceInputWithList(Node* node, size_t i, ArrayRef<Value*> to) {
 }
 
 static void eraseListConstruct(Block* block) {
+  // TODO: Fix this pass/maybe get rid of this part.
+  // Tensor lists might be used for meshgrid and such ops as well.
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* n = *it;
@@ -590,18 +592,79 @@ static void fuseSplitListUnpack(Block* b) {
       auto origSplitNode = it->input()->node();
 
       Node* splitNode =
-          b->owningGraph()->create(onnx::Split, it->outputs().size());
+        b->owningGraph()->create(onnx::Split, it->outputs().size());
       for (size_t i = 0; i < splitNode->outputs().size(); ++i) {
         splitNode->outputs()[i]->copyMetadata(it->outputs()[i]);
       }
       splitNode->copyAttributes(*origSplitNode);
       splitNode->insertBefore(origSplitNode);
-      splitNode->addInput(origSplitNode->input());
+      splitNode->addInput(origSplitNode->inputs().at(0));
       it->replaceAllUsesWith(splitNode);
       it->removeAllInputs();
       origSplitNode->destroy();
       it.destroyCurrent();
       continue;
+    }
+  }
+}
+
+// Unbind is being converted to ONNX as Split + Squeeze.
+// Example IR
+// graph(%0 : Float(3, 4, 5)):
+//   %7 : Long() = prim::Constant[value={0}]()
+//   %3 : Tensor[] = aten::unbind(%0, %7)
+//   %4 : Float(4, 5), %5 : Float(4, 5), %6 : Float(4, 5) = prim::ListUnpack(%3)
+//   return (%4, %5, %6)
+//
+// Translates to ONNX:
+// graph(%0 : Float(3, 4, 5)):
+//   %1 : Tensor, %2 : Tensor, %3 : Tensor = onnx::Split[axis=0](%0)
+//   %4 : Float(4, 5) = onnx::Squeeze[axes=[0]](%3)
+//   %5 : Float(4, 5) = onnx::Squeeze[axes=[0]](%2)
+//   %6 : Float(4, 5) = onnx::Squeeze[axes=[0]](%1)
+//   return (%6, %5, %4)
+static void fuseUnbindListUnpack(Block *b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseUnbindListUnpack(child_block);
+    }
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == aten::unbind) {
+      Node* orig_unbind_node = it->input()->node();
+      auto dim = orig_unbind_node->i(attr::axis);
+
+      Node* split_node =
+          b->owningGraph()->create(onnx::Split, {orig_unbind_node->input()}, it->outputs().size());
+      split_node->i_(attr::axis, dim);
+      split_node->insertAfter(*it);
+      for (size_t i = 0; i < split_node->outputs().size(); ++i) {
+        Node* unsqueeze_node =  b->owningGraph()->create(onnx::Squeeze, {split_node->output(i)});
+        unsqueeze_node->is_(attr::axes, {dim});
+        unsqueeze_node->output()->copyMetadata(it->output(i));
+        it->output(i)->replaceAllUsesWith(unsqueeze_node->output());
+        unsqueeze_node->insertAfter(split_node);
+      }
+      it->removeAllInputs();
+      orig_unbind_node->destroy();
+      it.destroyCurrent();
+    }
+  }
+}
+
+// For ops such as meshgrid where output is a list of Tensors
+// (returns prim::ListConstruct), we need to unpack the list
+// before the pass which deletes ListConstruct.
+static void fuseListConstructListUnpack(Block *b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      fuseListConstructListUnpack(child_block);
+    }
+    if (it->kind() == prim::ListUnpack &&
+        it->input()->node()->kind() == prim::ListConstruct) {
+      for (size_t i = 0; i < it->outputs().size(); i++) {
+        auto output = it->outputs().at(i);
+        output->replaceAllUsesWith(it->input()->node()->inputs().at(i));
+      }
     }
   }
 }
@@ -655,8 +718,10 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool
   eliminateNopTranspose(graph->block());
   fuseTransposeIntoGemm(graph->block());
   speculateOps(graph->block());
-  eraseListConstruct(graph->block());
+  fuseListConstructListUnpack(graph->block());
   fuseSplitListUnpack(graph->block());
+  fuseUnbindListUnpack(graph->block());
+  eraseListConstruct(graph->block());
   removeMaxPoolUnusedOutput(graph->block());
 }
 

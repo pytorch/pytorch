@@ -48,6 +48,7 @@ blacklist = [
     '__init_subclass__',
     '__new__',
     '__subclasshook__',
+    'cdist',
     'clamp',
     'clamp_',
     'device',
@@ -274,7 +275,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
                 python_args.append('*')
                 render_kw_only_separator = False
             python_args += ["dtype: _dtype=None",
-                            "layout: layout=strided",
+                            "layout: _layout=strided",
                             "device: Union[_device, str, None]=None",
                             "requires_grad:_bool=False"]
 
@@ -283,8 +284,10 @@ def generate_type_hints(fname, decls, is_tensor=False):
 
         if len(python_returns) > 1:
             python_returns_s = 'Tuple[' + ', '.join(python_returns) + ']'
-        else:
+        elif len(python_returns) == 1:
             python_returns_s = python_returns[0]
+        else:
+            python_returns_s = 'None'
 
         type_hint = "def {}({}) -> {}: ...".format(fname, python_args_s, python_returns_s)
         numargs = len(decl['arguments'])
@@ -416,6 +419,7 @@ def gen_pyi(declarations_path, out):
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
+        'numel': ['def numel(self: Tensor) -> _int: ...'],
         'clamp': ["def clamp(self, min: _float=-inf, max: _float=inf,"
                   " *, out: Optional[Tensor]=None) -> Tensor: ..."],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
@@ -501,6 +505,7 @@ def gen_pyi(declarations_path, out):
         'requires_grad_': ['def requires_grad_(self, mode: _bool=True) -> Tensor: ...'],
         'element_size': ['def element_size(self) -> _int: ...'],
         'dim': ['def dim(self) -> _int: ...'],
+        'numel': ['def numel(self) -> _int: ...'],
         'ndimension': ['def ndimension(self) -> _int: ...'],
         'nelement': ['def nelement(self) -> _int: ...'],
         'cuda': ['def cuda(self, device: Optional[_device]=None, non_blocking: _bool=False) -> Tensor: ...'],

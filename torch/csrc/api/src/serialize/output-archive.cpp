@@ -42,5 +42,10 @@ void OutputArchive::save_to(const std::string& filename) {
 void OutputArchive::save_to(std::ostream& stream) {
   jit::ExportModule(module_, stream);
 }
+
+void OutputArchive::save_to(
+    const std::function<size_t(const void*, size_t)>& func) {
+  jit::ExportModule(module_, func);
+}
 } // namespace serialize
 } // namespace torch

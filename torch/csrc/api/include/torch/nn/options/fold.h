@@ -34,5 +34,25 @@ struct TORCH_API FoldOptions {
   TORCH_ARG(ExpandingArray<2>, stride) = 1;
 };
 
+/// Options for an Unfold functional and module.
+struct TORCH_API UnfoldOptions {
+  UnfoldOptions(ExpandingArray<2> kernel_size)
+      : kernel_size_(std::move(kernel_size)) {}
+
+  /// the size of the sliding blocks
+  TORCH_ARG(ExpandingArray<2>, kernel_size);
+
+  /// controls the spacing between the kernel points; also known as the à trous
+  /// algorithm.
+  TORCH_ARG(ExpandingArray<2>, dilation) = 1;
+
+  /// controls the amount of implicit zero-paddings on both sides for padding
+  /// number of points for each dimension before reshaping.
+  TORCH_ARG(ExpandingArray<2>, padding) = 0;
+
+  /// controls the stride for the sliding blocks.
+  TORCH_ARG(ExpandingArray<2>, stride) = 1;
+};
+
 } // namespace nn
 } // namespace torch

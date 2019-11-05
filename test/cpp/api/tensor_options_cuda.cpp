@@ -1,10 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <ATen/Context.h>
-#include <ATen/DeviceGuard.h>
-#include <ATen/Functions.h>
-#include <c10/core/ScalarType.h>
-#include <c10/core/TensorOptions.h>
+#include <torch/torch.h>
 
 #include <torch/cuda.h>
 

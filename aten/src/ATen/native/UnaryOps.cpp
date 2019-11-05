@@ -57,6 +57,10 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
+Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
+Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
+Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
+
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
 Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
@@ -81,6 +85,14 @@ Tensor& log10_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor log10(const Tensor& self) { return unary_op_impl(self, at::log10_out); }
 Tensor& log10_(Tensor& self) { return unary_op_impl_(self, at::log10_out); }
 
+Tensor& log1p_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log1p_stub); }
+Tensor log1p(const Tensor& self) { return unary_op_impl(self, at::log1p_out); }
+Tensor& log1p_(Tensor& self) { return unary_op_impl_(self, at::log1p_out); }
+
+Tensor& log2_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log2_stub); }
+Tensor log2(const Tensor& self) { return unary_op_impl(self, at::log2_out); }
+Tensor& log2_(Tensor& self) { return unary_op_impl_(self, at::log2_out); }
+
 Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
@@ -96,6 +108,18 @@ Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
 Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
 Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
+
+Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sin_stub); }
+Tensor sin(const Tensor& self) { return unary_op_impl(self, at::sin_out); }
+Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
+
+Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinh_stub); }
+Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
+Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
+
+Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
+Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
+Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
 
 Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
 Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
@@ -246,7 +270,8 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
     return at::op##_out(self, self);                                   \
   }                                                                    \
   Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
-    checkBackend(#op, result, Backend::device);                        \
+    checkDeviceType(#op, result, DeviceType::device);                  \
+    checkLayout(#op, result, Layout::Strided);                         \
     auto iter = TensorIterator::unary_op(result, self,                 \
       /*check_mem_overlap=*/true);                                     \
     op##_stub(iter.device_type(), iter);                               \
@@ -263,8 +288,11 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
 IMPLEMENT_UNARY_OP_VEC(abs)
+IMPLEMENT_UNARY_OP_VEC(angle)
+IMPLEMENT_UNARY_OP_VEC(real)
+IMPLEMENT_UNARY_OP_VEC(imag)
+IMPLEMENT_UNARY_OP_VEC(conj)
 IMPLEMENT_UNARY_OP_VEC(acos)
-IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
@@ -273,18 +301,17 @@ IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(frac)
-IMPLEMENT_UNARY_OP_VEC(log1p)
-IMPLEMENT_UNARY_OP_VEC(log2)
 IMPLEMENT_UNARY_OP_VEC(reciprocal)
 IMPLEMENT_UNARY_OP_VEC(sigmoid)
-IMPLEMENT_UNARY_OP_VEC(sin)
-IMPLEMENT_UNARY_OP_VEC(sinh)
-IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
+DEFINE_DISPATCH(angle_stub);
+DEFINE_DISPATCH(real_stub);
+DEFINE_DISPATCH(imag_stub);
+DEFINE_DISPATCH(conj_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);

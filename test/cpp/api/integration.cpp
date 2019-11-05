@@ -1,15 +1,6 @@
 #include <gtest/gtest.h>
 
-#include <torch/data.h>
-#include <torch/nn/modules/batchnorm.h>
-#include <torch/nn/modules/conv.h>
-#include <torch/nn/modules/dropout.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/optim/adam.h>
-#include <torch/optim/optimizer.h>
-#include <torch/optim/sgd.h>
-#include <torch/types.h>
-#include <torch/utils.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
 

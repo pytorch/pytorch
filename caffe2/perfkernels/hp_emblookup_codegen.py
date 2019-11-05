@@ -70,11 +70,12 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
 
     # inner loop
     if use_offsets:
-        code.append(
-            "      if (dataInd != offsets[rangeIndex]) {\n"
-            + "        return false;\n"
-            + "      }"
-        )
+        # code.append(
+        #     "      if (dataInd != offsets[rangeIndex]) {\n"
+        #     + "        return false;\n"
+        #     + "      }"
+        # )
+        code.append("      dataInd = offsets[rangeIndex];")
         code.append("""\
       int64_t end_offset =
           (rangeIndex == output_size - 1 ? index_size
@@ -488,7 +489,7 @@ for o in options:
     code.append("    // generic code")
     code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
     code.append("  }")
-    if not opts.fused:
+    if opts.use_offsets:
         code.append("  return dataInd == (end_idx == output_size ? index_size : offsets[end_idx]);")
     else:
         code.append("  return dataInd == index_size;")

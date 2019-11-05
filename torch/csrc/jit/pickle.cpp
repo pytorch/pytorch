@@ -74,7 +74,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
   std::vector<at::TypePtr> types(writeable_tensors.size(), at::StringType::get());
 
   for (size_t i = 0; i < writeable_tensors.size(); i++) {
-    keys.emplace_back(std::to_string(i));
+    keys.emplace_back(c10::to_string(i));
   }
 
   auto keys_tuple = at::ivalue::Tuple::create(keys);
@@ -91,7 +91,7 @@ std::vector<char> pickle_save(const at::IValue& ivalue) {
 }
 
 IValue unpickle(
-    std::function<bool(char*, size_t)> reader,
+    std::function<size_t(char*, size_t)> reader,
     ClassResolver class_resolver,
     const std::vector<at::Tensor>* tensor_table) {
   Unpickler unpickler(
@@ -106,15 +106,16 @@ IValue unpickle(
     const std::vector<at::Tensor>* tensor_table) {
   size_t bytes_read = 0;
   return unpickle(
-      [&](char* buffer, size_t len) {
-        if (bytes_read + len > size) {
-          return false;
+      [&](char* buffer, size_t len) -> size_t {
+        if (bytes_read >= size) {
+          return 0;
         }
+        len = std::min(size - bytes_read, len);
         // Copy len bytes into buffer
         const char* start = data + bytes_read;
         std::memcpy(buffer, start, len);
         bytes_read += len;
-        return true;
+        return len;
       },
       std::move(class_resolver),
       tensor_table);

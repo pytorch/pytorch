@@ -1,4 +1,4 @@
-r"""Definition of the DataLoader and it's iterator _DataLoaderIter classes.
+r"""Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter
 
 To support these two classes, in `./_utils` we define many utility methods and
 functions to be run in multiprocessing. E.g., the data loading worker loop is

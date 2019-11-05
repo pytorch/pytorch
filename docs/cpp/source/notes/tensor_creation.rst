@@ -72,12 +72,12 @@ tensor filled with values from a unit normal distribution by writing:
 .. code-block:: cpp
 
   torch::Tensor tensor = torch::randn({3, 4, 5});
-  assert(tensor.sizes() == torch::IntArrayRef{3, 4, 5});
+  assert(tensor.sizes() == std::vector<int64_t>{3, 4, 5});
 
-Notice how we use ``tensor.sizes()`` to get back an ``IntArrayRef`` containing the
-sizes we passed to the tensor. You can also write ``tensor.size(i)`` to access
-a single dimension, which is equivalent to but preferred over
-``tensor.sizes()[i]``.
+``tensor.sizes()`` returns an ``IntArrayRef`` which can be compared against an
+``std::vector<int64_t>``, and we can see that it contains the sizes we passed
+to the tensor. You can also write ``tensor.size(i)`` to access a single dimension,
+which is equivalent to but preferred over ``tensor.sizes()[i]``.
 
 Passing Function-Specific Parameters
 ************************************
