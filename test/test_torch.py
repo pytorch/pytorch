@@ -3896,7 +3896,7 @@ class _TestTorchMixin(object):
         rootview = c[8]
         self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
 
-    def test_serialization_zipfile(self):
+    def test_serialization_zipfile_utils(self):
         data = {
             'a': b'12039810948234589',
             'b': b'1239081209484958',
@@ -3916,6 +3916,25 @@ class _TestTorchMixin(object):
                     actual = zip_file.get_record(key)
                     expected = data[key]
                     self.assertEqual(expected, actual)
+
+        with tempfile.NamedTemporaryFile() as f:
+            test(f)
+        with tempfile.NamedTemporaryFile() as f:
+            test(f.name)
+
+        test(io.BytesIO())
+
+    def test_serialization_zipfile(self):
+        data = self._test_serialization_data()
+
+        def test(name_or_buffer):
+            torch.save(data, name_or_buffer, _use_new_zipfile_serialization=True)
+
+            if hasattr(name_or_buffer, 'seek'):
+                name_or_buffer.seek(0)
+
+            result = torch.load(name_or_buffer)
+            self.assertEqual(result, data)
 
         with tempfile.NamedTemporaryFile() as f:
             test(f)
