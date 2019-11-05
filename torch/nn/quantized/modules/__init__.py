@@ -12,13 +12,14 @@ from .functional_modules import FloatFunctional, QFunctional
 
 class Quantize(torch.nn.Module):
     r"""Quantizes an incoming tensor
+
     Args:
-     `out_scale`: scale of the output Quantized Tensor
-     `out_zero_point`: zero_point of output Quantized Tensor
-     `out_dtype`: data type of output Quantized Tensor
+     `scale`: scale of the output Quantized Tensor
+     `zero_point`: zero_point of output Quantized Tensor
+     `dtype`: data type of output Quantized Tensor
 
     Attributes:
-      `out_scale`, `out_zero_point`, `out_dtype`
+      `scale`, `zero_point`, `dtype`
 
     Examples::
         >>> t = torch.tensor([[1., -1.], [1., -1.]])
