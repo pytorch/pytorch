@@ -1374,8 +1374,22 @@ class OrderedModuleDict(OrderedDictWrapper):
         return k in self._python_modules
 
     def __setitem__(self, k, v):
-        raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                           "tried to replace existing module '{}': {}".format(k, v))
+        # Cases where sub-module can be re-assigned after ScriptModule construction
+        # 1. If the attr is an module interface type, it's guranteed that the module is
+        #    not inlined in the graph, so it's safe to swap a new ScriptModule in.
+        # 2. if the new value if a ScriptModule with the same JIT type, IR won't change
+        #    and it's legit to swap a new module in.
+        # In these two cases we allow swapping a new scripted module and update the
+        # corresponding python module dict to keep sync.
+        # Note: the value to be swapped in has to be ScriptModule instead of nn.Module,
+        # otherwise it's illegal and we throw error.
+        if isinstance(v, ScriptModule):
+            self.module._set_attribute(k, v)
+            self._python_modules[k] = v
+        else:
+            raise RuntimeError("Cannot re-assign modules in a ScriptModule with non-scripted "
+                               "module, tried to replace existing module '{}': {}".format(k, v))
+
 
     def __getitem__(self, k):
         return self._python_modules[k]
@@ -1498,7 +1512,7 @@ class ScriptMeta(type):
                         # today, but it is wrong)
                         continue
                     delattr(self, name)
-                for name in concrete_type.get_module_names():
+                for name, _ in concrete_type.get_modules():
                     delattr(self, name)
                 for name in ("_parameters", "_buffers", "_modules"):
                     delattr(self, name)
@@ -1717,8 +1731,7 @@ if _enabled:
                 # XXX: buffers are implemented as attributes in the JIT
                 self._c._set_attribute(attr, value)
             elif self._c._has_module(attr):
-                raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                                   "tried to replace existing module '{}': {}".format(attr, value))
+                self._modules[attr] = value
             elif self._c._has_parameter(attr):
                 self._c._set_parameter(attr, value)
             elif hasattr(self, "_concrete_type") and attr in self._concrete_type.get_constants().keys():
@@ -2115,7 +2128,6 @@ _compiled_overloaded_fns = {}
 
 def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
     impl_ast = torch.jit.get_jit_def(impl_fn)
-    _frames_up = 0
     _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
