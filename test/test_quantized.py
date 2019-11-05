@@ -1121,8 +1121,7 @@ class TestQuantizedLinear(unittest.TestCase):
             return
         decimal_val = 4
         if qengine == 'qnnpack':
-            # QNNPACK does not play well with ASAN.
-            # Temporarily disable on MACOS as it runs with ASAN.
+            # QNNPACK qlinear is flaky on MACOS. Issue #27326
             if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
@@ -1245,9 +1244,7 @@ class TestQuantizedLinear(unittest.TestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
-            # QNNPACK does not play well with ASAN.
-            # Temporarily disable on MACOS as it runs with ASAN.
-            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
+            if IS_PPC or TEST_WITH_UBSAN:
                 return
             use_channelwise = False
 
@@ -1492,7 +1489,8 @@ class TestQuantizedConv(unittest.TestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            # QNNPACK qconv is flaky on MACOS. Issue #27326
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
 
