@@ -194,7 +194,6 @@ struct FunctionParameter {
   bool optional;
   bool allow_none;
   bool keyword_only;
-  bool allow_numbers_as_tensors = false;
   int size;
   std::string name;
   // having this as a raw PyObject * will presumably leak it, but these are only held by static objects

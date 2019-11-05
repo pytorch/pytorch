@@ -298,7 +298,6 @@
     MkldnnCPU: mkldnn_add_out
   supports_named_tensor: True
 
-# For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -923,7 +922,6 @@
     SparseCUDA: div_out_sparse_zerodim
   supports_named_tensor: True
 
-# For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -1874,7 +1872,6 @@
     MkldnnCPU: mkldnn_mul_out
   supports_named_tensor: True
 
-  # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: mul.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -3023,7 +3020,6 @@
     SparseCUDA: sub_sparse_
   supports_named_tensor: True
 
-# For C++ only, until we have conversion from C++ numbers to Tensor
 - func: sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -3038,7 +3034,6 @@
   variants: function
   supports_named_tensor: True
 
-# For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function

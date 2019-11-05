@@ -77,19 +77,6 @@ blacklist = [
     'norm',
     'split',
     'unique_consecutive',
-    # These are handled specially by python_arg_parser.cpp
-    'add',
-    'add_',
-    'add_out',
-    'sub',
-    'sub_',
-    'sub_out',
-    'mul',
-    'mul_',
-    'mul_out',
-    'div',
-    'div_',
-    'div_out',
 ]
 
 
