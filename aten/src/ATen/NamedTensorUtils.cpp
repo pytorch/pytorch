@@ -130,10 +130,13 @@ static void assert_names_equal(DimnameList a, DimnameList b) {
 Tensor& propagate_names_if_nonempty(Tensor& result,
     DimnameList maybe_names,
     bool validate_names) {
-  // names can be empty in the following two cases:
-  // 1. The compute_names step did not run name inference.
-  // 2. We are dealing with operations on scalar tensors.
-  //    In this case, it doesn't matter if name inference ran or not.
+  propagate_names_if_nonempty(result.unsafeGetTensorImpl(), maybe_names, validate_names);
+  return result;
+}
+
+TensorImpl* propagate_names_if_nonempty(TensorImpl* result,
+    DimnameList maybe_names,
+    bool validate_names) {
   if (maybe_names.empty()) {
     return result;
   }
@@ -141,32 +144,24 @@ Tensor& propagate_names_if_nonempty(Tensor& result,
 }
 
 Tensor& propagate_names(Tensor& result, DimnameList names, bool validate_names) {
-  if (result.sizes().size() > 0) {
-    TORCH_INTERNAL_ASSERT(
-        !names.empty(),
-        "propagate_names: passed in empty names to propagate to result with",
-        " shape ", result.sizes(), ". Empty names means that name inference did",
-        "not occur; use `propagate_names_if_nonempty` instead of `propagate_names`.");
-  }
-  if (!result.has_names()) {
-    internal_set_names_inplace(result, names);
-  } else {
-    assert_names_equal(result.names(), names);
-  }
+  propagate_names(result.unsafeGetTensorImpl(), names, validate_names);
   return result;
 }
 
-static void propagate_names(TensorImpl* result, optional<DimnameList> names) {
-  if (!impl::has_names(result) && !names.has_value()) {
-    return;
+TensorImpl* propagate_names(TensorImpl* result, DimnameList names, bool validate_names) {
+  if (result->sizes().size() > 0) {
+    TORCH_INTERNAL_ASSERT(
+        !names.empty(),
+        "propagate_names: passed in empty names to propagate to result with",
+        " shape ", result->sizes(), ". Empty names means that name inference did",
+        "not occur; use `propagate_names_if_nonempty` instead of `propagate_names`.");
   }
   if (!impl::has_names(result)) {
-    impl::internal_set_names_inplace(result, names);
-    return;
+    impl::internal_set_names_inplace(result, names, validate_names);
+  } else {
+    assert_names_equal(impl::get_names(result), names);
   }
-  assert_names_equal(
-      impl::get_names(result),
-      names.value_or(default_names(result->dim())));
+  return result;
 }
 
 void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef excluded_idxs) {
@@ -210,17 +205,17 @@ void propagate_names_for_reduction(Tensor& result, const Tensor& src, IntArrayRe
 }
 
 void propagate_names(Tensor& result, const Tensor& src) {
-  if (!result.has_names() && !src.has_names()) {
-    return;
-  }
-  propagate_names(result, src.names());
+  propagate_names(result.unsafeGetTensorImpl(), src.unsafeGetTensorImpl());
 }
 
 void propagate_names(TensorImpl* result, TensorImpl* src) {
   if (result == src) {
     return;
   }
-  propagate_names(result, impl::get_opt_names(src));
+  if (!impl::has_names(result) && !impl::has_names(src)) {
+    return;
+  }
+  propagate_names(result, impl::get_names(src));
 }
 
 std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor) {
@@ -503,14 +498,14 @@ std::vector<Dimname> compute_bmm_outnames(
   return compute_matmul_outnames(self.names(), other.names());
 }
 
-optional<std::vector<Dimname>> compute_baddbmm_outnames(
+std::vector<Dimname> compute_baddbmm_outnames(
     TensorImpl* result,
     TensorImpl* batch1,
     TensorImpl* batch2,
     TensorImpl* bias) {
   if (!impl::has_names(result) && !impl::has_names(batch1) &&
       !impl::has_names(batch2) && !impl::has_names(bias)) {
-    return nullopt;
+    return {};
   }
   auto bmm_names = compute_matmul_outnames(
       impl::get_names(batch1), impl::get_names(batch2));
