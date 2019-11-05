@@ -1,4 +1,4 @@
-#pragma once
+k#pragma once
 
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
@@ -244,25 +244,12 @@ inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatch
           "Available functions are ", dispatchTable.listAllDispatchKeys())
   }
 
-  // If the input is quantized, but the quantization is not supported.
-  if (dispatchKey.value() == TensorTypeId::QuantizedCPUTensorId) {
-    TORCH_CHECK(false, "Tried running '", dispatchTable.operatorName(), "' with a",
-                " quantized tensor but '", dispatchTable.operatorName(), "' expects a",
-                " non-quantized input.");
-  }
-
-  // If the input is not quantized, but the kernel is.
-  if (dispatchTable.lookup(TensorTypeId::QuantizedCPUTensorId)) {
-    TORCH_CHECK(false, "Tried running '", dispatchTable.operatorName(), "' but the input",
-                " is not quantized. Please ensure you have QuantStub",
-                " during model conversion, or you manually quantize the",
-                " input tensor.");
-  }
-
   const std::string dispatchKeyStr = toString(*dispatchKey);
-  TORCH_CHECK(false, "Didn't find kernel to dispatch to for operator '", dispatchTable.operatorName(),
-           "'. Tried to look up kernel for dispatch key '", dispatchKeyStr,
-           "'. Registered dispatch keys are: ", dispatchTable.listAllDispatchKeys());
+  TORCH_CHECK(false, "Could not run '", dispatchTable.operatorName(), "' with arguments",
+          " from the '", dispatchKeyStr, "' backend. '",
+          dispatchTable.operatorName(), "' is only available for these backends: ",
+          dispatchTable.listAllDispatchKeys(), ".");
 }
 
 } // namespace c10
+

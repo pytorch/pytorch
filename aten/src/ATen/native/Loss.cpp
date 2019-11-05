@@ -237,4 +237,35 @@ Tensor& mse_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
   return grad_input;
 }
 
+Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto loss = input.sub(target).abs_();
+  return apply_loss_reduction(loss, reduction);
+}
+
+Tensor& l1_loss_out(Tensor&result, const Tensor& input, const Tensor& target, int64_t reduction) {
+  if (reduction != Reduction::None) {
+    auto loss = input.sub(target).abs_();
+    if (reduction == Reduction::Mean) {
+      at::mean_out(result, loss, 0);
+    } else {
+      at::sum_out(result, loss, 0);
+    }
+  } else {
+    at::sub_out(result, input, target).abs_();
+  }
+  return result;
+}
+
+Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor grad_input = at::zeros_like(input);
+  return at::l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
+}
+
+Tensor& l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
+    const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? grad_output / input.numel() : grad_output;
+  at::sub_out(grad_input, input, target).sign_().mul_(norm);
+  return grad_input;
+}
+
 }}  // namespace at::native
