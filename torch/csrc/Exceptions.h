@@ -12,7 +12,6 @@
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>
-#include <c10/util/Exception.h>
 
 /// NOTE [ Conversion Cpp Python Warning ]
 /// The warning handler cannot set python warnings immediately
@@ -81,7 +80,7 @@
       throw;                                                 \
     }                                                                \
     catch (torch::jit::JITException & e) {\
-      /* Special case for JITException that are explicitely unpacked by pybind */ \
+      /* Special case for JITException that are explicitly unpacked by pybind */ \
       /* Set a temporary python error to be detectable by warning code */ \
       PyErr_SetString(PyExc_RuntimeError, "JITException");              \
       throw; \
@@ -97,7 +96,7 @@
     throw py::error_already_set();                                                 \
   }                                                                \
   catch (torch::jit::JITException & e) {\
-    /* Special case for JITException that are explicitely unpacked by pybind */ \
+    /* Special case for JITException that are explicitly unpacked by pybind */ \
     /* Clear the temporary error message we used */ \
     PyErr_Clear(); \
     throw; \
