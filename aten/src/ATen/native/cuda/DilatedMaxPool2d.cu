@@ -370,7 +370,7 @@ void max_pool2d_with_indices_out_cuda_template(
               cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputWidth), block_y*BLOCK_STRIDE));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_y*BLOCK_STRIDE));
+              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(outputHeight), block_z*BLOCK_STRIDE));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           max_pool_forward_nhwc<scalar_t, scalar_t>
@@ -522,7 +522,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
               cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputWidth), block_y*BLOCK_STRIDE));
           int grid_z = std::min<int>(
               at::cuda::getCurrentDeviceProperties()->maxGridSize[2],
-              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_y*BLOCK_STRIDE));
+              cuda::ATenCeilDiv(safe_downcast<int, int64_t>(inputHeight), block_z*BLOCK_STRIDE));
           const dim3 grid(grid_x, grid_y, grid_z);
 
           max_pool_backward_nhwc<scalar_t, accscalar_t>
