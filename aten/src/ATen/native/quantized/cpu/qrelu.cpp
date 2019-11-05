@@ -132,7 +132,7 @@ Tensor quantized_relu6_(Tensor& qx) {
                                                          zero_point);
           return scalar_t(std::min<underlying_t>(relu_val, six.val_));
         },
-        [&](Vec value) -> Vec { return value.relu(zero_point_vec, six_vec); });
+        [&](Vec value) -> Vec { return value.relu6(zero_point_vec, six_vec); });
   });
   return qx;
 }
@@ -140,7 +140,7 @@ Tensor quantized_relu6_(Tensor& qx) {
 class QRelu6 final : public c10::OperatorKernel {
  public:
   Tensor operator()(Tensor qx, bool inplace) {
-    if (inpalce) {
+    if (inplace) {
       return quantized_relu6_(qx);
     } else {
       return quantized_relu6(qx);

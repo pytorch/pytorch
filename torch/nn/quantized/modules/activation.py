@@ -72,7 +72,7 @@ class ReLU6(torch.nn.ReLU):
         self.inplace = inplace
 
     def forward(self, input):
-        return torch.ops.quantized.relu6_(input, self.inplace)
+        return torch.ops.quantized.relu6(input, self.inplace)
 
     def _get_name(self):
         return 'QuantizedReLU6'
