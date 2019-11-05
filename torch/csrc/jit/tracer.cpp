@@ -182,7 +182,7 @@ bool TracingState::hasValue(const IValue& var) const {
 }
 
 
-Value* TracingState::getOutput(const IValue& iv) {
+Value* TracingState::getOutput(const IValue& iv, size_t i) {
    if (iv.isTensor()) {
      at::Tensor var = iv.toTensor();
      if (!var.defined()) {
@@ -194,7 +194,7 @@ Value* TracingState::getOutput(const IValue& iv) {
      auto it = value_map.find(iv);
      if (it == value_map.end()) {
        std::ostringstream os;
-       os << "output of traced region did not have observable "
+       os << "output " << i << " (" << var << ") of traced region did not have observable "
           << "data dependence with trace inputs; this probably indicates your "
              "program "
           << "cannot be understood by the tracer.";
@@ -204,7 +204,7 @@ Value* TracingState::getOutput(const IValue& iv) {
   } else if (iv.isTuple()) {
     auto tuple = iv.toTuple()->elements();
     auto tuple_node = graph->createTuple(
-        fmap(tuple, [&](const IValue& ival) { return getOutput(ival); }));
+        fmap(tuple, [&](const IValue& ival) { return getOutput(ival, i); }));
     graph->insertNode(tuple_node);
     return tuple_node->output();
   } else {
@@ -300,8 +300,9 @@ static void gatherParametersAndBuffers(
                                 ->output()
                                 ->setType(s.value.type());
     if (s.value.type()->isSubtypeOf(TensorType::get())) {
-      addInput(state, s.value, s.value.type(), trace_get_attr);
-    } else if (self_ty->is_module(self_ty->getAttributeSlot(s.name))) {
+      addInput(
+          state, s.value, s.value.type(), trace_get_attr);
+    } else if (self_ty->getAttribute(s.name)->is_module()) {
       gatherParametersAndBuffers(
           state, trace_get_attr, script::Module(s.value.toObject()), qualname);
     }
@@ -348,7 +349,9 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     // invocations of the trace.
     size_t i = 0;
     for (auto& output : out_stack) {
-      state->graph->registerOutput(state->getOutput(output));
+      // NB: The stack is in "reverse" order, so when we pass the diagnostic
+      // number we need to flip it based on size.
+      state->graph->registerOutput(state->getOutput(output, out_stack.size() - i));
       i++;
     }
     setTracingState(nullptr);
@@ -621,8 +624,13 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto& tracing_state = getTracingState();
   auto& graph = tracing_state->graph;
 
-  auto size_var =
-      autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
+  Variable size_var;
+  {
+    // Make sure this scalar to tensor isn't traced!
+    at::AutoNonVariableTypeMode guard;
+    size_var =
+        autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
+  }
   auto* value = getValueTrace(var);
   auto dim_val = graph->insertConstant(dim);
   recordSourceLocation(dim_val->node());

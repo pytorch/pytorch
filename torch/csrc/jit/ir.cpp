@@ -244,22 +244,20 @@ std::ostream &Node::print(std::ostream &out, size_t level,
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
     pyOp->writeScalars(out);
-  } else if (print_attributes) {
-    if (hasAttribute(attr::Subgraph) && groups) {
-      out << kind().toQualString() << "_" << groups->size();
-      if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
-        printAttributes(out, /*ignore_subgraph=*/true);
-      }
+  } else if (hasAttribute(attr::Subgraph) && groups) {
+    out << kind().toQualString() << "_" << groups->size();
+    if (print_attributes && numAttributes() > 1 &&
+        kind() != prim::DifferentiableGraph) {
+      printAttributes(out, /*ignore_subgraph=*/true);
+    }
 
-      groups->push_back(this);
-    } else {
-      out << kind().toQualString();
-      if (hasAttributes()) {
-        printAttributes(out);
-      }
+    groups->push_back(this);
+  } else {
+    out << kind().toQualString();
+    if (print_attributes && hasAttributes()) {
+      printAttributes(out);
     }
   }
-
   out << "(" << inputs() << ")";
 
   if (print_scopes) {
@@ -915,17 +913,17 @@ bool Node::isNondeterministic() const {
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::rand_like(Tensor self) -> Tensor",
-      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::rand_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randint_like(Tensor self, int high) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high) -> Tensor",
-      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high, *, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randn_like(Tensor self) -> Tensor",
-      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::randn_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
 
   if (nondeterministic_ops.find(this) == nullptr) {
