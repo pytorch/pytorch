@@ -4,21 +4,6 @@
 
 #include <ATen/core/Reduction.h>
 
-THC_API void THNN_(AbsCriterion_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *output,
-                  int64_t reduction);
-
-THC_API void THNN_(AbsCriterion_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int64_t reduction);
-
 THC_API void THNN_(BCECriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -133,27 +118,12 @@ THC_API void THNN_(LogSigmoid_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *buffer);
 
-THC_API void THNN_(MSECriterion_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *output,
-                  int64_t reduction);
-
-THC_API void THNN_(MSECriterion_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int64_t reduction);
-
 THC_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
                   THCTensor *output,
-                  THCTensor *istarget,
+                  THCTensor *is_target,
                   int64_t reduction);
 
 THC_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
@@ -162,7 +132,7 @@ THC_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
                   THCIndexTensor *target,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  THCTensor *istarget,
+                  THCTensor *is_target,
                   int64_t reduction);
 
 THC_API void THNN_(MultiMarginCriterion_updateOutput)(
@@ -185,20 +155,6 @@ THC_API void THNN_(MultiMarginCriterion_updateGradInput)(
                   int p,
                   THCTensor *weights,           // [OPTIONAL]
                   accreal margin);
-THC_API void THNN_(SmoothL1Criterion_updateOutput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *output,
-                  int64_t reduction);
-
-THC_API void THNN_(SmoothL1Criterion_updateGradInput)(
-                  THCState *state,
-                  THCTensor *input,
-                  THCTensor *target,
-                  THCTensor *gradOutput,
-                  THCTensor *gradInput,
-                  int64_t reduction);
 
 THC_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCState *state,

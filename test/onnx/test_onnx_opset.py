@@ -74,12 +74,13 @@ class TestONNXOpset(TestCase):
             def forward(self, x):
                 return torch.topk(x, 3)
 
-        ops_9 = [{"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2},
-                 {"name" : "k", "i" : 3, "type" : 2}]}]
-        ops_10 = [{"op_name" : "Constant", "attributes" : [{"name" : "value", "type" : 4}]},
-                  {"op_name" : "Unsqueeze", "attributes" : [{"name" : "axes", "ints" : [0], "type" : 7}]},
-                  {"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2}]}]
-        ops = {9 : ops_9, 10 : ops_10}
+        ops_9 = [{"op_name": "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2},
+                 {"name": "k", "i" : 3, "type" : 2}]}]
+        ops_10 = [{"op_name": "Constant", "attributes": [{"name": "value", "type": 4}]},
+                  {"op_name": "Constant", "attributes": [{"name": "value", "type": 4}]},
+                  {"op_name": "Reshape"},
+                  {"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2}]}]
+        ops = {9: ops_9, 10: ops_10}
         x = torch.arange(1., 6., requires_grad=True)
         check_onnx_opsets_operator(MyModule(), x, ops, opset_versions=[9, 10])
 
@@ -89,9 +90,10 @@ class TestONNXOpset(TestCase):
             def forward(self, input, k):
                 return torch.topk(input, k)
 
-        ops_10 = [{"op_name" : "Unsqueeze", "attributes" : [{"name" : "axes", "ints" : [0], "type" : 7}]},
-                  {"op_name" : "TopK", "attributes" : [{"name" : "axis", "i" : -1, "type" : 2}]}]
-        ops = {10 : ops_10}
+        ops_10 = [{"op_name": "Constant", "attributes": [{"name": "value", "type": 4}]},
+                  {"op_name": "Reshape"},
+                  {"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2}]}]
+        ops = {10: ops_10}
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
         module = MyModuleDynamic()
@@ -193,21 +195,10 @@ class TestONNXOpset(TestCase):
             def forward(self, x):
                 return x[1:x.size(0)]
 
-        ops_9 = [{"op_name" : "Constant"},
-                 {"op_name" : "Constant"},
-                 {"op_name" : "Shape"},
-                 {"op_name" : "Gather",
-                 "attributes" : [{"name" : "axis", "i" : 0, "type" : 2}]},
-                 {"op_name" : "Unsqueeze",
-                 "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
-                 {"op_name" : "Unsqueeze",
-                 "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
-                 {"op_name" : "Unsqueeze",
-                 "attributes" : [{"name" : "axes", "i" : 0, "type" : 7}]},
-                 {"op_name" : "DynamicSlice"}]
         ops_10 = [{"op_name" : "Constant"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Shape"},
+                  {"op_name": "Constant"},
                   {"op_name" : "Gather",
                    "attributes" : [{"name" : "axis", "i" : 0, "type" : 2}]},
                   {"op_name" : "Unsqueeze",
@@ -219,11 +210,11 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Constant"},
                   {"op_name" : "Slice",
                    "attributes" : []}]
-        ops = {9 : ops_9, 10 : ops_10}
+        ops = {10 : ops_10}
         module = DynamicSliceModel()
         x = torch.rand(1, 2)
         example_output = module(x)
-        check_onnx_opsets_operator(module, x, ops, opset_versions=[9, 10], example_outputs=example_output)
+        check_onnx_opsets_operator(module, x, ops, opset_versions=[10], example_outputs=example_output)
 
     def test_flip(self):
         class MyModule(Module):
@@ -284,11 +275,11 @@ class TestONNXOpset(TestCase):
                 return torch.nn.functional.interpolate(x,
                                                        size=size,
                                                        mode='nearest')
-        ops_9 = [{"op_name" : "Constant"},
-                 {"op_name" : "Shape"},
-                 {"op_name" : "Gather"},
+        ops_9 = [{"op_name" : "Shape"},
                  {"op_name" : "Constant"},
+                 {"op_name" : "Gather"},
                  {"op_name" : "Shape"},
+                 {"op_name" : "Constant"},
                  {"op_name" : "Gather"},
                  {"op_name" : "Constant"},
                  {"op_name" : "Mul"},
@@ -307,11 +298,11 @@ class TestONNXOpset(TestCase):
                  {"op_name" : "Upsample",
                   "attributes" :
                   [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
-        ops_10 = [{"op_name" : "Constant"},
-                  {"op_name" : "Shape"},
-                  {"op_name" : "Gather"},
+        ops_10 = [{"op_name" : "Shape"},
                   {"op_name" : "Constant"},
+                  {"op_name" : "Gather"},
                   {"op_name" : "Shape"},
+                  {"op_name" : "Constant"},
                   {"op_name" : "Gather"},
                   {"op_name" : "Constant"},
                   {"op_name" : "Mul"},
@@ -333,6 +324,7 @@ class TestONNXOpset(TestCase):
                   {"op_name" : "Resize",
                    "attributes" :
                    [{"name": "mode", "s": ("nearest").encode(), "type": 3}]}]
+
         ops = {9 : ops_9, 10 : ops_10}
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         check_onnx_opsets_operator(MyModel(), x, ops, opset_versions=[9, 10])

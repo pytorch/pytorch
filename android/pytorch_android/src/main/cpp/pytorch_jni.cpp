@@ -615,7 +615,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }
     auto output = [&]() {
       torch::autograd::AutoGradMode guard(false);
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
       return module_.forward(std::move(inputs));
     }();
     return JIValue::newJIValueFromAtIValue(output);
@@ -638,7 +637,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     if (auto method = module_.find_method(methodName)) {
       auto output = [&]() {
         torch::autograd::AutoGradMode guard(false);
-        at::AutoNonVariableTypeMode non_var_type_mode(true);
         return (*method)(std::move(inputs));
       }();
       return JIValue::newJIValueFromAtIValue(output);

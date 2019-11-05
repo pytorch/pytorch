@@ -325,7 +325,7 @@ Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
-      at::isFloatingType(scalarType),
+      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
       "Can only calculate the mean of floating types. Got ",
       toString(scalarType),
       " instead.");
@@ -439,7 +439,7 @@ static Tensor& norm_out(Tensor &result, const Tensor &self, optional<Scalar> opt
 
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
-      at::isFloatingType(scalarType),
+      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
       "Can only calculate the mean of floating types. Got ",
       toString(scalarType),
       " instead.");
@@ -460,7 +460,8 @@ static inline Tensor _norm(const Tensor &self, Scalar p) {
   } else {
     TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
              "norm only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-    TORCH_CHECK(at::isFloatingType(self.scalar_type()), "norm only supports floating-point dtypes");
+    TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+                "norm only supports floating-point dtypes");
 
     Tensor result;
     return at::native::norm_out(result, self, p, IntArrayRef{}, false, c10::nullopt);
@@ -676,13 +677,37 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
 static Tensor &std_var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "std and var only support CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "std and var only support floating-point dtypes");
-  ScalarType dtype = get_dtype(result, self, {}, true);
-  auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
-  if (iter.numel() == 0) {
-    result.fill_(NAN);
-  } else {
-    std_var_stub(iter.device_type(), iter, unbiased, take_sqrt);
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+              "std and var only support floating-point dtypes");
+
+  if (at::isComplexType(self.scalar_type())){
+    ScalarType dtype = c10::toValueType(get_dtype(result, self, {}, true));
+    Tensor real_in = self.real().to(dtype);
+    Tensor real_out = at::empty({0}, self.options().dtype(dtype));
+    auto iter = make_reduction("std or var", real_out, real_in, dim, keepdim, dtype);
+    if (iter.numel() == 0) {
+      real_out.fill_(NAN);
+    } else {
+      std_var_stub(iter.device_type(), iter, unbiased, false);
+    }
+    Tensor imag_in = self.imag().to(dtype);
+    Tensor imag_out = at::empty({0}, self.options().dtype(dtype));
+    iter = make_reduction("std or var", imag_out, imag_in, dim, keepdim, dtype);
+    if (iter.numel() == 0) {
+      imag_out.fill_(NAN);
+    } else {
+      std_var_stub(iter.device_type(), iter, unbiased, false);
+    }
+    at::add_out(result, real_out, imag_out);
+    take_sqrt ? at::sqrt_out(result, result) : result;
+  } else{
+    ScalarType dtype = get_dtype(result, self, {}, true);
+    auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
+    if (iter.numel() == 0) {
+      result.fill_(NAN);
+    } else {
+      std_var_stub(iter.device_type(), iter, unbiased, take_sqrt);
+    }
   }
   return result;
 }
@@ -691,20 +716,48 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
   AT_ASSERT(result1.defined() && result2.defined());
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            fname, " only support CPU and CUDA backend, got: ", toString(self.type().backend()));
-  TORCH_CHECK(at::isFloatingType(self.type().scalarType()), fname, " only support floating-point dtypes");
+  TORCH_CHECK(at::isFloatingType(self.type().scalarType()) || at::isComplexType(self.scalar_type()),
+              fname, " only support floating-point dtypes");
   TORCH_CHECK(result1.type().scalarType() == result2.type().scalarType(),
            "provided by result1 dtype must match dtype of result2. Got ",
            toString(result1.type().scalarType()),
            " and ",
            toString(result2.type().scalarType()),
            ".");
-  ScalarType dtype = get_dtype(result1, self, {}, true);
-  auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
-  if (iter.numel() == 0) {
-    result1.fill_(NAN);
-    result2.fill_(NAN);
+  if (at::isComplexType(self.scalar_type())){
+    ScalarType dtype = c10::toValueType(get_dtype(result1, self, {}, true));
+    Tensor real_in = self.real().to(dtype);
+    Tensor real_out_var = at::empty({0}, self.options().dtype(dtype));
+    Tensor real_out_mean = at::empty({0}, self.options().dtype(dtype));
+    auto iter = make_reduction(fname, real_out_var, real_out_mean, real_in, dim, keepdim, dtype);
+    if (iter.numel() == 0) {
+      real_out_var.fill_(NAN);
+      real_out_mean.fill_(NAN);
+    } else {
+      std_var_stub(iter.device_type(), iter, unbiased, false);
+    }
+    Tensor imag_in = self.imag().to(dtype);
+    Tensor imag_out_var = at::empty({0}, self.options().dtype(dtype));
+    Tensor imag_out_mean = at::empty({0}, self.options().dtype(dtype));
+    iter = make_reduction(fname, imag_out_var, imag_out_mean, imag_in, dim, keepdim, dtype);
+    if (iter.numel() == 0) {
+      imag_out_var.fill_(NAN);
+      imag_out_mean.fill_(NAN);
+    } else {
+      std_var_stub(iter.device_type(), iter, unbiased, false);
+    }
+    at::add_out(result1, real_out_var, imag_out_var);
+    take_sqrt ? at::sqrt_out(result1, result1) : result1;
+    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, std::complex<double>{0.0, 1.0}));
   } else {
-    std_var_stub(iter.device_type(), iter, unbiased, take_sqrt);
+    ScalarType dtype = get_dtype(result1, self, {}, true);
+    auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
+    if (iter.numel() == 0) {
+      result1.fill_(NAN);
+      result2.fill_(NAN);
+    } else {
+      std_var_stub(iter.device_type(), iter, unbiased, take_sqrt);
+    }
   }
   return std::tuple<Tensor&, Tensor&>(result1, result2);
 }
@@ -751,8 +804,9 @@ std::tuple<Tensor,Tensor> var_mean(const Tensor& self, bool unbiased) {
 
 Tensor var(const Tensor& self, bool unbiased) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "var only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "var only supports floating-point dtypes");
+              "var only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+              "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
   return trivial_return.has_value() ? trivial_return.value() : at::_var(self, unbiased);
 }
@@ -769,7 +823,8 @@ Tensor &var_out(Tensor &result, const Tensor &self, IntArrayRef dim, bool unbias
 Tensor std(const Tensor& self, bool unbiased) {
   TORCH_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
            "std only supports CPU AND CUDA backend, got: ", toString(self.type().backend()));
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "std only supports floating-point dtypes");
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
+              "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
   return trivial_return.has_value() ? trivial_return.value() : at::_std(self, unbiased);
 }

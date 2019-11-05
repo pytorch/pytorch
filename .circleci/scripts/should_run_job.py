@@ -32,11 +32,14 @@ default_set = set([
     'caffe2-py2-clang7-ubuntu16.04',
     # Caffe2 CMake
     'caffe2-cmake-cuda9.0-cudnn7-ubuntu16.04',
+    # Caffe2 CentOS
+    'caffe2-py3.6-devtoolset7-cuda9.0-cudnn7-centos7',
 
     # Binaries
     'manywheel 2.7mu cpu devtoolset7',
     'libtorch 2.7m cpu devtoolset7',
     'libtorch 2.7m cpu gcc5.4_cxx11-abi',
+    'libtorch 2.7 cpu',
     'libtorch-ios-10.2.1-nightly-x86_64-build',
     'libtorch-ios-10.2.1-nightly-arm64-build',
     'libtorch-ios-10.2.1-nightly-binary-build-upload',

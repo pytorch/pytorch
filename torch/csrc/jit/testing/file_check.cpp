@@ -218,7 +218,7 @@ struct FileCheckImpl {
         }
         size_t end =
             assertFind(SourceRange(source, end_check_string, end_line), ":");
-        count = std::stoll(
+        count = c10::stoll(
             source->text().substr(end_check_string, end - end_check_string));
         end_check_string = end + 2; // add ':' and the space
       }

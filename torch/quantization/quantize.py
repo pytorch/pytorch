@@ -95,7 +95,7 @@ def add_observer_(module):
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
-       len(module._modules) == 0:
+       len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential):
         # observer and hook will be gone after we swap the module
         module.add_module('activation_post_process', module.qconfig.activation())
         module.register_forward_hook(_observer_forward_hook)
