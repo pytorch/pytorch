@@ -65,7 +65,5 @@ using ExportModuleExtraFilesHook =
     std::function<script::ExtraFilesMap(const script::Module&)>;
 TORCH_API void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook);
 
-TORCH_API void dump_opnames(const script::Module& m, std::unordered_set<std::string>& opnames);
-
 } // namespace jit
 } // namespace torch
