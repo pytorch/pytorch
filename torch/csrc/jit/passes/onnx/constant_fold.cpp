@@ -329,7 +329,7 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 // nodes can be lifted so we run them earlier, before the usual parameters are
 // known.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
-  if (opset_version != ONNX_OPSET_9 && opset_version != ONNX_OPSET_10 && 
+  if (opset_version != ONNX_OPSET_9 && opset_version != ONNX_OPSET_10 &&
       opset_version != ONNX_OPSET_11) {
     // Number of elements of 'axes' and 'ends' 1-D input tensors should be the same
     std::cerr << "Warning: Constant folding supported for only opsets 9, 10, and 11. "
