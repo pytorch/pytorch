@@ -1065,7 +1065,7 @@ class TestNamedTensor(TestCase):
         def test_autograd_supports_dimname_overload(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device, requires_grad=True)
             sum_all_outputs(op(t, 'C')).backward()
-            self.assertTrue(t.grad is not None)
+            self.assertIsNotNone(t.grad)
 
         def test_complete_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
