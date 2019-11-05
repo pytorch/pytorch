@@ -74,7 +74,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
               " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
-// Validates input shapes for operations on batches of square matrices (inverse, cholesky, lu, symeig)
+// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig)
 static inline void squareCheckInputs(const Tensor& self) {
   TORCH_CHECK(self.size(-1) == self.size(-2),
               "A must be batches of square matrices, "
@@ -86,7 +86,7 @@ static inline void squareCheckInputs(const Tensor& self) {
  * this function checks if the computation over all these batches has been
  * successful (info = 0) or not, and report in case of the latter.
  */
-static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* name) {
+static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* name, bool allow_singular=false) {
   for (size_t i = 0; i < infos.size(); i++) {
     auto info = infos[i];
     if (info < 0) {
@@ -97,7 +97,7 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
       } else if (strstr(name, "symeig")) {
         AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
                  " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
-      } else {
+      } else if (!allow_singular) {
         AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
       }
     }
@@ -107,7 +107,7 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
 /*
  * This is an overloaded case of the previous function for a tensor of infos.
  */
-static inline void batchCheckErrors(const Tensor& infos, const char* name) {
+static inline void batchCheckErrors(const Tensor& infos, const char* name, bool allow_singular=false) {
   auto batch_size = infos.numel();
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
@@ -115,7 +115,7 @@ static inline void batchCheckErrors(const Tensor& infos, const char* name) {
     auto info = infos_data[i];
     if (info < 0) {
       AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
-    } else if (info > 0) {
+    } else if (!allow_singular && info > 0) {
       AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
     }
   }
@@ -125,7 +125,7 @@ static inline void batchCheckErrors(const Tensor& infos, const char* name) {
  * Given a info int, obtained after a single operation, this function check if the computation
  * has been successful (info = 0) or not, and report in case of the latter.
  */
-static inline void singleCheckErrors(int64_t info, const char* name) {
+static inline void singleCheckErrors(int64_t info, const char* name, bool allow_singular=false) {
   if (info < 0) {
     AT_ERROR(name, ": Argument ", -info, " has illegal value");
   } else if (info > 0) {
@@ -134,7 +134,7 @@ static inline void singleCheckErrors(int64_t info, const char* name) {
     } else if (strstr(name, "symeig")) {
       AT_ERROR(name, ": the algorithm failed to converge; ", info,
                " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
-    } else {
+    } else if (!allow_singular) {
       AT_ERROR(name, ": U(", info, ",", info, ") is zero, singular U.");
     }
   }
