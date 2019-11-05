@@ -150,10 +150,10 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     } else {
         loss = input - target * at::log(input + eps);
     }
-    
+
     if (full) {
-        auto mask1 = (target > 1);
-        loss.masked_select(mask1) += (target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target)).masked_select(mask1);
+        auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target);
+        loss += stirling_term.masked_fill(target <= 1, 0);
     }
 
     return apply_loss_reduction(loss, reduction);
@@ -234,6 +234,37 @@ Tensor& mse_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
   iter.add_input(grad_output);
   iter.build();
   mse_backward_stub(iter.device_type(), iter, norm);
+  return grad_input;
+}
+
+Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto loss = input.sub(target).abs_();
+  return apply_loss_reduction(loss, reduction);
+}
+
+Tensor& l1_loss_out(Tensor&result, const Tensor& input, const Tensor& target, int64_t reduction) {
+  if (reduction != Reduction::None) {
+    auto loss = input.sub(target).abs_();
+    if (reduction == Reduction::Mean) {
+      at::mean_out(result, loss, 0);
+    } else {
+      at::sum_out(result, loss, 0);
+    }
+  } else {
+    at::sub_out(result, input, target).abs_();
+  }
+  return result;
+}
+
+Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor grad_input = at::zeros_like(input);
+  return at::l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
+}
+
+Tensor& l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
+    const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto norm = reduction == Reduction::Mean ? grad_output / input.numel() : grad_output;
+  at::sub_out(grad_input, input, target).sign_().mul_(norm);
   return grad_input;
 }
 

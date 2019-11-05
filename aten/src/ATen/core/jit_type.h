@@ -1497,7 +1497,14 @@ struct CAFFE2_API ClassType : public NamedType {
         name,
         "'");
     TypePtr atype = getAttribute(*slot_idx);
-    TORCH_CHECK(ty->isSubtypeOf(atype));
+    TORCH_CHECK(
+      ty->isSubtypeOf(atype),
+      ty->python_str(),
+      " is not compatible with the type ",
+      atype->python_str(),
+      " for the field '",
+      name,
+      "'");
     return *slot_idx;
   }
 
