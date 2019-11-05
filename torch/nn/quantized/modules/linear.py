@@ -5,7 +5,6 @@ import torch
 from torch._jit_internal import Optional  # noqa: F401
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-from torch.nn.modules import Module
 from torch.nn.quantized.modules.utils import _quantize_weight
 
 

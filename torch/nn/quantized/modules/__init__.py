@@ -10,7 +10,7 @@ from .linear import Linear
 from .functional_modules import FloatFunctional, QFunctional
 
 
-class Quantize(Module):
+class Quantize(torch.nn.Module):
     r"""Quantizes an incoming tensor
     Args:
      `out_scale`: scale of the output Quantized Tensor
@@ -50,7 +50,7 @@ class Quantize(Module):
         return 'scale={}, zero_point={}, dtype={}'.format(self.scale, self.zero_point, self.dtype)
 
 
-class DeQuantize(Module):
+class DeQuantize(torch.nn.Module):
     r"""Dequantizes an incoming tensor
 
     Examples::
