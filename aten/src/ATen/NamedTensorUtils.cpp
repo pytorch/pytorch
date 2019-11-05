@@ -156,7 +156,7 @@ Tensor& propagate_names(Tensor& result, DimnameList names, bool validate_names) 
   return result;
 }
 
-void propagate_names(TensorImpl* result, optional<DimnameList> names) {
+static void propagate_names(TensorImpl* result, optional<DimnameList> names) {
   if (!impl::has_names(result) && !names.has_value()) {
     return;
   }
