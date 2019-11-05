@@ -118,7 +118,7 @@ Tensor quantized_relu6(const Tensor& qx) {
 
 Tensor quantized_relu6_(Tensor& qx) {
   const auto zero_point = qx.q_zero_point();
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu6", [&]() {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu6_", [&]() {
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qx, qx);
     auto zero_point_vec = Vec(scalar_t(zero_point));
