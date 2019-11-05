@@ -6,7 +6,7 @@ namespace functions {
 
 Variable CrossMapLRN2d::forward(
     AutogradContext *ctx, 
-    Variable input, 
+    const Variable& input,
     const CrossMapLRN2dOptions& options){
   ctx->saved_data["size"] = options.size();
   ctx->saved_data["alpha"] = options.alpha();

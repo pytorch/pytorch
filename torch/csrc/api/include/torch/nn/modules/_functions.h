@@ -15,7 +15,7 @@ class CrossMapLRN2d : public torch::autograd::Function<CrossMapLRN2d> {
  public:
   static Variable forward(
       AutogradContext *ctx, 
-      Variable input, 
+      const Variable& input,
       const CrossMapLRN2dOptions& options);
   
   static variable_list backward(AutogradContext *ctx, variable_list grad_output);

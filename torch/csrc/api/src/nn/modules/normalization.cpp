@@ -74,7 +74,7 @@ void CrossMapLRN2dImpl::pretty_print(std::ostream& stream) const {
 }
 
 torch::Tensor CrossMapLRN2dImpl::forward(const torch::Tensor& input) {
-  return functions::CrossMapLRN2d::apply(Variable(input), options);
+  return functions::CrossMapLRN2d::apply(input, options);
 }
 
 } // namespace nn
