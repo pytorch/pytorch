@@ -276,8 +276,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__  float sqrt (float a) { return  sqrtf(a); }
   static inline __host__ __device__  float acos (float a) { return  acosf(a); }
   static inline __host__ __device__  float cosh (float a) { return  coshf(a); }
-  static inline __host__ __device__  float acosh(float a) { return acoshf(a); }
-  static inline __host__ __device__  float asinh(float a) { return asinhf(a); }
   static inline __host__ __device__  float tan  (float a) { return   tanf(a); }
   static inline __host__ __device__  float atan (float a) { return  atanf(a); }
   static inline __host__ __device__  float tanh (float a) { return  tanhf(a); }
@@ -319,8 +317,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__  double sqrt (double a) { return  ::sqrt(a); }
   static inline __host__ __device__  double acos (double a) { return  ::acos(a); }
   static inline __host__ __device__  double cosh (double a) { return  ::cosh(a); }
-  static inline __host__ __device__  double acosh(double a) { return ::acosh(a); }
-  static inline __host__ __device__  double asinh(double a) { return ::asinh(a); }
   static inline __host__ __device__  double tan  (double a) { return   ::tan(a); }
   static inline __host__ __device__  double atan (double a) { return  ::atan(a); }
   static inline __host__ __device__  double tanh (double a) { return  ::tanh(a); }
