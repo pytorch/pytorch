@@ -1,4 +1,4 @@
-k#pragma once
+#pragma once
 
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
