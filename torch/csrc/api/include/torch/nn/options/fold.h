@@ -3,6 +3,7 @@
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/expanding_array.h>
+#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -34,6 +35,10 @@ struct TORCH_API FoldOptions {
   TORCH_ARG(ExpandingArray<2>, stride) = 1;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Fold)
+
+// ============================================================================
+
 /// Options for an Unfold functional and module.
 struct TORCH_API UnfoldOptions {
   UnfoldOptions(ExpandingArray<2> kernel_size)
@@ -53,6 +58,8 @@ struct TORCH_API UnfoldOptions {
   /// controls the stride for the sliding blocks.
   TORCH_ARG(ExpandingArray<2>, stride) = 1;
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Unfold)
 
 } // namespace nn
 } // namespace torch
