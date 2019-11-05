@@ -73,7 +73,15 @@ class QReLUBenchmark(_ActivationBenchmarkBase):
         self.set_module_name("QReLU")
 
 
+class QReLU6Benchmark(_ActivationBenchmarkBase):
+    def init(self, dims, permute_dims, inplace, dtype):
+        super(QReLU6Benchmark, self).setup(dims, permute_dims, dtype)
+        self.qop = nnq.ReLU6(inplace=inplace)
+        self.set_module_name("QReLU6")
+
+
 op_bench.generate_pt_test(qactivation_configs, QReLUBenchmark)
+op_bench.generate_pt_test(qactivation_configs, QReLU6Benchmark)
 
 
 if __name__ == "__main__":
