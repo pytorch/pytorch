@@ -1136,6 +1136,21 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (1, 2, 3, 4))
         self.run_test(FlattenModel(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_getitem(self):
+        class GetItemModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y, z, ind):
+                # this will create prim::ListConstruct(x, y, z) + aten::__getitem__
+                arr = [x, y, z]
+                return arr[ind]
+
+        x = torch.randn(3, 4, 5)
+        y = torch.randn(1, 4, 5)
+        z = torch.randn(2, 4, 5)
+        ind = torch.tensor(1, dtype=torch.long)
+        self.run_test(GetItemModel(), (x, y, z, ind))
+
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):
             def forward(self, input):
