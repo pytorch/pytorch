@@ -124,9 +124,7 @@ std::vector<Tensor> where(const Tensor& condition) {
 }
 
 Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  if (self.dtype() != other.dtype()) {
-    TORCH_CHECK(false, "expected scalar type ", self.dtype(), " but found ", other.dtype());
-  }
+  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
   Tensor ret = at::empty(self.sizes(), self.options());
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(ret.scalar_type(), "where_cpu", [&] {
     where_cpu<scalar_t>(ret, condition, self, other);

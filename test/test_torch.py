@@ -790,16 +790,12 @@ class _TestTorchMixin(object):
                             self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(x1 == 1, x1, x2))
                         else:
                             if x1.is_floating_point():
-                                res = torch.where(x1 < 0.5, x1, x2)
+                                condition = (x1 < 0.5)
                             else:
-                                res = torch.where(x1 == 1, x1, x2)
-                            for i in range(height):
-                                for j in range(width):
-                                    if (x1.is_floating_point() and x1[i][j] < 0.5) or \
-                                            (not x1.is_floating_point() and x1[i][j] == 1):
-                                        self.assertTrue(res[i][j].item() == x1[i][j].item())
-                                    else:
-                                        self.assertTrue(res[i][j].item() == x2[i][j].item())
+                                condition = (x1 == 1)
+                            expected = condition.to(x1.dtype) * x1 + (~condition).to(x2.dtype) * x2
+                            result = torch.where(condition, x1, x2)
+                            self.assertEqual(expected, result)
 
     def test_all_any_with_dim(self):
         def test(x):
