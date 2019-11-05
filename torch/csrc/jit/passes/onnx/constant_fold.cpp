@@ -198,10 +198,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     int opset_version) {
   at::Tensor updated_val;
   if (node->kind() == onnx::Slice) {
-    if (opset_version == 9) {
+    if (opset_version == ONNX_OPSET_9) {
       return runTorchSlice_opset9(node, inputTensorValues);
     }
-    else if (opset_version == 10 || opset_version == 11) {
+    else if (opset_version == ONNX_OPSET_10 || opset_version == ONNX_OPSET_11) {
       return runTorchSlice_opset10(node, inputTensorValues);
     }
     else {
@@ -329,7 +329,8 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 // nodes can be lifted so we run them earlier, before the usual parameters are
 // known.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
-  if (opset_version != 9 && opset_version != 10 && opset_version != 11) {
+  if (opset_version != ONNX_OPSET_9 && opset_version != ONNX_OPSET_10 && 
+      opset_version != ONNX_OPSET_11) {
     // Number of elements of 'axes' and 'ends' 1-D input tensors should be the same
     std::cerr << "Warning: Constant folding supported for only opsets 9, 10, and 11. "
               << "Constant folding not applied." << std::endl;
