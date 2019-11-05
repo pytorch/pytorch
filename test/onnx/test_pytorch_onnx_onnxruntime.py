@@ -1195,6 +1195,46 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel(), x)
 
+    def test_concat(self):
+        class ConcatModel(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.cat((x, y, z))
+
+        x = torch.randn(3, 4, 5)
+        y = torch.randn(1, 4, 5)
+        z = torch.randn(2, 4, 5)
+        self.run_test(ConcatModel(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_concat_dynamic(self):
+        class ConcatDynamicModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.cat(x.unbind())
+
+        x = torch.randn(4, 5, 6)
+        self.run_test(ConcatDynamicModel(), x)
+
+    def test_stack(self):
+        class StackModel(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.stack((x, y, z), 1)
+
+        x = torch.randn(3, 4, 5)
+        y = torch.randn(3, 4, 5)
+        z = torch.randn(3, 4, 5)
+        self.run_test(StackModel(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_stack_dynamic(self):
+        class StackDynamicModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.stack(x.unbind(), 1)
+
+        x = torch.randn(4, 5, 6)
+        self.run_test(StackDynamicModel(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):
