@@ -167,8 +167,8 @@ class _TestTorchMixin(object):
         num_threads = 100
         trials = 10
         test_iters = 100
-
         barrier = threading.Barrier(num_threads)
+
         def _worker(t, input_):
             my_stream = torch.cuda.Stream()
             results[t] = input_
