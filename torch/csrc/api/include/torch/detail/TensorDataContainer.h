@@ -23,6 +23,23 @@ inline std::ostream& operator<<(std::ostream& stream, c10::BFloat16 value) {
   return stream;
 }
 
+inline c10::ScalarType compute_desired_dtype(c10::ScalarType scalar_type) {
+  if (scalar_type == at::kInt || scalar_type == at::kLong) {
+    // In C++, an integer literal without suffix (e.g. `1` instead of `1u`) can be one of
+    // `int` / `long int` / `long long int` types. When we find that `scalar_type` is one
+    // of those types, we always use `torch.int64` type, because In Python `torch.tensor(1)`
+    // always gives a tensor of `torch.int64` dtype.
+    //
+    // Note that this dtype computation only takes effect when the user passes an integer
+    // literal or a braced-init-list to `torch::tensor` constructor. It doesn't affect
+    // `torch::tensor(at::ArrayRef<T>)` and `torch::tensor(std::vector<T>)` as the specified
+    // dtype `T` is always respected.
+    return at::kLong;
+  } else {
+    return scalar_type;
+  }
+}
+
 // We use `TensorDataContainer` to support converting the following data container types
 // into the equivalent Tensor:
 //
@@ -82,7 +99,7 @@ struct TensorDataContainer {
 #define TENSOR(T, S) \
   TensorDataContainer(T value) : \
       sizes_(), \
-      scalar_type_(at::k##S), \
+      scalar_type_(compute_desired_dtype(at::k##S)), \
       type_(TensorDataContainerType::Scalar), \
       scalar_(value) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
@@ -119,19 +136,10 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
       scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Tensor) { \
     at::AutoNonVariableTypeMode non_var_type_mode(true); \
-    /* NOTE: if I only use
-       `tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU).is_variable(false));` here,
-       a call such as
-       `torch::tensor(at::ArrayRef<bool>({true, false, true}))` would throw the following runtime error:
-       ```
-       C++ exception with description ""tensor_cpu" not implemented for 'Bool'
-       (operator() at ../aten/src/ATen/native/TensorFactories.cpp:850)
-       ```
-    */ \
     if (scalar_type_ == at::kBool) { \
-      tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU).is_variable(false)); \
+      tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU)); \
     } else { \
-      tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU).is_variable(false)); \
+      tensor_ = at::tensor(values, at::dtype(scalar_type_).device(at::kCPU)); \
     } \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
@@ -141,9 +149,9 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
   // to `at::ArrayRef`, otherwise the following error can be thrown when calling
   // `torch::tensor(std::vector<double>({1.1, 2.2}))`:
   // ```
-  // error: no matching function for call to ‘tensor(const std::vector<int>&)’
-  // no known conversion for argument 1 from ‘const std::vector<int>’ to
-  // ‘torch::detail::TensorDataContainer’
+  // error: no matching function for call to 'tensor(const std::vector<int>&)'
+  // no known conversion for argument 1 from 'const std::vector<int>' to
+  // 'torch::detail::TensorDataContainer'
   // ```
   //
   // NOTE: `torch::tensor(std::vector<bool>)` is not supported for now, because
@@ -201,7 +209,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
 
     if (is_scalar()) {
       at::AutoNonVariableTypeMode non_var_type_mode(true);
-      return at::scalar_tensor(scalar_, options.is_variable(false));
+      return at::scalar_tensor(scalar_, options);
     } else if (is_init_list()) {
       // NOTE: Here we explicitly choose to initialize the tensor on CPU first,
       // fill each element of the tensor, and then move the tensor to the desired
@@ -211,7 +219,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
       // `N` is the number of the elements in the tensor).
       at::Tensor tensor = ([&]() {
         at::AutoNonVariableTypeMode non_var_type_mode(true);
-        return at::empty(sizes_, options.device(at::kCPU).is_variable(false));
+        return at::empty(sizes_, options.device(at::kCPU));
       })();
       fill_tensor(tensor);
       return tensor.to(options.device());
