@@ -280,7 +280,7 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    return ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -322,9 +322,9 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
     return _get_interpreter_name_for_var
 
 
-class LegacyTracedModule(Module):
+class ONNXTracedModule(Module):
     def __init__(self, inner, force_outplace=False, return_inputs=False, return_inputs_states=False):
-        super(LegacyTracedModule, self).__init__()
+        super(ONNXTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
@@ -338,39 +338,39 @@ class LegacyTracedModule(Module):
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
-        try:
-            trace, all_trace_inputs = torch._C._tracer_enter(*(in_vars + module_state))
-        except Exception as e:
-            torch._C._tracer_abandon()
-            raise e
-        ret_inputs = tuple(x.clone() for x in all_trace_inputs)
-        torch._C._tracer_set_force_outplace(self._force_outplace)
-        torch._C._tracer_set_get_unique_name_fn(_create_interpreter_name_lookup_fn())
-        try:
-            trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
-            # inputs_states is a tuple of len == 2 that keeps track of
-            # the inputs before (inputs_states[0]) and after (inputs_states[1])
-            # the trace to verify if they were modified during the trace
+
+        ret_inputs = []
+        inputs_states = []
+        outs = []
+
+        def wrapper(*args):
+            trace_inputs = _unflatten(args[:len(in_vars)], in_desc)
+
+            ret_inputs.append(tuple(x.clone() for x in args))
             if self._return_inputs_states:
-                # executing a deepcopy on trace_inputs will fail
-                # for tensors not explicitly created by the user.
-                # generating trace_inputs again by calling _unflatten
-                # for now.
-                inputs_states = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
-            out = self.inner(*trace_inputs)
+                inputs_states.append(_unflatten(args[:len(in_vars)], in_desc))
+            outs.append(self.inner(*trace_inputs))
             if self._return_inputs_states:
-                inputs_states = (inputs_states, trace_inputs)
-            out_vars, _ = _flatten(out)
-            torch._C._tracer_exit(tuple(out_vars))
-        except Exception:
-            torch._C._tracer_abandon()
-            raise
+                inputs_states[0] = (inputs_states[0], trace_inputs)
+            out_vars, _ = _flatten(outs)
+            if len(out_vars) == 1:
+                return out_vars[0]
+            else:
+                return tuple(out_vars)
+
+        graph, out = torch._C._create_graph_by_tracing(
+            wrapper,
+            in_vars + module_state,
+            _create_interpreter_name_lookup_fn(),
+            self._force_outplace,
+        )
+
         if self._return_inputs:
-            return trace, out, ret_inputs
+            return graph, outs[0], ret_inputs[0]
         if self._return_inputs_states:
-            return trace, out, inputs_states
+            return graph, outs[0], inputs_states[0]
         else:
-            return trace, out
+            return graph, outs[0]
 
 
 def _clone_inputs(args):
@@ -1236,7 +1236,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
     if isinstance(obj, torch.nn.Module):
-        return torch.jit.torch.jit._recursive.recursive_script(obj)
+        return torch.jit._recursive.recursive_script(obj)
 
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
@@ -1249,7 +1249,10 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. "
-                               "Please inherit from 'object'")
+                               "Please inherit from 'object'.")
+        if len(obj.mro()) > 2:
+            raise RuntimeError("TorchScript classes does not support inheritance yet. "
+                               "Please directly inherit from 'object'.")
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
@@ -1269,10 +1272,20 @@ def interface(obj):
         raise RuntimeError("interface must be applied to a class")
     if not _is_new_style_class(obj):
         raise RuntimeError("TorchScript interfaces must inherit from 'object'")
+
+    is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
+
+    if not is_module_interface and len(obj.mro()) > 2:
+        raise RuntimeError("TorchScript interface does not support inheritance yet. "
+                           "Please directly inherit from 'object' or 'nn.Module'.")
+
     qualified_name = _qualified_name(obj)
-    ast = get_jit_class_def(obj, obj.__name__)
     rcb = _jit_internal.createResolutionCallbackFromFrame(1)
-    torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
+    # if this type is a `nn.Module` subclass, generate an module interface type
+    # instead of a class interface type, an module interface type only compile
+    # the user provided methods as part of the interface
+    ast = get_jit_class_def(obj, obj.__name__)
+    torch._C._jit_script_interface_compile(qualified_name, ast, rcb, is_module_interface)
     obj.__torch_script_interface__ = True
     return obj
 
@@ -1361,8 +1374,22 @@ class OrderedModuleDict(OrderedDictWrapper):
         return k in self._python_modules
 
     def __setitem__(self, k, v):
-        raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                           "tried to replace existing module '{}': {}".format(k, v))
+        # Cases where sub-module can be re-assigned after ScriptModule construction
+        # 1. If the attr is an module interface type, it's guranteed that the module is
+        #    not inlined in the graph, so it's safe to swap a new ScriptModule in.
+        # 2. if the new value if a ScriptModule with the same JIT type, IR won't change
+        #    and it's legit to swap a new module in.
+        # In these two cases we allow swapping a new scripted module and update the
+        # corresponding python module dict to keep sync.
+        # Note: the value to be swapped in has to be ScriptModule instead of nn.Module,
+        # otherwise it's illegal and we throw error.
+        if isinstance(v, ScriptModule):
+            self.module._set_attribute(k, v)
+            self._python_modules[k] = v
+        else:
+            raise RuntimeError("Cannot re-assign modules in a ScriptModule with non-scripted "
+                               "module, tried to replace existing module '{}': {}".format(k, v))
+
 
     def __getitem__(self, k):
         return self._python_modules[k]
@@ -1485,7 +1512,7 @@ class ScriptMeta(type):
                         # today, but it is wrong)
                         continue
                     delattr(self, name)
-                for name in concrete_type.get_module_names():
+                for name, _ in concrete_type.get_modules():
                     delattr(self, name)
                 for name in ("_parameters", "_buffers", "_modules"):
                     delattr(self, name)
@@ -1704,8 +1731,7 @@ if _enabled:
                 # XXX: buffers are implemented as attributes in the JIT
                 self._c._set_attribute(attr, value)
             elif self._c._has_module(attr):
-                raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                                   "tried to replace existing module '{}': {}".format(attr, value))
+                self._modules[attr] = value
             elif self._c._has_parameter(attr):
                 self._c._set_parameter(attr, value)
             elif hasattr(self, "_concrete_type") and attr in self._concrete_type.get_constants().keys():
@@ -2102,7 +2128,6 @@ _compiled_overloaded_fns = {}
 
 def _compile_function_with_overload(qual_name, impl_fn, overload_decl, overload_defaults):
     impl_ast = torch.jit.get_jit_def(impl_fn)
-    _frames_up = 0
     _rcb = _jit_internal.createResolutionCallbackFromClosure(impl_fn)
     fn = torch._C._jit_script_compile_overload(qual_name, overload_decl, impl_ast, _rcb, overload_defaults)
     return fn
