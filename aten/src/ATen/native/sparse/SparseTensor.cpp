@@ -71,7 +71,7 @@ Tensor values_sparse(const Tensor& self) {
 /*** Helper methods ***/
 
 SparseTensor new_sparse(const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT(impl::variable_is_excluded());
+  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   AT_ASSERT(options.layout() == kSparse);
   TensorTypeId type_id;
   if (options.device().is_cuda()) {
