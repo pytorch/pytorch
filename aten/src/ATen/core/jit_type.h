@@ -1510,6 +1510,20 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeTypes_;
   }
 
+  size_t addConstant(
+      const std::string& name,
+      IValue value);
+
+  c10::optional<IValue> findConstant(const std::string& name) const;
+
+  at::ArrayRef<std::string> constantNames() const {
+    return constantNames_;
+  }
+
+  at::ArrayRef<IValue> constantValues() const {
+    return constantValues_;
+  }
+
   // generate a refined version of this class.
   // It has the same name but the slot Types are subtypes of
   // the original slots. It is only valid to refine a class type in a context
@@ -1558,6 +1572,9 @@ struct CAFFE2_API ClassType : public NamedType {
   // available from c10
   std::vector<std::string> attributeNames_;
   std::vector<TypePtr> attributeTypes_;
+  // Mapping of constant names -> their value.
+  std::vector<std::string> constantNames_;
+  std::vector<IValue> constantValues_;
   // Holds method attributes
   std::weak_ptr<CompilationUnit> compilation_unit_;
 

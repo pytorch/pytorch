@@ -92,6 +92,42 @@ size_t ClassType::addAttribute(
   return slot;
 }
 
+size_t ClassType::addConstant(
+      const std::string& name,
+      IValue value) {
+  for (size_t i = 0; i < constantNames_.size(); ++i) {
+    TORCH_CHECK(
+        name != constantNames_[i],
+        "attempting to add constant",
+        " '",
+        name,
+        "' to ",
+        python_str(),
+        " but a field of the same name already exists with value ",
+        constantValues_[i]);
+  }
+  size_t slot = constantNames_.size();
+  constantNames_.push_back(name);
+  constantValues_.push_back(value);
+  return slot;
+}
+
+c10::optional<IValue> ClassType::findConstant(const std::string& name) const {
+  AT_ASSERT(constantNames_.size() == constantValues_.size());
+  size_t pos = 0;
+  for (const auto& c : constantNames_) {
+    if (name == c) {
+      break;
+    }
+    ++pos;
+  }
+
+  if (pos >= constantNames_.size()) {
+    return c10::nullopt;
+  }
+  return constantValues_[pos];
+}
+
 const std::vector<Function*>& ClassType::methods() const {
   return methods_;
 }
