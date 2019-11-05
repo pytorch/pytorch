@@ -1236,7 +1236,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn("`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead")
 
     if isinstance(obj, torch.nn.Module):
-        return torch.jit.torch.jit._recursive.recursive_script(obj)
+        return torch.jit._recursive.recursive_script(obj)
 
     qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
@@ -1249,7 +1249,10 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
         if not _is_new_style_class(obj):
             raise RuntimeError("TorchScript classes must be new-style classes. "
-                               "Please inherit from 'object'")
+                               "Please inherit from 'object'.")
+        if len(obj.mro()) > 2:
+            raise RuntimeError("TorchScript classes does not support inheritance yet. "
+                               "Please directly inherit from 'object'.")
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
@@ -1269,10 +1272,20 @@ def interface(obj):
         raise RuntimeError("interface must be applied to a class")
     if not _is_new_style_class(obj):
         raise RuntimeError("TorchScript interfaces must inherit from 'object'")
+
+    is_module_interface = issubclass(obj, torch.nn.Module) and len(obj.mro()) == 3
+
+    if not is_module_interface and len(obj.mro()) > 2:
+        raise RuntimeError("TorchScript interface does not support inheritance yet. "
+                           "Please directly inherit from 'object' or 'nn.Module'.")
+
     qualified_name = _qualified_name(obj)
-    ast = get_jit_class_def(obj, obj.__name__)
     rcb = _jit_internal.createResolutionCallbackFromFrame(1)
-    torch._C._jit_script_interface_compile(qualified_name, ast, rcb)
+    # if this type is a `nn.Module` subclass, generate an module interface type
+    # instead of a class interface type, an module interface type only compile
+    # the user provided methods as part of the interface
+    ast = get_jit_class_def(obj, obj.__name__)
+    torch._C._jit_script_interface_compile(qualified_name, ast, rcb, is_module_interface)
     obj.__torch_script_interface__ = True
     return obj
 
