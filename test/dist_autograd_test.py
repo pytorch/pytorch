@@ -28,6 +28,7 @@ known_context_ids = []
 # we don't need a lock here since the GIL is held while executing remote
 # python UDFs, so access is serialized across several workers.
 def _set_rpc_done(ctx_id, rank_distance):
+    print(ctx_id, "=== setting rpc done for rank dist ", rank_distance)
     global rpc_done
     global ctx_ids
     global known_context_ids
@@ -107,6 +108,7 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
 # This function creates a dis atugorad context, run rpc_sync on the given ps,
 # and then blocks until the ps has verified the grads are correctly accumulated.
 def _run_trainer(rref_t1, t2, ps, rank_diff):
+    print("11111111111")
     with dist_autograd.context() as context_id:
         print("ps=", ps, "rank diff = ", rank_diff, " got autograd context")
 
@@ -170,6 +172,7 @@ class DistAutogradTest(object):
         return self.dst_rank
 
     def _check_rpc_done(self, rank_distance):
+        print("--- ", self.rank, " checking rpc done ")
         _check_rpc_done(rank_distance)
 
     @property
@@ -887,8 +890,9 @@ class DistAutogradTest(object):
 
         # check if the trainers have done with their backward pass
         for rank_diff in rank_diffs:
+            print("rank", self.rank, " checking ", rank_diff)
             self._check_rpc_done(rank_diff)
-            print("rank", self.rank, " checked rpc done for ", rank_diff)
+        print("rank", self.rank, " checked rpc done")
 
         # trainers are done and holding the context for verification
         accumulate_grad_func = None
