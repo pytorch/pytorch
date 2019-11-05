@@ -582,13 +582,14 @@ static void apply_lu(Tensor& self, Tensor& pivots, Tensor& infos) {
   auto self_matrix_stride = matrixStride(self);
   auto pivots_matrix_stride = pivots.size(-1);
   auto batch_size = batchCount(self);
+  auto m = self.size(-2);
   auto n = self.size(-1);
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
     int* pivots_working_ptr = &pivots_data[i * pivots_matrix_stride];
     int* infos_working_ptr = &infos_data[i];
-    lapackLu<scalar_t>(n, n, self_working_ptr, n, pivots_working_ptr, infos_working_ptr);
+    lapackLu<scalar_t>(m, n, self_working_ptr, m, pivots_working_ptr, infos_working_ptr);
   }
 #endif
 }
@@ -598,9 +599,11 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
   TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
            " instead");
-  squareCheckInputs(self);
+  auto m = self.size(-2);
+  auto n = self.size(-1);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
+  req_size.back() = std::min(m, n);
   auto pivots_tensor = at::empty(req_size, self.options().dtype(kInt));
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
@@ -616,9 +619,9 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cpu(const Tensor& self, bool pi
   }
   if (check_errors) {
     if (self.dim() > 2) {
-      batchCheckErrors(infos_tensor, "lu");
+      batchCheckErrors(infos_tensor, "lu", /*allow_singular=*/true);
     } else {
-      singleCheckErrors(infos_tensor.item<int64_t>(), "lu");
+      singleCheckErrors(infos_tensor.item<int64_t>(), "lu", /*allow_singular=*/true);
     }
   }
   return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
