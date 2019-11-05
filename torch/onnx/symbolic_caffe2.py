@@ -1,5 +1,3 @@
-import torch
-import torch.onnx
 import importlib
 import torch.onnx.symbolic_registry as sym_registry
 from inspect import getmembers, isfunction
