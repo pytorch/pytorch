@@ -797,12 +797,10 @@ def emit_body(declaration):
                 output_var = return_info['name']
                 if output_idx in view_info_dict:
                     stmt = wrap_view_single(output_var, view_info_dict[output_idx])
-                elif 'Tensor' in return_info['type']:
-                    stmt = '{output_var} = as_variable({output_var});'.format(output_var=output_var)
                 extra_wrapping_stmts.append(stmt)
             return call, extra_wrapping_stmts
         else:
-            return 'as_variable(std::move({}))'.format(call), []
+            return 'std::move({})'.format(call), []
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
