@@ -12,7 +12,7 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 from hypothesis_utils import no_deadline
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
@@ -1106,7 +1106,9 @@ class TestQuantizedLinear(unittest.TestCase):
             return
         decimal_val = 4
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            # QNNPACK does not play well with ASAN.
+            # Temporarily disable on MACOS as it runs with ASAN.
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
             use_multi_dim_input = False
@@ -1322,7 +1324,9 @@ class TestQuantizedConv(unittest.TestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            # QNNPACK does not play well with ASAN.
+            # Temporarily disable on MACOS as it runs with ASAN.
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
 
