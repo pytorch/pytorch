@@ -728,6 +728,10 @@ class TestCppExtension(common.TestCase):
         self.assertNotRegex(str(e), pattern)
 
     def test_warning(self):
+        # Note: the module created from this source will include the py::key_error
+        # symbol. But because of visibility and the fact that it lives in a
+        # different compilation unit than pybind, this trips up ubsan even though
+        # it is fine. "ubsan.supp" thus needs to contain "vptr:warn_mod.so".
         source = '''
         // error_type:
         // 0: no error
@@ -778,7 +782,7 @@ class TestCppExtension(common.TestCase):
                 warn_mod.foo(t, 1)
             self.assertEqual(len(w), 0)
 
-            with self.assertRaisesRegex(RuntimeError, "bad argument to internal function"):
+            with self.assertRaisesRegex(RuntimeError, "bad argument to internal function|python_error"):
                 warn_mod.foo(t, 2)
             self.assertEqual(len(w), 0)
 
