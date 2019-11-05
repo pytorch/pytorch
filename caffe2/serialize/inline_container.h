@@ -12,6 +12,7 @@
 
 #include "caffe2/core/logging.h"
 #include "caffe2/serialize/istream_adapter.h"
+#include "caffe2/serialize/func_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
 extern "C" {
@@ -100,7 +101,7 @@ class CAFFE2_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
   explicit PyTorchStreamReader(std::istream* in);
-  explicit PyTorchStreamReader(std::function<size_t(char*, size_t)> in);
+  explicit PyTorchStreamReader(ReaderFunc in, SeekerFunc seeker, size_t size);
   explicit PyTorchStreamReader(std::unique_ptr<ReadAdapterInterface> in);
 
   // return dataptr, size

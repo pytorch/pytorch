@@ -57,9 +57,12 @@ PyTorchStreamReader::PyTorchStreamReader(const std::string& file_name)
   init();
 }
 
-PyTorchStreamReader::PyTorchStreamReader(std::function<size_t(char*, size_t)> in)
+PyTorchStreamReader::PyTorchStreamReader(
+    ReaderFunc in,
+    SeekerFunc seeker,
+    size_t size)
     : ar_(caffe2::make_unique<mz_zip_archive>()),
-      in_(caffe2::make_unique<FuncAdapter>(in)) {
+      in_(caffe2::make_unique<FuncAdapter>(in, seeker, size)) {
   init();
 }
 
@@ -98,6 +101,8 @@ void PyTorchStreamReader::init() {
 
   mz_zip_reader_init(ar_.get(), size, 0);
   valid("reading zip archive");
+
+  std::cout << "init done\n";
 
   // figure out the archive_name (i.e. the zip folder all the other files are in)
   // all lookups to getRecord will be prefixed by this folder

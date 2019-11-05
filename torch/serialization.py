@@ -188,64 +188,72 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 class _open_file_like(object):
-    def __init__(self, f, mode):
-        self.f = f
+    def __init__(self, name_or_buffer, mode):
+        self.is_path = _open_file_like.is_path(name_or_buffer)
+        if self.is_path:
+            self.fname = name_or_buffer
+        else:
+            self.buffer = name_or_buffer
         self.mode = mode
 
     def open_path(self):
-        return open(self.f, self.mode)
+        return open(self.fname, self.mode)
 
     def open_handle(self):
-        return self.f
+        return self.buffer
 
-    def is_path(self):
-        return isinstance(self.f, str) or \
-            (sys.version_info[0] == 2 and isinstance(self.f, unicode)) or \
-            (sys.version_info[0] == 3 and isinstance(self.f, pathlib.Path))
+    @staticmethod
+    def is_path(name_or_buffer):
+        return isinstance(name_or_buffer, str) or \
+            (sys.version_info[0] == 2 and isinstance(name_or_buffer, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(name_or_buffer, pathlib.Path))
 
     def __enter__(self):
-        if self.is_path():
-            self.fd = self.open_path()
-            return self.fd
+        if self.is_path:
+            file_like = self.open_path()
+        else:
+            file_like = self.open_handle()
 
-        return self.open_handle()
+        self.file_like = file_like
+        return self.file_like
 
     def __exit__(self, *args):
-        if hasattr(self, 'fd'):
-            self.fd.close()
+        if self.is_path:
+            # Only close the `file_like` if it was opened by this object
+            self.file_like.close()
 
 
 class _open_zipfile_writer(_open_file_like):
     def open_path(self):
-        return torch._C.PyTorchFileWriter(self.f)
+        return torch._C.PyTorchFileWriter(self.fname)
 
     def open_handle(self):
         def write(capsule, size):
-            self.f.write(torch._C.make_bytes(capsule, size))
+            self.buffer.write(torch._C.make_bytes(capsule, size))
             return size
-
-        self.fd = torch._C.PyTorchFileWriter(write)
-        return self.fd
+        return torch._C.PyTorchFileWriter(write)
 
     def __exit__(self, *args):
-        self.fd.write_end_of_file()
-        if not self.is_path():
-            self.f.flush()
+        self.file_like.write_end_of_file()
+        if not self.is_path:
+            # If this is writing to a buffer, flush it after everything is done
+            self.buffer.flush()
 
 
 class _open_zipfile_reader(_open_file_like):
     def open_path(self):
-        print("opening from path")
         return torch._C.PyTorchFileReader(self.f)
 
     def open_handle(self):
         def reader(capsule, size):
-            print("READING", size)
-            # self.f.write(torch._C.make_bytes(capsule, size))
-            return size
+            the_bytes = self.buffer.read(size)
+            torch._C.read_into(capsule, the_bytes)
+            return len(the_bytes)
 
-        self.fd = torch._C.PyTorchFileReader(reader)
-        return self.fd
+        def seeker(pos):
+            return self.buffer.seek(pos)
+
+        return torch._C.PyTorchFileReader(reader, seeker, len(self.buffer.getvalue()))
 
     def __exit__(self, *args):
         pass
@@ -328,7 +336,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
                    'Please use something like io.BytesIO for torch.save instead.')
             raise RuntimeError(msg)
 
-    with _open_zipfile_writer(f=f, mode='w') as opened_file:
+    with _open_zipfile_writer(name_or_buffer=f, mode='w') as opened_file:
         return _save(obj, opened_file, pickle_module, pickle_protocol)
 
 
@@ -468,11 +476,11 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
     """
-    with _open_file_like(f=f, mode='rb') as opened_file:
+    with _open_file_like(name_or_buffer=f, mode='rb') as opened_file:
         _check_seekable(opened_file)
 
         if _is_zipfile(opened_file):
-            with _open_zipfile_reader(f=f, mode='rb') as zip_file:
+            with _open_zipfile_reader(name_or_buffer=f, mode='rb') as zip_file:
                 return _load(zip_file, map_location, pickle_module, **pickle_load_args)
 
         f_should_read_directly = _should_read_directly(opened_file)
