@@ -49,7 +49,8 @@ void index_select_add(const Tensor &select_indices,
                              const Tensor &add_indices,
                              const Tensor &src,
                              Tensor &output,
-                             const Tensor& /*offsets*/) {
+                             const Tensor& /*offsets*/,
+                             bool /*new_offsets*/) {
   AT_ASSERT(select_indices.numel() == add_indices.numel());
   auto add_indices_data = add_indices.data_ptr<int64_t>();
   auto select_indices_data = select_indices.data_ptr<int64_t>();
@@ -74,30 +75,46 @@ void index_select_add<float>(const Tensor &select_indices,
                              const Tensor &add_indices,
                              const Tensor &src,
                              Tensor &output,
-                             const Tensor& offsets) {
+                             const Tensor& offsets,
+                             bool new_offsets) {
   int64_t ddim = src.size(1);
   auto src_data = src.data_ptr<float>();
   auto select_indices_data = select_indices.data_ptr<int64_t>();
   auto output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelect(src, output)) {
-    auto output_size = offsets.numel();
-    at::parallel_for(0, output_size, 0, [&](int64_t start_idx, int64_t end_idx) {
-        caffe2::EmbeddingLookupIdx(
-            /*block_size=*/ddim,
-            /*start_idx=*/start_idx,
-            /*end_idx=*/end_idx,
-            /*output_size=*/offsets.numel(),
-            /*index_size=*/select_indices.numel(),
-            /*data_size=*/src.size(0),
-            /*input=*/src_data,
-            /*indices=*/select_indices_data,
-            /*offsets=*/offsets.data_ptr<int64_t>(),
-            /*weights=*/nullptr,
-            /*scale_bias=*/nullptr,
-            /*normalize_by_lengths=*/false,
-            /*out=*/output_data);
-    });
+    if (new_offsets) {
+      auto output_size = offsets.numel();
+      at::parallel_for(
+          0, output_size, 0, [&](int64_t start_idx, int64_t end_idx) {
+            caffe2::EmbeddingLookupIdx(
+                /*block_size=*/ddim,
+                /*output_size=*/end_idx - start_idx,
+                /*index_size=*/select_indices.numel(),
+                /*data_size=*/src.size(0),
+                /*input=*/src_data,
+                /*indices=*/select_indices_data +
+                    offsets.data_ptr<int64_t>()[start_idx],
+                /*offsets=*/offsets.data_ptr<int64_t>() + start_idx,
+                /*weights=*/nullptr,
+                /*scale_bias=*/nullptr,
+                /*normalize_by_lengths=*/false,
+                /*out=*/output_data + start_idx);
+          });
+    } else {
+      caffe2::EmbeddingLookupIdx(
+          /*block_size=*/ddim,
+          /*output_size=*/offsets.numel(),
+          /*index_size=*/select_indices.numel(),
+          /*data_size=*/src.size(0),
+          /*input=*/src_data,
+          /*indices=*/select_indices_data,
+          /*offsets=*/offsets.data_ptr<int64_t>(),
+          /*weights=*/nullptr,
+          /*scale_bias=*/nullptr,
+          /*normalize_by_lengths=*/false,
+          /*out=*/output_data);
+    }
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto add_indices_data = add_indices.data_ptr<int64_t>();
@@ -107,9 +124,13 @@ void index_select_add<float>(const Tensor &select_indices,
     auto output_stride1 = output.stride(1);
     auto numel = add_indices.numel();
     for (int64_t i = 0; i < numel; i++) {
-      THBlas_axpy<float>(ddim, 1,
-              src_data + src_stride0 * select_indices_data[i], src_stride1,
-              output_data + output_stride0 * add_indices_data[i], output_stride1);
+      THBlas_axpy<float>(
+          ddim,
+          1,
+          src_data + src_stride0 * select_indices_data[i],
+          src_stride1,
+          output_data + output_stride0 * add_indices_data[i],
+          output_stride1);
     }
   }
 }
@@ -124,7 +145,8 @@ static void index_select_scale_add(const Tensor &select_indices,
                                    const Tensor &scale,
                                    const Tensor &src,
                                    Tensor &output,
-                                   const Tensor& /*offsets*/) {
+                                   const Tensor& /*offsets*/,
+                                   bool /*new_offsets*/) {
   AT_ASSERT(select_indices.numel() == add_indices.numel());
   auto add_indices_data = add_indices.data_ptr<int64_t>();
   auto select_indices_data = select_indices.data_ptr<int64_t>();
@@ -156,7 +178,8 @@ void index_select_scale_add<float>(const Tensor &select_indices,
                                           const Tensor &scale,
                                           const Tensor &src,
                                           Tensor &output,
-                                          const Tensor& offsets) {
+                                          const Tensor& offsets,
+                                          bool new_offsets) {
   int64_t ddim = src.size(1);
   auto* scale_data = scale.data_ptr<float>();
   auto select_indices_data = select_indices.data_ptr<int64_t>();
@@ -164,23 +187,38 @@ void index_select_scale_add<float>(const Tensor &select_indices,
   auto output_data = output.data_ptr<float>();
 
   if (isFastPathIndexSelectScale(src, scale, output)) {
-    auto output_size = offsets.numel();
-    at::parallel_for(0, output_size, 0, [&](int64_t start_idx, int64_t end_idx) {
-        caffe2::EmbeddingLookupIdx(
-            /*block_size=*/ddim,
-            /*start_idx=*/start_idx,
-            /*end_idx=*/end_idx,
-            /*output_size=*/offsets.numel(),
-            /*index_size=*/select_indices.numel(),
-            /*data_size=*/src.size(0),
-            /*input=*/src_data,
-            /*indices=*/select_indices_data,
-            /*offsets=*/offsets.data_ptr<int64_t>(),
-            /*weights=*/nullptr,
-            /*scale_bias=*/nullptr,
-            /*normalize_by_lengths=*/false,
-            /*out=*/output_data);
-    });
+    if (new_offsets) {
+      auto output_size = offsets.numel();
+      at::parallel_for(
+          0, output_size, 0, [&](int64_t start_idx, int64_t end_idx) {
+            caffe2::EmbeddingLookupIdx(
+                /*block_size=*/ddim,
+                /*output_size=*/end_idx - start_idx,
+                /*index_size=*/select_indices.numel(),
+                /*data_size=*/src.size(0),
+                /*input=*/src_data,
+                /*indices=*/select_indices_data +
+                    offsets.data_ptr<int64_t>()[start_idx],
+                /*offsets=*/offsets.data_ptr<int64_t>() + start_idx,
+                /*weights=*/nullptr,
+                /*scale_bias=*/nullptr,
+                /*normalize_by_lengths=*/false,
+                /*out=*/output_data + start_idx);
+          });
+    } else {
+      caffe2::EmbeddingLookupIdx(
+          /*block_size=*/ddim,
+          /*output_size=*/offsets.numel(),
+          /*index_size=*/select_indices.numel(),
+          /*data_size=*/src.size(0),
+          /*input=*/src_data,
+          /*indices=*/select_indices_data,
+          /*offsets=*/offsets.data_ptr<int64_t>(),
+          /*weights=*/scale_data,
+          /*scale_bias=*/nullptr,
+          /*normalize_by_lengths=*/false,
+          /*out=*/output_data);
+    }
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
     auto add_indices_data = add_indices.data_ptr<int64_t>();
@@ -308,9 +346,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor>
 embedding_bag(const Tensor &weight, const Tensor &indices,
               const Tensor &offsets, const bool scale_grad_by_freq,
               const int64_t mode, bool sparse,
-              const Tensor &per_sample_weights) {
+              const Tensor &per_sample_weights,
+              bool new_offsets) {
   return at::_embedding_bag(weight, indices.contiguous(), offsets.contiguous(),
-                            scale_grad_by_freq, mode, sparse, per_sample_weights);
+                            scale_grad_by_freq, mode, sparse, per_sample_weights, new_offsets);
   };
 
 // Assumes all input tensors except for `weight` are contiguous.
@@ -319,7 +358,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
                   const Tensor &offsets, const bool scale_grad_by_freq,
                   const int64_t mode, bool sparse,
-                  const Tensor &per_sample_weights) {
+                  const Tensor &per_sample_weights, bool new_offsets) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_bag", indices_arg, kLong);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
@@ -374,9 +413,9 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
       if (per_sample_weights.defined()) {
         AT_ASSERT(mode == MODE_SUM);
         index_select_scale_add<scalar_t>(
-            indices, offset2bag, per_sample_weights, weight, output, offsets);
+            indices, offset2bag, per_sample_weights, weight, output, offsets, new_offsets);
       } else {
-        index_select_add<scalar_t>(indices, offset2bag, weight, output, offsets);
+        index_select_add<scalar_t>(indices, offset2bag, weight, output, offsets, new_offsets);
       }
     });
     auto ret = apply_bag_size(offsets, indices, mode, output, bag_size);

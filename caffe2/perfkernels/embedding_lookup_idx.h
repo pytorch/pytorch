@@ -16,7 +16,7 @@ namespace caffe2 {
  * Behavior is roughly equivalent to pseudocode:
  *
  * pos = 0
- * for (i = start_idx..end_idx) // start_idx=0, end_idx=output_size-1 for single thread
+ * for (i = 0..output_size-1)
  *   for (k = 0..block_size-1)
  *     out[i*block_size + k] = 0
  *   start_offset = offsets[i]
@@ -41,8 +41,6 @@ template <
     bool IS_WEIGHT_POSITIONAL = false>
 void EmbeddingLookupIdx(
     const std::int64_t block_size,
-    const std::int64_t start_idx,
-    const std::int64_t end_idx,
     const std::int64_t output_size,
     const std::int64_t index_size,
     const std::int64_t data_size,
