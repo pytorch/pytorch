@@ -86,7 +86,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   AT_ASSERT(options.device().type() == DeviceType::CPU);
-  AT_ASSERT(!options.is_variable());  // is_variable should have been 'unpacked'  // TODO: remove this when Variable and Tensor are merged
+  TORCH_INTERNAL_ASSERT(impl::variable_is_excluded());
   check_size_nonnegative(size);
 
   c10::Allocator* allocator;
@@ -398,6 +398,7 @@ Tensor ones_like(
   return native::ones_like(
       self, self.options(), optional_memory_format);
 }
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
@@ -497,18 +498,30 @@ Tensor& randint_out(
   return result.random_(low, high, generator);
 }
 
-Tensor randint_like(const Tensor& self, int64_t high) {
-  return native::randint_like(self, high, self.options());
+Tensor randint_like(
+    const Tensor& self,
+    int64_t high,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::randint_like(
+      self, high, self.options(), optional_memory_format);
 }
 
-Tensor randint_like(const Tensor& self, int64_t low, int64_t high) {
-  return native::randint_like(self, low, high, self.options());
+Tensor randint_like(
+    const Tensor& self,
+    int64_t low,
+    int64_t high,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::randint_like(
+      self, low, high, self.options(), optional_memory_format);
 }
 
 Tensor randint_like(
     const Tensor& self,
     int64_t high,
-    const TensorOptions& options) {
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.random_(0, high, nullptr);
   return native::randint(high, self.sizes(), nullptr, options);
 }
 
@@ -516,8 +529,10 @@ Tensor randint_like(
     const Tensor& self,
     int64_t low,
     int64_t high,
-    const TensorOptions& options) {
-  return native::randint(low, high, self.sizes(), nullptr, options);
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.random_(low, high, nullptr);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randn ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -552,12 +567,18 @@ Tensor& normal_out(Tensor& result, double mean, double std,
   return result.normal_(mean, std, generator);
 }
 
-Tensor randn_like(const Tensor& self) {
-  return native::randn_like(self, self.options());
+Tensor randn_like(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::randn_like(self, self.options(), optional_memory_format);
 }
 
-Tensor randn_like(const Tensor& self, const TensorOptions& options) {
-  return native::randn(self.sizes(), nullptr, options);
+Tensor randn_like(
+    const Tensor& self,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.normal_(0, 1, nullptr);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randperm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -731,17 +752,24 @@ Tensor& zeros_out(Tensor& result, IntArrayRef size) {
   return result.zero_();
 }
 
-Tensor zeros_like(const Tensor& self) {
-  return native::zeros_like(self, self.options());
+Tensor zeros_like(
+    const Tensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  return native::zeros_like(self, self.options(), optional_memory_format);
 }
 
-Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
+Tensor zeros_like(
+    const Tensor& self,
+    const TensorOptions& options,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   if (options.layout() == kSparse && self.is_sparse()) {
     auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(self.sizes(), self.sparse_dim(), self.dense_dim());
+    res.sparse_resize_and_clear_(
+        self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
   }
-  return native::zeros(self.sizes(), options);
+  auto result = at::empty_like(self, options, optional_memory_format);
+  return result.zero_();
 }
 
 Tensor new_zeros(
@@ -866,7 +894,7 @@ template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
   AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tensor_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
     std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
   });
   return result;
