@@ -238,14 +238,15 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
   SugaredValuePtr getitem(const SourceRange& loc, Function& m, Value* idx)
       override {
     if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
-      throw ErrorReport(loc) << "Expected integer literal for Tuple index";
+      throw ErrorReport(loc) << "Expected integer literal for index";
     }
     auto index = toIValue(idx)->toInt();
     int64_t adj_index = (index < 0) ? index + static_cast<int64_t>(tup_.size()) : index;
     if (!(adj_index >= 0 && adj_index < static_cast<int64_t>(tup_.size()))) {
-      throw ErrorReport(loc) << "Index " << index << " out of range of tuple of length " << tup_.size();
+      throw ErrorReport(loc)
+          << "Index " << index << " out of range of length " << tup_.size();
     }
-    return tup_.at(index);
+    return tup_.at(adj_index);
   }
 
   // This function is called when a SugaredValue is used to convert a

@@ -10395,33 +10395,39 @@ a")
                 print(list(m))
                 
     def test_script_modulelist_index(self):
-        class Sub(torch.jit.ScriptModule):
-            def __init__(self):
+        class Sub(torch.nn.Module):
+            def __init__(self, i):
                 super(Sub, self).__init__()
-                self.weight = nn.Parameter(torch.randn(2))
+                self.i = i
 
-            @torch.jit.script_method
             def forward(self, thing):
-                return self.weight + thing
+                return thing - self.i
 
-        class M(torch.jit.ScriptModule):
+        class M(torch.nn.Module):
             __constants__ = ['mods']
 
             def __init__(self):
                 super(M, self).__init__()
-                self.mods = nn.ModuleList([Sub() for i in range(10)])
+                self.mods = nn.ModuleList([Sub(i) for i in range(10)])
 
-            @torch.jit.script_method
             def forward(self, v):
-                return self.mods[4].forward(v)
+                v = self.mods[4].forward(v)
+                v = self.mods[-1].forward(v)
+                v = self.mods[-9].forward(v)
+                return v
 
+        x = torch.tensor(1)
+        self.checkModule(M(), (x,))
 
-            @torch.jit.script_method
-            def forward2(self, v):
-                return self.mods[2](v)
+        class M2(M):
+            def __init__(self):
+                super(M2, self).__init__()
 
-        print(M().forward.graph)
-        # torch.jit.script(M().forward2)
+            def forward(self, v):
+                return self.mods[-11].forward(v)
+
+        with self.assertRaisesRegex(Exception, "Index -11 out of range"):
+            torch.jit.script(M2())
 
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
