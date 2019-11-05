@@ -921,9 +921,8 @@ void dump_opnames(const script::Module& m, std::unordered_set<std::string>& opna
   auto methods = m.get_methods();
   for (const auto &method : methods) {
     const auto &func = method.function();
-    std::cout << "function name: " << func.name() << std::endl;
+//    std::cout << "function name: " << func.name() << std::endl;
     torch::jit::Code code(func.graph());
-    // Make a copy of opnames. Some of them may be changed for mobile later.
     for (size_t i = 0; i < code.instructions().size(); ++i) {
       auto ins = code.instructions()[i];
       auto node = code.instructions_source()[i];
@@ -932,14 +931,14 @@ void dump_opnames(const script::Module& m, std::unordered_set<std::string>& opna
         std::string namestr = opname.name;
         if (!opname.overload_name.empty())
           namestr += opname.overload_name;
-        std::cout << "    " << namestr << std::endl;
+//        std::cout << "    " << namestr << std::endl;
         opnames.emplace(namestr);
       }
     }
   }
   auto modules = m.get_modules();
   for (const auto& sub_m : modules) {
-    std::cout << "sub module name: " << sub_m.name << std::endl;
+//    std::cout << "sub module name: " << sub_m.name << std::endl;
     dump_opnames(sub_m.module, opnames);
   }
 }
