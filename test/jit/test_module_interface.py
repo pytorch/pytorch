@@ -5,16 +5,6 @@ import torch
 import torch.nn as nn
 from jit_utils import JitTestCase
 
-@torch.jit.interface
-class ModuleInterface(nn.Module):
-    def one(self, inp1, inp2):
-        # type: (Tensor, Tensor) -> Tensor
-        pass
-
-    def forward(self, input):
-        # type: (Tensor) -> Tensor
-        pass
-
 class OrigModule(nn.Module):
     def __init__(self):
         super(OrigModule, self).__init__()
@@ -31,20 +21,26 @@ class OrigModule(nn.Module):
         # type: (Tensor) -> Tensor
         return input + self.one(input, input) + 1
 
-class TestModule(nn.Module):
-    proxy_mod : ModuleInterface
-
+class NewModule(nn.Module):
     def __init__(self):
-        super(TestModule, self).__init__()
-        self.proxy_mod = OrigModule()
+        super(NewModule, self).__init__()
+
+    def one(self, inp1, inp2):
+        # type: (Tensor, Tensor) -> Tensor
+        return inp1 * inp2 + 1
 
     def forward(self, input):
         # type: (Tensor) -> Tensor
-        return self.proxy_mod.forward(input)
-
+        return self.one(input, input + 1)
 
 class TestModuleInterface(JitTestCase):
     def test_not_submodule_interface_call(self):
+        @torch.jit.interface
+        class ModuleInterface(nn.Module):
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
         class TestNotModuleInterfaceCall(nn.Module):
             proxy_mod : ModuleInterface
 
@@ -60,17 +56,26 @@ class TestModuleInterface(JitTestCase):
             torch.jit.script(TestNotModuleInterfaceCall())
 
     def test_module_swap(self):
-        class NewModule(nn.Module):
-            def __init__(self):
-                super(NewModule, self).__init__()
-
+        @torch.jit.interface
+        class ModuleInterface(nn.Module):
             def one(self, inp1, inp2):
                 # type: (Tensor, Tensor) -> Tensor
-                return inp1 * inp2 + 1
+                pass
 
             def forward(self, input):
                 # type: (Tensor) -> Tensor
-                return self.one(input, input + 1)
+                pass
+
+        class TestModule(nn.Module):
+            proxy_mod : ModuleInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigModule()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return self.proxy_mod.forward(input)
 
         scripted_mod = torch.jit.script(TestModule())
         input = torch.randn(3, 4)
@@ -80,7 +85,21 @@ class TestModuleInterface(JitTestCase):
         scripted_mod.proxy_mod = torch.jit.script(NewModule())
         self.assertEqual(scripted_mod(input), input * (input + 1) + 1)
 
+        # module swap with non-scripted module should throw error
+        with self.assertRaisesRegex(RuntimeError, "a ScriptModule with non-scripted module"):
+            scripted_mod.proxy_mod = NewModule()
+
     def test_module_swap_wrong_module(self):
+        @torch.jit.interface
+        class ModuleInterface(nn.Module):
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                pass
+
         class NewModuleWrong(nn.Module):
             def __init__(self):
                 super(NewModuleWrong, self).__init__()
@@ -89,12 +108,44 @@ class TestModuleInterface(JitTestCase):
                 # type: (int) -> int
                 return input + 1
 
+        class TestModule(nn.Module):
+            proxy_mod : ModuleInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigModule()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return self.proxy_mod.forward(input)
+
         scripted_mod = torch.jit.script(TestModule())
         # module swap with in-compatible interface
         with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
             scripted_mod.proxy_mod = torch.jit.script(NewModuleWrong())
 
     def test_module_swap_no_lazy_compile(self):
+        @torch.jit.interface
+        class ModuleInterface(nn.Module):
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                pass
+
+        class TestModule(nn.Module):
+            proxy_mod : ModuleInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigModule()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return self.proxy_mod.forward(input)
+
         class NewModuleMethodNotLazyCompile(nn.Module):
             def __init__(self):
                 super(NewModuleMethodNotLazyCompile, self).__init__()
@@ -130,37 +181,7 @@ class TestModuleInterface(JitTestCase):
         input = torch.randn(3, 4)
         self.assertEqual(scripted_mod(input), input + 1)
 
-    def test_module_swap_non_scripted_module(self):
-        class NewModule(nn.Module):
-            def __init__(self):
-                super(NewModule, self).__init__()
-
-            def one(self, inp1, inp2):
-                # type: (Tensor, Tensor) -> Tensor
-                return inp1 * inp2 + 1
-
-            def forward(self, input):
-                # type: (Tensor) -> Tensor
-                return self.one(input, input + 1)
-
-        scripted_mod = torch.jit.script(TestModule())
-        # module swap with non-scripted module
-        with self.assertRaisesRegex(RuntimeError, "a ScriptModule with non-scripted module"):
-            scripted_mod.proxy_mod = NewModule()
-
     def test_module_swap_no_module_interface(self):
-        class NewModule(nn.Module):
-            def __init__(self):
-                super(NewModule, self).__init__()
-
-            def one(self, inp1, inp2):
-                # type: (Tensor, Tensor) -> Tensor
-                return inp1 * inp2 + 1
-
-            def forward(self, input):
-                # type: (Tensor) -> Tensor
-                return self.one(input, input + 1)
-
         # test module swapping with no module interface
         class TestNoModuleInterface(nn.Module):
             def __init__(self):
@@ -181,6 +202,16 @@ class TestModuleInterface(JitTestCase):
             scripted_no_module_interface.proxy_mod = torch.jit.script(NewModule())
 
     def test_script_module_as_interface_swap(self):
+        @torch.jit.interface
+        class ModuleInterface(nn.Module):
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                pass
+
         class OrigScriptModule(torch.jit.ScriptModule):
             def __init__(self):
                 super(OrigScriptModule, self).__init__()
