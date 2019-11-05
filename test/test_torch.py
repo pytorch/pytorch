@@ -5677,6 +5677,54 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
 
+    def test_batch_norm_cpu_inference(self):
+        # input nchw in (2,1,1,1), (2,2,2,2) 
+        inputs = [
+            torch.tensor([[[[-0.5000]]], [[[0.5000]]]]),
+            torch.tensor([
+                [
+                    [[-0.5000, 0.5000], [-1.0000, 1.0000]],
+                    [[-0.2500, -0.5000], [0.2500, 0.5000]]
+                ],
+                [
+                    [[0.1000, 1.0000], [1.0000, 0.1000]],
+                    [[1.0000, 0.5000], [1.5000, -1.5000]]
+                ]])]
+        # output nchw in (2,1,1,1), (2,2,2,2) 
+        outputs = [
+            torch.tensor([
+                [[[-0.499997496604919433593750000]]],
+                [[[0.499997496604919433593750000]]]]),
+            torch.tensor([
+                [[[-0.499997496604919433593750000, 0.499997496604919433593750000],
+                  [-0.999994993209838867187500000, 0.999994993209838867187500000]],
+                 [[-0.249998748302459716796875000, -0.499997496604919433593750000],
+                  [0.249998748302459716796875000, 0.499997496604919433593750000]]],
+                [[[0.099999502301216125488281250, 0.999994993209838867187500000],
+                  [0.999994993209838867187500000, 0.099999502301216125488281250]],
+                 [[0.999994993209838867187500000, 0.499997496604919433593750000],
+                  [1.499992489814758300781250000, -1.499992489814758300781250000]]]])]
+
+        for i in range(len(inputs)):
+            m = torch.nn.BatchNorm2d(inputs[i].size()[1], 1e-05, 0.1, affine=False)
+            m.eval()
+            # contiguous case
+            input1 = inputs[i].contiguous()
+            output1 = m(input1)
+            # non-contiguous case
+            input2 = input1.permute(0, 1, 3, 2)
+            output2 = m(input2).permute(0, 1, 3, 2)
+            # channels last case
+            input3 = input1.contiguous(memory_format=torch.channels_last)
+            for name, param in m.named_parameters():    
+                if param.requires_grad:    
+                    if param.data.dim() == 4:    
+                        param.data = param.data.contiguous(memory_format=torch.channels_last)
+            output3 = m(input3)
+            self.assertEqual(output3, outputs[i])
+            self.assertEqual(output3, output1)
+            self.assertEqual(output3, output2)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
