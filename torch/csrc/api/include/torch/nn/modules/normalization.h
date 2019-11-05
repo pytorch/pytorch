@@ -90,7 +90,7 @@ class TORCH_API CrossMapLRN2dImpl : public torch::nn::Cloneable<CrossMapLRN2dImp
   /// Pretty prints the `CrossMapLRN2d` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 
-  torch::Tensor forward(torch::Tensor& input);
+  torch::Tensor forward(const torch::Tensor& input);
 
   CrossMapLRN2dOptions options;
 };

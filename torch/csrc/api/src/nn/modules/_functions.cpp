@@ -16,12 +16,9 @@ Variable CrossMapLRN2d::forward(
 
   TORCH_CHECK(input.dim() == 4);
 
-  ctx->saved_data["scale"] = torch::empty({0}, torch::TensorOptions().dtype(input.dtype()).device(input.device()))
-                                 .__or__(ctx->saved_data["scale"].toTensor());
+  ctx->saved_data["scale"] = ctx->saved_data["scale"].toTensor().defined() ? ctx->saved_data["scale"] : torch::empty({0}, input.options());
   
-  // ctx->saved_data["scale"].toTensor()
-  //                                .__or__();
-  torch::Tensor output = torch::empty({0}, torch::TensorOptions().dtype(input.dtype()).device(input.device()));
+  torch::Tensor output = torch::empty({0}, input.options());
 
   int64_t batch_size = input.size(0);
   int64_t channels = input.size(1);
@@ -81,7 +78,7 @@ variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_o
   auto grad_output = grad_outputs[0];
   auto input = ctx->get_saved_variables()[0];
   auto output = ctx->get_saved_variables()[1];
-  auto grad_input = torch::empty({0}, torch::TensorOptions().dtype(grad_output.dtype()).device(grad_output.device()));
+  auto grad_input = torch::empty({0}, grad_output.options());
 
   int64_t batch_size = input.size(0);
   int64_t channels = input.size(1);
@@ -89,9 +86,9 @@ variable_list CrossMapLRN2d::backward(AutogradContext *ctx, variable_list grad_o
   int64_t input_width = input.size(3);
 
   auto padded_ratio = torch::empty({channels + ctx->saved_data["size"].toInt() - 1, input_height, input_width}, 
-                                    torch::TensorOptions().dtype(input.dtype()).device(input.device()));
+                                    input.options());
   auto accum_ratio = torch::empty({input_height, input_width}, 
-                                    torch::TensorOptions().dtype(input.dtype()).device(input.device()));
+                                    input.options());
   double cache_ratio_value = 2 * ctx->saved_data["alpha"].toDouble() * ctx->saved_data["beta"].toDouble() / ctx->saved_data["size"].toInt();
   int64_t inversePrePad = static_cast<int64_t>(ctx->saved_data["size"].toInt() - (ctx->saved_data["size"].toInt() - 1) / 2);
 
