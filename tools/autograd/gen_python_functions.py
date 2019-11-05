@@ -862,7 +862,7 @@ def sort_declarations(grouped_decls):
     sorted_deps = []
     while processing_set:
         i = processing_set.pop()
-        sorted_deps.append((i, grouped_decls[i]))
+        sorted_deps.append(grouped_decls[i])
         for i2 in sorted(larger_than.keys()):
             larger = larger_than[i2]
             larger.discard(i)
@@ -870,7 +870,7 @@ def sort_declarations(grouped_decls):
                 del larger_than[i2]
                 processing_set.append(i2)
 
-    return [decl for i, decl in reversed(sorted_deps)]
+    return list(reversed(sorted_deps))
 
 
 def get_python_signature(declaration, include_out):
