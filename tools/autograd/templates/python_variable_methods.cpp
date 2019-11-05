@@ -190,7 +190,7 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
 }
 
 static Tensor dispatch_contiguous(const Tensor & self, at::MemoryFormat memory_format) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return self.contiguous(memory_format);
 }
@@ -228,7 +228,7 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObjec
 }
 
 static Tensor dispatch_copy_(Tensor & self, const Tensor & other, bool non_blocking) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return self.copy_(other, non_blocking);
 }
@@ -248,7 +248,7 @@ static Tensor dispatch_copy_(Tensor & self, const Tensor & other, bool non_block
 }
 
 static double dispatch_to_CDouble(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
@@ -257,7 +257,7 @@ static double dispatch_to_CDouble(const Tensor & self) {
 }
 
 static std::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
@@ -266,7 +266,7 @@ static std::complex<double> dispatch_to_CComplexDouble(const Tensor & self) {
 }
 
 static int64_t dispatch_to_CLong(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
@@ -275,7 +275,7 @@ static int64_t dispatch_to_CLong(const Tensor & self) {
 }
 
 static bool dispatch_to_Bool(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   if (self.numel() != 1) {
     throw ValueError("only one element tensors can be converted to Python scalars");
@@ -321,7 +321,7 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
 }
 
 static Tensor dispatch_invert(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return self.bitwise_not();
 }
@@ -337,7 +337,7 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
 }
 
 static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   // NOTE: this is where we record aten::to in the graph during tracing. However, the behavior of aten::to
   // is different with respect to TensorOptions fields that are not present: aten::to inherits fields that
   // are missing from the self argument while the tracer assumes that they should be populated with the
@@ -347,12 +347,12 @@ static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking,
 }
 
 static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return self.to(dtype, non_blocking, copy, optional_memory_format);
 }
 
 static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return self.to(device, dtype, non_blocking, copy, optional_memory_format);
 }
 
@@ -371,13 +371,13 @@ static PyObject * THPVariable_cpu(PyObject* self, PyObject* args, PyObject* kwar
 }
 
 static Tensor dispatch_nonzero(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return self.nonzero();
 }
 
 static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return self.nonzero_numpy();
 }

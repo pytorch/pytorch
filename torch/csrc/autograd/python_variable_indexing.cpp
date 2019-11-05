@@ -240,14 +240,14 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
 }
 
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(converted_indices, value);

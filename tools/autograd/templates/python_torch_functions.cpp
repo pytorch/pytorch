@@ -76,24 +76,24 @@ static void check_out_type_matches(Tensor result,
 }
 
 inline Tensor dispatch_arange(Scalar end, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::arange_out(result, end);
 }
 
 inline Tensor dispatch_arange(Scalar end, const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::arange(end, options);
 }
 
 inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::arange_out(result, start, end, step);
 }
 
 inline Tensor dispatch_arange(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::arange(start, end, step, options);
 }
 
@@ -161,14 +161,14 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 }
 
 inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(result));
   return at::range_out(result, start, end, step);
 }
 
 inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   DeviceGuard device_guard(options.device());
   return torch::range(start, end, step, options);
 }
@@ -205,39 +205,39 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 }
 
 inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, high, size, generator);
 }
 inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::randint(high, size, generator, options);
 }
 inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, high, size);
 }
 inline Tensor dispatch_randint(int64_t high, IntArrayRef size, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::randint(high, size, options);
 }
 inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, low, high, size, generator);
 }
 inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Generator * generator, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::randint(low, high, size, generator, options);
 }
 inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, Tensor result) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, low, high, size);
 }
 inline Tensor dispatch_randint(int64_t low, int64_t high, IntArrayRef size, const TensorOptions & options) {
   torch::utils::maybe_initialize_cuda(options);
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return torch::randint(low, high, size, options);
 }
 
@@ -356,19 +356,19 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 }
 
 static Tensor dispatch_nonzero(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return self.nonzero();
 }
 
 static Tensor dispatch_nonzero(const Tensor & self, Tensor out) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return at::nonzero_out(out, self);
 }
 
 static std::vector<Tensor> dispatch_nonzero_numpy(const Tensor & self) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
   return self.nonzero_numpy();
 }

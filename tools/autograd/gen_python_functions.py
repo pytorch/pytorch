@@ -541,7 +541,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
 
-        env['AutoNoGIL'] = 'AutoNoGIL no_gil;' if not declaration['with_gil'] else ''
+        env['AutoNoGIL'] = 'pybind11::gil_scoped_release no_gil;' if not declaration['with_gil'] else ''
 
         # Use the simple_return_type (Tensor) rather than the fancy return type
         # (Tensor &).  This is important because the dispatch functions take
