@@ -40,7 +40,8 @@ struct AtomicAddIntegerImpl<T, 2> {
 
     do {
       assumed = old;
-      sum = val + (size_t)address & 2 ? T(old >> 16) : T(old & 0xffff);
+      sum = (size_t)address & 2 ? old >> 16 : old & 0xffff;
+      sum = THCNumerics<T>::add(sum, val);
       newval = (size_t)address & 2 ? (old & 0xffff) | (sum << 16) : (old & 0xffff0000) | sum;
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);

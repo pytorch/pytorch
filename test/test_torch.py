@@ -13367,6 +13367,15 @@ class TestTorchDeviceType(TestCase):
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
+    def test_atomic_add(self, device):
+        # https://github.com/pytorch/pytorch/issues/29153
+        for dtype in torch.testing.get_all_math_dtypes(device):
+            indices = torch.tensor([[0, 0], [1, 1]])
+            values = torch.tensor([5, 6], dtype=dtype)
+            sparse = torch.sparse_coo_tensor(indices=indices, values=values, size=(2, 2), device=device, dtype=dtype)
+            value = sparse.to_dense()[0, 1].item()
+            self.assertEqual(value, 11)
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
