@@ -8,6 +8,9 @@
 #include <caffe2/core/workspace.h>
 #include <caffe2/proto/caffe2_pb.h>
 
+C10_DECLARE_string(onnxifi_blacklist);
+C10_DECLARE_string(onnxifi_blacklist_ops);
+
 namespace caffe2 {
 namespace glow {
 

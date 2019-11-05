@@ -15,8 +15,18 @@ namespace autograd {
 // During the backward pass, this function is queued for execution in the
 // autograd engine which eventually runs the rest of the autograd graph.
 struct TORCH_API SendRpcBackward : public torch::autograd::Node {
+ public:
   torch::autograd::variable_list apply(
-      torch::autograd::variable_list&& grads) override;
+      torch::autograd::variable_list&& inputs) override;
+
+  // SendRpcBackward is actually the root of an autograd graph on the local
+  // node. As a result, it doesn't receive any 'inputs', but rather the RPC
+  // framework passes gradients over to this function to kickoff local autograd
+  // computation.
+  void setGrads(const torch::autograd::variable_list& grads);
+
+ private:
+  torch::autograd::variable_list grads_;
 };
 
 } // namespace autograd

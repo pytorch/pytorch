@@ -412,6 +412,9 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// implementation of your `Module`. Registering it makes it available to
   /// methods such as `parameters()`, `clone()` or `to().`
   ///
+  /// Note that registering an undefined Tensor (e.g. `module.register_parameter("param", Tensor())`)
+  /// is allowed, and is equivalent to `module.register_parameter("param", None)` in Python API.
+  ///
   /// \rst
   /// .. code-block:: cpp
   ///

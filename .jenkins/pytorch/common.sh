@@ -158,12 +158,18 @@ fi
 
 function pip_install() {
   # retry 3 times
-  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@"
+  # old versions of pip don't have the "--progress-bar" flag
+  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
+  pip install "$@" || pip install "$@" || pip install "$@"
 }
 
 function pip_uninstall() {
   # uninstall 2 times
   pip uninstall -y "$@" || pip uninstall -y "$@"
+}
+
+retry () {
+  $*  || (sleep 1 && $*) || (sleep 2 && $*)
 }
 
 function get_exit_code() {

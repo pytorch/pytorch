@@ -7,67 +7,6 @@
 #include <THC/THCApply.cuh>
 #include <THC/THCNumerics.cuh>
 
-template <typename T, typename TOut>
-struct TensorLTValueOp {
-  TensorLTValueOp(T v) : value(v) {}
-  __device__ __forceinline__ void operator()(TOut* out, T* in) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::lt(*in, value));
-  }
-
-  const T value;
-};
-
-template <typename T, typename TOut>
-struct TensorGTValueOp {
-  TensorGTValueOp(T v) : value(v) {}
-  __device__ __forceinline__ void operator()(TOut* out, T* in) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::gt(*in, value));
-  }
-
-  const T value;
-};
-
-
-template <typename T, typename TOut>
-struct TensorLEValueOp {
-  TensorLEValueOp(T v) : value(v) {}
-  __device__ __forceinline__ void operator()(TOut* out, T* in) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::le(*in, value));
-  }
-
-  const T value;
-};
-
-template <typename T, typename TOut>
-struct TensorGEValueOp {
-  TensorGEValueOp(T v) : value(v) {}
-  __device__ __forceinline__ void operator()(TOut* out, T* in) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::ge(*in, value));
-  }
-
-  const T value;
-};
-
-template <typename T, typename TOut>
-struct TensorEQValueOp {
-  TensorEQValueOp(T v) : value(v) {}
-  __device__ __forceinline__ void operator()(TOut* out, T* in) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::eq(*in, value));
-  }
-
-  const T value;
-};
-
-template <typename T, typename TOut>
-struct TensorNEValueOp {
-  TensorNEValueOp(T v) : value(v) {}
-  __device__ __forceinline__ void operator()(TOut* out, T* in) {
-    *out = ScalarConvert<bool, TOut>::to(THCNumerics<T>::ne(*in, value));
-  }
-
-  const T value;
-};
-
 template<typename ScalarTypeOut, typename ScalarType, typename TensorTypeOut, typename TensorType, class Op>
 void THC_logicalValue(THCState *state,
                       TensorTypeOut *self_,

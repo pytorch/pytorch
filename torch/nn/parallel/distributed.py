@@ -234,6 +234,11 @@ class DistributedDataParallel(Module):
 
         super(DistributedDataParallel, self).__init__()
 
+        assert any((p.requires_grad for p in module.parameters())), (
+            "DistributedDataParallel is not needed when a module "
+            "doesn't have any parameter that requires a gradient."
+        )
+
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
         self.is_cuda = all([p.device.type == 'cuda' for p in module.parameters()])
 

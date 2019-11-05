@@ -13,8 +13,8 @@
 namespace torch {
 namespace nn {
 template <size_t D, typename Derived>
-ConvImpl<D, Derived>::ConvImpl(ConvOptions<D> options)
-    : options(std::move(options)) {
+ConvImpl<D, Derived>::ConvImpl(const ConvOptions<D>& options_)
+    : options(options_) {
   reset();
 }
 

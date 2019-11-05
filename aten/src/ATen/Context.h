@@ -108,7 +108,7 @@ class CAFFE2_API Context {
   void setDeterministicCuDNN(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
-  std::vector<at::QEngine> supportedQEngines() const;
+  const std::vector<at::QEngine>& supportedQEngines() const;
 
  private:
   void initCUDAIfNeeded(DeviceType p) {
@@ -127,14 +127,7 @@ class CAFFE2_API Context {
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
   bool enabled_mkldnn = true;
-  at::QEngine quantized_engine =
-#ifdef USE_FBGEMM
-      at::kFBGEMM;
-#elif defined(USE_PYTORCH_QNNPACK)
-      at::kQNNPACK;
-#else
-      at::kNoQEngine;
-#endif
+  c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 };
@@ -149,22 +142,22 @@ CAFFE2_API Allocator* getCPUAllocator();
 
 static inline DeprecatedTypeProperties& getNonVariableDeprecatedTypeProperties(Backend p, ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      p, s, /*is_variable*/false);
+      p, s);
 }
 
 static inline DeprecatedTypeProperties& CPU(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      Backend::CPU, s, /*is_variable*/false);
+      Backend::CPU, s);
 }
 
 static inline DeprecatedTypeProperties& CUDA(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      Backend::CUDA, s, /*is_variable*/false);
+      Backend::CUDA, s);
 }
 
 static inline DeprecatedTypeProperties& HIP(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      Backend::HIP, s, /*is_variable*/false);
+      Backend::HIP, s);
 }
 
 static inline bool hasCUDA() {

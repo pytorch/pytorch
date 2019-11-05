@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10d/FileStore.hpp>
+#include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
@@ -85,8 +86,8 @@ PyObject* c10d_init(PyObject* _unused) {
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
-An enum-like class of available reduce operations: ``SUM``, ``PRODUCT``,
-``MIN``, and ``MAX``.
+An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
+``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
@@ -94,7 +95,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .value("SUM", ::c10d::ReduceOp::SUM)
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
-      .value("MAX", ::c10d::ReduceOp::MAX);
+      .value("MAX", ::c10d::ReduceOp::MAX)
+      .value("BAND", ::c10d::ReduceOp::BAND)
+      .value("BOR", ::c10d::ReduceOp::BOR)
+      .value("BXOR", ::c10d::ReduceOp::BXOR);
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
@@ -190,6 +194,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   shared_ptr_class_<::c10d::FileStore>(module, "FileStore", store)
       .def(py::init<const std::string&, int>());
+
+  shared_ptr_class_<::c10d::HashStore>(module, "HashStore", store)
+      .def(py::init<>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
       .def(py::init<const std::string&, int, int, bool>());
@@ -308,6 +315,14 @@ They are used in specifying strategies for reduction collectives, e.g.,
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "allgather_coalesced",
+              &::c10d::ProcessGroup::allgather_coalesced,
+              py::arg("output_lists"),
+              py::arg("input_list"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(

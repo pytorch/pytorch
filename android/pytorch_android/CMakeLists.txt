@@ -4,38 +4,21 @@ set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(pytorch_android_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)
-set(libtorch_include_DIR ${pytorch_android_DIR}/libtorch_include/${ANDROID_ABI})
 
-set(libtorch_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libtorch.a)
-set(libc10_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libc10.a)
-set(libnnpack_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libnnpack.a)
-set(libqnnpack_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libqnnpack.a)
-set(libpytorch_qnnpack_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libpytorch_qnnpack.a)
-set(libcpuinfo_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libcpuinfo.a)
-set(libclog_FILE ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/libclog.a)
+if (ANDROID_ABI)
+  set(libtorch_include_DIR ${pytorch_android_DIR}/libtorch_include/${ANDROID_ABI})
+  set(BUILD_SUBDIR ${ANDROID_ABI})
+else()
+  if (NOT LIBTORCH_HOME)
+    message(FATAL_ERROR
+      "pytorch_android requires LIBTORCH_HOME to be defined for non-Android builds.")
+  endif()
+  set(libtorch_include_DIR ${LIBTORCH_HOME}/include)
+  link_directories(${LIBTORCH_HOME}/lib)
+  set(BUILD_SUBDIR host)
+endif()
 
 message(STATUS "libtorch dir:${libtorch_DIR}")
-
-add_library(libtorch STATIC IMPORTED)
-set_property(TARGET libtorch PROPERTY IMPORTED_LOCATION ${libtorch_FILE})
-
-add_library(libc10 STATIC IMPORTED)
-set_property(TARGET libc10 PROPERTY IMPORTED_LOCATION ${libc10_FILE})
-
-add_library(libnnpack STATIC IMPORTED)
-set_property(TARGET libnnpack PROPERTY IMPORTED_LOCATION ${libnnpack_FILE})
-
-add_library(libqnnpack STATIC IMPORTED)
-set_property(TARGET libqnnpack PROPERTY IMPORTED_LOCATION ${libqnnpack_FILE})
-
-add_library(libpytorch_qnnpack STATIC IMPORTED)
-set_property(TARGET libpytorch_qnnpack PROPERTY IMPORTED_LOCATION ${libpytorch_qnnpack_FILE})
-
-add_library(libcpuinfo STATIC IMPORTED)
-set_property(TARGET libcpuinfo PROPERTY IMPORTED_LOCATION ${libcpuinfo_FILE})
-
-add_library(libclog STATIC IMPORTED)
-set_property(TARGET libclog PROPERTY IMPORTED_LOCATION ${libclog_FILE})
 
 file(GLOB pytorch_android_SOURCES
   ${pytorch_android_DIR}/*.cpp
@@ -49,30 +32,62 @@ target_compile_options(pytorch PRIVATE
   -fexceptions
 )
 
-target_compile_definitions(pytorch PRIVATE USE_STATIC_DISPATCH)
-
 target_include_directories(pytorch PUBLIC
     ${libtorch_include_DIR}
 )
 
-set(BUILD_DIR ${CMAKE_SOURCE_DIR}/build)
-file(MAKE_DIRECTORY ${BUILD_DIR})
-
 set(fbjni_DIR ${CMAKE_CURRENT_LIST_DIR}/../libs/fbjni/)
-set(fbjni_BUILD_DIR ${BUILD_DIR}/fbjni/${ANDROID_ABI})
+set(fbjni_BUILD_DIR ${CMAKE_BINARY_DIR}/fbjni/${BUILD_SUBDIR})
 
 add_subdirectory(${fbjni_DIR} ${fbjni_BUILD_DIR})
 
-target_link_libraries(pytorch
-    fbjni
-    -Wl,--gc-sections
-    -Wl,--whole-archive
-    libtorch
-    -Wl,--no-whole-archive
-    libc10
-    libnnpack
-    libqnnpack
-    libpytorch_qnnpack
-    libcpuinfo
-    libclog
-)
+if (ANDROID_ABI)
+
+  function(import_static_lib name)
+    add_library(${name} STATIC IMPORTED)
+    set_property(
+        TARGET ${name}
+        PROPERTY IMPORTED_LOCATION
+        ${CMAKE_CURRENT_LIST_DIR}/src/main/jniLibs/${ANDROID_ABI}/${name}.a)
+  endfunction(import_static_lib)
+
+  import_static_lib(libtorch)
+  import_static_lib(libc10)
+  import_static_lib(libnnpack)
+  import_static_lib(libpytorch_qnnpack)
+  import_static_lib(libeigen_blas)
+  import_static_lib(libcpuinfo)
+  import_static_lib(libclog)
+
+    # Link most things statically on Android.
+  target_link_libraries(pytorch
+      fbjni
+      -Wl,--gc-sections
+      -Wl,--whole-archive
+      libtorch
+      -Wl,--no-whole-archive
+      libc10
+      libnnpack
+      libpytorch_qnnpack
+      libeigen_blas
+      libcpuinfo
+      libclog
+  )
+
+else()
+
+  # Prefer dynamic linking on the host
+  target_link_libraries(pytorch
+      fbjni
+      -Wl,--gc-sections
+      -Wl,--whole-archive
+      torch
+      -Wl,--no-whole-archive
+      c10
+      nnpack
+      pytorch_qnnpack
+      cpuinfo
+      clog
+  )
+
+endif()

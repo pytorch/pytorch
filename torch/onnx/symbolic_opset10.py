@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import torch
 from torch.nn.modules.utils import _single, _pair, _triple
 import torch.onnx
@@ -20,33 +22,12 @@ import torch.onnx.symbolic_opset9
 
 @parse_args('v', 'i', 'i', 'none')
 def sort(g, self, dim, decending, out=None):
-    if out is not None:
-        _unimplemented("Sort", "Out parameter is not supported for sort")
-
-    # TODO: add decending to ONNX TopK so ascending sort is supported
-    if not decending:
-        _unimplemented("Sort", "Cannot sort in ascending order")
-
-    shape_ = g.op("Shape", self)
-    axis = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
-    start = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int64)) 
-    end = g.op("Constant", value_t=torch.tensor(dim + 1, dtype=torch.int64)) 
-    slice_ = sym_help._slice_helper(g, shape_, axes=axis, starts=start, ends=end, steps=None, dynamic_slice=True)
-    return g.op("TopK", self, slice_, axis_i=dim, outputs=2)
+    return sym_help._sort_helper(g, self, dim, decending=decending, out=out)
 
 
 @parse_args('v', 'v', 'i', 'i', 'i', 'none')
 def topk(g, self, k, dim, largest, sorted, out=None):
-    if out is not None:
-        _unimplemented("TopK", "Out parameter is not supported for topk")
-    if not largest:
-        _unimplemented("TopK", "Ascending TopK is not supported")
-    k = sym_help._maybe_get_const(k, 'i')
-    if not sym_help._is_value(k):
-        k = g.op("Constant", value_t=torch.tensor(k, dtype=torch.int64))
-    from torch.onnx.symbolic_opset9 import unsqueeze
-    k = unsqueeze(g, k, 0)
-    return g.op("TopK", self, k, axis_i=dim, outputs=2)
+    return sym_help._topk_helper(g, self, k, dim, largest=largest, sorted=sorted, out=out)
 
 
 def _max_pool(name, tuple_fn, ndims, return_indices):
@@ -104,11 +85,7 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
-        if divisor_override and divisor_override.node().kind() != 'prim::Constant':
-            return _unimplemented(name, "divisor_override")
-        if not stride:
-            stride = kernel_size
-        padding = tuple(tuple_fn(padding))
+        padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if count_include_pad:
             input = g.op("Pad", input,
                          pads_i=((0,) * 2 + padding) * 2,
@@ -131,29 +108,26 @@ avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, align_corners=None):
+        sym_help._interpolate_warning(interpolate_mode)
+        align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
             return _unimplemented(name, "align_corners == True")
-
-        output_size = sym_help._maybe_get_const(output_size, 'is')
-        if sym_help._is_value(output_size):
-            offset = 2
-            offsets = g.op("Constant", value_t=torch.tensor([1. for i in range(offset)]))
-            dividend = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-            divisor = sym_help._slice_helper(g, g.op("Shape", input), axes=[0], ends=[dim], starts=[offset])
-            divisor = g.op("Cast", divisor, to_i=sym_help.cast_pytorch_to_onnx["Float"])
-            scale_dims = g.op("Div", dividend, divisor)
-            scales = g.op("Concat", offsets, scale_dims, axis_i=0)
-        else:
-            scales_constant = [1. if i < 2 else
-                               float(output_size[-(dim - i)]) / float(input.type().sizes()[-(dim - i)])
-                               for i in range(0, dim)]
-            scales = g.op("Constant", value_t=torch.tensor(scales_constant))
+        scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
         return g.op("Resize", input, scales, mode_s=interpolate_mode)
     return symbolic_fn
 
 upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
 upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
 upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
+upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
+upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
+upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
+
+
+def __interpolate(g, input, size, scale_factor, mode , align_corners):
+    scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
+                                                             mode , align_corners)
+    return g.op("Resize", input, scales, mode_s=mode)
 
 
 def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
@@ -196,3 +170,7 @@ def flip(g, input, dims):
                                   starts=[-1] * len(dims),
                                   ends=[-9223372036854775807] * len(dims),
                                   steps=[-1] * len(dims))
+
+
+def fmod(g, input, other):
+    return g.op("Mod", input, other, fmod_i=1)

@@ -1,9 +1,11 @@
+import math
 import sys
 import tempfile
 import unittest
+
 from copy import deepcopy
-from itertools import product
 from functools import reduce
+from itertools import product
 from operator import mul
 
 
@@ -295,8 +297,8 @@ def bceloss_no_reduce_test():
             lambda i: F.binary_cross_entropy(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()),
-        check_gradgrad=False,
-        pickle=False)
+        pickle=False,
+        precision=7e-4)
 
 
 def bceloss_no_reduce_scalar_test():
@@ -307,7 +309,6 @@ def bceloss_no_reduce_scalar_test():
             lambda i: F.binary_cross_entropy(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()),
-        check_gradgrad=False,
         pickle=False)
 
 
@@ -321,8 +322,8 @@ def bceloss_weights_no_reduce_test():
                                              weight=weights.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, p, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
-        check_gradgrad=False,
-        pickle=False
+        pickle=False,
+        precision=3e-4
     )
 
 
@@ -336,7 +337,6 @@ def bceloss_weights_no_reduce_scalar_test():
                                              weight=weights.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
-        check_gradgrad=False,
         pickle=False
     )
 
@@ -1130,6 +1130,14 @@ new_module_tests = [
         desc='3d_no_elementwise_affine',
     ),
     dict(
+        module_name='LayerNorm',
+        constructor_args=([5], 1e-3),
+        input_size=(0, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_empty_elementwise_affine',
+    ),
+    dict(
         module_name='GroupNorm',
         constructor_args=(3, 6, 1e-3),
         input_size=(4, 6, 5),
@@ -1217,6 +1225,14 @@ new_module_tests = [
         input_size=(1, 4, 1),
         cudnn=True,
         desc='pad2size1',
+    ),
+    dict(
+        module_name='Conv1d',
+        constructor_args=(4, 5, 3),
+        input_size=(0, 4, 10),
+        cudnn=True,
+        desc='zero_batch',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv1d_dilated',
@@ -1308,6 +1324,15 @@ new_module_tests = [
         check_with_long_tensor=True,
     ),
     dict(
+        module_name='Conv2d',
+        constructor_args=(3, 4, (3, 2)),
+        input_size=(0, 3, 7, 5),
+        cudnn=True,
+        desc='zero_batch',
+        check_with_long_tensor=True,
+        test_cuda=(not TEST_WITH_ROCM),
+    ),
+    dict(
         fullname='Conv2d_groups',
         constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
         input_size=(2, 4, 6, 5),
@@ -1380,6 +1405,7 @@ new_module_tests = [
         constructor_args=((3, 3), (2, 2), (1, 1)),
         cpp_constructor_args='(torch::nn::MaxPool2dOptions({3, 3}).stride({2, 2}).padding({1, 1}))',
         input_size=(1, 3, 7, 7),
+        check_with_channels_last=True,
     ),
     dict(
         module_name='AvgPool1d',
@@ -1558,6 +1584,15 @@ new_module_tests = [
         cudnn=True,
         desc='stride_padding',
         check_with_long_tensor=True,
+    ),
+    dict(
+        module_name='Conv3d',
+        constructor_args=(3, 4, (2, 3, 4)),
+        input_size=(0, 3, 3, 4, 5),
+        cudnn=True,
+        check_with_long_tensor=True,
+        desc='zero_batch',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         fullname='Conv3d_groups',
@@ -2121,6 +2156,17 @@ new_module_tests = [
         constructor_args=(1,),
         input_size=(5, 6, 7),
         desc='dim',
+    ),
+    dict(
+        module_name='GELU',
+        input_size=(),
+        desc='scalar',
+        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
+    ),
+    dict(
+        module_name='GELU',
+        input_size=(3, 2, 5),
+        reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=-1),
@@ -3343,10 +3389,11 @@ class NNTestCase(TestCase):
         numerical_t = list(iter_tensors(numerical))
 
         # TODO: compare structure
-        self.assertLessEqual(
-            max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
-            PRECISION
-        )
+        if input.numel() != 0:
+            self.assertLessEqual(
+                max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
+                PRECISION
+            )
 
     def check_criterion_jacobian(self, criterion, input, target):
         eps = 1e-6
@@ -3510,7 +3557,7 @@ class ModuleTest(TestBase):
                 dim = d + 1
                 break
         noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
-        assert noncontig.numel() == 1 or not noncontig.is_contiguous()
+        assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
 
@@ -3534,7 +3581,9 @@ class ModuleTest(TestBase):
         nc_grad_output = self.noncontiguize(grad_output)
         for contig_i, contig_g in product((True, False), repeat=2):
             i = input if contig_i else nc_input
-            go = grad_output if contig_g else nc_grad_output
+            # Some ops, e.g., nn.Flatten, return gradient that shares
+            # storage with the grad_output. Hence we copy here.
+            go = deepcopy(grad_output if contig_g else nc_grad_output)
             test_case._zero_grad_parameters(module)
             test_case._zero_grad_input(i)
             with freeze_rng_state():

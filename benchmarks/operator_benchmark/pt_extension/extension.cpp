@@ -34,7 +34,7 @@ Tensor clear_cache() {
 // That caused an issue for our op benchmark which needs to run an op
 // in a loop and report the execution time. This diff resolves that issue by
 // registering this consume op with correct alias information which is DEFAULT.
-auto reg = torch::jit::RegisterOperators()
+auto reg = torch::RegisterOperators()
   .op("operator_benchmark::_consume", &consume)
   .op("operator_benchmark::_clear_cache", &clear_cache);
 

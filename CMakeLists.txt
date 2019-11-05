@@ -15,6 +15,10 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.15.0)
   cmake_policy(SET CMP0092 NEW)
 endif()
 
+if(NOT CMAKE_VERSION VERSION_LESS 3.10)
+  set(FIND_CUDA_MODULE_DEPRECATED ON)
+endif()
+
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
@@ -103,7 +107,8 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
+cmake_dependent_option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
+  "NOT MSVC" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
 option(BUILD_NAMEDTENSOR "Experimental: compile with namedtensor support" OFF)
@@ -140,7 +145,7 @@ option(USE_METAL "Use Metal for iOS build" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
-    "USE_CUDA;UNIX;NOT APPLE" OFF)
+    "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(
     USE_STATIC_NCCL "Use static NCCL" OFF
     "USE_NCCL" OFF)
@@ -310,9 +315,12 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
+  set(USE_PYTORCH_QNNPACK ON)
+  set(USE_QNNPACK OFF)
   set(USE_STATIC_DISPATCH ON)
   set(INTERN_DISABLE_ONNX ON)
   set(INTERN_DISABLE_AUTOGRAD ON)
+  set(INTERN_USE_EIGEN_BLAS ON)
 endif()
 
 # ---[ Utils
@@ -383,10 +391,6 @@ endif()
 
 if(USE_PYTORCH_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PYTORCH_QNNPACK")
-endif()
-
-if(USE_STATIC_DISPATCH)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_STATIC_DISPATCH")
 endif()
 
 # ---[ Whitelist file if whitelist is specified

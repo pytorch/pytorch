@@ -59,6 +59,7 @@ struct IODescriptor {
   // NOTE: if extend() was ever called then metadata.size() can be
   // different than the number of 'v's in structure.
   std::string structure;
+  std::vector<std::string> strings;
   std::vector<VariableMetadata> metadata;
   bool grad_enabled = false;
 };

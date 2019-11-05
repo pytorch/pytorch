@@ -1,5 +1,7 @@
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorNames.h>
 #include <ATen/core/EnableNamedTensor.h>
+#include <ATen/WrapDimUtilsMulti.h>
 #include <bitset>
 #include <sstream>
 
@@ -20,21 +22,10 @@ int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
   const auto names = tensor.names();
 
-  const auto it = std::find_if(
-      names.begin(), names.end(),
-      [&dim](const Dimname& candidate) { return dim.can_refer_to(candidate); });
+  const auto it = std::find(names.begin(), names.end(), dim);
   TORCH_CHECK(it != names.end(),
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
 
-  // Check that it can't refer to another dimension
-  const auto dup = std::find_if(
-      it + 1, names.end(),
-      [&dim](const Dimname& candidate) { return dim.can_refer_to(candidate); });
-  TORCH_CHECK(
-      dup == names.end(),
-      "Name ", dim, " could refer to multiple dimensions in ",
-      toDimnameRepr(tensor), ". Please disambiguate by using a more ",
-      "specific name like ", *it, " or ", dup, ".");
   return std::distance(names.begin(), it);
 }
 
@@ -65,16 +56,15 @@ static void check_for_misalignment(
     DimnameList names,
     DimnameList other_names,
     const char* action) {
-  if (name.is_wildcard()) {
+  if (name.isWildcard()) {
     return;
   }
-  auto it = std::find_if(other_names.begin(), other_names.end(),
-      [&](const Dimname& candidate) { return name.can_refer_to(candidate); });
+  auto it = std::find(other_names.begin(), other_names.end(), name);
   // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
   TORCH_CHECK(it == other_names.end(),
       "Misaligned dims when attempting to ", action, " dims ", names, " and dims ",
       other_names, ": dim ", name, " appears in a different position from the right "
-      "across both lists");
+      "across both lists.");
 }
 
 // Assumption: A DimnameList can have no duplicate full names with
@@ -94,20 +84,15 @@ std::vector<Dimname> unify_from_right(
     const auto& name = names_it == names.rend() ? wildcard : *names_it;
     const auto& other_name = other_it == other_names.rend() ? wildcard : *other_it;
 
-    // TODO(zou3519): Don't support tagged names for now. They're a little weird.
-    if (name.is_tagged() || other_name.is_tagged()) {
-      TORCH_INTERNAL_ASSERT("unify_from_right: NYI: tagged names.");
-    }
-
     // Step 1: Check that the names match
-    const auto maybeName = unify(name, other_name);
+    const auto maybeName = name.unify(other_name);
     if (!maybeName) {
       report_positional_error(name, other_name, names, other_names, action);
     }
     *result_it = *maybeName;
 
     // Step 2: Check that the names are not misaligned
-    if (!name.is_normal() || !other_name.is_normal()) {
+    if (!name.isBasic() || !other_name.isBasic()) {
       // Let: N = max(len(names), len(other_names))
       //      K = # of special names among names and other_names.
       // This search (including the outer loop) is O(N*K) but typically # of dims is small.
@@ -129,24 +114,18 @@ std::vector<Dimname> unify_from_right(
 
 namespace namedinference {
 
-static std::bitset<kMaxNamedTensorDim>
-compute_included_idxs(IntArrayRef excluded_idxs) {
-  std::bitset<kMaxNamedTensorDim> included_idxs;
-  for (auto i : excluded_idxs) {
-    TORCH_INTERNAL_ASSERT(
-        i <= kMaxNamedTensorDim,
-        "Only tensors with up to ", kMaxNamedTensorDim, " are supported.");
-    included_idxs.set(i);
-  }
-  included_idxs.flip();
-  return included_idxs;
+static std::bitset<dim_bitset_size>
+compute_included_idxs(IntArrayRef excluded_idxs, int64_t ndims) {
+  auto result = dim_list_to_bitset(excluded_idxs, ndims);
+  result.flip();
+  return result;
 }
 
 static void assert_names_equal(DimnameList a, DimnameList b) {
   TORCH_CHECK(a == b,
       "Name mismatch: specified out tensor with names ", a,
       " are not the same as the computed output names ", b,
-      ". Please rename the out tensor's dimensions.");
+      ". Please rename the out tensor's dims with `Tensor.rename`.");
 }
 
 void propagate_names(TensorImpl* result, optional<DimnameList> names) {
@@ -208,14 +187,14 @@ void propagate_names_except(Tensor& result, const Tensor& src, IntArrayRef exclu
   // fast path
   if (excluded_idxs.size() == 1) {
     std::vector<Dimname> outnames = src_names.vec();
-    outnames.erase(outnames.begin() + excluded_idxs[0]);
+    outnames.erase(outnames.begin() + maybe_wrap_dim(excluded_idxs[0], src_dim));
     propagate_names(result, std::move(outnames), /*validate_names=*/false);
     return;
   }
 
   std::vector<Dimname> outnames;
   outnames.reserve(result_dim);
-  auto included_idxs = compute_included_idxs(excluded_idxs);
+  auto included_idxs = compute_included_idxs(excluded_idxs, src_dim);
   for (size_t dim = 0; dim < src_dim; ++dim) {
     if (included_idxs[dim]) {
       outnames.push_back(src_names[dim]);
@@ -247,12 +226,18 @@ void propagate_names(TensorImpl* result, TensorImpl* src) {
   propagate_names(result, impl::get_opt_names(src));
 }
 
-void propagate_names_for_copy(Tensor& result, const Tensor& src) {
-  if (!result.has_names() && !src.has_names()) {
-    return;
+optional<std::vector<Dimname>> compute_squeeze_outnames(const Tensor& tensor) {
+  if (!tensor.has_names()) {
+    return nullopt;
   }
-  auto outnames = unify_from_right(result.names(), src.names());
-  propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  std::vector<Dimname> outnames;
+  auto tensor_names = tensor.names();
+  for (int64_t d = 0; d < tensor.dim(); d++) {
+    if (tensor.sizes()[d] != 1) {
+      outnames.push_back(tensor_names[d]);
+    }
+  }
+  return outnames;
 }
 
 // tensor_dotted_dim and other_dotted_dim are the dimensions of the two
@@ -297,7 +282,7 @@ static void check_feature_names_are_distinct(
     " with Tensor", other_names,
     " would produce output tensor with duplicate names ",
     outnames,
-    ". Please rename the input tensors to prevent this.");
+    ". Please rename the input tensors with `Tensor.rename` to prevent this.");
 }
 
 static DimnameList batch_dims(DimnameList names) {
@@ -316,7 +301,7 @@ static DimnameList feature_dims(DimnameList names) {
 
 static bool are_distinct(DimnameList batch_dims, DimnameList feature_dims) {
   for (const auto& target : feature_dims) {
-    if (target.is_wildcard()) {
+    if (target.isWildcard()) {
       continue;
     }
     if (std::any_of(batch_dims.begin(), batch_dims.end(),
@@ -327,43 +312,13 @@ static bool are_distinct(DimnameList batch_dims, DimnameList feature_dims) {
   return true;
 }
 
-// Let batch_dims = everything except for the last two dimensions
-//     feature_dims = the last two dims of the tensor.
-// This function checks that names of batch_dims of one tensor are distinct
-// from the feature dimensions of another tensor.
-//
-// For example,
-// Tensor[N, A, B] @ Tensor[None, N, A] -> Misaligned because N (a batch dim of
-// the first tensor) appears in a non-batch dimension in the second tensor.
-//
-// Tensor[N, A, B1] @ Tensor[N, B2] -> Misaligned! The user may have intended
-// to batch multiply matrices of size [A, B1] with vectors of size [B2]
-// but instead matmul treats it as batch multiplying matrices of size [A, B1]
-// with matrices of size [N, B2]. In this case, we're able to warn the user.
-static void check_batch_and_feature_dims_are_distinct(
-    DimnameList self_names,
-    DimnameList other_names) {
-  auto self_batch_dims = batch_dims(self_names);
-  auto self_feature_dims = feature_dims(self_names);
-  auto other_batch_dims = batch_dims(other_names);
-  auto other_feature_dims = feature_dims(other_names);
-
-  TORCH_CHECK(are_distinct(self_batch_dims, other_feature_dims),
-      "Misaligned dims when batch matrix multiplying Tensor", self_names,
-      " and Tensor", other_names, ": there is overlap between the feature dims ",
-      "of the second tensor (", other_feature_dims,
-      ") and the batch dims of the first tensor (", self_batch_dims,
-      "). Please ensure batch dims are not present in the feature dims.");
-
-  TORCH_CHECK(are_distinct(other_batch_dims, self_feature_dims),
-      "Misaligned dims when batch matrix multiplying Tensor", self_names,
-      " and Tensor", other_names, ": there is overlap between the feature dims ",
-      "of the first tensor (", self_feature_dims,
-      ") and the batch dims of the second tensor (", other_batch_dims,
-      "). Please ensure batch dims are not present in the feature dims.");
+static int64_t num_batch_dims(DimnameList names) {
+  if (names.size() <= 2) {
+    return 0;
+  }
+  return names.size() - 2;
 }
 
-// Compute the outnames of torch.matmul(A, B).
 static std::vector<Dimname> compute_matmul_outnames(
     DimnameList self_names,
     DimnameList other_names) {
@@ -371,37 +326,35 @@ static std::vector<Dimname> compute_matmul_outnames(
       "both arguments to matmul need to be at least 1D, but they are ",
       self_names.size(), "D and ", other_names.size(), "D");
 
-  check_batch_and_feature_dims_are_distinct(self_names, other_names);
+  // matmul performs a batch matrix multiply between self and other, each of which
+  // can either be:
+  // - a batches of matrices (if dim > 2)
+  // - a matrix (if dim == 2)
+  // - a vector (if dim == 1)
+  //
+  // To compute output names, we unify the batch dimensions because those are
+  // broadcastable to get the output batch dimensions.
+  //
+  // After that, we append some names that are equal to the result of the matmul
+  // without batch dimensions. Those names are computed by removing the names
+  // of the dimensions that were contracted away. We always contract the
+  // last dim of the first tensor with the first feature dimension of the second.
 
-  // The approach is to
-  // (1) compute the outnames of the matrix multiplication on the feature dims.
-  // (2) compute the outnames of the batch dimensions, after broadcasting
-  // (3) concatenate the batch outnames and matrix multiply outnames.
+  // Get the output's batch dimension names
+  const auto wrapped_self_names = TensorNames(self_names, 0, num_batch_dims(self_names));
+  const auto wrapped_other_names = TensorNames(other_names, 0, num_batch_dims(other_names));
+  auto working_names = wrapped_self_names.unifyFromRight(wrapped_other_names, "matmul");
 
-  // Step 1: Compute outnames of matrix multiplication
-  // Let N >= 2.
-  // if ND @ ND we matrix multiply the last two dimensions of both tensors.
-  // if ND @ 1D, it is a batch matrix (last two dims of first tensor) - vector multiply
-  // if 1D @ ND, it is a batch vector - matrix (last two dims of second tensor) multiply
-  // In all cases, we are contracting the last dimension of the first tensor
-  // with the first non-batch dimension of the second tensor.
-  auto self_feature_dims = feature_dims(self_names);
-  auto mm_outnames = compute_dot_product_outnames(
-      self_feature_dims,
-      /*tensor_dotted_dim=*/self_feature_dims.size() - 1, // last dim
-      feature_dims(other_names),
-      /*other_dotted_dim=*/0);
-
-  // Step 2: Figure out the outnames of the batch dimensions.
-  std::vector<Dimname> result;
-  auto self_batch_dims = batch_dims(self_names);
-  auto other_batch_dims = batch_dims(other_names);
-  if (self_batch_dims.empty() && other_batch_dims.empty()) {
-    result = mm_outnames;
-  } else {
-    result = unify_from_right(self_batch_dims, other_batch_dims);
-    result.insert(result.end(), mm_outnames.begin(), mm_outnames.end());
+  // Append the result of each individual (non-batched) matmul.
+  // If either of self or other have dim 1, that means they are a vector. Vectors get
+  // completely contracted away during matmul so we don't take any names from them.
+  if (self_names.size() >= 2) {
+    working_names.append(TensorName(self_names, -2));
   }
+  if (other_names.size() >= 2) {
+    working_names.append(TensorName(other_names, -1));
+  }
+  const auto result = working_names.toDimnameVec();
 
   check_feature_names_are_distinct(self_names, other_names, result);
   return result;

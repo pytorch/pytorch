@@ -9,6 +9,7 @@
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/TensorTypeSet.h>
+#include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/core/CopyBytes.h>
 
 #include <c10/util/Exception.h>
@@ -138,10 +139,32 @@ struct C10_API AutogradMetaInterface {
   virtual ~AutogradMetaInterface();
 };
 
-struct C10_API NonVariableTypeMode {
-  static bool is_enabled();
-  static void set_enabled(bool enabled);
+namespace impl {
+
+// Unfortunately, the definition of AutogradMeta lives in a separate
+// compilation unit than TensorImpl (libtorch.so versus libc10.so)
+// which means that we cannot construct an AutogradMeta from TensorImpl,
+// not even from the cpp file.  So we have to indirect it through a factory
+// function which will be initialized when we load libtorch.so.
+
+struct C10_API AutogradMetaFactory {
+  virtual ~AutogradMetaFactory() = default;
+  virtual std::unique_ptr<AutogradMetaInterface> make() const = 0;
+  // This method is the dumbest method.  But I don't have access
+  // to Tensor (not TensorImpl) which is undefined in this header.
+  virtual const at::Tensor& undefined_tensor() const = 0;
 };
+
+C10_API void SetAutogradMetaFactory(AutogradMetaFactory* factory);
+C10_API AutogradMetaFactory* GetAutogradMetaFactory();
+
+struct C10_API AutogradMetaFactoryRegisterer {
+  explicit AutogradMetaFactoryRegisterer(AutogradMetaFactory* factory) {
+    SetAutogradMetaFactory(factory);
+  }
+};
+
+} // namespace impl
 
 struct C10_API NamedTensorMetaInterface {
   virtual ~NamedTensorMetaInterface() {};
@@ -400,8 +423,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    // NB: At the moment, variables have the same TensorTypeId as their
-    // corresponding tensor, but if this ever changes, we need to modify this.
     return type_set_.has(TensorTypeId::SparseCPUTensorId) ||
            type_set_.has(TensorTypeId::SparseCUDATensorId) ||
            type_set_.has(TensorTypeId::SparseHIPTensorId);
@@ -409,23 +430,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    // NB: At the moment, variables have the same TensorTypeId as their
-    // corresponding tensor, but if this ever changes, we need to modify this.
     return type_set_.has(TensorTypeId::QuantizedCPUTensorId);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    // NB: At the moment, variables have the same TensorTypeId as their
-    // corresponding tensor, but if this ever changes, we need to modify this.
     return type_set_.has(TensorTypeId::CUDATensorId) ||
            type_set_.has(TensorTypeId::SparseCUDATensorId);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
-    // NB: At the moment, variables have the same TensorTypeId as their
-    // corresponding tensor, but if this ever changes, we need to modify this.
     return type_set_.has(TensorTypeId::HIPTensorId) ||
            type_set_.has(TensorTypeId::SparseHIPTensorId);
   }
@@ -517,11 +532,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // ~~~~~ Autograd API ~~~~~
   // Some methods below are defined in TensorImpl.cpp because Tensor is an
   // incomplete type.
-  //
-  // Note [Tensor versus Variable in C++]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Autograd methods are only valid for Variables (i.e. Tensors that contain
-  // autograd metadata).
 
   /**
    * Set whether or not a tensor requires gradient.
@@ -529,10 +539,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  void set_requires_grad(bool requires_grad) {
-    TORCH_INTERNAL_ASSERT(autograd_meta(), "set_requires_grad is not implemented for Tensor");
-    autograd_meta()->set_requires_grad(requires_grad, this);
-  }
+  void set_requires_grad(bool requires_grad);
 
   /**
    * True if a tensor requires gradient.  Tensors which require gradient
@@ -544,10 +551,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  bool requires_grad() const {
-    TORCH_INTERNAL_ASSERT(autograd_meta(), "requires_grad is not implemented for Tensor");
-    return autograd_meta()->requires_grad();
-  }
+  bool requires_grad() const;
 
   /**
    * Return a mutable reference to the gradient.  This is conventionally
@@ -805,17 +809,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual int64_t stride(int64_t d) const;
 
   /**
-   * True if a tensor is a variable.  See Note [Tensor versus Variable in C++]
+   * True if we will dispatch to the Variable handler for this tensor.  This has
+   * nothing to do with the variable-ness of a tensor (as every tensor is a
+   * variable; see also the invariant on type_set_), it just consults thread
+   * local state.
+   *
+   * TODO: Remove this in favor of a more direct test that doesn't mention
+   * Tensor at all.
    */
   bool is_variable() const {
-    return autograd_meta_ != nullptr && !at::NonVariableTypeMode::is_enabled();
+    return !impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
   }
 
   /**
    * Set whether a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
-  virtual void set_allow_tensor_metadata_change(bool value) {
+  void set_allow_tensor_metadata_change(bool value) {
     allow_tensor_metadata_change_ = value;
   }
 
@@ -823,36 +833,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * True if a tensor allows changes to its metadata (e.g. sizes / strides / storage / storage_offset).
    * See NOTE [ Metadata Change for a Detached Tensor ] for details.
    */
-  virtual bool allow_tensor_metadata_change() const {
+  bool allow_tensor_metadata_change() const {
     return allow_tensor_metadata_change_;
   }
 
   /**
    * Set the pointer to autograd metadata.
    */
-  void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta) {
-    autograd_meta_ = std::move(autograd_meta);
-    if (autograd_meta_) {
-      type_set_ = type_set_.add(TensorTypeId::VariableTensorId);
-    } else {
-      type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
-    }
-  }
+  void set_autograd_meta(std::unique_ptr<c10::AutogradMetaInterface> autograd_meta);
 
   /**
-   * Return the pointer to autograd metadata.
+   * Return the pointer to autograd metadata.  May return nullptr if the
+   * tensor does not track gradients.
    */
-  c10::AutogradMetaInterface* autograd_meta() const {
-    return autograd_meta_.get();
-  }
-
-  /**
-   * Detach the autograd metadata unique_ptr from this tensor, and return it.
-   */
-  std::unique_ptr<c10::AutogradMetaInterface> detach_autograd_meta() {
-    type_set_ = type_set_.remove(TensorTypeId::VariableTensorId);
-    return std::move(autograd_meta_);
-  }
+  c10::AutogradMetaInterface* autograd_meta() const;
 
   /**
    * Set the pointer to named tensor metadata.
@@ -927,9 +921,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
              ts.has(TensorTypeId::SparseCUDATensorId) ||
              ts.has(TensorTypeId::SparseHIPTensorId);
     };
-    // TODO: This is going to be wrong when we introduce Variable; need to
-    // factor this to be agnostic to Variable.  Maybe the correct fix
-    // is to introduce another RTTI code for subclasses.
     return (type_set_ == from) || (is_dense(type_set_) && is_dense(from)) || (is_sparse(type_set_) && is_sparse(from));
   }
 
@@ -1390,6 +1381,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_contiguous_ = false;
     is_channels_last_contiguous_ = false;
     is_channels_last_ = false;
+    is_non_overlapping_and_dense_ = false;
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         strides_.resize(sizes_.size(), 0);
@@ -1401,6 +1393,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           }
         }
         is_contiguous_ = true;
+        is_non_overlapping_and_dense_ = true;
         return;
       }
       case MemoryFormat::ChannelsLast: {
@@ -1410,6 +1403,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
         is_channels_last_contiguous_ = true;
         is_channels_last_ = true;
+        is_non_overlapping_and_dense_ = true;
         return;
       }
       case MemoryFormat::Preserve:
@@ -1419,6 +1413,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_strides_like_channels_last() const {
     return is_channels_last_;
+  }
+
+  bool is_non_overlapping_and_dense() const {
+    return is_non_overlapping_and_dense_;
   }
 
 private:
@@ -1501,6 +1499,8 @@ private:
 
   bool compute_strides_like_channels_last() const;
 
+  bool compute_non_overlapping_and_dense() const;
+
 protected:
   /**
    * Recompute the cached numel of a tensor.  Call this if you modify sizes.
@@ -1517,6 +1517,7 @@ protected:
     is_contiguous_ = compute_contiguous();
     is_channels_last_contiguous_ = compute_channels_last_contiguous();
     is_channels_last_ = is_channels_last_contiguous_ || compute_strides_like_channels_last();
+    is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
   }
 
   /**
@@ -1529,31 +1530,7 @@ protected:
       const TensorImpl* src_impl,
       TensorImpl* dest_impl,
       const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) {
-    dest_impl->storage_ = src_impl->storage_;
-    dest_impl->sizes_ = src_impl->sizes_;
-    dest_impl->strides_ = src_impl->strides_;
-    dest_impl->storage_offset_ = src_impl->storage_offset_;
-    dest_impl->data_type_ = src_impl->data_type_;
-    dest_impl->device_opt_ = src_impl->device_opt_;
-    // This may temporarily violate invariant that
-    // type_set_.has(VariableTensorId) iff autograd_meta_ != nullptr...
-    dest_impl->type_set_ = src_impl->type_set_;
-    // ...so refresh Variable in autograd_meta_
-    if (dest_impl->autograd_meta_) {
-      dest_impl->type_set_ = dest_impl->type_set_.add(TensorTypeId::VariableTensorId);
-    } else {
-      dest_impl->type_set_ = dest_impl->type_set_.remove(TensorTypeId::VariableTensorId);
-    }
-    dest_impl->is_contiguous_ = src_impl->is_contiguous_;
-    dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
-    dest_impl->reserved_ = src_impl->reserved_;
-    dest_impl->set_version_counter(version_counter);
-    dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-    if (src_impl->named_tensor_meta_ != nullptr) {
-      dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
-    }
-  }
+      bool allow_tensor_metadata_change);
 
 protected:
   // Error message to show when the user tries to change tensor metadata on
@@ -1569,8 +1546,28 @@ private:
   // (such as grad_ / grad_fn_ / grad_accumulator_).
   // This pointer always has unique ownership (meaning only one TensorImpl can own it
   // at a time).
-  // This is private because we must maintain dispatcher invariants on it
-  // in type_set_.
+  //
+  // autograd_meta_ can be nullptr, as an optimization.  When this occurs, it is
+  // equivalent to having an autograd_meta_ pointing to a default constructed
+  // AutogradMeta; intuitively, tensors which don't require grad will have this
+  // field set to null.  If !type_set_.has(VariableTensorId), then
+  // autograd_meta == nullptr (but not vice versa, due to the nullptr
+  // optimization)
+  //
+  // This means accessors on autograd_meta_ have to be careful to test if they
+  // got a nullptr, and handle default behavior appropriately in that case.
+  //
+  // Note that we don't enforce the invariant that if the AutogradMeta is
+  // default constructed, it is nullptr (to do this, we'd have to continuously
+  // check if an AutogradMeta became, by mutation, equal to the default
+  // constructed form.  (This might be useful, but it seems rare enough that
+  // a requires_grad=True variable will turn back into the requires_grad=False
+  // version.)  So there are three representable states:
+  //
+  //    1. autograd_meta_ == nullptr
+  //    2. autograd_meta_ is default constructed (semantically, same as (1))
+  //    3. autograd_meta_ has nontrivial information content
+  //
   std::unique_ptr<c10::AutogradMetaInterface> autograd_meta_ = nullptr;
 
 protected:
@@ -1625,6 +1622,22 @@ protected:
   c10::optional<c10::Device> device_opt_;
 
   // The set of TensorTypeIds which describe this tensor
+  //
+  // INVARIANT: type_set_.has(TensorTypeId::VariableTensorId) (every tensor
+  // is a variable).  Historically this was not the case (there was a
+  // distinction between plain tensors and variables), but because
+  // we merged Variable and Tensor, this invariant now always holds.
+  // This invariant is currently enforced in the constructor of TensorImpl.
+  //
+  // You might be wondering why we don't just not include VariableTensorId
+  // from the type set, if it is always set.  The answer is, we still need
+  // to dispatch differently from variables, and then mask out the variable
+  // id once we are done handling autograd.  If the boolean here was
+  // inverted, we wouldn't be able to get autograd codepath (since there's
+  // be no TensorTypeId to dispatch to!)  We cannot set VariableTensorId
+  // as the default value contained in the *included* tensor type id set
+  // as TLS requires our state to be zero-initialized (i.e., it is not
+  // included).
   TensorTypeSet type_set_;
 
   // You get to have eight byte-size fields here, before you
@@ -1640,6 +1653,11 @@ protected:
   // Channels last contiguous tensor is channel last tensor which occupies
   // contiguous memory block.
   bool is_channels_last_contiguous_ = false;
+
+  // Dense tensor is the tensor that store values in a contiguous block of memory.
+  // Non-overlapping tensor is the tensor in which elements occupy individual
+  // non-repetitive memory.
+  bool is_non_overlapping_and_dense_ = false;
 
   bool is_wrapped_number_ = false;
 

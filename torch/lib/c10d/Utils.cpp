@@ -22,6 +22,7 @@ namespace tcputil {
 namespace {
 
 constexpr int LISTEN_QUEUE_SIZE = 2048;
+const std::string kConnectTimeoutMsg = "connect() timed out.";
 
 void setSocketNoDelay(int socket) {
   int flag = 1;
@@ -162,6 +163,7 @@ int connect(
   // yet, or is listening but has its listen backlog exhausted.
   bool anyRefused = false;
   bool anyReset = false;
+  const auto start = std::chrono::high_resolution_clock::now();
   while (true) {
     try {
       SYSCHECK_ERR_RETURN_NEG1(
@@ -185,12 +187,22 @@ int connect(
       pfd.fd = socket;
       pfd.events = POLLOUT;
 
-      int numReady = ::poll(&pfd, 1, timeout.count());
+      int64_t pollTimeout = -1;
+      if (timeout != kNoTimeout) {
+        // calculate remaining time and use that as timeout for poll()
+        const auto elapsed = std::chrono::high_resolution_clock::now() - start;
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(timeout) -
+            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed);
+        pollTimeout = std::max(
+            static_cast<int64_t>(0), static_cast<int64_t>(remaining.count()));
+      }
+      int numReady = ::poll(&pfd, 1, pollTimeout);
       if (numReady < 0) {
         throw std::system_error(errno, std::system_category());
       } else if (numReady == 0) {
         errno = 0;
-        throw std::runtime_error("connect() timed out");
+        throw std::runtime_error(kConnectTimeoutMsg);
       }
 
       socklen_t errLen = sizeof(errno);
@@ -230,6 +242,16 @@ int connect(
       if (!nextAddr) {
         if (!wait || (!anyRefused && !anyReset)) {
           throw;
+        }
+
+        // if a timeout is specified, check time elapsed to see if we need to
+        // timeout. A timeout is specified if timeout != kNoTimeout.
+        if (timeout != kNoTimeout) {
+          const auto elapsed =
+              std::chrono::high_resolution_clock::now() - start;
+          if (elapsed > timeout) {
+            throw std::runtime_error(kConnectTimeoutMsg);
+          }
         }
         std::this_thread::sleep_for(std::chrono::seconds(1));
         anyRefused = false;

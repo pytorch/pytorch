@@ -23,7 +23,13 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
                          int pW,
                          int pH,
                          int weight_nullable) {
-  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
+  bool valid_empty = false;
+  if (input->dim() == 4) {
+    valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0 && input->size(3) != 0;
+  } else if (input->dim() == 5) {
+    valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0 && input->size(3) != 0 && input->size(4) != 0;
+  }
+  THNN_ARGCHECK((!input->is_empty() || valid_empty) && (input->dim() == 4 || input->dim() == 5), 2, input,
                 "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 8,
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);

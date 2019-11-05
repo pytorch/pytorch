@@ -117,6 +117,8 @@ torch_nn_modules.module_metadata_map['SampleModule'] = TorchNNModuleMetadata(
     cpp_default_constructor_args='(true)',
     num_attrs_recursive=20,
     cpp_sources=SAMPLE_MODULE_CPP_SOURCE,
+    python_ignored_constructor_args=['has_parity'],
+    python_ignored_attrs=['has_parity'],
 )
 
 torch.nn.SampleModule = SampleModule

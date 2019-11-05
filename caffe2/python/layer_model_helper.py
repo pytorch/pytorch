@@ -40,8 +40,14 @@ class LayerModelHelper(model_helper.ModelHelper):
     """
 
     def __init__(self, name, input_feature_schema, trainer_extra_schema,
-                 keep_blobs=False):
+                 keep_blobs=False,
+                 use_attribution=True):
         ''' TODO(amalevich): more documnetation on input args
+
+        use_attribution:
+            if True, will generate the atrribution net for feature importance
+            calculation; Need to turn it to false when FC is quantized as FP16
+            This attribute access will be consistent with MTML model.
         '''
 
         super(LayerModelHelper, self).__init__(name=name)
@@ -92,6 +98,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         # TODO(xlwang): it's hack!
         self.ad_hoc_diagnose_blobs_and_operations = []
         self.ad_hoc_plot_blobs = []
+        self.use_attribution = use_attribution
 
     def clear_output_schema(self):
         self._output_schema = None

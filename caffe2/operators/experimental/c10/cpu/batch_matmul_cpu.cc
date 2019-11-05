@@ -11,10 +11,6 @@ namespace math = caffe2::math;
 namespace caffe2 {
 namespace {
 
-struct Cache final : public c10::KernelCache {
-  std::shared_ptr<at::Tensor> scratch;
-};
-
 template <class T, class Context>
 class batch_matmul_cpu final : public c10::OperatorKernel {
  public:

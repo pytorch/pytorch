@@ -53,7 +53,7 @@ sudo apt-get -y install doxygen
 # Generate ATen files
 pushd "${pt_checkout}"
 pip install -r requirements.txt
-time GEN_TO_SOURCE=1 python aten/src/ATen/gen.py \
+time python aten/src/ATen/gen.py \
   -s aten/src/ATen \
   -d build/aten/src/ATen \
   aten/src/ATen/Declarations.cwrap \

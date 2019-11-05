@@ -181,18 +181,12 @@ void THTensor_(bitor)(THTensor *r_, THTensor *t, scalar_t value)
 
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
-void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha)
+static void THTensor_(addmmImpl)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha)
 {
   char transpose_r, transpose_m1, transpose_m2;
   THTensor *r__, *m1_, *m2_;
   int free_m1 = 0;
   int free_m2 = 0;
-
-#ifdef BUILD_NAMEDTENSOR
-  // The logic in this function changes these around so we save a copy of the original
-  THTensor* orig_m1 = m1;
-  THTensor* orig_m2 = m2;
-#endif
 
   if( (m1->dim() != 2) || (m2->dim() != 2))
     THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
@@ -217,13 +211,15 @@ void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, sca
   {
     THTensor_(resizeAs)(r_, t);
     if (beta != 0.0) {
-#ifdef BUILD_NAMEDTENSOR
-      at::NoNamesGuard guard;
-#endif
       at::Tensor r__wrap = THTensor_wrap(r_);
       at::Tensor t_wrap = THTensor_wrap(t);
       at::native::copy_(r__wrap, t_wrap);
     }
+  }
+
+  if((r_->size(0) == 0) || (r_->size(1) == 0))
+  {
+    return;
   }
 
   // n == 1 || ldc >= max(1, m)
@@ -331,13 +327,21 @@ void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, sca
 
   if(r__ != r_)
     THTensor_(freeCopyTo)(r__, r_);
+}
 
+void THTensor_(addmm)(THTensor *r_, THTensor *t, THTensor *m1, THTensor *m2, scalar_t beta, scalar_t alpha) {
+  {
 #ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names_for_addmm(r_, orig_m1, orig_m2, t);
+    at::NoNamesGuard guard;
+#endif
+    THTensor_(addmmImpl)(r_, t, m1, m2, beta, alpha);
+  }
+#ifdef BUILD_NAMEDTENSOR
+  at::namedinference::propagate_names_for_addmm(r_, m1, m2, t);
 #endif
 }
 
-void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
+static void THTensor_(addmvImpl)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha)
 {
   if( (mat->dim() != 2) || (THTensor_nDimension(vec) != 1) )
     THError("matrix and vector expected, got %dD, %dD",
@@ -407,10 +411,19 @@ void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, s
     }
   }
 
+  #undef LDA_COND
+}
+
+void THTensor_(addmv)(THTensor *r_, THTensor *t, THTensor *mat, THTensor *vec, scalar_t beta, scalar_t alpha) {
+  {
+#ifdef BUILD_NAMEDTENSOR
+    at::NoNamesGuard guard;
+#endif
+    THTensor_(addmvImpl)(r_, t, mat, vec, beta, alpha);
+  }
 #ifdef BUILD_NAMEDTENSOR
   at::namedinference::propagate_names_for_addmv(r_, mat, vec, t);
 #endif
-  #undef LDA_COND
 }
 
 void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, scalar_t beta, scalar_t alpha)
@@ -436,9 +449,6 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
 
   if(r_ != t)
   {
-#ifdef BUILD_NAMEDTENSOR
-    at::NoNamesGuard guard;
-#endif
     THTensor_(resizeAs)(r_, t);
     at::Tensor r__wrap = THTensor_wrap(r_);
     at::Tensor t_wrap = THTensor_wrap(t);
@@ -748,49 +758,6 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 #endif
 
   }
-}
-
-void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t gain)
-{
-  int64_t N1 = m1->size(0);
-  int64_t N2 = m2->size(0);
-  int64_t dim;
-  scalar_t *m1_p;
-  scalar_t *m2_p;
-  scalar_t *r_p;
-
-  THTensor_(resize2d)(r_, N1, N2);
-
-  m1 = THTensor_(newContiguous)(m1);
-  m2 = THTensor_(newContiguous)(m2);
-
-  THTensor_(resize2d)(m1, N1, THTensor_(nElement)(m1) / N1);
-  THTensor_(resize2d)(m2, N2, THTensor_(nElement)(m2) / N2);
-
-  dim = m1->size(1);
-  THArgCheck(m1->size(1) == m2->size(1), 3, "m1 and m2 must have the same inner vector dim");
-
-  m1_p = m1->data<scalar_t>();
-  m2_p = m2->data<scalar_t>();
-  r_p = r_->data<scalar_t>();
-
-  at::parallel_for(0, N1, 0,
-      [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      int64_t j, k;
-      for (j = 0; j < N2; j++) {
-        scalar_t sum = 0;
-        for (k = 0; k < dim; k++) {
-          scalar_t term = m1_p[i * dim + k] - m2_p[j * dim + k];
-          sum += term * term;
-        }
-        r_p[i * N2 + j] = gain * sum;
-      }
-    }
-  });
-
-  c10::raw::intrusive_ptr::decref(m1);
-  c10::raw::intrusive_ptr::decref(m2);
 }
 
 void THTensor_(addbmm)(THTensor *result, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha)

@@ -19,6 +19,7 @@ android {
     buildTypes {
         debug {
             minifyEnabled false
+            debuggable true
         }
         release {
             minifyEnabled false
@@ -36,7 +37,11 @@ android {
     }
 
     packagingOptions {
-        exclude '**/libfbjni.so'
+        if (rootProject.isPublishing()) {
+            exclude '**/libfbjni.so'
+        } else {
+            pickFirst '**/libfbjni.so'
+        }
     }
 
     useLibrary 'android.test.runner'

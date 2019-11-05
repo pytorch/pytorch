@@ -26,15 +26,18 @@ class ReLU(torch.nn.ReLU):
 
         >>> m = nn.quantized.ReLU()
         >>> input = torch.randn(2)
-        >>> input = torch.quantize_linear(input, 1.0, 0, dtype=torch.qint32)
+        >>> input = torch.quantize_per_tensor(input, 1.0, 0, dtype=torch.qint32)
         >>> output = m(input)
     """
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(inplace)
-        assert not inplace, 'torch.nn.quantized.ReLU does not support inplace'
+        self.inplace = inplace
 
     def forward(self, input):
-        return torch.nn.quantized.functional.relu(input)
+        return torch.nn.quantized.functional.relu(input, inplace=self.inplace)
+
+    def _get_name(self):
+        return 'QuantizedReLU'
 
     @staticmethod
     def from_float(mod):
@@ -61,7 +64,7 @@ class ReLU6(torch.nn.ReLU):
 
         >>> m = nn.quantized.ReLU6()
         >>> input = torch.randn(2)
-        >>> input = torch.quantize_linear(input, 1.0, 0, dtype=torch.qint32)
+        >>> input = torch.quantize_per_tensor(input, 1.0, 0, dtype=torch.qint32)
         >>> output = m(input)
     """
     def __init__(self, inplace=False):
@@ -70,6 +73,9 @@ class ReLU6(torch.nn.ReLU):
 
     def forward(self, input):
         return torch.ops.quantized.relu6(input)
+
+    def _get_name(self):
+        return 'QuantizedReLU6'
 
     @staticmethod
     def from_float(mod):

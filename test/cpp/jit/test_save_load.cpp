@@ -57,20 +57,5 @@ void testSaveExtraFilesHook() {
   }
 }
 
-static const auto pretty_printed = R"JIT(
-op_version_set = 1000
-def foo(x: Tensor,
-    y: Tensor) -> Tensor:
-  _0 = torch.add(torch.mul(x, 2), y, alpha=1)
-  return _0
-)JIT";
-
-void testImportTooNew() {
-  Module m("__torch__.m");
-  const std::vector<at::Tensor> constant_table;
-  auto src = std::make_shared<Source>(pretty_printed);
-  ASSERT_ANY_THROW(LEGACY_import_methods(m, src, constant_table, nullptr));
-}
-
 } // namespace jit
 } // namespace torch

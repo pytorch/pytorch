@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
+#include <vector>
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -13,6 +14,14 @@
 
 namespace torch {
 namespace jit {
+
+// gets a string representation of a node header
+// (e.g. outputs, a node kind and outputs)
+std::string getHeader(const Node *node) {
+  std::stringstream ss;
+  node->print(ss, 0, {}, false, false, false, false);
+  return ss.str();
+}
 
 static std::unordered_map<std::string, size_t>
 parseJITLogOption(const char *option) {
@@ -68,16 +77,11 @@ bool is_enabled(const char *cfname, JitLoggingLevels level) {
 // a dummy function to give to PythonPrint
 std::string log_function(const std::shared_ptr<torch::jit::Graph> &graph) {
   torch::jit::Function func("source_dump", graph, nullptr);
-  std::stringstream ss;
   std::vector<at::Tensor> tensors;
   std::vector<c10::NamedTypePtr> deps;
-  SourceRangeRecords source_ranges;
-  PythonPrint(ss, source_ranges, func, false, tensors, deps, false);
-  return ss.str();
-}
-
-std::string debugValueOrDefault(const Node* n) {
-  return n->outputs().size() > 0 ? n->outputs().at(0)->debugName() : "n/a";
+  PythonPrint pp(tensors, deps, false);
+  pp.printFunction(func);
+  return pp.str();
 }
 
 std::string jit_log_prefix(
@@ -120,7 +124,7 @@ std::ostream& operator<<(std::ostream& out, JitLoggingLevels level) {
       out << "DEBUG";
       break;
     default:
-      TORCH_INTERNAL_ASSERT("Invalid level");
+      TORCH_INTERNAL_ASSERT(false, "Invalid level");
   }
 
   return out;

@@ -49,11 +49,13 @@ here is the basic process.
       operator/optimizer?” Giving evidence for its utility, e.g., usage
       in peer reviewed papers, or existence in other frameworks, helps a
       bit when making this case.
-      - **Adding operators / algorithms from recently-released research** 
+
+      - **Adding operators / algorithms from recently-released research**
         is generally not accepted, unless there is overwhelming evidence that
         this newly published work has ground-breaking results and will eventually
         become a standard in the field. If you are not sure where your method falls,
         open an issue first before implementing a PR.
+
    -  Core changes and refactors can be quite difficult to coordinate,
       as the pace of development on PyTorch master is quite fast.
       Definitely reach out about fundamental or cross-cutting changes;

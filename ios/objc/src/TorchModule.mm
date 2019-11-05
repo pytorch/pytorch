@@ -1,5 +1,5 @@
-#import <LibTorch/LibTorch.h>
 #import "TorchModule.h"
+#import <LibTorch/LibTorch.h>
 #import "TorchIValuePrivate.h"
 
 @implementation TorchModule {
@@ -10,21 +10,19 @@
   if (modelPath.length == 0) {
     return nil;
   }
-  @try {
-    auto torchScriptModule =
-        torch::jit::load([modelPath cStringUsingEncoding:NSASCIIStringEncoding]);
+  try {
+    auto qengines = at::globalContext().supportedQEngines();
+    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) != qengines.end()) {
+      at::globalContext().setQEngine(at::QEngine::QNNPACK);
+    }
     TorchModule* module = [[TorchModule alloc] init];
-    module->_impl = torchScriptModule;
+    module->_impl = torch::jit::load([modelPath cStringUsingEncoding:NSASCIIStringEncoding]);
+    module->_impl.eval();
     return module;
-  } @catch (NSException* exception) {
-    @throw exception;
-    NSLog(@"%@", exception);
+  } catch (const std::exception& exception) {
+    NSLog(@"%s", exception.what());
   }
   return nil;
-}
-
-+ (NSArray<NSNumber* >* )predict:(void* )data dims:(NSArray<NSNumber* >* )dims type:(TensorType) type {
-    return nil;
 }
 
 - (TorchIValue*)forward:(NSArray<TorchIValue*>*)values {
@@ -33,14 +31,13 @@
     at::IValue atValue = value.toIValue;
     inputs.push_back(atValue);
   }
-  @try {
+  try {
     torch::autograd::AutoGradMode guard(false);
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     auto result = _impl.forward(inputs);
     return [TorchIValue newWithIValue:result];
-  } @catch (NSException* exception) {
-    @throw exception;
-    NSLog(@"%@", exception);
+  } catch (const std::exception& exception) {
+    NSLog(@"%s", exception.what());
   }
   return nil;
 }
@@ -53,7 +50,7 @@
   for (TorchIValue* value in values) {
     inputs.push_back(value.toIValue);
   }
-  @try {
+  try {
     if (auto method = _impl.find_method(
             std::string([methodName cStringUsingEncoding:NSASCIIStringEncoding]))) {
       torch::autograd::AutoGradMode guard(false);
@@ -61,9 +58,8 @@
       auto result = (*method)(std::move(inputs));
       return [TorchIValue newWithIValue:result];
     }
-  } @catch (NSException* exception) {
-    @throw exception;
-    NSLog(@"%@", exception);
+  } catch (const std::exception& exception) {
+    NSLog(@"%s", exception.what());
   }
   return nil;
 }

@@ -15,7 +15,7 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
     @given(
         channels_per_group=st.integers(min_value=1, max_value=5),
         groups=st.sampled_from([1, 4, 8, 9]),
-        n=st.integers(min_value=1, max_value=2),
+        n=st.integers(0, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
         **hu.gcs_cpu_only
     )
@@ -23,8 +23,9 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
         X = np.round(np.random.rand(n, channels_per_group * groups, 5, 6) * 255).astype(
             np.float32
         )
-        X[0, 0, 0, 0] = 0
-        X[0, 0, 0, 1] = 255
+        if n != 0:
+            X[0, 0, 0, 0] = 0
+            X[0, 0, 0, 1] = 255
         if order == "NHWC":
             X = utils.NCHW2NHWC(X)
 
@@ -66,7 +67,7 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
 
     @given(
         channels_per_group=st.integers(min_value=32, max_value=128),
-        n=st.integers(min_value=1, max_value=2),
+        n=st.integers(0, 2),
         **hu.gcs_cpu_only
     )
     def test_channel_shuffle_fast_path(self, channels_per_group, n, gc, dc):
@@ -75,8 +76,9 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
         X = np.round(np.random.rand(n, channels_per_group * groups, 5, 6) * 255).astype(
             np.float32
         )
-        X[0, 0, 0, 0] = 0
-        X[0, 0, 0, 1] = 255
+        if n != 0:
+            X[0, 0, 0, 0] = 0
+            X[0, 0, 0, 1] = 255
         X = utils.NCHW2NHWC(X)
 
         net = core.Net("test_net")

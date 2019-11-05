@@ -10,60 +10,6 @@
 #include <ATen/NamedTensorUtils.h>
 #endif
 
-#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)                                      \
-  void THTensor_(NAME##Value)(THBoolTensor *r_, THTensor* t, scalar_t value)   \
-  {                                                                            \
-    THBoolTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);         \
-    TH_TENSOR_APPLY2(bool, r_, scalar_t, t,                                    \
-                     *r__data = (*t_data OP value) ? 1 : 0;);                  \
-  }                                                                            \
-  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, scalar_t value)      \
-  {                                                                            \
-    THTensor_(resizeNd)(r_, t->dim(), THTensor_getSizePtr(t), NULL);           \
-    TH_TENSOR_APPLY2(scalar_t, r_, scalar_t, t,                                \
-                     *r__data = (*t_data OP value) ? 1 : 0;);                  \
-  }                                                                            \
-  void THTensor_(NAME##Tensor)(THBoolTensor *r_, THTensor *ta, THTensor *tb)   \
-  {                                                                            \
-    THBoolTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);       \
-    TH_TENSOR_APPLY3(bool, r_, scalar_t, ta, scalar_t, tb,                     \
-                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;);              \
-  }                                                                            \
-  void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb)      \
-  {                                                                            \
-    THTensor_(resizeNd)(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);         \
-    TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, ta, scalar_t, tb,                 \
-                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;);              \
-  }
-
-TENSOR_IMPLEMENT_LOGICAL(lt,<)
-TENSOR_IMPLEMENT_LOGICAL(gt,>)
-TENSOR_IMPLEMENT_LOGICAL(le,<=)
-TENSOR_IMPLEMENT_LOGICAL(ge,>=)
-TENSOR_IMPLEMENT_LOGICAL(eq,==)
-TENSOR_IMPLEMENT_LOGICAL(ne,!=)
-
-#define TENSOR_IMPLEMENT_LOGICAL_BYTE(NAME,OP)                                            \
-  void THTensor_(NAME##ValueByte)(THByteTensor *r_, THTensor* t, scalar_t value)          \
-  {                                                                                       \
-    THByteTensor_resizeNd(r_, t->dim(), THTensor_getSizePtr(t), NULL);                    \
-    TH_TENSOR_APPLY2(unsigned char, r_, scalar_t, t,                                      \
-                     *r__data = (*t_data OP value) ? 1 : 0;);                             \
-  }                                                                                       \
-  void THTensor_(NAME##TensorByte)(THByteTensor *r_, THTensor *ta, THTensor *tb)          \
-  {                                                                                       \
-    THByteTensor_resizeNd(r_, ta->dim(), THTensor_getSizePtr(ta), NULL);                  \
-    TH_TENSOR_APPLY3(unsigned char, r_, scalar_t, ta, scalar_t, tb,                       \
-                     *r__data = (*ta_data OP *tb_data) ? 1 : 0;);                         \
-  }                                                                                       \
-
-TENSOR_IMPLEMENT_LOGICAL_BYTE(lt,<)
-TENSOR_IMPLEMENT_LOGICAL_BYTE(gt,>)
-TENSOR_IMPLEMENT_LOGICAL_BYTE(le,<=)
-TENSOR_IMPLEMENT_LOGICAL_BYTE(ge,>=)
-TENSOR_IMPLEMENT_LOGICAL_BYTE(eq,==)
-TENSOR_IMPLEMENT_LOGICAL_BYTE(ne,!=)
-
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {
   return THTensor_(nElement)(t);
@@ -1041,15 +987,12 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #define TH_MATH_NAME(fn) fn
 #endif
 
-LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(sinh,TH_MATH_NAME(sinh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
 LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
@@ -1338,6 +1281,9 @@ void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t 
     minval = minval - 1;
     maxval = maxval + 1;
   }
+
+  TORCH_CHECK(!(std::isinf(minval) || std::isinf(maxval) || std::isnan(minval) || std::isnan(maxval)), "range of [", minval, ", ", maxval, "] is not finite");
+  TORCH_CHECK(minval < maxval, "max must be larger than min");
 
   h_data = hist->data<scalar_t>();
 

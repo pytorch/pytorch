@@ -11,7 +11,7 @@ import sys
 import atexit
 
 # old private location of the ExceptionWrapper that some users rely on:
-from torch._utils import ExceptionWrapper  # noqa: F401
+from torch._utils import ExceptionWrapper
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -42,4 +42,4 @@ def _set_python_exit_flag():
 atexit.register(_set_python_exit_flag)
 
 
-from . import worker, signal_handling, pin_memory, collate, fetch  # noqa: F401
+from . import worker, signal_handling, pin_memory, collate, fetch

@@ -14,7 +14,6 @@
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/EnableNamedTensor.h>
@@ -187,12 +186,17 @@ class CAFFE2_API Tensor {
   int64_t ndimension() const {
     return dim();
   }
+
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_->is_contiguous(memory_format);
   }
 
+  bool is_non_overlapping_and_dense() const {
+    return impl_->is_non_overlapping_and_dense();
+  }
+
   at::MemoryFormat suggest_memory_format() const {
-    if (impl_->is_strides_like_channels_last()) {
+    if (!is_mkldnn() && !is_sparse() && !impl_->is_contiguous() && impl_->is_strides_like_channels_last()) {
       return at::MemoryFormat::ChannelsLast;
     }
     return at::MemoryFormat::Contiguous;
@@ -205,6 +209,10 @@ class CAFFE2_API Tensor {
   // Defined to be numel() * itemsize()
   size_t nbytes() const {
     return impl_->numel() * impl_->itemsize();
+  }
+
+  int64_t numel() const {
+    return impl_->numel();
   }
 
   // Length of one array element in bytes.  This is the traditional
@@ -221,8 +229,7 @@ class CAFFE2_API Tensor {
   DeprecatedTypeProperties & type() const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
         tensorTypeIdToBackend(legacyExtractTypeId(type_set())),
-        scalar_type(),
-        is_variable());
+        scalar_type());
   }
   TensorTypeSet type_set() const {
     return impl_->type_set();
@@ -425,21 +432,12 @@ protected:
 };
 
 namespace detail {
-// Helper creator for Tensor clas which doesn't requires the users to pass
+// Helper creator for Tensor class which doesn't requires the users to pass
 // in an intrusive_ptr instead it just converts the argument passed to
 // requested intrusive_ptr type.
 template <typename T, typename... Args>
 Tensor make_tensor(Args&&... args) {
   return Tensor(c10::make_intrusive<T>(std::forward<Args>(args)...));
-}
-
-inline TensorTypeSet infer_tensor_type_set(const Tensor & tl) {
-  return tl.type_set();
-}
-
-inline TensorTypeSet infer_tensor_type_set(TensorList tl) {
-  TORCH_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return tl[0].type_set();
 }
 
 } // namespace detail

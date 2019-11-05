@@ -11,9 +11,6 @@
 namespace torch {
 namespace jit {
 
-using ClassResolver =
-    std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
-
 // See Python's pickletools.py for a detailed description of each of these codes
 enum class PickleOpCode : char {
   MARK = '(',
@@ -34,7 +31,8 @@ enum class PickleOpCode : char {
   STRING = 'S',
   BINSTRING = 'T',
   SHORT_BINSTRING = 'U',
-  UNICODE = 'V',
+  // NB: Avoid using UNICODE as it is a macro in the Windows API
+  UNICODE_ = 'V',
   BINUNICODE = 'X',
   APPEND = 'a',
   BUILD = 'b',
@@ -127,8 +125,12 @@ class Pickler {
  public:
   Pickler(
       std::function<void(const char*, size_t)> writer,
-      std::vector<at::Tensor>* tensor_table)
-      : writer_(writer), tensor_table_(tensor_table) {}
+      std::vector<at::Tensor>* tensor_table,
+      std::vector<c10::ClassTypePtr>* memorized_class_types = nullptr)
+      : writer_(writer),
+        tensor_table_(tensor_table),
+        memorized_class_types_(memorized_class_types) {}
+  ~Pickler();
 
   // Push protocol onto the stack
   void protocol();
@@ -144,6 +146,7 @@ class Pickler {
   const std::vector<WriteableTensorData>& tensorData() {
     return tensor_data_;
   }
+
   void pushEmptyDict();
   void pushDict(const IValue& ivalue);
   void pushInt(int64_t value);
@@ -151,6 +154,7 @@ class Pickler {
 
  private:
   void pushIValueImpl(const IValue& ivalue);
+  void pushBool(bool value);
   void pushDouble(double value);
   void pushGenericList(const IValue& ivalue);
   void pushIntList(const IValue& ivalue);
@@ -182,18 +186,41 @@ class Pickler {
 
   const void* getPointer(const IValue& ivalue);
 
+  // Caller checks that bufferPos_ > 0
+  void flushNonEmpty() {
+    writer_(buffer_.data(), bufferPos_);
+    bufferPos_ = 0;
+  }
+
+  void flush() {
+    if (bufferPos_ != 0) {
+      flushNonEmpty();
+    }
+  }
+
   // These convert values to bytes and add them to the stack (NB: since T is to
   // the left of a '::', its type cannot be deduced by the compiler so one must
   // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
   // does not)
+  static constexpr size_t kBufferSize = 256;
   template <typename T>
   void push(typename std::common_type<T>::type value) {
     const char* begin = reinterpret_cast<const char*>(&value);
-    writer_(begin, sizeof(T));
+    if (bufferPos_ + sizeof(T) > buffer_.size()) {
+      flushNonEmpty();
+    }
+    static_assert(sizeof(T) <= kBufferSize, "Buffer size assumption");
+    memcpy(buffer_.data() + bufferPos_, begin, sizeof(T));
+    bufferPos_ += sizeof(T);
   }
 
   // Stream to write binary data to
+  // Code shouldn't call writer_ directly without first flush()ing.
   std::function<void(const char*, size_t)> writer_;
+
+  // Buffer to avoid calling a writer_ on a per-byte basis.
+  std::array<char, kBufferSize> buffer_;
+  size_t bufferPos_{0};
 
   // Stack of opcodes/data
   std::vector<char> stack_;
@@ -216,6 +243,9 @@ class Pickler {
   // object, and we will alias it to the old object at that address.
   std::vector<IValue> memoized_ivalues_;
 
+  // List of all the types that it wrote, inspect from the IValues it wrote.
+  std::vector<c10::ClassTypePtr>* memorized_class_types_;
+
   // List of tensor storages to serialize in the same binary as the pickle data
   // similar to ivalues, they are memoized using BINPUT
   std::vector<WriteableTensorData> tensor_data_;
@@ -223,81 +253,6 @@ class Pickler {
 
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
-};
-
-// [unpickler refactor] there is some cruft around PickleOpCode::BUILD,
-// PickleOpCode::NEWOBJ, and the last_opcode_ member below that should be deleted at
-// some point, the Pickler doesn't produce it and it's only around to support
-// models saved before 1.1
-class Unpickler {
-  TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
-
- public:
-  // tensors inside the pickle are references to the tensor_table
-  Unpickler(
-      std::function<bool(char*, size_t)> reader,
-      ClassResolver class_resolver,
-      const std::vector<at::Tensor>* tensor_table)
-      : reader_(reader),
-        tensor_table_(tensor_table),
-        class_resolver_(std::move(class_resolver)) {}
-
-  // tensors inside the pickle contain meta-data, the raw tensor
-  // dead is retrieved by calling `read_record`.
-  Unpickler(
-      std::function<bool(char*, size_t)> reader,
-      ClassResolver class_resolver,
-      std::function<at::DataPtr(const std::string&)> read_record,
-      c10::optional<at::Device> device)
-      : reader_(reader),
-        tensor_table_(nullptr),
-        class_resolver_(std::move(class_resolver)),
-        read_record_(std::move(read_record)),
-        device_(std::move(device)) {}
-
-  IValue parse_ivalue();
-
- private:
-  // No arguments ensures that a template arugment must be specified
-  // so that the number of bytes read / type read is explicit
-  template <typename T>
-  T read() {
-    T item;
-    if (!reader_(reinterpret_cast<char*>(&item), sizeof(item))) {
-      AT_ERROR("Unexpected end of pickler archive.");
-    }
-    return item;
-  }
-
-  std::string readBytes(size_t num_bytes);
-
-  double readFloat();
-  PickleOpCode readInstruction();
-  PickleOpCode readOpCode();
-  std::string readString();
-  void readList();
-  void setInput(size_t memo_id);
-  void run();
-
-  // Returns a pointer to the number of bytes requested. This should state-fully
-  // remember how many bytes have been read
-  std::function<bool(char*, size_t)> reader_;
-
-  std::vector<IValue> stack_;
-
-  // globals are represented on the stack as IValue integer indices
-  // into this list
-  std::vector<std::function<void(void)>> globals_;
-  std::vector<IValue> memo_table_;
-  std::vector<size_t> marks_;
-  const std::vector<at::Tensor>* tensor_table_;
-
-  // optionally nullptr, needs to be present for creating classes
-  ClassResolver class_resolver_;
-  IValue empty_tuple_;
-
-  std::function<at::DataPtr(const std::string&)> read_record_;
-  c10::optional<at::Device> device_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor

@@ -9,8 +9,8 @@ libraries users call in the workers. In this file and `DataLoader.cpp`, we make
 our best effort to provide some error message to users when such unfortunate
 events happen.
 
-When a _DataLoaderIter starts worker processes, their pids are registered in a
-defined in `DataLoader.cpp`: id(_DataLoaderIter) => Collection[ Worker pids ]
+When a _BaseDataLoaderIter starts worker processes, their pids are registered in a
+defined in `DataLoader.cpp`: id(_BaseDataLoaderIter) => Collection[ Worker pids ]
 via `_set_worker_pids`.
 
 When an error happens in a worker process, the main process received a SIGCHLD,

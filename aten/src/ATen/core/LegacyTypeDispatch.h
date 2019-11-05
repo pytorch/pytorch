@@ -12,8 +12,9 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/LegacyDeviceTypeInit.h>
+#include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/core/TensorImpl.h>
-#include <ATen/core/ATenDispatch.h>
+#include <ATen/core/TensorBody.h>
 
 namespace at {
 
@@ -46,22 +47,52 @@ class CAFFE2_API LegacyTypeDispatch {
 
 CAFFE2_API LegacyTypeDispatch& globalLegacyTypeDispatch();
 
-// A RAII, thread local (!) guard that has the following effect:
+// A RAII, thread local (!) guard that will disable dispatch to variable
+// handler.
 //
-// Upon construction: sets NonVariableTypeMode_enabled for the current thread to
-// control whether we are in non-Variable-type mode.
+// NOTE [ Treating Variables as non-Variables in type dispatch ]
 //
-// Upon destruction: sets NonVariableTypeMode_enabled back to the original value.
+// What exactly does AutoNonVariableType do?  The short answer is, it causes
+// dispatches on ATen functions to go to the non-variable implementation,
+// bypassing autograd handling (and also profiling and tracing).
 //
-// See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
+// To understand why this guard exists, it's helpful to understand the history
+// behind how Variable was implemented.  Previously, Variables were implemented
+// as a wrapper on Tensors; so the act of processing a Variable involved
+// unwrapping the underlying Tensor, and then calling the underlying base
+// operation on /that/ operation
+//
+// However, after the Variable/Tensor merge, there is no concept of unwrapping
+// a tensor anymore.  If you just call the operation on the same variable
+// again inside your VariableType handler, you'll dispatch back to
+// VariableType, which is not what we want.
+//
+// The solution to the above problem is to add `at::NonVariableTypeMode`, which
+// when enabled will cause `legacyTensorType()` and `getType()` to always return
+// non-Variable type, even if the tensor being called on is a variable.
+//
+// TODO: Since `torch::NoGradGuard` serves the same purpose in libtorch, we should
+// merge these two thread-local guards.  However, NoGradGuard does something
+// subtly different: it turns of gradient recording, but DOES NOT skip
+// VariableType implementation (as we still might need to profile or trace).
+// To unify the two, we would first have to move profiling and tracing out of
+// VariableType.
+
 struct CAFFE2_API AutoNonVariableTypeMode {
-  AutoNonVariableTypeMode(bool enabled) : prev_mode(NonVariableTypeMode::is_enabled()) {
-    NonVariableTypeMode::set_enabled(enabled);
+  // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
+  // TODO: Eliminate this parameter entirely
+  AutoNonVariableTypeMode(bool enabled = true) :
+    guard_(TensorTypeId::VariableTensorId) {
+
+    TORCH_INTERNAL_ASSERT(enabled);
   }
-  ~AutoNonVariableTypeMode() {
-    NonVariableTypeMode::set_enabled(prev_mode);
-  }
-  bool prev_mode;
+  c10::impl::ExcludeTensorTypeIdGuard guard_;
 };
+
+namespace impl {
+inline bool variable_is_excluded() {
+  return c10::impl::tls_local_tensor_type_set().excluded_.has(TensorTypeId::VariableTensorId);
+}
+}
 
 } // namespace at
