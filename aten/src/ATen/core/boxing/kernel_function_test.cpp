@@ -31,6 +31,8 @@ int64_t decrementKernel(const Tensor& tensor, int64_t input) {
 }
 
 void expectCallsIncrement(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
@@ -40,6 +42,8 @@ void expectCallsIncrement(TensorTypeId type_id) {
 }
 
 void expectCallsDecrement(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
@@ -628,6 +632,8 @@ std::string concatKernel(const Tensor& tensor1, std::string a, const std::string
 }
 
 void expectCallsConcatUnboxed(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
@@ -636,6 +642,8 @@ void expectCallsConcatUnboxed(TensorTypeId type_id) {
 }
 
 void expectCannotCallConcatBoxed(TensorTypeId type_id) {
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   // assert that schema and cpu kernel are present
   auto op = c10::Dispatcher::singleton().findSchema({"_test::my_op", ""});
   ASSERT_TRUE(op.has_value());
