@@ -3896,6 +3896,35 @@ class _TestTorchMixin(object):
         rootview = c[8]
         self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
 
+    def test_serialization_zipfile(self):
+        data = {
+            'a': b'12039810948234589',
+            'b': b'1239081209484958',
+            'c/d': b'94589480984058'
+        }
+
+        def test(name_or_buffer):
+            with torch.serialization._open_zipfile_writer(name_or_buffer, 'wb') as zip_file:
+                for key in data:
+                    zip_file.write_record(key, data[key], len(data[key]))
+
+            if hasattr(name_or_buffer, 'seek'):
+                name_or_buffer.seek(0)
+
+            with torch.serialization._open_zipfile_reader(name_or_buffer, 'rb') as zip_file:
+                for key in data:
+                    actual = zip_file.get_record(key)
+                    expected = data[key]
+                    self.assertEqual(expected, actual)
+
+        with tempfile.NamedTemporaryFile() as f:
+            test(f)
+        with tempfile.NamedTemporaryFile() as f:
+            test(f.name)
+
+        test(io.BytesIO())
+
+
     def test_serialization(self):
         # Test serialization with a real file
         b = self._test_serialization_data()
@@ -5678,7 +5707,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(e1, e2)
 
     def test_batch_norm_cpu_inference(self):
-        # input nchw in (2,1,1,1), (2,2,2,2) 
+        # input nchw in (2,1,1,1), (2,2,2,2)
         inputs = [
             torch.tensor([[[[-0.5000]]], [[[0.5000]]]]),
             torch.tensor([
@@ -5690,7 +5719,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                     [[0.1000, 1.0000], [1.0000, 0.1000]],
                     [[1.0000, 0.5000], [1.5000, -1.5000]]
                 ]])]
-        # output nchw in (2,1,1,1), (2,2,2,2) 
+        # output nchw in (2,1,1,1), (2,2,2,2)
         outputs = [
             torch.tensor([
                 [[[-0.499997496604919433593750000]]],
@@ -5716,9 +5745,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             output2 = m(input2).permute(0, 1, 3, 2)
             # channels last case
             input3 = input1.contiguous(memory_format=torch.channels_last)
-            for name, param in m.named_parameters():    
-                if param.requires_grad:    
-                    if param.data.dim() == 4:    
+            for name, param in m.named_parameters():
+                if param.requires_grad:
+                    if param.data.dim() == 4:
                         param.data = param.data.contiguous(memory_format=torch.channels_last)
             output3 = m(input3)
             self.assertEqual(output3, outputs[i])

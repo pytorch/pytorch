@@ -406,16 +406,41 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
+      .def(py::init<const std::function<size_t(const void*, size_t)>&>())
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
              const std::string& name,
              const char* data,
              size_t size) { return self.writeRecord(name, data, size); })
-      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile);
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             uintptr_t data,
+             size_t size) {
+            return self.writeRecord(
+                name, reinterpret_cast<const char*>(data), size);
+          });
+
+  m.def("make_bytes", [](py::capsule data, size_t len) {
+    char* bytes = data;
+    return py::bytes(bytes, len);
+  });
+  m.def("read_into", [](py::capsule capsule, py::bytes bytes) {
+    char* output_bytes = capsule;
+    std::string input_bytes = bytes;
+    size_t size = py::len(bytes);
+    std::copy(input_bytes.data(), input_bytes.data() + size, output_bytes);
+  });
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
+      .def(py::init<
+           std::function<size_t(void*, size_t)>,
+           std::function<size_t(size_t)>,
+           size_t>())
       .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
         at::DataPtr data;
         size_t size;

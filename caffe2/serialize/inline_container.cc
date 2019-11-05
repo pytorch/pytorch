@@ -13,6 +13,7 @@
 #include "caffe2/serialize/file_adapter.h"
 #include "caffe2/serialize/inline_container.h"
 #include "caffe2/serialize/istream_adapter.h"
+#include "caffe2/serialize/func_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
 #include "miniz.h"
@@ -53,6 +54,15 @@ size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
 PyTorchStreamReader::PyTorchStreamReader(const std::string& file_name)
     : ar_(caffe2::make_unique<mz_zip_archive>()),
       in_(caffe2::make_unique<FileAdapter>(file_name)) {
+  init();
+}
+
+PyTorchStreamReader::PyTorchStreamReader(
+    ReaderFunc in,
+    SeekerFunc seeker,
+    size_t size)
+    : ar_(caffe2::make_unique<mz_zip_archive>()),
+      in_(caffe2::make_unique<FuncAdapter>(in, seeker, size)) {
   init();
 }
 

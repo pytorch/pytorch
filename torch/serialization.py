@@ -207,6 +207,44 @@ class _open_file_like(object):
             self.file_like.close()
 
 
+class _open_zipfile_writer(_open_file_like):
+    def open_path(self):
+        return torch._C.PyTorchFileWriter(self.fname)
+
+    def open_handle(self):
+        def write(capsule, size):
+            self.buffer.write(torch._C.make_bytes(capsule, size))
+            return size
+        return torch._C.PyTorchFileWriter(write)
+
+    def __exit__(self, *args):
+        self.file_like.write_end_of_file()
+        if not self.is_path:
+            # If this is writing to a buffer, flush it after everything is done
+            self.buffer.flush()
+
+
+class _open_zipfile_reader(_open_file_like):
+    def open_path(self):
+        return torch._C.PyTorchFileReader(self.fname)
+
+    def open_handle(self):
+        def reader(capsule, size):
+            the_bytes = self.buffer.read(size)
+            torch._C.read_into(capsule, the_bytes)
+            return len(the_bytes)
+
+        def seeker(pos):
+            return self.buffer.seek(pos)
+
+        self.buffer.seek(0, os.SEEK_END)
+        size = self.buffer.tell()
+        return torch._C.PyTorchFileReader(reader, seeker, size)
+
+    def __exit__(self, *args):
+        pass
+
+
 def _is_compressed_file(f):
     compress_modules = ['gzip']
     try:
