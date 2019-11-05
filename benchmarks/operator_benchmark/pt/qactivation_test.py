@@ -46,8 +46,11 @@ class QReLUBenchmark(op_bench.TorchBenchmarkBase):
         else:
             zero_point = 0
             qinfo = torch.iinfo(dtype)
-            fmin, fmax = f_input.min(), f_input.max()
-            scale = (fmax - fmin).item() / (qinfo.max - qinfo.min)
+            fmin, fmax = f_input.min().item(), f_input.max().item()
+            if fmax == fmin:
+                scale = 1.0
+            else:
+                scale = (fmax - fmin) / (qinfo.max - qinfo.min)
 
         # Quantize the tensor
         self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
