@@ -55,10 +55,10 @@ fi
 
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
-if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu100" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
-  export PYTORCH_BUILD_VERSION="1.3.0.dev$DATE"
+if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu101" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
+  export PYTORCH_BUILD_VERSION="1.3.1"
 else
-  export PYTORCH_BUILD_VERSION="1.3.0.dev$DATE+$DESIRED_CUDA"
+  export PYTORCH_BUILD_VERSION="1.3.1+$DESIRED_CUDA"
 fi
 export PYTORCH_BUILD_NUMBER=1
 
