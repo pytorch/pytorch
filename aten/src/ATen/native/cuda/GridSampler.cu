@@ -661,7 +661,7 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
   auto grad_grid = at::empty_like(grid, at::MemoryFormat::Contiguous);
   int count = static_cast<int>(N * H * W);
   if (count > 0) {
@@ -691,7 +691,7 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   auto D = grid.size(1);
   auto H = grid.size(2);
   auto W = grid.size(3);
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
   auto grad_grid = at::empty_like(grid, at::MemoryFormat::Contiguous);
   int count = static_cast<int>(N * D * H * W);
   if (count > 0) {

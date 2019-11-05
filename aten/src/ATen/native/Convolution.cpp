@@ -802,7 +802,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    ggO = at::zeros_like(gO);
+    ggO = at::zeros_like(gO, at::MemoryFormat::Contiguous);
   }
 
   if (ggb.defined()) {
@@ -893,7 +893,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    gW = at::zeros_like(weight);
+    gW = at::zeros_like(weight, at::MemoryFormat::Contiguous);
   }
 
   // Compute gI = convT(ggW, gO.t()) if !transposed
@@ -982,12 +982,12 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
       }
     }
   } else {
-    gI = at::zeros_like(input);
+    gI = at::zeros_like(input, at::MemoryFormat::Contiguous);
   }
 
-  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO);
-  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input);
-  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight);
+  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO, at::MemoryFormat::Contiguous);
+  if (output_mask[1] && !gI.defined()) gI = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  if (output_mask[2] && !gW.defined()) gW = at::zeros_like(weight, at::MemoryFormat::Contiguous);
 
   return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
 }
