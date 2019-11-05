@@ -349,6 +349,12 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: CELU
     :members:
 
+:hidden:`GELU`
+~~~~~~~~~~~~~~
+
+.. autoclass:: GELU
+    :members:
+
 :hidden:`Sigmoid`
 ~~~~~~~~~~~~~~~~~
 
