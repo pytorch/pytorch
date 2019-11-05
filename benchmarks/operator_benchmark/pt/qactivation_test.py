@@ -55,9 +55,9 @@ class QReLUBenchmark(op_bench.TorchBenchmarkBase):
                                                  dtype=dtype)
         if permute_dims:
             # Make non-contiguous
-            dims = list(dims)
-            random.shuffle(dims)
-            self.q_input = self.q_input.permute(dims)
+            new_shape = list(range(len(self.q_input.shape)))
+            random.shuffle(new_shape)
+            self.q_input = self.q_input.permute(new_shape)
 
         self.set_module_name("QReLU")
 
