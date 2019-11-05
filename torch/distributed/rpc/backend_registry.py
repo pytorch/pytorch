@@ -48,6 +48,8 @@ def process_group_init_backend_handler(
     *args,
     **kwargs
 ):
+    from . import ProcessGroupAgent
+
     # Initialize ProcessGroup.
     if dist.is_initialized():
         raise RuntimeError(
@@ -76,7 +78,7 @@ def process_group_init_backend_handler(
                 )
             )
         # TODO: add try-except and destroy _agent in all processes if any fails.
-        return dist.ProcessGroupAgent(self_name, group, num_send_recv_threads, kwargs["rpc_timeout"])
+        return ProcessGroupAgent(self_name, group, num_send_recv_threads, kwargs["rpc_timeout"])
     except Exception as ex:
         dist.destroy_process_group()
         raise ex
