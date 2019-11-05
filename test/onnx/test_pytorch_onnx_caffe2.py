@@ -15,8 +15,10 @@ from torch import nn
 from torch.autograd import Variable, function
 import torch.utils.model_zoo as model_zoo
 from torch.nn.utils import rnn as rnn_utils
+import torch.nn.quantized as nnq
 from debug_embed_params import run_embed_params
 import io
+import os
 
 # Import various models for testing
 from torchvision.models.alexnet import alexnet
@@ -336,7 +338,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail) 
+        # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
         onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
@@ -379,7 +381,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail) 
+        # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
         onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
@@ -420,7 +422,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
 
         # test that the model still runs with a different batch size
         # (save the model with a batch_size of 1 with rnn with a variable batch size,
-        # othewise expand will fail) 
+        # othewise expand will fail)
         variable_batch_size_init_input = make_input(1)
         onnxir, _ = do_export(model, variable_batch_size_init_input, keep_initializers_as_inputs=True)
         other_input = make_input(RNN_BATCH_SIZE + 1)
@@ -1489,7 +1491,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(16, 3, 256, 256)
         self.run_model_test(ReduceSumMultipleAxes(), train=False, input=(x,), batch_size=BATCH_SIZE, use_gpu=False)
 
-    # InstanceNorm model (used in the subgraph) includes unused weights, 
+    # InstanceNorm model (used in the subgraph) includes unused weights,
     # so skip this in TestCaffe2BackendEmbed
     @skipIfEmbed
     def test_group_norm(self):
@@ -2436,6 +2438,55 @@ TestCaffe2BackendEmbed_opset10 = type(str("TestCaffe2BackendEmbed_opset10"),
                                       (unittest.TestCase,),
                                       dict(TestCaffe2Backend_opset9.__dict__,
                                            embed_params=True, opset_version=10))
+
+
+class TestQuantizedOps(unittest.TestCase):
+    def generic_test(self, model, sample_inputs):
+        model.qconfig = torch.quantization.default_qconfig
+        q_model = torch.quantization.prepare(model, inplace=False)
+        q_model = torch.quantization.convert(q_model, inplace=False)
+        torch.onnx.export(q_model, sample_inputs, os.path.join("model.onnx"), operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+
+    def generic_unary_test(self, op):
+        class QModule(torch.nn.Module):
+            def __init__(self, op):
+                super(QModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.op = op
+
+            def forward(self, x):
+                return self.op(self.quant1(x))
+
+        self.generic_test(QModule(op), (torch.tensor([[3.0, 4.0]])))
+
+    def test_quantized_add(self):
+        class QAddModule(torch.nn.Module):
+            def __init__(self):
+                super(QAddModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.quant2 = torch.quantization.QuantStub()
+
+            def forward(self, x, y):
+                return torch.ops.quantized.add(self.quant1(x), self.quant2(y), 1.0, 0)
+
+        self.generic_test(QAddModule(), (torch.tensor(3.0), torch.tensor(4.0)))
+
+    def test_quantized_relu(self):
+        self.generic_unary_test(torch.nn.ReLU())
+
+    def test_quantized_linear(self):
+        class QLinear(torch.nn.Module):
+            @staticmethod
+            def forward(x, y):
+                qx = torch.quantize_per_tensor(x, 1.0, 0, torch.quint8)
+                qlinear = nnq.Linear(2, 2)
+                weight = torch.quantize_per_tensor(y, 1.0, 0, torch.qint8)
+                bias = torch.ones(2).to(torch.float)
+                out = qlinear(qx)
+                return out.dequantize()
+        x = torch.ones(2, 2, 2, 2)
+        y = torch.ones(2, 2)
+        torch.onnx.export(QLinear(), (x, y), os.path.join("model.onnx"), operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
 
 if __name__ == '__main__':

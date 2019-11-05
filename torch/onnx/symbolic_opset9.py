@@ -2040,11 +2040,18 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     axes = [i for i in range(1, len(input_sizes) - 1)]
     return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
 
+@parse_args('v', 'f', 'i', 't')
 def quantize_per_tensor(g, input, scale, zero_point, dtype):
-    return g.op("_caffe2::Int8Quantize", input, scale, zero_point)
+    kwargs = {
+        "Y_scale_f": scale,
+        "zero_point_i": zero_point,
+    }
+    return g.op("_caffe2::Int8Quantize", input, **kwargs)
 
+@parse_args('v')
 def dequantize(g, input):
     return g.op("_caffe2::Int8Dequantize", input)
 
+@parse_args('v', 't', 't', 't', 't', 't', 't', 't')
 def _empty_affine_quantized(g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout):
     return input
