@@ -505,8 +505,8 @@ PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs,
   PyObject* ret = nullptr;
   // there must be at least one overloaded argument at this point, since r.has_torch_function() is true
   // so ret will never be returned unset
-  for (auto it = r.overloaded_args.begin(); it != r.overloaded_args.end(); ++it) {
-    PyObject* torch_function = PyObject_FastGetAttrString(*it, "__torch_function__");
+  for (auto arg : r.overloaded_args) {
+    PyObject* torch_function = PyObject_FastGetAttrString(arg, "__torch_function__");
     ret = PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
     if (ret != Py_NotImplemented) {
       return ret;
