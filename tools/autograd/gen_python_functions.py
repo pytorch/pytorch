@@ -89,9 +89,9 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 """)
 
 TORCH_FUNCTION_CHECK = """\
-  if(r.has_torch_function()){
-    return handle_torch_function(r, args, kwargs, THPVariableFunctions);
-  }
+if(r.has_torch_function()) {
+  return handle_torch_function(r, args, kwargs, THPVariableFunctions);
+}
 """
 
 PY_VARIABLE_FUNCTION_VARARGS_FORWARD_DECLARATION = CodeTemplate("""\
