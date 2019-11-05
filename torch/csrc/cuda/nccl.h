@@ -64,7 +64,7 @@ TORCH_API void broadcast(
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
-size_t get_max_count();
+TORCH_API size_t get_max_count();
 
 TORCH_API void reduce(
     const std::vector<at::Tensor>& inputs,
