@@ -130,7 +130,15 @@ class RNNBase(Module):
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)
+
+        # Resets _flat_weights
+        # Note: be v. careful before removing this, as 3rd party device types
+        # likely rely on this behavior to properly .to() modules like LSTM.
+        self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names]
+
+        # Flattens params (on CUDA)
         self.flatten_parameters()
+
         return ret
 
     def reset_parameters(self):

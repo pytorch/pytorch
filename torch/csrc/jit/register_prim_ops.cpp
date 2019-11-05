@@ -25,6 +25,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <bitset>
@@ -931,15 +932,26 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::AutogradAnyNonZero,
+         "prim::AutogradAnyNonZero(...) -> int",
          [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
-           return [=](Stack& stack) {
+           return [num_inputs](Stack& stack) {
              bool result = false;
-             for (const IValue& t : last(stack, num_inputs)) {
-               if (t.toTensor().defined()) {
-                 result = true;
-                 break;
+             for (const IValue& v : last(stack, num_inputs)) {
+               if (v.isTensor()) {
+                 if (v.toTensor().defined()) {
+                   result = true;
+                   break;
+                 }
+               } else if (v.isTensorList()) {
+                 for (const at::Tensor& t : v.toTensorListRef()) {
+                   result = true;
+                 }
+                 if (result) {
+                   break;
+                 }
+               } else {
+                 TORCH_INTERNAL_ASSERT(false);
                }
              }
              drop(stack, num_inputs);
@@ -947,18 +959,25 @@ RegisterOperators reg(
              return 0;
            };
          },
-         aliasAnalysisSpecialCase()),
+         aliasAnalysisFromSchema()),
      Operator(
          prim::AutogradAdd,
          [](Stack& stack) {
            at::Tensor a, b;
            pop(stack, a, b);
-           if (!a.defined())
-             stack.emplace_back(b);
-           else if (!b.defined())
+           if (!a.defined() && !b.defined()) {
+             // undef + undef == undef
              stack.emplace_back(a);
-           else
+           }
+           else if (!a.defined()) {
+             stack.emplace_back(b);
+           }
+           else if (!b.defined()) {
+             stack.emplace_back(a);
+           }
+           else {
              stack.emplace_back(a + b);
+           }
            return 0;
          },
          aliasAnalysisSpecialCase()),
