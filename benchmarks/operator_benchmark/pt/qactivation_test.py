@@ -29,8 +29,8 @@ qactivation_configs = op_bench.cross_product_configs(
 )
 
 
-r"""Base class for all the activations."""
 class _ActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
+    r"""Base class for all the activations."""
     def setup(self, dims, permute_dims, dtype):
         # Input dimensions
         f_input = (torch.rand(*dims) - 0.5) * 1e6
