@@ -80,41 +80,22 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
   ${unpack_self}
   ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-
+  ${check_has_torch_function}
   ${declare_namedtuple_return_types}
   ${dispatch}
-
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 """)
 
-PY_VARIABLE_FUNCTION_VARARGS_FORWARD_DECLARATION = CodeTemplate("""\
-static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs);
-""")
-
-# Check for __torch_function__ overrides
-PY_VARIABLE_FUNCTION_VARARGS = CodeTemplate("""\
-static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    ${signatures}
-  }, /*traceable=*/${traceable});
-  ${unpack_self}
-  ParsedArgs<${max_args}> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-
-  // Check for __torch_function__ overrides
+TORCH_FUNCTION_CHECK = """\
   if(r.has_torch_function()){
     return handle_torch_function(r, args, kwargs, THPVariableFunctions);
   }
+"""
 
-  ${declare_namedtuple_return_types}
-  ${dispatch}
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
+PY_VARIABLE_FUNCTION_VARARGS_FORWARD_DECLARATION = CodeTemplate("""\
+static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs);
 """)
 
 PY_VARIABLE_METHOD_NOARGS = CodeTemplate("""\
@@ -757,6 +738,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             'unpack_self': [],
             'dispatch': [],
             'declare_namedtuple_return_types': '',
+            'check_has_torch_function': '',
         }
 
         if has_self:
@@ -798,8 +780,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['pycfunc_voidcast'] = '(void(*)(void))'
 
         if not is_module and not has_self:
-            tmpl = PY_VARIABLE_FUNCTION_VARARGS
             env['flags'] += ' | METH_STATIC'
+            env['check_has_torch_function'] = TORCH_FUNCTION_CHECK
             py_signatures.append(PY_VARIABLE_FUNCTION_VARARGS_FORWARD_DECLARATION.substitute(env))
 
         py_methods.append(tmpl.substitute(env))
