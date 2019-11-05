@@ -13,13 +13,14 @@ import operator_benchmark as op_bench
 
 r"""Microbenchmarks for the quantized activations."""
 
-qrelu_configs = op_bench.cross_product_configs(
+qactivation_configs = op_bench.cross_product_configs(
     dims=(
         (1,), (1, 1), (1, 1, 1),     # Single element
         (2, 1), (1, 2),              # Rank=2 row-/col-major
         (3, 4, 5),                   # Rank=3
         (1, 3, 4, 5), (2, 3, 4, 5),  # Rank=4, batch=1, batch>1
         (4, 1, 1, 1),                # Rank=4, all other single dimensions
+        (2, 1, 2, 1, 2, 1),          # Rank>4
     ),
     permute_dims=(False, True),
     inplace=(False, True),
@@ -28,10 +29,8 @@ qrelu_configs = op_bench.cross_product_configs(
 )
 
 
-class QReLUBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, dims, permute_dims, inplace, dtype):
-        self.qop = nnq.ReLU(inplace=inplace)
-
+class _ActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
+    def setup(self, dims, permute_dims, dtype):
         # Input dimensions
         f_input = (torch.rand(*dims) - 0.5) * 1e6
 
@@ -62,12 +61,19 @@ class QReLUBenchmark(op_bench.TorchBenchmarkBase):
             random.shuffle(new_shape)
             self.q_input = self.q_input.permute(new_shape)
 
-        self.set_module_name("QReLU")
-
     def forward(self):
         return self.qop(self.q_input)
 
-op_bench.generate_pt_test(qrelu_configs, QReLUBenchmark)
+
+class QReLUBenchmark(_ActivationBenchmarkBase):
+    def init(self, dims, permute_dims, inplace, dtype):
+        super(QReLUBenchmark, self).setup(dims, permute_dims, dtype)
+        self.qop = nnq.ReLU(inplace=inplace)
+        self.set_module_name("QReLU")
+
+
+op_bench.generate_pt_test(qactivation_configs, QReLUBenchmark)
+
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
