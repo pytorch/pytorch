@@ -10,14 +10,17 @@ std::string getNcclVersion() {
   std::call_once(ncclGetVersionFlag, []() {
     int version;
     ncclResult_t status = ncclGetVersion(&version);
-    if (status != ncclSuccess) {
+    // can't compute the version if call did not return successfully or version
+    // code < 100 (corresponding to 0.1.0)
+    if (status != ncclSuccess || version < 100) {
       versionString = "Unknown NCCL version";
+    } else {
+      auto ncclMajor = version / 1000;
+      auto ncclMinor = (version % 1000) / 100;
+      auto ncclPatch = version % (ncclMajor * 1000 + ncclMinor * 100);
+      versionString = std::to_string(ncclMajor) + "." +
+          std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
     }
-    auto ncclMajor = version / 1000;
-    auto ncclMinor = (version % 1000) / 100;
-    auto ncclPatch = version % (ncclMajor * 1000 + ncclMinor * 100);
-    versionString = std::to_string(ncclMajor) + "." +
-        std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
   });
 
   return versionString;

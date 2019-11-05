@@ -81,6 +81,7 @@ struct CAFFE2_API Type : std::enable_shared_from_this<Type> {
   // from the python_str() that describes the type. For instance it is clear that `int <: str` is false
   // but not clear why `Foo <: InterfaceBar` might be false.
   virtual bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const;
+  virtual bool is_module() const;
   bool isSubtypeOf(const TypePtr rhs) const {
     return isSubtypeOfExt(rhs, nullptr);
   }
@@ -556,6 +557,12 @@ struct CAFFE2_API TensorType : public Type {
     return r;
   }
 
+  TensorTypePtr withPossiblyUndefined() {
+    auto r = clone();
+    r->undefined_ = c10::nullopt;
+    return r;
+  }
+
   c10::optional<bool> undefined() const { return undefined_; }
 
   static TensorTypePtr get();
@@ -563,29 +570,37 @@ struct CAFFE2_API TensorType : public Type {
   static const TypeKind Kind = TypeKind::TensorType;
 
  private:
-   TensorType(const at::Tensor &tensor)
-       : Type(TypeKind::TensorType), scalar_type_(tensor.scalar_type()),
-         device_(tensor.device()), sizes_(tensor.sizes().size()),
-         strides_(tensor.sizes().size()),
-         requires_grad_(tensor.requires_grad()), undefined_(false) {
-     if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
-       sizes_ = tensor.sizes().vec();
-       strides_ = tensor.strides().vec();
-     }
-        }
-        TensorType(c10::optional<at::ScalarType> scalar_type,
-                   c10::optional<Device> device, const VaryingShape &sizes,
-                   const VaryingStrides &strides,
-                   c10::optional<bool> requires_grad,
-                   c10::optional<bool> undefined = false)
-            : Type(TypeKind::TensorType), scalar_type_(scalar_type),
-              device_(device), sizes_(sizes), strides_(strides),
-              requires_grad_(requires_grad), undefined_(undefined) {}
+  TensorType(const at::Tensor& tensor)
+      : Type(TypeKind::TensorType),
+        scalar_type_(tensor.scalar_type()),
+        device_(tensor.device()),
+        sizes_(tensor.sizes().size()),
+        strides_(tensor.sizes().size()),
+        requires_grad_(tensor.requires_grad()),
+        undefined_(!tensor.defined()) {
+    if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
+      sizes_ = tensor.sizes().vec();
+      strides_ = tensor.strides().vec();
+    }
+  }
+  TensorType(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      const VaryingShape& sizes,
+      const VaryingStrides& strides,
+      c10::optional<bool> requires_grad,
+      c10::optional<bool> undefined = false)
+      : Type(TypeKind::TensorType),
+        scalar_type_(scalar_type),
+        device_(device),
+        sizes_(sizes),
+        strides_(strides),
+        requires_grad_(requires_grad),
+        undefined_(undefined) {}
 
-        TensorTypePtr clone() const {
-          return TensorTypePtr(new TensorType(scalar_type_, device_, sizes_,
-                                              strides_, requires_grad_,
-                                              undefined_));
+  TensorTypePtr clone() const {
+    return TensorTypePtr(new TensorType(
+        scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
   }
 
   static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
@@ -782,24 +797,33 @@ private:
   c10::optional<QualifiedName> name_;
 };
 
+// Any should never appear in a named type like a class, namedtuple or
+// interface. If it does, then dynamic type information will be lost in the
+// Pickler, leading to hard-to-track-down bugs that will only occur
+// after saving or loading a model. This is because we rely on the
+// static types in named types to reconstruct type tags of loaded
+// values. Lifting this restriction requires solving the serialization
+// problem first.
+CAFFE2_API void checkNoAny(
+    const Type& base,
+    const char* what,
+    const std::string& attrname,
+    const TypePtr& attrtype);
+
 struct TupleType;
 using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct CAFFE2_API TupleType : public NamedType {
-  static std::shared_ptr<FunctionSchema> namedTupleSchemaFromNamesAndTypes(
-      c10::QualifiedName,
-      std::vector<std::string>,
-      std::vector<TypePtr>);
-
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<std::string>& field_names,
+      const std::vector<TypePtr>& types);
   static TupleTypePtr create(
-      std::vector<TypePtr> types,
-      c10::optional<c10::QualifiedName> name = c10::nullopt,
-      std::shared_ptr<FunctionSchema> schema = nullptr) {
+      std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
         std::move(types),
-        std::move(name),
-        std::move(schema))); // NOLINT(modernize-make-shared)
+        c10::nullopt,
+        nullptr)); // NOLINT(modernize-make-shared)
   }
 
   at::ArrayRef<TypePtr> elements() const {
@@ -819,7 +843,8 @@ struct CAFFE2_API TupleType : public NamedType {
   }
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
-    return create(std::move(contained_types));
+    return std::shared_ptr<TupleType>(
+        new TupleType(std::move(contained_types), name(), schema()));
   }
   const std::shared_ptr<FunctionSchema>& schema() const {
     return schema_;
@@ -1191,6 +1216,8 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
 
+CAFFE2_API c10::optional<TypePtr> unifyTypeList(at::ArrayRef<TypePtr> elements);
+
 namespace detail {
 template <typename T>
 struct getTypePtr_ final {
@@ -1304,10 +1331,6 @@ inline TypePtr getTypePtr() {
   return detail::getTypePtr_<T>::call();
 }
 
-CAFFE2_API TypePtr incompleteInferTypeFrom(const IValue& value);
-CAFFE2_API TypePtr attemptToRecoverType(const IValue& input_ivalue);
-CAFFE2_API bool isSubvalueOf(const IValue& input_ivalue, TypePtr type);
-
 using TypeEnv = std::unordered_map<std::string, TypePtr>;
 struct MatchTypeReturn {
   MatchTypeReturn(std::string reason) : reason_(std::move(reason)) {}
@@ -1340,6 +1363,7 @@ matchTypeVariables(TypePtr formal, TypePtr actual, TypeEnv& type_env);
 // `type_env`. Returns nullptr if a variable used in `type`
 // does not appear in `type_env`
 CAFFE2_API TypePtr tryEvalTypeVariables(TypePtr type, TypeEnv& type_env);
+
 
 /**
  * User Defined Types
@@ -1407,9 +1431,7 @@ struct CAFFE2_API ClassType : public NamedType {
 
   Function* getMethod(const std::string& name) const;
   const std::vector<Function*>& methods() const;
-  void addMethod(Function* method) {
-    methods_.push_back(method);
-  }
+  void addMethod(Function* method);
 
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
@@ -1510,7 +1532,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return ptr;
   }
 
-  bool is_module() const {
+  bool is_module() const override {
     return bool(parameterSlots_);
   }
   bool is_parameter(size_t slot) const {
@@ -1548,7 +1570,6 @@ struct CAFFE2_API ClassType : public NamedType {
 
 };
 
-
 struct InterfaceType;
 using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
 using ::torch::jit::script::CompilationUnit;
@@ -1556,9 +1577,14 @@ using ::torch::jit::Function;
 
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.
+
+// Subtype relations for Interface with ClassType:
+// lhs (ClassType or InterfaceType) is a subtype of rhs if:
+// 1. lhs methods are a superset of rhs methods
+// 2. if rhs is module interface, the lhs must be module interface or module itself
 struct CAFFE2_API InterfaceType : public NamedType {
   static InterfaceTypePtr create(
-      QualifiedName qualifiedName);
+      QualifiedName qualifiedName, bool is_module=false);
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<InterfaceType>()) {
@@ -1584,14 +1610,20 @@ struct CAFFE2_API InterfaceType : public NamedType {
   const std::vector<FunctionSchema>& methods() {
     return *methods_;
   }
+
+  bool is_module() const override{
+    return is_module_;
+  }
   static const TypeKind Kind = TypeKind::InterfaceType;
   ~InterfaceType() override;
  private:
-  InterfaceType(QualifiedName name);
+  InterfaceType(QualifiedName name, bool is_module);
 
   // shared_ptr so that this header does not have to depend on
   // FunctionSchema.h
   std::shared_ptr<std::vector<FunctionSchema>> methods_;
+  // flag to distinguish if it's an interface type from a module or not
+  bool is_module_;
 };
 
 } // namespace c10

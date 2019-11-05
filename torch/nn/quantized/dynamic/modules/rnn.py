@@ -185,7 +185,6 @@ class RNNBase(torch.nn.Module):
             self.dropout,
             self.bidirectional,
             self._all_weight_names,
-            self.__overloads__,
             self.training,
             self.dtype,
         )
@@ -209,9 +208,8 @@ class RNNBase(torch.nn.Module):
         self.dropout = vals[6]
         self.bidirectional = vals[7]
         self._all_weight_names = vals[8]
-        self.__overloads__ = vals[9]
-        self.training = vals[10]
-        self.dtype = vals[11]
+        self.training = vals[9]
+        self.dtype = vals[10]
 
         self._all_weight_values = []
         for i in range(len(self._all_weight_names)):
@@ -229,7 +227,7 @@ class RNNBase(torch.nn.Module):
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.QConfig import default_dynamic_qconfig
+            from torch.quantization.qconfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
 
         dtype = weight_observer.dtype

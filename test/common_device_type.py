@@ -1,4 +1,5 @@
 import inspect
+import threading
 from functools import wraps
 import unittest
 import torch
@@ -123,6 +124,18 @@ device_type_test_bases = []
 class DeviceTypeTestBase(TestCase):
     device_type = 'generic_device_type'
 
+    # Precision is a thread-local setting since it may be overriden per test
+    _tls = threading.local()
+    _tls.precision = TestCase.precision
+
+    @property
+    def precision(self):
+        return self._tls.precision
+
+    @precision.setter
+    def precision(self, prec):
+        self._tls.precision = prec
+
     # Returns a string representing the device that single device tests should use.
     # Note: single device tests use this device exclusively.
     @classmethod
@@ -145,6 +158,11 @@ class DeviceTypeTestBase(TestCase):
         if not hasattr(test, 'dtypes'):
             return None
         return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
+
+    def _get_precision_override(self, test, dtype):
+        if not hasattr(test, 'precision_overrides'):
+            return self.precision
+        return test.precision_overrides.get(dtype, self.precision)
 
     # Creates device-specific tests.
     @classmethod
@@ -170,7 +188,16 @@ class DeviceTypeTestBase(TestCase):
                 @wraps(test)
                 def instantiated_test(self, test=test, dtype=dtype):
                     device_arg = cls.get_primary_device() if not hasattr(test, 'num_required_devices') else cls.get_all_devices()
-                    return test(self, device_arg, dtype)
+                    # Sets precision and runs test
+                    # Note: precision is reset after the test is run
+                    guard_precision = self.precision
+                    try :
+                        self.precision = self._get_precision_override(test, dtype)
+                        result = test(self, device_arg, dtype)
+                    finally:
+                        self.precision = guard_precision
+
+                    return result
 
                 setattr(cls, dtype_test_name, instantiated_test)
 
@@ -362,6 +389,37 @@ class deviceCountAtLeast(object):
             return fn(slf, devices, *args, **kwargs)
 
         return multi_fn
+
+
+# Specifies per-dtype precision overrides.
+# Ex.
+#
+# @precisionOverride(torch.half : 1e-2, torch.float : 1e-4)
+# @dtypes(torch.half, torch.float, torch.double)
+# def test_X(self, device, dtype):
+#   ...
+#
+# When the test is instantiated its class's precision will be set to the
+# corresponding override, if it exists.
+# self.precision can be accessed directly, and it also controls the behavior of
+# functions like self.assertEqual().
+#
+# Note that self.precision is a scalar value, so if you require multiple
+# precisions (or are working with multiple dtypes) they should be specified
+# explicitly and computed using self.precision (e.g.
+# self.precision *2, max(1, self.precision)).
+class precisionOverride(object):
+
+    def __init__(self, d):
+        assert isinstance(d, dict), "precisionOverride not given a dtype : precision dict!"
+        for dtype, prec in d.items():
+            assert isinstance(dtype, torch.dtype), "precisionOverride given unknown dtype {0}".format(dtype)
+
+        self.d = d
+
+    def __call__(self, fn):
+        fn.precision_overrides = self.d
+        return fn
 
 
 # Decorator that instantiates a variant of the test for each given dtype.

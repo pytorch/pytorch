@@ -40,9 +40,9 @@ class Quantize(Module):
 
     @staticmethod
     def from_float(mod):
-        assert hasattr(mod, 'observer')
-        scale, zero_point = mod.observer.calculate_qparams()
-        return Quantize(scale.float().item(), zero_point.long().item(), mod.observer.dtype)
+        assert hasattr(mod, 'activation_post_process')
+        scale, zero_point = mod.activation_post_process.calculate_qparams()
+        return Quantize(scale.float().item(), zero_point.long().item(), mod.activation_post_process.dtype)
 
     def extra_repr(self):
         return 'scale={}, zero_point={}, dtype={}'.format(self.scale, self.zero_point, self.dtype)
@@ -182,7 +182,6 @@ class Linear(torch.nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
-        # type: (Tuple[int, int, Optional[torch.Tensor], torch.Tensor, float, int, bool]) -> None
         self.in_features = state[0]
         self.out_features = state[1]
         self.set_weight_bias(state[3], state[2])
@@ -217,22 +216,22 @@ class Linear(torch.nn.Module):
         """
         if hasattr(mod, 'weight_fake_quant'):
             # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
-            weight_observer = mod.weight_fake_quant
-            activation_observer = mod.observer
+            weight_post_process = mod.weight_fake_quant
+            activation_post_process = mod.activation_post_process
         else:
             assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
                 cls._FLOAT_MODULE.__name__
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             if type(mod) == nni.LinearReLU:
-                activation_observer = mod[1].observer
+                activation_post_process = mod[1].activation_post_process
                 mod = mod[0]
             else:
-                activation_observer = mod.observer
-            weight_observer = mod.qconfig.weight()
-            weight_observer(mod.weight)
-        act_scale, act_zp = activation_observer.calculate_qparams()
-        assert weight_observer.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
-        qweight = _quantize_weight(mod.weight.float(), weight_observer)
+                activation_post_process = mod.activation_post_process
+            weight_post_process = mod.qconfig.weight()
+            weight_post_process(mod.weight)
+        act_scale, act_zp = activation_post_process.calculate_qparams()
+        assert weight_post_process.dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
+        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qlinear = cls(mod.in_features, mod.out_features)
         qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)

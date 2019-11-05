@@ -159,7 +159,7 @@ class TransformerEncoder(Module):
         self.norm = norm
 
     def forward(self, src, mask=None, src_key_padding_mask=None):
-        r"""Pass the input through the endocder layers in turn.
+        r"""Pass the input through the encoder layers in turn.
 
         Args:
             src: the sequnce to the encoder (required).
@@ -269,7 +269,7 @@ class TransformerEncoderLayer(Module):
         self.activation = _get_activation_fn(activation)
 
     def forward(self, src, src_mask=None, src_key_padding_mask=None):
-        r"""Pass the input through the endocder layer.
+        r"""Pass the input through the encoder layer.
 
         Args:
             src: the sequnce to the encoder layer (required).

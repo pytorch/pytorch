@@ -220,11 +220,12 @@ class FunctionModifiers(object):
 
 def export(fn):
     """
-    This decorator indicates that a method is used as an entry point into a
-    ``ScriptModule`` and should be compiled. ``forward`` implicitly is assumbed to be an
-    entry point, so it does not need this decorator. Functions and methods
-    called from ``forward`` are compiled as they are seen, so they do not need
-    this decorator either.
+    This decorator indicates that a method on an ``nn.Module`` is used as an entry point into a
+    :class:`ScriptModule` and should be compiled.
+
+    ``forward`` implicitly is assumed to be an entry point, so it does not need this decorator.
+    Functions and methods called from ``forward`` are compiled as they are seen
+    by the compiler, so they do not need this decorator either.
 
     Example (using ``@torch.jit.export`` on a method):
 
@@ -415,7 +416,6 @@ def is_ignored_fn(fn):
     mod = get_torchscript_modifier(fn)
     return mod is FunctionModifiers.UNUSED or mod is FunctionModifiers.IGNORE
 
-
 def get_torchscript_modifier(fn):
     if not callable(fn):
         return None
@@ -423,18 +423,11 @@ def get_torchscript_modifier(fn):
         fn = fn.__func__
     return getattr(fn, '_torchscript_modifier', FunctionModifiers.DEFAULT)
 
-
-def _parameter_list(parameter_names_fn):
-    """
-    Decorator to denote that a function returns a list of all the parameters
-    in a module
-    """
-    def decorator(fn):
-        fn._parameter_names_fn = parameter_names_fn
-        return fn
-
-    return decorator
-
+def copy_torchscript_modifier(orig, new):
+    attr = get_torchscript_modifier(orig)
+    if attr is None:
+        return
+    new._torchscript_modifier = attr
 
 # overloading registration
 # overloads get registered in this file, and compiled in torch/jit/__init__.py
@@ -529,7 +522,7 @@ def _get_overloaded_methods(method, mod_class):
 
 try:
     import typing
-    from typing import Tuple, List, Dict, Optional
+    from typing import Tuple, List, Dict, Optional, Any
 
     def is_tuple(ann):
         # For some reason Python 3.7 violates the Type[A, B].__origin__ == Type rule
@@ -615,10 +608,14 @@ except ImportError:
         def __getitem__(self, types):
             return OptionalInstance(types)
 
+    class AnyCls(object):
+        pass
+
     Tuple = TupleCls()  # noqa: T484
     List = ListCls()  # noqa: T484
     Dict = DictCls()  # noqa: T484
     Optional = DictCls()  # noqa: T484
+    Any = AnyCls()  # noqa: T484
 
     def is_tuple(ann):
         return isinstance(ann, TupleInstance)

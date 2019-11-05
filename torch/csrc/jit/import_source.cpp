@@ -78,7 +78,7 @@ struct ConstantTableValue : public SugaredValue {
       const std::string& field) override {
     const char* field_s = field.c_str();
     char* end;
-    int64_t offset = std::strtoll(field_s + 1, &end, 10);
+    int64_t offset = strtoll(field_s + 1, &end, 10);
     if (field.size() < 2 || *end != 0)
       throw ErrorReport(loc) << "invalid constant specifier: " << field;
     if (offset < 0 || size_t(offset) >= constants_->size()) {
@@ -103,9 +103,12 @@ struct SourceImporterImpl : public Resolver,
   SourceImporterImpl(
       const std::shared_ptr<CompilationUnit> cu,
       const std::vector<at::Tensor>* tensor_table,
-      SourceLoader source_loader)
+      SourceLoader source_loader,
+      size_t version)
       : cu_(cu), source_loader_(std::move(source_loader)) {
     env_ = {
+        {"torch", std::make_shared<BuiltinModule>("aten", version)},
+        {"ops", std::make_shared<OpsValue>(version)},
         // Constants present in the model. Used to resolve "CONSTANTS.n" to the
         // actual value
         {"CONSTANTS", std::make_shared<ConstantTableValue>(tensor_table)},
@@ -160,7 +163,7 @@ struct SourceImporterImpl : public Resolver,
       return;
     }
     Parser p(src);
-    parseAndCheckVersionNumber(p.lexer());
+    parsePossibleVersionNumber(p.lexer());
 
     auto& L = p.lexer();
 
@@ -193,7 +196,7 @@ struct SourceImporterImpl : public Resolver,
     c10::QualifiedName prefix = mod.name();
     Parser p(src);
 
-    parseAndCheckVersionNumber(p.lexer());
+    parsePossibleVersionNumber(p.lexer());
 
     parseImports(p.lexer());
 
@@ -252,7 +255,9 @@ struct SourceImporterImpl : public Resolver,
       // ClassTypes)
       return importNamedTuple(qualified_name, class_def);
     } else if (superclass_name == "Interface") {
-      cu_->define_interface(qualified_name, class_def, shared_from_this());
+      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/false);
+    } else if (superclass_name == "ModuleInterface") {
+      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/true);
     } else {
       throw ErrorReport(class_def.range())
           << "Torchscript does not support class inheritance.";
@@ -387,47 +392,23 @@ struct SourceImporterImpl : public Resolver,
       field_types.emplace_back(std::move(type));
     }
 
-    auto tt = TupleType::create(
-        field_types,
-        qualified_name,
-        TupleType::namedTupleSchemaFromNamesAndTypes(
-            qualified_name, field_names, field_types));
+    auto tt = TupleType::createNamed(qualified_name, field_names, field_types);
     cu_->register_type(tt);
   }
 
-  void parseAndCheckVersionNumber(Lexer& L) {
-    size_t version = parseVersionNumber(L);
-    // note: this cannot be called in the constructor because it may throw
-    if (version > CURRENT_OP_VERSION_SET) {
-      throw ErrorReport(L.cur().range)
-          << "Attempting to load a script generated from a newer version of "
-          << "PyTorch. Maximum supported TorchScript version is "
-          << CURRENT_OP_VERSION_SET
-          << " but the script being loaded is version " << version;
+  void parsePossibleVersionNumber(Lexer& L) {
+    // Older versions of serialization produced an op_version_set string
+    // per-file We now just use a single version which is handled by
+    // PyTorchStreamReader. We used to check if op_version_set was _newer_ for
+    // forward compatibility reasons but now that it doesn't exist there can't
+    // be a newer one, so we just discard this.
+    if (L.cur().kind == TK_IDENT && L.cur().text() == "op_version_set") {
+      auto range = L.cur().range;
+      L.next();
+      L.expect('=');
+      std::string version_text = L.expect(TK_NUMBER).text();
+      L.expect(TK_NEWLINE);
     }
-    // version numbers are specified per-file as a historic artifact.
-    // There really should be a version per entire source archive.
-    // We work around this by using the first version number in the components
-    // that need versions
-    if (env_.count("torch") == 0) {
-      env_["torch"] = std::make_shared<BuiltinModule>("aten", version);
-      env_["ops"] = std::make_shared<OpsValue>(version);
-    }
-  }
-
-  size_t parseVersionNumber(Lexer& L) {
-    auto range = L.cur().range;
-    auto name = L.expect(TK_IDENT).text();
-    L.expect('=');
-    std::string version_text = L.expect(TK_NUMBER).text();
-    L.expect(TK_NEWLINE);
-    auto version = Const::create(L.cur().range, version_text);
-    if (name != "op_version_set")
-      throw ErrorReport(range) << "expected an assignment to op_version_set";
-    if (!version.isIntegral())
-      throw ErrorReport(range)
-          << "expected an integral version but found " << version.text();
-    return size_t(version.asIntegral());
   }
 
   // older versions of serialization required import statements,
@@ -484,11 +465,13 @@ SourceImporter::SourceImporter(
     // The compilation unit that will own the imported source
     std::shared_ptr<CompilationUnit> cu,
     const std::vector<at::Tensor>* tensor_table,
-    SourceLoader loader)
+    SourceLoader loader,
+    size_t version)
     : pImpl(std::make_shared<SourceImporterImpl>(
           std::move(cu),
           tensor_table,
-          std::move(loader))) {}
+          std::move(loader),
+          version)) {}
 
 TypePtr SourceImporter::loadNamedType(const QualifiedName& name) const {
   TypePtr t = pImpl->findNamedType(name);

@@ -67,7 +67,7 @@ class _BatchNorm(Module):
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:
-                self.num_batches_tracked += 1
+                self.num_batches_tracked = self.num_batches_tracked + 1
                 if self.momentum is None:  # use cumulative moving average
                     exponential_average_factor = 1.0 / float(self.num_batches_tracked)
                 else:  # use exponential moving average
@@ -435,7 +435,7 @@ class SyncBatchNorm(_BatchNorm):
             exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
-            self.num_batches_tracked += 1
+            self.num_batches_tracked = self.num_batches_tracked + 1
             if self.momentum is None:  # use cumulative moving average
                 exponential_average_factor = 1.0 / self.num_batches_tracked.item()
             else:  # use exponential moving average

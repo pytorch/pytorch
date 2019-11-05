@@ -316,7 +316,15 @@ Tensor& Module::register_parameter(
       "Parameter name must not contain a dot (got '",
       name,
       "')");
-  tensor.set_requires_grad(requires_grad);
+  if (!tensor.defined()) {
+    if (requires_grad) {
+      TORCH_WARN(
+        "An undefined tensor cannot require grad. ",
+        "Ignoring the `requires_grad=true` function parameter.");
+    }
+  } else {
+    tensor.set_requires_grad(requires_grad);
+  }
   return parameters_.insert(std::move(name), std::move(tensor));
 }
 

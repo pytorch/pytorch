@@ -8,6 +8,10 @@ class Dataset(Generic[T_co]):
     def __len__(self) -> int: ...
     def __add__(self, other: T_co) -> 'ConcatDataset[T_co]': ...
 
+class IterableDataset(Dataset[T_co]):
+    def __iter__(self) -> Iterable[T_co]: ...
+
+ 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     tensors: List[Tensor]
 

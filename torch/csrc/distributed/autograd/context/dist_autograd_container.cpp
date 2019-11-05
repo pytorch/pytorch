@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/autograd/context/dist_autograd_container.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 
 namespace torch {
 namespace distributed {
@@ -9,8 +10,10 @@ constexpr int kAutoIncrementBits = 48;
 constexpr int64_t kAutoIncrementMask = (1LL << kAutoIncrementBits) - 1;
 constexpr int kMaxWorkerId = 65535;
 
+constexpr int64_t kInvalidContextId = -1;
+
 // Each thread has a single autograd_context_id valid at any point in time.
-static thread_local int64_t current_context_id_ = -1;
+static thread_local int64_t current_context_id_ = kInvalidContextId;
 
 // Lock to ensure DistAutogradContainer is initialized only once.
 static std::mutex dist_container_init_lock_;
@@ -83,7 +86,15 @@ DistAutogradContext& DistAutogradContainer::getOrCreateContext(
   return context;
 }
 
+rpc::worker_id_t DistAutogradContainer::getWorkerId() const {
+  return worker_id_;
+}
+
 const DistAutogradContext& DistAutogradContainer::newContext() {
+  TORCH_CHECK(
+      current_context_id_ == kInvalidContextId,
+      "Already have an autograd context id for this thread.");
+
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   // Check for overflow into workerId_ section.
   TORCH_INTERNAL_ASSERT(next_context_id_ < max_id_);
@@ -100,7 +111,7 @@ const DistAutogradContext& DistAutogradContainer::newContext() {
 }
 
 bool DistAutogradContainer::hasValidContext() const {
-  return current_context_id_ != -1;
+  return current_context_id_ != kInvalidContextId;
 }
 
 DistAutogradContext& DistAutogradContainer::currentContext() {
@@ -118,17 +129,47 @@ DistAutogradContext& DistAutogradContainer::currentContext() {
   return it->second;
 }
 
+void DistAutogradContainer::releaseContextIfPresent(int64_t context_id) {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  // no-op if the context does not exist on this thread. This could happen if an
+  // in-flight RPC has already released the context on this thread.
+  if (autograd_context_.find(context_id) == autograd_context_.end()) {
+    return;
+  }
+  sendReleaseContextRpc(context_id);
+  eraseContextIdAndReset(context_id);
+}
+
 void DistAutogradContainer::releaseContext(int64_t context_id) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
+
   TORCH_CHECK(
       autograd_context_.find(context_id) != autograd_context_.end(),
       "Could not find autograd context with id: ",
       context_id);
+
+  sendReleaseContextRpc(context_id);
+  eraseContextIdAndReset(context_id);
+}
+
+void DistAutogradContainer::sendReleaseContextRpc(int64_t context_id) {
+  // notify other workers to clean up their contexts.
+  auto workerIds =
+      autograd_context_.find(context_id)->second.getKnownWorkerIds();
+  auto agent = rpc::RpcAgent::getDefaultRpcAgent();
+  for (const auto& worker_id : workerIds) {
+    agent->send(
+        agent->getWorkerInfo(worker_id),
+        CleanupAutogradContextReq(context_id).toMessage());
+  }
+}
+
+void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
   autograd_context_.erase(context_id);
 
   if (current_context_id_ == context_id) {
     // Reset the thread_local current context id, since it is no longer valid.
-    current_context_id_ = -1;
+    current_context_id_ = kInvalidContextId;
   }
 }
 
@@ -144,6 +185,17 @@ DistAutogradContext& DistAutogradContainer::retrieveContext(
 
 int64_t DistAutogradContainer::getMaxId() {
   return max_id_;
+}
+
+void DistAutogradContainer::setCurrentContextId(int64_t contextId) {
+  TORCH_INTERNAL_ASSERT(
+      current_context_id_ == kInvalidContextId,
+      "Already have an autograd context id for this thread.");
+  current_context_id_ = contextId;
+}
+
+void DistAutogradContainer::clearCurrentContext() {
+  current_context_id_ = -1;
 }
 
 } // namespace autograd

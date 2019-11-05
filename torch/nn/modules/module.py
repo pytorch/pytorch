@@ -249,7 +249,7 @@ class Module(object):
     def apply(self, fn):
         r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
-        (see also :ref:`torch-nn-init`).
+        (see also :ref:`nn-init-doc`).
 
         Args:
             fn (:class:`Module` -> None): function to be applied to each submodule
@@ -1159,3 +1159,11 @@ class Module(object):
         keys = [key for key in keys if not key[0].isdigit()]
 
         return sorted(keys)
+
+    def _replicate_for_data_parallel(self):
+        replica = self.__new__(type(self))
+        replica.__dict__ = self.__dict__.copy()
+        replica._parameters = replica._parameters.copy()
+        replica._buffers = replica._buffers.copy()
+        replica._modules = replica._modules.copy()
+        return replica

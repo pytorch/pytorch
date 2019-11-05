@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -486,9 +487,7 @@ struct Environment {
 
     if (!retval) {
       if (auto type = resolver->resolveType(ident, range)) {
-        if (auto class_type = type->cast<ClassType>()) {
-          retval = std::make_shared<script::ClassValue>(class_type);
-        } else if (auto tuple_type = type->cast<TupleType>()) {
+        if (auto tuple_type = type->cast<TupleType>()) {
           retval = std::make_shared<script::NamedTupleConstructor>(tuple_type);
         }
       }
@@ -496,6 +495,14 @@ struct Environment {
 
     if (!retval) {
       retval = resolver->resolveValue(ident, method, range);
+    }
+
+    if (!retval) {
+      if (auto type = resolver->resolveType(ident, range)) {
+        if (auto class_type = type->cast<ClassType>()) {
+          retval = std::make_shared<script::ClassValue>(class_type);
+        }
+      }
     }
 
     if (!retval && required) {
@@ -609,7 +616,7 @@ struct to_ir {
   std::vector<DefContext> def_stack_;
   size_t temp_name_count_ = 0;
   std::string createTempName(const std::string& prefix) {
-    return prefix + std::to_string(temp_name_count_++);
+    return prefix + c10::to_string(temp_name_count_++);
   }
 
   void pushFrame(Block* b, bool starts_def = false) {
@@ -1077,83 +1084,39 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
-  TypePtr emitInTempEnvironment(const std::function<TypePtr()>& fn) {
-    auto b = graph->insertNode(graph->create(prim::Loop))->addBlock();
-    pushFrame(b);
-    WithInsertPoint guard(b);
-    auto ret_type = fn();
-    popFrame();
-    b->owningNode()->destroy();
-    return ret_type;
-  }
-
-  // emit a single expr from the loop comprehension so that we can correctly
-  // type the list we create, then remove the nodes we emitted
-  TypePtr getListCompType(const ListComp& lc, const TypePtr type_ptr) {
-    return emitInTempEnvironment([&]() {
-      auto li_elem = graph->insertNode(graph->createUninitialized(type_ptr));
-      emitExprsAssign(
-          List<Expr>::create(lc.range(), {lc.target()}),
-          {std::make_shared<SimpleValue>(li_elem->output())},
-          lc.range(),
-          /*n_binders*/ 1);
-      return emitExpr(lc.elt())->type();
-    });
-  }
-
-  // emit a single index of the Iterable to get the children type
-  TypePtr getIterableChildrenType(const ListComp& lc, IterableTree& tree) {
-    return emitInTempEnvironment([&]() {
-      return tree.getitem(lc.range(), method, graph->insertConstant(0))->type();
-    });
-  }
-
-  Value* emitListComprehension(const ListComp& lc) {
-    const auto tmp_name = createTempName("$list_acc");
-    const auto sv = emitSugaredExpr(lc.iter(), 1);
-
-    TypePtr list_type;
-
-    auto siv = dynamic_cast<SimpleValue*>(sv.get());
-    if (siv && siv->getValue()->type()->cast<ListType>()) {
-      auto list_elem =
-          siv->getValue()->type()->cast<ListType>()->getElementType();
-      list_type = getListCompType(lc, list_elem);
-    } else if (auto iterable_tree = dynamic_cast<IterableTree*>(sv.get())) {
-      list_type =
-          getListCompType(lc, getIterableChildrenType(lc, *iterable_tree));
-    } else if (dynamic_cast<RangeValue*>(sv.get())) {
-      list_type = getListCompType(lc, IntType::get());
-    } else {
-      throw ErrorReport(lc.range())
-          << "iterator expression is expected to be a list, iterable, or "
-             "range, found "
-          << sv->kind();
-    }
-
-    // given `[x*2 for x in my_list]` this generates the following AST:
-    // __list_acc = []
-    // for x in my_list:
-    //  __list_acc.append(x*2)
-    const auto n =
-        graph->insertNode(graph->createList(list_type, at::ArrayRef<Value*>{}));
-    environment_stack->setVar(lc.range(), tmp_name, n->output());
-    const auto tmp_list_ident = Ident::create(lc.range(), tmp_name);
-    const auto tmp_list_var = Var::create(lc.range(), tmp_list_ident);
-    const auto append_ident = Ident::create(lc.range(), "append");
-    const auto dot_op = Select::create(lc.range(), tmp_list_var, append_ident);
-    const auto append_args_list = List<Expr>::create(lc.range(), {lc.elt()});
-    const auto append_attrs = List<Attribute>::create(lc.range(), {});
-    const auto apply_append =
-        Apply::create(lc.range(), dot_op, append_args_list, append_attrs);
-    const auto expr_stmt = ExprStmt::create(lc.range(), apply_append);
-    const auto stmt_list = List<Stmt>::create(lc.range(), {expr_stmt});
-    const auto iters_list = List<Expr>::create(lc.range(), {lc.iter()});
+  Value* emitListComprehension(const ListComp& lc, const TypePtr& type_hint) {
+    const auto loc = lc.range();
     const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
-    const auto for_loop =
-        For::create(lc.range(), targets_list, iters_list, stmt_list);
-    emitFor(for_loop);
-    return n->output();
+    const auto itrs = List<Expr>::create(lc.range(), {lc.iter()});
+
+    // If there is no type hint, and this is emitted over an iterable that is
+    // unrolled and of length 0, then we emit a List of tensors
+    Value* list_value = graph->insertNode(graph->create(prim::ListConstruct, 1))
+                            ->output()
+                            ->setType(ListType::ofTensors());
+    bool type_set = false;
+    if (type_hint) {
+      if (!type_hint->cast<ListType>()) {
+        throw ErrorReport(loc)
+            << "Expected list type annotation for list comprehension"
+               ", found "
+            << type_hint->python_str();
+      }
+      list_value->setType(type_hint);
+      type_set = true;
+    }
+    auto emit_body = [&]() {
+      auto comprehension_out = emitExpr(lc.elt());
+      if (!type_set) {
+        list_value->setType(ListType::create(comprehension_out->type()));
+        type_set = true;
+      }
+      NamedValue self = NamedValue(loc, "self", list_value);
+      NamedValue input = NamedValue(loc, "", comprehension_out);
+      emitBuiltinCall(loc, *graph, aten::append, {input}, {}, self);
+    };
+    emitFor(targets_list, itrs, loc, emit_body);
+    return list_value;
   }
 
   // Insert subtyping refinements
@@ -1555,7 +1518,7 @@ struct to_ir {
   // https://github.com/onnx/onnx/blob/master/docs/Operators.md#Loop
   void emitLoopCommon(
       SourceRange range,
-      const List<Stmt>& body,
+      const std::function<void()>& emit_body,
       const SugaredValuePtr& iter_val,
       c10::optional<List<Expr>> targets,
       c10::optional<Expr> cond) {
@@ -1596,7 +1559,8 @@ struct to_ir {
 
       // if the FOR iters and targets are present, emit FOR target assignments
       if (iter_val != nullptr && targets) {
-        Value* cur_elem = iter_val->getitem(range, method, trip_count);
+        Value* cur_elem = iter_val->getitem(range, method, trip_count)
+                              ->asValue(range, method);
         SugaredValuePtr sv = std::make_shared<SimpleValue>(cur_elem);
         List<Expr> target_exprs = targets.value();
         validateAssignLhsExpr(target_exprs, range);
@@ -1609,69 +1573,68 @@ struct to_ir {
         }
         emitExprsAssign(target_exprs, {sv}, range, /*n_binders=*/1);
       }
-
-      emitStatements(body);
-
+      emit_body();
       popFrame();
     }
   }
 
-  void emitFor(const For& stmt) {
-    auto targets = stmt.targets();
-    auto itrs = stmt.itrs();
-    auto body = stmt.body();
-    if (stmt.itrs().size() != 1) {
-      throw ErrorReport(stmt) << "List of iterables is not supported currently";
+  void emitUnrolledLoop(
+      const SourceRange& loc,
+      const std::function<void()>& emit_body,
+      SugaredValuePtr iterable,
+      const List<Expr>& targets) {
+    auto static_len = iterable->staticLen();
+    TORCH_INTERNAL_ASSERT(
+        static_len, "Unrolled loop iter should have static length");
+    int64_t len = *static_len;
+
+    // In order to support ModuleLists which return different types,
+    // as with an nn.Sequential which has a module that returns a Dict and then
+    // a module which returns a Tensor,
+    // we do not push a new environment frame because if we did all intermediary
+    // values would have to subtype the input type.
+    for (int64_t i = 0; i < len; ++i) {
+      auto index =
+          materializeConstant(i, *method.graph(), loc, integral_constants);
+      auto sugared_value = iterable->getitem(loc, method, index);
+      emitExprsAssign(
+          targets, {sugared_value}, targets.range(), /*n_binders=*/1);
+      emit_body();
     }
+  }
+
+  void emitFor(
+      const List<Expr>& targets,
+      const List<Expr>& itrs,
+      const SourceRange& loc,
+      const std::function<void()>& emit_body) {
+    if (itrs.size() != 1) {
+      throw ErrorReport(loc) << "List of iterables is not supported currently";
+    }
+
     // Emit loop information for builtinFunction values like range(), zip(),
     // enumerate() or SimpleValue like List, Tensor, Dict, etc.
     SugaredValuePtr sv = emitSugaredExpr(itrs[0], 1);
+    SugaredValuePtr iterable = sv->iter(loc, method);
 
-    // We will get IterableTree for builtinFunctions zip() and enumerate(),
-    // RangeValue for range(), and SimpleValue for types like
-    // List/Tensor/Dict/String.
-    auto range_val = std::dynamic_pointer_cast<RangeValue>(sv);
-    auto siv = std::dynamic_pointer_cast<SimpleValue>(sv);
-    auto iterable_tree = std::dynamic_pointer_cast<IterableTree>(sv);
-
-    // For SimpleValue(except Tuple) or RanveValue/IterableTree, emit common
-    // loop
-    if ((siv && !siv->getValue()->type()->cast<TupleType>()) || range_val ||
-        iterable_tree) {
-      // looping over a dict defaults to looping over the keys in python
-      if (siv && siv->getValue()->type()->cast<DictType>()) {
-        sv = std::make_shared<SimpleValue>(
-            graph->insert(aten::keys, {siv->getValue()}, {}, stmt.range()));
-      }
-      emitLoopCommon(stmt.range(), body, sv, targets, {});
-      return;
+    // We unroll the loop for iterables that contain ModuleLists so that we can
+    // compile Heterogenous module lists.
+    if (!iterable->shouldEmitUnrolled()) {
+      emitLoopCommon(loc, emit_body, iterable, targets, {});
+    } else {
+      emitUnrolledLoop(loc, emit_body, iterable, targets);
     }
+  }
 
-    // Emit or unroll the loop for Tuple or ModuleList, we choose to unroll or
-    // emit each subelemnt for each iteration separately. This is because for
-    // ModuleList, each module inside the list may be different types, so FOR ..
-    // in ModuleList essentially should emit different stmts for each iteration,
-    // which we shouldn't emit the prim::Loop node for it, the same rule applies
-    // for the Tuple case.
-    auto instances = sv->asTuple(stmt.range(), method);
-    pushFrame(environment_stack->block());
-    for (const auto& inst : instances) {
-      emitExprsAssign(targets, {inst}, itrs[0].range(), /*n_binders=*/1);
-      emitStatements(body);
-    }
-
-    for (const auto& n : environment_stack->definedVariables()) {
-      if (environment_stack->findInParentFrame(n)) {
-        environment_stack->next->setVar(
-            stmt.range(), n, environment_stack->getVar(n, stmt.range()));
-      }
-    }
-    popFrame();
+  void emitFor(const For& stmt) {
+    auto emit_body = [&]() { emitStatements(stmt.body()); };
+    emitFor(stmt.targets(), stmt.itrs(), stmt.range(), emit_body);
   }
 
   void emitWhile(const While& stmt) {
     auto cond = stmt.cond();
-    emitLoopCommon(stmt.range(), stmt.body(), nullptr, {}, cond);
+    auto emit_body = [&]() { emitStatements(stmt.body()); };
+    emitLoopCommon(stmt.range(), emit_body, nullptr, {}, cond);
   }
 
   // Currently we do not support assigning exceptions to variables,
@@ -2230,7 +2193,7 @@ struct to_ir {
       case TK_IN:
         return aten::__contains__;
       default:
-        throw std::runtime_error("unknown kind " + std::to_string(kind));
+        throw std::runtime_error("unknown kind " + c10::to_string(kind));
     }
   }
 
@@ -2273,7 +2236,7 @@ struct to_ir {
       case TK_IN:
         return "__contains__";
       default:
-        throw std::runtime_error("unknown kind " + std::to_string(kind));
+        throw std::runtime_error("unknown kind " + c10::to_string(kind));
     }
   }
 
@@ -2461,9 +2424,9 @@ struct to_ir {
       }
       // We construct the iterable tree here using the IterableTree
       // SugaredValue, The tree consists of SimpleValue, RangeValue or
-      // IterableValue: For SimpleValues(List, Dict, etc) or RangeValue. We will
+      // IterableTree: For SimpleValues(List, Dict, etc) or RangeValue. We will
       // make them as tree leaves since we could get the loop information from
-      // len() and get_item(). For IterableValue like zip(), enumerate(), we can
+      // len() and get_item(). For IterableTree like zip(), enumerate(), we can
       // model them as a combination of leaves, and we emit a IterableTree value
       // to record the tree information
       case prim::range: {
@@ -2501,11 +2464,18 @@ struct to_ir {
             loc,
             integral_constants);
         range_inputs.emplace_back(end);
-        SugaredValuePtr range_sv =
-            std::make_shared<RangeValue>(loc, method, range_inputs);
         SugaredValuePtr expr_sv = emitSugaredExpr(inputs[0], 1);
-        return std::make_shared<IterableTree>(
-            std::vector<SugaredValuePtr>({range_sv, expr_sv}));
+        auto iterable_value = expr_sv->iter(loc, method);
+
+        // range should have the same static length as the other iterable
+        c10::optional<int64_t> iter_static_len = iterable_value->staticLen();
+        SugaredValuePtr range_sv = std::make_shared<RangeValue>(
+            loc, method, range_inputs, iter_static_len);
+
+        auto tree = std::make_shared<IterableTree>();
+        tree->addChild(loc, method, range_sv);
+        tree->addChild(loc, method, iterable_value);
+        return tree;
       }
       case prim::zip: {
         // zip(x, y) can be rewrite as subtrees:
@@ -2517,8 +2487,8 @@ struct to_ir {
         }
         auto iterable_tree = std::make_shared<IterableTree>();
         for (Expr expr : inputs) {
-          auto expr_sv = emitSugaredExpr(expr, 1);
-          iterable_tree->addChild(expr_sv);
+          auto iterable = emitSugaredExpr(expr, 1)->iter(apply.range(), method);
+          iterable_tree->addChild(apply.range(), method, iterable);
         }
         return iterable_tree;
       }
@@ -2590,16 +2560,13 @@ struct to_ir {
     if (val->node()->kind() != opSymbol) {
       return val;
     }
-    auto maybe_constant_input = toIValue(val->node()->input());
-    if (!maybe_constant_input) {
+
+    auto maybe_out_stack = runNodeIfInputsAreConstant(val->node());
+    if (!maybe_out_stack) {
       return val;
     }
-    auto op = getOperation(val->node());
-    Stack stack;
-    stack.push_back(*maybe_constant_input);
-    op(stack);
-    AT_ASSERT(stack.size() == 1);
-    return graph->insertConstant(stack[0], tree->range());
+    TORCH_INTERNAL_ASSERT(maybe_out_stack->size() == 1);
+    return graph->insertConstant(maybe_out_stack->at(0), tree->range());
   }
 
   std::shared_ptr<SugaredValue> emitForkExpr(
@@ -2798,7 +2765,7 @@ struct to_ir {
       } break;
       case TK_LIST_COMP: {
         auto lc = ListComp(tree);
-        return emitListComprehension(lc);
+        return emitListComprehension(lc, type_hint);
       } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
@@ -3193,7 +3160,7 @@ struct to_ir {
       } else if (val->type()->isSubtypeOf(TensorType::get())) {
         return emitMultidimSlicing(range, val, subscript_exprs);
       } else {
-        return sv->getitem(range, method, idx);
+        return sv->getitem(range, method, idx)->asValue(range, method);
       }
     }
   }
@@ -3247,7 +3214,7 @@ c10::QualifiedName CompilationUnit::mangle(
       // Append the part of the name up to the end of the prefix
       newAtom.append(atom, 0, pos);
       newAtom.append(manglePrefix);
-      newAtom.append(std::to_string(mangleIndex_++));
+      newAtom.append(c10::to_string(mangleIndex_++));
       atom = newAtom;
       return QualifiedName(atoms);
     }
@@ -3255,7 +3222,7 @@ c10::QualifiedName CompilationUnit::mangle(
 
   // Otherwise add a mangle namespace right before the basename
   TORCH_INTERNAL_ASSERT(!atoms.empty());
-  atoms.insert(atoms.end() - 1, manglePrefix + std::to_string(mangleIndex_++));
+  atoms.insert(atoms.end() - 1, manglePrefix + c10::to_string(mangleIndex_++));
   return QualifiedName(atoms);
 }
 
@@ -3417,10 +3384,11 @@ void lambdaLiftFork(Node* fork_node) {
 void CompilationUnit::define_interface(
     const c10::QualifiedName& qualifiedName,
     const ClassDef& classDef,
-    ResolverPtr rcb) {
-  ScriptTypeParser typeParser(rcb);
+    ResolverPtr rcb,
+    bool is_module) {
+  ScriptTypeParser typeParser(std::move(rcb));
   InterfaceTypePtr iface =
-      InterfaceType::create(c10::QualifiedName(qualifiedName));
+      InterfaceType::create(c10::QualifiedName(qualifiedName), is_module);
   for (const Stmt& stmt : classDef.body()) {
     if (stmt.kind() != TK_DEF) {
       throw ErrorReport(stmt)

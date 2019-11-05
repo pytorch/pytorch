@@ -244,22 +244,20 @@ std::ostream &Node::print(std::ostream &out, size_t level,
     auto* pyOp = static_cast<const ::torch::jit::PythonOp*>(this);
     out << "^" << pyOp->name();
     pyOp->writeScalars(out);
-  } else if (print_attributes) {
-    if (hasAttribute(attr::Subgraph) && groups) {
-      out << kind().toQualString() << "_" << groups->size();
-      if (numAttributes() > 1 && kind() != prim::DifferentiableGraph) {
-        printAttributes(out, /*ignore_subgraph=*/true);
-      }
+  } else if (hasAttribute(attr::Subgraph) && groups) {
+    out << kind().toQualString() << "_" << groups->size();
+    if (print_attributes && numAttributes() > 1 &&
+        kind() != prim::DifferentiableGraph) {
+      printAttributes(out, /*ignore_subgraph=*/true);
+    }
 
-      groups->push_back(this);
-    } else {
-      out << kind().toQualString();
-      if (hasAttributes()) {
-        printAttributes(out);
-      }
+    groups->push_back(this);
+  } else {
+    out << kind().toQualString();
+    if (print_attributes && hasAttributes()) {
+      printAttributes(out);
     }
   }
-
   out << "(" << inputs() << ")";
 
   if (print_scopes) {
@@ -765,7 +763,7 @@ Value* Value::setDebugName(const std::string& name) {
     if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
       if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
           std::string::npos) {
-        suffix = std::stoll(name.substr(last_dot_pos + 1));
+        suffix = c10::stoll(name.substr(last_dot_pos + 1));
         name_base = name.substr(0, last_dot_pos);
       }
     }
@@ -840,10 +838,15 @@ bool Node::matches(
 }
 
 bool Node::mustBeNone() const {
-  return kind_ == prim::AutogradZero ||
+  // We can statically deduce this Node has returning None if:
+  return
+      // It's an AutogradZero node, or ...
+      kind_ == prim::AutogradZero ||
+      // It has only one output and that output is NoneType, or ...
+      (outputs().size() == 1 && output()->type() == NoneType::get()) ||
+      // It's a constant optional with no value in the attributes.
       (kind_ == prim::Constant && !this->hasAttributes() &&
-       (output()->type()->cast<OptionalType>() ||
-        output()->type() == NoneType::get()));
+       output()->type()->cast<OptionalType>());
 }
 
 void Node::dump() const {
@@ -895,17 +898,17 @@ bool Node::isNondeterministic() const {
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::rand_like(Tensor self) -> Tensor",
-      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::rand_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::rand_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
       "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randint_like(Tensor self, int high) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high) -> Tensor",
-      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
-      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high, *, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-      "aten::randn_like(Tensor self) -> Tensor",
-      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory) -> Tensor",
+      "aten::randn_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
 
   if (nondeterministic_ops.find(this) == nullptr) {
@@ -935,6 +938,8 @@ bool Node::hasSideEffects() const {
     case prim::CallMethod:
     case prim::BailoutTemplate:
     case prim::profile:
+    case prim::BailOut:
+    case prim::Guard:
       return true;
   }
 
@@ -1379,15 +1384,16 @@ Node* Graph::createWithSubgraph(Symbol kind) {
   return n;
 }
 
-Node* Graph::createTuple(
-    at::ArrayRef<Value*> values,
-    c10::optional<c10::QualifiedName> qualname,
-    std::shared_ptr<FunctionSchema> schema) {
-  auto types = fmap(values, [](Value* v) { return v->type(); });
-  auto tt = TupleType::create(
-      std::move(types), std::move(qualname), std::move(schema));
+Node* Graph::createTuple(at::ArrayRef<Value*> values, TupleTypePtr tuple_type) {
+  TORCH_INTERNAL_ASSERT(
+      !tuple_type || tuple_type->schema(),
+      "only pass tuple_type when creating a named tuple");
+  if (!tuple_type) {
+    auto types = fmap(values, [](Value* v) { return v->type(); });
+    tuple_type = TupleType::create(std::move(types));
+  }
   auto n = create(prim::TupleConstruct, values);
-  n->output()->setType(tt);
+  n->output()->setType(tuple_type);
   return n;
 }
 

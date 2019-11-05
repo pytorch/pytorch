@@ -25,6 +25,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <bitset>
@@ -131,7 +132,7 @@ void checkDoubleInRange(double a) {
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
     throw c10::Error(
-        "Cannot convert float " + std::to_string(a) + " to integer", "");
+        "Cannot convert float " + c10::to_string(a) + " to integer", "");
     return;
   }
 }
@@ -255,11 +256,9 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::Guard(Tensor(a) t) -> Tensor(a)",
-         [](const Node* node) -> Operation {
-           return [](Stack& stack) {
-             AT_ERROR("Should be replaced by prim::BailOut");
-             return 0;
-           };
+         [](Stack& stack) {
+           AT_ERROR("Should be replaced by prim::BailOut");
+           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -273,18 +272,16 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator(
          "prim::BailoutTemplate() -> int",
-         [](const Node * /* node */) -> Operation {
-           return [](Stack& stack) {
-             // TODO: today, we put a single bailout template at the front to
-             // carry the un-optimized graph for bailout nodes to use. Ideally
-             // this should never run, but we haven't written the code to remove
-             // it yet.
-             // TORCH_INTERNAL_ASSERT(false);
+         [](Stack& stack) {
+           // TODO: today, we put a single bailout template at the front to
+           // carry the un-optimized graph for bailout nodes to use. Ideally
+           // this should never run, but we haven't written the code to remove
+           // it yet.
+           // TORCH_INTERNAL_ASSERT(false);
 
-             // Returns an int so that we have an easy way to do graph traversal
-             push(stack, 1);
-             return 0;
-           };
+           // Returns an int so that we have an easy way to do graph traversal
+           push(stack, 1);
+           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -739,12 +736,19 @@ RegisterOperators reg(
          },
          aliasAnalysisConservative()),
      Operator(
+         "aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)",
+         [](Stack& stack) {
+           bool _requires_grad = pop(stack).toBool();
+           at::Tensor self = pop(stack).toTensor();
+           self.requires_grad_(_requires_grad);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
          "prim::AutogradZero() -> Tensor",
-         [](const Node* node) -> Operation {
-           return [](Stack& stack) {
-             stack.emplace_back(at::Tensor());
-             return 0;
-           };
+         [](Stack& stack) {
+           stack.emplace_back(at::Tensor());
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -902,45 +906,52 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          c10::onnx::Reshape,
-         [](const Node* node) -> Operation {
-           return [=](Stack& stack) {
-             at::Tensor input, shape;
-             pop(stack, input, shape);
-             shape = shape.contiguous();
-             AT_ASSERT(shape.ndimension() == 1);
-             at::IntArrayRef shape_list(shape.data_ptr<int64_t>(), shape.size(0));
-             push(stack, input.reshape(shape_list));
-             return 0;
-           };
+         [](Stack& stack) {
+           at::Tensor input, shape;
+           pop(stack, input, shape);
+           shape = shape.contiguous();
+           AT_ASSERT(shape.ndimension() == 1);
+           at::IntArrayRef shape_list(shape.data_ptr<int64_t>(), shape.size(0));
+           push(stack, input.reshape(shape_list));
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
          c10::onnx::Shape,
-         [](const Node* node) -> Operation {
-           return [=](Stack& stack) {
-             auto t = pop(stack).toTensor();
-             at::IntArrayRef sizes = t.sizes();
-             auto sizes_tensor = torch::empty(
-                 {static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
-             auto accessor = sizes_tensor.accessor<int64_t, 1>();
-             for (size_t i = 0; i < sizes.size(); ++i) {
-               accessor[i] = sizes[i];
-             }
-             stack.emplace_back(sizes_tensor);
-             return 0;
-           };
+         [](Stack& stack) {
+           auto t = pop(stack).toTensor();
+           at::IntArrayRef sizes = t.sizes();
+           auto sizes_tensor = torch::empty(
+               {static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
+           auto accessor = sizes_tensor.accessor<int64_t, 1>();
+           for (size_t i = 0; i < sizes.size(); ++i) {
+             accessor[i] = sizes[i];
+           }
+           stack.emplace_back(sizes_tensor);
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::AutogradAnyNonZero,
+         "prim::AutogradAnyNonZero(...) -> int",
          [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
-           return [=](Stack& stack) {
+           return [num_inputs](Stack& stack) {
              bool result = false;
-             for (const IValue& t : last(stack, num_inputs)) {
-               if (t.toTensor().defined()) {
-                 result = true;
-                 break;
+             for (const IValue& v : last(stack, num_inputs)) {
+               if (v.isTensor()) {
+                 if (v.toTensor().defined()) {
+                   result = true;
+                   break;
+                 }
+               } else if (v.isTensorList()) {
+                 for (const at::Tensor& t : v.toTensorListRef()) {
+                   result = true;
+                 }
+                 if (result) {
+                   break;
+                 }
+               } else {
+                 TORCH_INTERNAL_ASSERT(false);
                }
              }
              drop(stack, num_inputs);
@@ -948,21 +959,26 @@ RegisterOperators reg(
              return 0;
            };
          },
-         aliasAnalysisSpecialCase()),
+         aliasAnalysisFromSchema()),
      Operator(
          prim::AutogradAdd,
-         [](const Node* node) -> Operation {
-           return [=](Stack& stack) {
-             at::Tensor a, b;
-             pop(stack, a, b);
-             if (!a.defined())
-               stack.emplace_back(b);
-             else if (!b.defined())
-               stack.emplace_back(a);
-             else
-               stack.emplace_back(a + b);
-             return 0;
-           };
+         [](Stack& stack) {
+           at::Tensor a, b;
+           pop(stack, a, b);
+           if (!a.defined() && !b.defined()) {
+             // undef + undef == undef
+             stack.emplace_back(a);
+           }
+           else if (!a.defined()) {
+             stack.emplace_back(b);
+           }
+           else if (!b.defined()) {
+             stack.emplace_back(a);
+           }
+           else {
+             stack.emplace_back(a + b);
+           }
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -1034,18 +1050,16 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::TupleIndex,
-         [](const Node* node) -> Operation {
-           return [](Stack& stack) {
-             int64_t index = pop(stack).toInt();
-             auto tuple = pop(stack).toTuple();
-             auto norm_index = normalizeIndex(index, tuple->elements().size());
-             if (norm_index < 0 ||
-                 norm_index > static_cast<int64_t>(tuple->elements().size())) {
-               throw std::out_of_range("Tuple list index out of range");
-             }
-             stack.emplace_back(tuple->elements()[norm_index]);
-             return 0;
-           };
+         [](Stack& stack) {
+           int64_t index = pop(stack).toInt();
+           auto tuple = pop(stack).toTuple();
+           auto norm_index = normalizeIndex(index, tuple->elements().size());
+           if (norm_index < 0 ||
+               norm_index > static_cast<int64_t>(tuple->elements().size())) {
+             throw std::out_of_range("Tuple list index out of range");
+           }
+           stack.emplace_back(tuple->elements()[norm_index]);
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -1294,11 +1308,9 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::Uninitialized,
-         [](const Node* node) -> Operation {
-           return [](Stack& stack) {
-             push(stack, IValue::uninitialized());
-             return 0;
-           };
+         [](Stack& stack) {
+           push(stack, IValue::uninitialized());
+           return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -3481,55 +3493,42 @@ IValue convert_scale_factor_to_double(const IValue& int_ivalue) {
   return scale_factor_double;
 }
 
-Operation upsample_nearest_op(const Node* n) {
-  return [](Stack& stack) {
-    at::Tensor input;
-    IValue size;
-    IValue scale_factor_int;
-    pop(stack, input, size, scale_factor_int);
-    IValue scale_factor_double =
-        convert_scale_factor_to_double(scale_factor_int);
-    at::Tensor res =
-        interpolate(input, size, scale_factor_double, "nearest", c10::nullopt);
-    push(stack, std::move(res));
-    return 0;
-  };
+int upsample_nearest_op(Stack& stack) {
+  at::Tensor input;
+  IValue size;
+  IValue scale_factor_int;
+  pop(stack, input, size, scale_factor_int);
+  IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
+  at::Tensor res =
+      interpolate(input, size, scale_factor_double, "nearest", c10::nullopt);
+  push(stack, std::move(res));
+  return 0;
 }
 
-Operation upsample_op(const Node* n) {
-  return [](Stack& stack) {
-    at::Tensor input;
-    IValue size;
-    IValue scale_factor_int;
-    std::string mode;
-    IValue align_corners;
-    pop(stack, input, size, scale_factor_int, mode, align_corners);
-    IValue scale_factor_double =
-        convert_scale_factor_to_double(scale_factor_int);
-    at::Tensor res = interpolate(
-        input,
-        size,
-        scale_factor_double,
-        mode,
-        align_corners.toOptional<bool>());
-    push(stack, std::move(res));
-    return 0;
-  };
+int upsample_op(Stack& stack) {
+  at::Tensor input;
+  IValue size;
+  IValue scale_factor_int;
+  std::string mode;
+  IValue align_corners;
+  pop(stack, input, size, scale_factor_int, mode, align_corners);
+  IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
+  at::Tensor res = interpolate(
+      input, size, scale_factor_double, mode, align_corners.toOptional<bool>());
+  push(stack, std::move(res));
+  return 0;
 }
 
-Operation upsample_bilinear_op(const Node* n) {
-  return [](Stack& stack) {
-    at::Tensor input;
-    IValue size;
-    IValue scale_factor_int;
-    pop(stack, input, size, scale_factor_int);
-    IValue scale_factor_double =
-        convert_scale_factor_to_double(scale_factor_int);
-    at::Tensor res =
-        interpolate(input, size, scale_factor_double, "bilinear", true);
-    push(stack, std::move(res));
-    return 0;
-  };
+int upsample_bilinear_op(Stack& stack) {
+  at::Tensor input;
+  IValue size;
+  IValue scale_factor_int;
+  pop(stack, input, size, scale_factor_int);
+  IValue scale_factor_double = convert_scale_factor_to_double(scale_factor_int);
+  at::Tensor res =
+      interpolate(input, size, scale_factor_double, "bilinear", true);
+  push(stack, std::move(res));
+  return 0;
 }
 
 RegisterOperators reg3({

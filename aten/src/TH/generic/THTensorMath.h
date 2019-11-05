@@ -134,8 +134,6 @@ TH_API void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src);
 TH_API void THTensor_(addbmm)(THTensor *r_, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha);
 TH_API void THTensor_(baddbmm)(THTensor *r_, THTensor *t, THTensor *batch1, THTensor *batch2, scalar_t beta, scalar_t alpha);
 
-TH_API void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, scalar_t gain);
-
 TH_API void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, int64_t k, int dimension, int keepdim);
 TH_API void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
 TH_API void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim);
@@ -152,20 +150,15 @@ TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
 
 TH_API void THTensor_(sigmoid)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(log1p)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(log2)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(exp)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(cos)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(acos)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(cosh)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(sin)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(asin)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(sinh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(tan)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(atan)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erf)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erfc)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(sqrt)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(rsqrt)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(ceil)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(floor)(THTensor *r_, THTensor *t);

@@ -19,8 +19,6 @@ namespace jit {
 // file contents being the raw tensor data.
 using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
-constexpr size_t CURRENT_OP_VERSION_SET = 1;
-
 TORCH_API std::tuple<std::string, RawDataExportMap> export_onnx(
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers,
@@ -52,6 +50,12 @@ TORCH_API void ExportModule(
 TORCH_API void ExportModule(
     const script::Module& module,
     const std::string& filename,
+    const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
+    bool bytecode_format = false);
+
+TORCH_API void ExportModule(
+    const script::Module& module,
+    const std::function<size_t(const void*, size_t)>& writer_func,
     const script::ExtraFilesMap& metadata = script::ExtraFilesMap(),
     bool bytecode_format = false);
 
