@@ -68,7 +68,7 @@ ModulePtr Module::module_object() const {
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-thread_local bool inline_everything = true;
+thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
 }
@@ -230,7 +230,7 @@ Module Module::clone_impl(
   size_t N = type()->numAttributes();
   for (size_t i = 0; i < N; ++i) {
     IValue s = module_object()->getSlot(i);
-    if (type()->is_module(i)) {
+    if (type()->getAttribute(i)->is_module()) {
       const Module& orig = Module(s.toObject());
       Module cloned = orig.clone_impl(type_remap);
       type_remap[orig.type()] = cloned.type();

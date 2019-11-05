@@ -1301,6 +1301,11 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             FileCheck().run(input_str, graph)
 
     @_tmp_donotuse_dont_inline_everything
+    @unittest.skip("Temporarily turn off fold_convbn tests until \
+    constants are handled properly, this test should not be passing \
+    because bias is not handled properly, the reason is passes is because the \
+    parameters of bn are initialized to default values and the recomputed bias \
+    for conv is zero, which is equivalent to no bias")
     def test_foldbn_trivial(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1338,6 +1343,8 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
 
     @_tmp_donotuse_dont_inline_everything
+    @unittest.skip("Temporarily turn off fold_convbn tests until \
+    constants are handled properly")
     def test_foldbn_trivial_nobias(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1375,6 +1382,8 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
 
     @_tmp_donotuse_dont_inline_everything
+    @unittest.skip("Temporarily turn off fold_convbn tests until \
+    constants are handled properly")
     def test_foldbn_in_submodule(self):
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
@@ -1794,6 +1803,20 @@ graph(%Ra, %Rb):
         ge = torch.jit.trace(fn, (x,), _force_outplace=True, check_trace=False)
         with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
             ge(x)
+
+    def test_force_outplace_check_fill(self):
+        def f(x):
+            return torch.empty(x.shape).fill_(7)
+        x = torch.randn(10, 15)
+        ft = torch.jit.trace(f, x, _force_outplace=True)
+        self.assertEqual(f(x), ft(x))
+
+    def test_force_outplace_check_zero(self):
+        def f(x):
+            return torch.empty(x.shape).zero_()
+        x = torch.randn(10, 15)
+        ft = torch.jit.trace(f, x, _force_outplace=True)
+        self.assertEqual(f(x), ft(x))
 
     def do_trace_size(self, requires_grad):
         def fn(x):
@@ -8649,9 +8672,46 @@ a")
 
                 return x, names
 
+        class M2(M):
+            def __init__(self):
+                super(M2, self).__init__()
+
+            def forward(self, x, skip_name):
+                # type: (Tensor, str)
+                names = torch.jit.annotate(List[str], [])
+                values = []
+                x2 = x
+                iter = 0
+                for name in self.moduledict:
+                    names.append(name)
+
+                for i, (name, mod) in enumerate(self.moduledict.items()):
+                    iter += i
+                    if name != skip_name:
+                        names.append(name)
+                        x = mod(x)
+                        values.append(x)
+
+                for i, mod in enumerate(self.moduledict.values()):
+                    iter += i
+                    x = mod(x)
+                    values.append(x)
+
+                for i, key in enumerate(self.moduledict.keys()):
+                    iter += i
+                    names.append(key)
+
+                for mod, mod in zip(self.moduledict.values(), self.moduledict.values()):
+                    iter += i
+                    x2 = mod(mod(x2))
+
+                return x, x2, names, iter
+
+
         for name in ["", "one", "two", "three"]:
             inp = torch.tensor(1)
             self.checkModule(M(), (inp, name))
+            self.checkModule(M2(), (inp, name))
 
     def test_script_module_for2(self):
         class Sub(torch.jit.ScriptModule):
@@ -10273,6 +10333,33 @@ a")
             self.assertTrue(m_import.param1.storage().data_ptr() == m_import.param2.storage().data_ptr())
             self.assertTrue(m_import.param1.storage().data_ptr() != m_import.param3.storage().data_ptr())
 
+    def test_sequential_intermediary_types(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            def forward(self, x):
+                return x + 3
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+
+            def forward(self, x):
+                return {"1": x}
+
+        class C(torch.nn.Module):
+            __constants__ = ['foo']
+
+            def __init__(self):
+                super(C, self).__init__()
+                self.foo = torch.nn.Sequential(A(), B())
+
+            def forward(self, x):
+                return self.foo(x)
+
+        self.checkModule(C(), (torch.tensor(1),))
+
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
@@ -11277,6 +11364,108 @@ a")
                 for i in range(.5):
                     print(i)
 
+    def test_zip_enumerate_modulelist(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super(Sub, self).__init__()
+
+            def forward(self, thing):
+                return thing - 2
+
+        class Double(torch.nn.Module):
+            def __init__(self):
+                super(Double, self).__init__()
+
+            def forward(self, thing):
+                return thing * 2
+
+        # zipping over two
+        class ZipModLists(torch.nn.Module):
+            __constants__ = ['mods', 'mods2']
+
+            def __init__(self, mods, mods2):
+                super(ZipModLists, self).__init__()
+                self.mods = mods
+                self.mods2 = mods2
+
+            def forward(self, x):
+                iter = 0
+                for mod1, mod2 in zip(self.mods, self.mods2):
+                    x = mod2(mod1(x))
+                    iter += 1
+                return x, iter
+
+        class ZipWithValues(torch.nn.Module):
+            __constants__ = ['mods', 'mods2', 'tup_larger', 'tup_smaller']
+
+            def __init__(self, mods, mods2):
+                super(ZipWithValues, self).__init__()
+                self.mods = mods
+                self.mods2 = mods2
+                self.tup_larger = list(range(len(mods2) + 1))
+                self.tup_smaller = list(range(max(len(mods2) + 1, 1)))
+
+            def forward(self, x):
+                iter = 0
+                x2 = x
+                for val, mod1, mod2 in zip(self.tup_larger, self.mods, self.mods2):
+                    x = mod2(mod1(x)) + val
+                    iter += 1
+                for val, mod1, mod2 in zip(self.tup_smaller, self.mods, self.mods2):
+                    x2 = mod2(mod1(x2)) + val
+                    iter += 1
+                return x, iter
+
+        mods = nn.ModuleList([Double()]), nn.ModuleList([Double(), Sub(), Sub()]), nn.ModuleList([Sub(), Double()])
+        for i in range(len(mods)):
+            for j in range(len(mods)):
+                mod = ZipModLists(mods[i], mods[j])
+                self.checkModule(mod, (torch.tensor(.5),))
+                mod2 = ZipWithValues(mods[i], mods[j])
+                self.checkModule(mod2, (torch.tensor(.5),))
+
+
+    def test_enumerate_modlist_range(self):
+        class Double(torch.nn.Module):
+            def forward(self, thing):
+                return thing * 2
+
+        class Mod(torch.nn.Module):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.mods = nn.ModuleList([Double(), Double()])
+
+            def forward(self, x):
+                x2 = x
+                iter = 0
+                for val, mod in enumerate(self.mods):
+                    x2 = mod(x2) * val
+                    iter += 1
+                return iter, x, x2
+
+        self.checkModule(Mod(), (torch.tensor(.5),))
+
+        # variable lenghth, modulelist
+        class Mod2(Mod):
+            def forward(self, x):
+                for val, mod in zip(range(int(x)), self.mods):
+                    x = mod(x) * val
+                return x
+
+        with self.assertRaisesRegex(Exception, "that does not have a statically determinable length"):
+            torch.jit.script(Mod2())
+
+        # modulelist, variable length
+        class Mod3(Mod):
+            def forward(self, x):
+                for val, mod in zip(self.mods, range(int(x))):
+                    x = mod(x) * val
+                return x
+
+        with self.assertRaisesRegex(Exception, "that does not have a statically determinable length"):
+            torch.jit.script(Mod3())
 
     def test_for_in_enumerate(self):
         def fn(x):
@@ -18499,6 +18688,21 @@ class TestClassType(JitTestCase):
                 li = [WrongLt(), WrongLt()]
                 li.sort()
                 return li
+
+    def test_class_inheritance(self):
+        @torch.jit.script
+        class Base(object):
+            def __init__(self):
+                self.b = 2
+
+            def two(self, x):
+                return x + self.b
+
+        with self.assertRaisesRegex(RuntimeError, "does not support inheritance"):
+            @torch.jit.script
+            class Derived(Base):
+                def two(self, x):
+                    return x + self.b + 2
 
     @unittest.skipIf(IS_SANDCASTLE, "Importing like this doesn't work in fbcode")
     def test_imported_classes(self):

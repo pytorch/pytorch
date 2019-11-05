@@ -486,7 +486,11 @@ struct slot_iterator_impl {
     // if the current thing is a module, we have to scan it for recursive
     // traversals. We do this by adding a new SlotCursor to track the traversal.
     if (recurse_ &&
-        top().module_.module_object()->type()->is_module(top().i_)) {
+        top()
+            .module_.module_object()
+            ->type()
+            ->getAttribute(top().i_)
+            ->is_module()) {
       cursors_.emplace_back(SlotCursor{cur().toModule(), 0});
       return;
     }
@@ -594,7 +598,7 @@ struct TORCH_API ModulePolicy {
   // is slot i in typ something that this iterator should return, otherwise,
   // we skip it.
   static bool valid(const ClassTypePtr& typ, size_t i) {
-    return typ->is_module(i);
+    return typ->getAttribute(i)->is_module();
   }
   // are we going to return everything? If so, we can optimize the calculate
   // of the size of the list.
