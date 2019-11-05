@@ -187,7 +187,7 @@ inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) co
     return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
       c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
       const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
-      return kernel.template callUnboxed<Return, Args...>(std::forward<Args>(args)...);
+      return kernel.template callUnboxed<Return, Args...>(op, std::forward<Args>(args)...);
     });
   });
 }
@@ -201,7 +201,7 @@ inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args
     return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
       c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
       const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
-      return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
+      return kernel.template callUnboxedOnly<Return, Args...>(op, std::forward<Args>(args)...);
     });
   });
 }
@@ -212,7 +212,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
     return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) {
       c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
       const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
-      kernel.callBoxed(stack);
+      kernel.callBoxed(op, stack);
     });
   });
 }

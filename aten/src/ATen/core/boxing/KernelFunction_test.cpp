@@ -1,12 +1,14 @@
 #include <gtest/gtest.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/boxing/test_helpers.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 using std::vector;
 using std::tuple;
 using c10::optional;
 using c10::IValue;
 using c10::OperatorKernel;
+using c10::OperatorHandle;
 using c10::Stack;
 using c10::KernelFunction;
 
@@ -22,7 +24,7 @@ namespace kernels {
 
 optional<tuple<int64_t, int64_t>> called_with_args;
 
-void boxed_func_with_return(OperatorKernel* functor, Stack* stack) {
+void boxed_func_with_return(OperatorKernel* /*functor*/, const OperatorHandle& /*opHandle*/, Stack* stack) {
   EXPECT_EQ(2, stack->size());
   EXPECT_TRUE(stack->at(0).isInt());
   EXPECT_TRUE(stack->at(1).isInt());
@@ -32,7 +34,7 @@ void boxed_func_with_return(OperatorKernel* functor, Stack* stack) {
   stack->push_back(5);
 }
 
-void boxed_func_without_return(OperatorKernel* functor, Stack* stack) {
+void boxed_func_without_return(OperatorKernel* /*functor*/, const OperatorHandle& /*opHandle*/, Stack* stack) {
   EXPECT_EQ(2, stack->size());
   EXPECT_TRUE(stack->at(0).isInt());
   EXPECT_TRUE(stack->at(1).isInt());
@@ -84,11 +86,17 @@ auto unboxed_lambda_without_return = [] (int64_t a, int64_t b) -> void{
   called_with_args = tuple<int64_t, int64_t>(a, b);
 };
 
+OperatorHandle makeDummyOperatorHandle() {
+  static auto registry = torch::RegisterOperators().op("my::dummy() -> ()");
+  return c10::Dispatcher::singleton().findSchema({"my::dummy", ""}).value();
+}
+
 void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   vector<IValue> stack {3, 4};
+  OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(&stack);
+  func.callBoxed(dummy, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -100,8 +108,9 @@ void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
 void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   vector<IValue> stack {3, 4};
+  OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callBoxed(&stack);
+  func.callBoxed(dummy, &stack);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -111,16 +120,18 @@ void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
 void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMessage) {
   called_with_args = c10::nullopt;
   vector<IValue> stack {3, 4};
+  OperatorHandle dummy = makeDummyOperatorHandle();
 
   expectThrows<c10::Error>([&] {
-    func.callBoxed(&stack);
+    func.callBoxed(dummy, &stack);
   }, errorMessage);
 }
 
 void expectUnboxedCallingWithReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
+  OperatorHandle dummy = makeDummyOperatorHandle();
 
-  int64_t result = func.callUnboxed<int64_t, int64_t, int64_t>(3, 4);
+  int64_t result = func.callUnboxed<int64_t, int64_t, int64_t>(dummy, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -129,8 +140,9 @@ void expectUnboxedCallingWithReturnWorks(const KernelFunction& func) {
 
 void expectUnboxedCallingWithoutReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
+  OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callUnboxed<void, int64_t, int64_t>(3, 4);
+  func.callUnboxed<void, int64_t, int64_t>(dummy, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -138,8 +150,9 @@ void expectUnboxedCallingWithoutReturnWorks(const KernelFunction& func) {
 
 void expectUnboxedOnlyCallingWithReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
+  OperatorHandle dummy = makeDummyOperatorHandle();
 
-  int64_t result = func.callUnboxedOnly<int64_t, int64_t, int64_t>(3, 4);
+  int64_t result = func.callUnboxedOnly<int64_t, int64_t, int64_t>(dummy, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -148,22 +161,25 @@ void expectUnboxedOnlyCallingWithReturnWorks(const KernelFunction& func) {
 
 void expectUnboxedOnlyCallingWithoutReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
+  OperatorHandle dummy = makeDummyOperatorHandle();
 
-  func.callUnboxedOnly<void, int64_t, int64_t>(3, 4);
+  func.callUnboxedOnly<void, int64_t, int64_t>(dummy,3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
 }
 
 void expectUnboxedOnlyCallingWithReturnFailsWith(const KernelFunction& func, const char* errorMessage) {
+  OperatorHandle dummy = makeDummyOperatorHandle();
   expectThrows<c10::Error>([&] {
-    int64_t result = func.callUnboxedOnly<int64_t, int64_t, int64_t>(3, 4);
+    int64_t result = func.callUnboxedOnly<int64_t, int64_t, int64_t>(dummy,3, 4);
   }, errorMessage);
 }
 
 void expectUnboxedOnlyCallingWithoutReturnFailsWith(const KernelFunction& func, const char* errorMessage) {
+  OperatorHandle dummy = makeDummyOperatorHandle();
   expectThrows<c10::Error>([&] {
-    func.callUnboxedOnly<void, int64_t, int64_t>(3, 4);
+    func.callUnboxedOnly<void, int64_t, int64_t>(dummy, 3, 4);
   }, errorMessage);
 }
 }

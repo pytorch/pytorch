@@ -11,21 +11,22 @@ using c10::TensorTypeId;
 using c10::Stack;
 using c10::guts::make_unique;
 using c10::OperatorKernel;
+using c10::OperatorHandle;
 using std::unique_ptr;
 
 namespace {
 
-void errorKernel(OperatorKernel* functor, Stack* stack) {
+void errorKernel(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
   EXPECT_TRUE(false); // this kernel should never be called
 }
 
-void incrementKernel(OperatorKernel* functor, Stack* stack) {
+void incrementKernel(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
   int input = torch::jit::pop(*stack).toInt();
   torch::jit::pop(*stack); // pop the dummy tensor
   torch::jit::push(*stack, input + 1);
 }
 
-void decrementKernel(OperatorKernel* functor, Stack* stack) {
+void decrementKernel(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
   int input = torch::jit::pop(*stack).toInt();
   torch::jit::pop(*stack); // pop the dummy tensor
   torch::jit::push(*stack, input - 1);
@@ -64,7 +65,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistered_thenC
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredAsLambda_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().kernel(TensorTypeId::CPUTensorId,
-    [] (OperatorKernel*, Stack* stack) {
+    [] (OperatorKernel*, const OperatorHandle&, Stack* stack) {
       int input = torch::jit::pop(*stack).toInt();
       torch::jit::pop(*stack); // pop the dummy tensor
       torch::jit::push(*stack, input + 1);
@@ -74,7 +75,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredAsLamb
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenCatchAllKernel_whenRegisteredAsLambda_thenCanBeCalled) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, int input) -> int", RegisterOperators::options().catchAllKernel(
-    [] (OperatorKernel*, Stack* stack) {
+    [] (OperatorKernel*, const OperatorHandle&, Stack* stack) {
       int input = torch::jit::pop(*stack).toInt();
       torch::jit::pop(*stack); // pop the dummy tensor
       torch::jit::push(*stack, input + 1);
@@ -121,7 +122,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegistrationRuns
 
 bool called = false;
 
-void kernelWithoutInputs(OperatorKernel*, Stack*) {
+void kernelWithoutInputs(OperatorKernel*, const OperatorHandle&, Stack*) {
   called = true;
 }
 
@@ -140,7 +141,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutAnyArg
   EXPECT_TRUE(called);
 }
 
-void kernelWithoutTensorInputs(OperatorKernel*, Stack* stack) {
+void kernelWithoutTensorInputs(OperatorKernel*, const OperatorHandle&, Stack* stack) {
   stack->back() = stack->back().toInt() + 1;
 }
 
@@ -159,7 +160,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, givenFallbackKernelWithoutTensor
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-void kernelForSchemaInference(OperatorKernel* functor, Stack* stack) {
+void kernelForSchemaInference(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
 }
 
 TEST(OperatorRegistrationTest_StackBasedKernel, givenKernel_whenRegisteredWithoutSpecifyingSchema_thenFailsBecauseItCannotInferFromStackBasedKernel) {

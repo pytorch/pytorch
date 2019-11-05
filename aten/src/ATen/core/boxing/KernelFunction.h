@@ -8,6 +8,8 @@
 
 namespace c10 {
 
+class OperatorHandle;
+
 namespace detail {
 template<class Return, class... Args> struct boxAndCallBoxedFunc;
 }
@@ -20,7 +22,7 @@ template<class Return, class... Args> struct boxAndCallBoxedFunc;
  */
 class CAFFE2_API KernelFunction final {
 public:
-  using BoxedKernelFunction = void(OperatorKernel*, Stack*);
+  using BoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, Stack*);
 
   KernelFunction()
   : functorFactory_()
@@ -52,7 +54,7 @@ public:
    * >      [] (Tensor a, bool b) -> Tensor {...});
    * > Tensor result = func.callBoxed(stack);
    */
-  void callBoxed(Stack* stack) const {
+  void callBoxed(const OperatorHandle& opHandle, Stack* stack) const {
     if (C10_UNLIKELY(boxed_kernel_func_ == nullptr)) {
       if (unboxed_kernel_func_ == nullptr) {
         TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callBoxed() on an uninitialized KernelFunction.");
@@ -62,7 +64,7 @@ public:
       }
     }
 
-    (*boxed_kernel_func_)(getFunctor_(), stack);
+    (*boxed_kernel_func_)(getFunctor_(), opHandle, stack);
   }
 
   /**
@@ -82,7 +84,7 @@ public:
    * > Tensor result = func.callUnboxedOnly<Tensor, Tensor, bool>(tensor1, true);
    */
   template<class Return, class... Args>
-  Return callUnboxedOnly(Args... args) const {
+  Return callUnboxedOnly(const OperatorHandle&, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
@@ -118,7 +120,7 @@ public:
    * > Tensor result = func.callUnboxed<Tensor, Tensor, bool>(tensor1, true);
    */
   template<class Return, class... Args>
-  Return callUnboxed(Args... args) const {
+  Return callUnboxed(const OperatorHandle& opHandle, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
@@ -130,7 +132,7 @@ public:
     }
 
     TORCH_INTERNAL_ASSERT(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::callUnboxed() on an uninitialized KernelFunction.");
-    return detail::boxAndCallBoxedFunc<Return, Args...>::call(boxed_kernel_func_, getFunctor_(), std::forward<Args>(args)...);
+    return detail::boxAndCallBoxedFunc<Return, Args...>::call(boxed_kernel_func_, getFunctor_(), opHandle, std::forward<Args>(args)...);
   }
 
   /**
@@ -382,11 +384,11 @@ private:
 namespace detail {
 template<class Return, class... Args>
 struct boxAndCallBoxedFunc final {
-  static Return call(KernelFunction::BoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, Args... args) {
+  static Return call(KernelFunction::BoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
     // TODO Reuse stack vector instead of allocating?
     std::vector<IValue> stack {std::forward<Args>(args)...};
 
-    (*boxed_kernel_func)(functor, &stack);
+    (*boxed_kernel_func)(functor, opHandle, &stack);
 
     TORCH_INTERNAL_ASSERT(stack.size() == 1, "A boxed kernel should only push one return to the stack");
     return std::move(stack[0]).to<Return>();
@@ -394,11 +396,11 @@ struct boxAndCallBoxedFunc final {
 };
 template<class... Args>
 struct boxAndCallBoxedFunc<void, Args...> final {
-  static void call(KernelFunction::BoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, Args... args) {
+  static void call(KernelFunction::BoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
     // TODO Reuse stack vector instead of allocating?
     std::vector<IValue> stack {std::forward<Args>(args)...};
 
-    (*boxed_kernel_func)(functor, &stack);
+    (*boxed_kernel_func)(functor, opHandle, &stack);
 
     TORCH_INTERNAL_ASSERT(stack.size() == 0, "A boxed kernel returned a value but when we called it with KernelFunction::callUnboxed, we expected it to return void.");
   }

@@ -6,6 +6,7 @@
 namespace c10 {
 
 using Stack = torch::jit::Stack; // TODO Instead of this, move torch::jit::Stack to the c10 namespace.
+class OperatorHandle;
 
 /**
  * Inherit from OperatorKernel to implement a c10 kernel.
@@ -228,7 +229,7 @@ namespace detail {
   struct wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
-    static void call(OperatorKernel* functor, Stack* stack) {
+    static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       auto output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
@@ -242,7 +243,7 @@ namespace detail {
   struct wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
-    static void call(OperatorKernel* functor, Stack* stack) {
+    static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);

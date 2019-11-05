@@ -17,6 +17,7 @@
 
 using c10::RegisterOperators;
 using c10::OperatorKernel;
+using c10::OperatorHandle;
 using c10::Dispatcher;
 using c10::IValue;
 using c10::TensorTypeId;
@@ -523,7 +524,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallOutOfSc
 }
 
 bool called_stackbased_kernel = false;
-void stackBasedKernel(c10::OperatorKernel* functor, c10::Stack* stack) {
+void stackBasedKernel(c10::OperatorKernel* functor, const OperatorHandle&, c10::Stack* stack) {
   called_stackbased_kernel = true;
 }
 
