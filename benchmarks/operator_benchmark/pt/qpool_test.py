@@ -1,0 +1,87 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
+import torch
+import torch.quantization as tq
+
+import operator_benchmark as op_bench
+
+# 2D pooling will have input matrix of rank 3 or 4
+qmaxpool2d_configs = op_bench.config_list(  # noqa: E121
+    attrs=(
+       #  C    H    W   k       s       p       d
+       (  1,   3,   3, (3, 3), (1, 1), (0, 0), (1, 1)),  # dummy
+       (  3,  64,  64, (3, 3), (1, 1), (0, 0), (1, 1)),  # dummy
+       (  3,  64,  64, (3, 3), (2, 2), (1, 1), (2, 2)),  # dummy
+       # VGG16 pools with original input shape: (-1, 3, 224, 224)
+       ( 64, 224, 224, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-4
+       (128, 112, 112, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-9
+       (256,  56,  56, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-16
+       (512,  28,  28, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-23
+       (512,  14,  14, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-30
+    ),
+    attr_names=('C', 'H', 'W',  # Input layout
+                'k', 's', 'p', 'd',  # Pooling parameters
+                            ),
+    cross_product_configs={
+        'N': range(5),  # if N==0, use rank=3
+        'ceil': (False, True),
+        'contig': (False, True),
+        'dtype': (torch.qint32, torch.qint8, torch.quint8),
+    },
+    tags=('short',)
+)
+
+
+class QMaxPool2dBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, N, C, H, W, k, s, p, d, ceil, contig, dtype):
+        self.pool_op = torch.nn.MaxPool2d(kernel_size=k, stride=s, padding=p,
+                                          dilation=d, ceil_mode=ceil,
+                                          return_indices=False)
+
+        # Input dimensions
+        if N == 0:
+            f_input = (torch.rand(C, H, W) - 0.5) * 1e6
+        else:
+            f_input = (torch.rand(N, C, H, W) - 0.5) * 1e6
+
+        # Get quantization paramerters and quantize
+        if dtype in (torch.qint8, torch.quint8):
+            observer = tq.MinMaxObserver(dtype=dtype,
+                                         qscheme=torch.per_tensor_affine,
+                                         reduce_range=False)
+            observer.forward(f_input)
+            scale, zero_point = observer.calculate_qparams()
+            scale, zero_point = scale.item(), zero_point.item()
+        else:
+            zero_point = 0
+            qinfo = torch.iinfo(dtype)
+            fmin, fmax = f_input.min().item(), f_input.max().item()
+            if fmax == fmin:
+                scale = 1.0
+            else:
+                scale = (fmax - fmin) / (qinfo.max - qinfo.min)
+        # Quantize the tensor
+        self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
+                                                 zero_point=zero_point,
+                                                 dtype=dtype)
+        if not contig:
+            # Permute into NHWC and back to make it non-contiguous
+            if N == 0:
+                self.q_input = self.q_input.permute(1, 2, 0).contiguous()
+                self.q_input = self.q_input.permute(2, 0, 1)
+            else:
+                self.q_input = self.q_input.permute(0, 2, 3, 1).contiguous()
+                self.q_input = self.q_input.permute(0, 3, 1, 2)
+
+    def forward(self):
+        return self.pool_op(self.q_input)
+
+
+op_bench.generate_pt_test(qmaxpool2d_configs, QMaxPool2dBenchmark)
+
+
+if __name__ == "__main__":
+    op_bench.benchmark_runner.main()
