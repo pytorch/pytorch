@@ -237,13 +237,6 @@
           script="/Users/distiller/project/.circleci/scripts/binary_ios_build.sh"
           cat "$script"
           source "$script"
-    - run:
-        name: Test
-        no_output_timeout: "30m"
-        command: |
-          script="/Users/distiller/project/.circleci/scripts/binary_ios_test.sh"
-          cat "$script"
-          source "$script"
     - persist_to_workspace:
         root: /Users/distiller/workspace/
         paths: ios
