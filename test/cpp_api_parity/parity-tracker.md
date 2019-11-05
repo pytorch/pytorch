@@ -138,6 +138,6 @@ torch.nn.utils.rnn.pack_padded_sequence|No|No
 torch.nn.utils.rnn.pad_packed_sequence|No|No
 torch.nn.utils.rnn.pad_sequence|No|No
 torch.nn.utils.rnn.pack_sequence|No|No
-torch.nn.CrossMapLRN2d|No|No
+torch.nn.CrossMapLRN2d|Yes|No
 torch.nn.FractionalMaxPool3d|No|No
 torch.nn.SampleModule|Yes|Yes
