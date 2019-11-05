@@ -44,9 +44,6 @@ Tensor& addcmul_out(
   iter.add_input(tensor2);
   iter.build();
   addcmul_stub(iter.device_type(), iter, value);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
@@ -82,9 +79,6 @@ Tensor& addcdiv_out(
   iter.add_input(tensor2);
   iter.build();
   addcdiv_stub(iter.device_type(), iter, value);
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 

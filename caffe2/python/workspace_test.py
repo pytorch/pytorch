@@ -299,10 +299,8 @@ class TestWorkspace(unittest.TestCase):
         t.resize_(5)
         t[4] = t[2] = 777
         np.testing.assert_array_equal(t.numpy(), np.array([2,2,777,2,777]))
-        # this doesn't work because of variable / tensor confusion
-        # the underlying data tensor is not properly reshaped :(
         np.testing.assert_array_equal(
-            workspace.FetchBlob("foo"), np.array([2,2,777,2]))
+            workspace.FetchBlob("foo"), np.array([2,2,777,2,777]))
 
         z = torch.ones((4,), dtype=torch.int64)
         workspace.FeedBlob('bar', z)
@@ -388,10 +386,8 @@ class TestWorkspaceGPU(test_util.TestCase):
         t[4] = t[2] = 777
         np.testing.assert_array_equal(
             t.cpu().numpy(), np.array([2,2,777,2,777]))
-        # this doesn't work because of variable / tensor confusion
-        # the underlying data tensor is not properly reshaped :(
         np.testing.assert_array_equal(
-            workspace.FetchBlob("foo"), np.array([2,2,777,2]))
+            workspace.FetchBlob("foo"), np.array([2,2,777,2,777]))
 
         z = torch.ones((4,), dtype=torch.int64, device="cuda")
         workspace.FeedBlob('bar', z)

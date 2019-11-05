@@ -23,10 +23,9 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   explicit GatherRangesToDenseOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...),
         lengths_(this->template GetRepeatedArgument<int>("lengths")),
-        minObservation_(
-            this->template GetSingleArgument<int>("min_observation", 10000)),
-        maxEmptyRatio_(
-            this->template GetSingleArgument<float>("max_empty_ratio", 0.3)),
+        minObservation_(this->template GetSingleArgument<int64_t>(
+            "min_observation",
+            10000)),
         maxMismatchedRatio_(this->template GetSingleArgument<float>(
             "max_mismatched_ratio",
             0.01)) {
@@ -44,12 +43,15 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   }
 
   ~GatherRangesToDenseOp() noexcept override {
-    LOG(INFO) << "In GatherRangesToDenseOp:\n"
-              << "  Lifetime empty ranges for each feature is " << emptyRanges_
-              << ".\n"
-              << "  Lifetime mismatched ranges for each feature is "
-              << mismatchedRanges_ << ".\n"
-              << "  After " << totalRanges_ << " examples";
+    if (totalRanges_ > minObservation_) {
+      LOG(INFO) << "In GatherRangesToDenseOp:\n"
+                << "  Lifetime empty ranges for each feature is "
+                << emptyRanges_ << ".\n"
+                << "  Lifetime mismatched ranges for each feature is "
+                << mismatchedRanges_ << ".\n"
+                << "  With a total of " << totalRanges_ << " examples.\n"
+                << this->getErrorMsg();
+    }
   }
 
   bool RunOnDevice() override {
@@ -168,14 +170,6 @@ class GatherRangesToDenseOp final : public Operator<Context> {
             totalRanges_,
             ") which exceeds ",
             maxMismatchedRatio_);
-        if (totalRanges_ * maxEmptyRatio_ <= emptyRanges_[j]) {
-          LOG(ERROR) << "Ratio of empty range for feature at index " << j
-                     << " is "
-                     << (static_cast<double>(emptyRanges_[j]) /
-                         static_cast<double>(totalRanges_))
-                     << " (" << emptyRanges_[j] << "/" << totalRanges_
-                     << ") which exceeds " << maxEmptyRatio_;
-        }
       }
     }
 
@@ -186,14 +180,14 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
  private:
   vector<int> lengths_;
-  int totalRanges_ = 0;
-  vector<int> emptyRanges_;
-  vector<int> mismatchedRanges_;
+  int64_t totalRanges_ = 0;
+  vector<int64_t> emptyRanges_;
+  vector<int64_t> mismatchedRanges_;
   // To avoid false alarm due to insufficient sample (e.g., first batch being
-  // empty and causing 100% to be empty), use a threshold to ensure enough
-  // samples are gathered before decideding whether there is an alarm or not.
-  int minObservation_ = 0;
-  float maxEmptyRatio_ = 0;
+  // mismatched and causing 100% to be mismatched), use a threshold to ensure
+  // enough samples are gathered before decideding whether there is an alarm or
+  // not.
+  int64_t minObservation_ = 0;
   float maxMismatchedRatio_ = 0;
 };
 

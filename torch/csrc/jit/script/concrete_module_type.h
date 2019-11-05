@@ -58,6 +58,10 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   void addPyClass(py::object pyClass);
   void addConstant(std::string name, py::object value);
   void addAttribute(std::string name, TypePtr type, bool isParameter);
+  void addFunctionAttribute(
+      std::string name,
+      const TypePtr& type,
+      py::object pyFunction);
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
   void addOverload(
       std::string methodName,
@@ -160,6 +164,20 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
     py::object v_;
   };
 
+  struct FunctionAttribute {
+    FunctionTypePtr function_;
+    py::object pyFunction_;
+
+    friend bool operator==(
+        const FunctionAttribute& lhs,
+        const FunctionAttribute& rhs) {
+      // Functions are not first class, so we can't do type comparison like a
+      // regular attribute. So we do a pointer equality check on the actual
+      // Python function object.
+      return lhs.pyFunction_.is(rhs.pyFunction_);
+    }
+  };
+
   struct Attribute {
     Attribute(TypePtr type, bool isParam)
         : type_(std::move(type)), isParam_(isParam) {}
@@ -196,7 +214,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, std::string> failedAttributes_;
   // Any function attributes. These are special right now because functions are
   // not first-class in the type system.
-  std::unordered_map<std::string, FunctionTypePtr> functionAttributes_;
+  std::unordered_map<std::string, FunctionAttribute> functionAttributes_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
 
