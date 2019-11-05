@@ -190,6 +190,7 @@ TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
   EXPECT_TRUE(iter.dtype(0) == at::kBool);
   EXPECT_TRUE(iter.dtype(1) == at::kDouble);
   EXPECT_TRUE(iter.dtype(2) == at::kDouble);
+  EXPECT_TRUE(iter.common_dtype() == at::kDouble);
 }
 
 TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
