@@ -170,8 +170,13 @@ Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
              "invalid size, possible overflow?");
     int64_t size = static_cast<int64_t>(size_d);
+    int64_t numel = result.numel();
 
-    if (result.numel() != size) {
+    if (numel != size) {
+      if(numel > 0){
+        TORCH_WARN("Size of out Tensor does not match the result Tensor. The interval may be subjected "
+                   "to rounding error. The output Tensor will be resized!");
+      }
       result.resize_({size});
     }
     Tensor r = result.is_contiguous() ? result : result.contiguous();
