@@ -308,6 +308,7 @@ IGNORED_TORCH_FUNCTIONS = (
     torch.randint,
     torch.randperm,
     torch.range,
+    torch.sparse_coo_tensor,
     torch.zeros,
 )
 
@@ -619,7 +620,6 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.softmax, lambda input, dim, dtype=None: -1),
     (torch.solve, lambda input, A, out=None: -1),
     (torch.sort, lambda input, dim=-1, descending=False, out=None: -1),
-    (torch.sparse_coo_tensor, lambda indices, values, size=None, dtype=None, device=None, requires_grad=False: -1),
     (torch.split, lambda tensor, split_size_or_sections, dim=0: -1),
     (torch.split_with_sizes, lambda tensor, split_size_or_sections, dim=0: -1),
     (torch.sqrt, lambda input, out=None: -1),
@@ -664,11 +664,6 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
 
 TENSOR_LIKE_OVERRIDES = tuple(t[0] for t in TENSOR_LIKE_TORCH_IMPLEMENTATIONS)
 
-# TODO make these functions overridable
-TENSOR_LIKE_SKIP_TESTS = (
-    torch.sparse_coo_tensor,
-)
-
 def generate_tensor_like_torch_implementations():
     torch_vars = vars(torch)
     untested_funcs = []
@@ -680,7 +675,8 @@ def generate_tensor_like_torch_implementations():
         # IGNORED_TORCH_FUNCTIONS are functions that are public but cannot be
         # overriden by __torch_function__
         if func in IGNORED_TORCH_FUNCTIONS:
-            assert func not in TENSOR_LIKE_OVERRIDES
+            msg = "torch.{} is in IGNORED_TORCH_FUNCTIONS but still has an explicit override"
+            assert func not in TENSOR_LIKE_OVERRIDES, msg.format(func.__name__)
             continue
         # ignore in-place operators
         if func_name.endswith('_'):
@@ -795,8 +791,6 @@ def generate_tensor_like_override_tests(cls):
         if args.varargs is not None:
             func_args += [TensorLike(), TensorLike()]
 
-        msg = "torch.{} is not currently overridable".format(func.__name__)
-        @unittest.skipIf(func in TENSOR_LIKE_SKIP_TESTS, msg)
         def test(self):
             self.assertEqual(func(*func_args), -1)
 
