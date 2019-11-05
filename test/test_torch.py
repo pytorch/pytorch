@@ -16,6 +16,7 @@ import pickle
 import gzip
 import types
 import textwrap
+import threading
 import zipfile
 from torch._utils_internal import get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -31,7 +32,8 @@ from common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MK
     TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
     IS_SANDCASTLE, load_tests, brute_pdist, brute_cdist, slowTest, \
-    skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf
+    skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, skipIfRocm
+from common_cuda import TEST_CUDA
 from multiprocessing.reduction import ForkingPickler
 from common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
@@ -152,6 +154,53 @@ class _TestTorchMixin(object):
             tensors["slice"].append(make_contiguous_slice(sum(list(shape)), dtype))
 
         return tensors
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfRocm
+    def test_cublas_multiple_threads_same_device(self):
+        size = 16
+        x = torch.ones((size, size), device='cuda')
+        weight = torch.ones((size, size), device='cuda')
+
+        results = {}
+
+        num_threads = 100
+        trials = 10
+        test_iters = 100
+
+        barrier = threading.Barrier(num_threads)
+        def _worker(t, input_):
+            my_stream = torch.cuda.Stream()
+            results[t] = input_
+            with torch.cuda.stream(my_stream):
+                barrier.wait()
+                for i in range(test_iters):
+                    # If all threads are sharing the same cublas handle,
+                    # the following sequence may occur:
+                    # thread 0 calls cublasSetStream()
+                    # thread 1 calls cublasSetStream()
+                    # thread 0 launches its raw gemm, which it thinks is in
+                    #          its own stream, but is actually in thread 1's stream.
+                    # thread 0 enqueues its div_, which IS is its own stream,
+                    #          but actually now races with its gemm.
+                    results[t] = torch.mm(results[t], weight)
+                    results[t].div_(float(size))
+            torch.cuda.current_stream().wait_stream(my_stream)
+
+        for trial in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device='cuda')
+
+            threads = [threading.Thread(target=_worker,
+                                        args=(t, results[t])) for t in range(num_threads)]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
 
     def test_dir(self):
         dir(torch)
