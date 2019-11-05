@@ -253,7 +253,9 @@ class _open_zipfile_reader(_open_file_like):
         def seeker(pos):
             return self.buffer.seek(pos)
 
-        return torch._C.PyTorchFileReader(reader, seeker, len(self.buffer.getvalue()))
+        self.buffer.seek(0, os.SEEK_END)
+        size = self.buffer.tell()
+        return torch._C.PyTorchFileReader(reader, seeker, size)
 
     def __exit__(self, *args):
         pass
