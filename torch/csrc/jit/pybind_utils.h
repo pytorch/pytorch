@@ -456,6 +456,12 @@ inline IValue toIValue(
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
+      if (auto mod = script::as_module(py::cast<py::object>(obj))) {
+        // if obj is already a ScriptModule, just return its ivalue
+        return mod.value().module_object();
+      }
+      // otherwise is a normal class object, we create a fresh
+      // ivalue::Object to use from the py object.
       // 1. create a bare ivalue
       const size_t numAttrs = classType->numAttributes();
       auto cu = classType->compilation_unit();
