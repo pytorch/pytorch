@@ -1,3 +1,6 @@
+# flake8: noqa
+# TODO: enable linting check for this file
+
 import torch
 import torch.nn as nn
 from jit_utils import JitTestCase
@@ -223,4 +226,3 @@ class TestModuleInterface(JitTestCase):
 
         scripted_mod.proxy_mod = NewScriptModule()
         self.assertEqual(scripted_mod(input), input * (input + 1) + 1)
-
