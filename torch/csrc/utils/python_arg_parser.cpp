@@ -132,13 +132,6 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 }
 
-static auto get_tensor_torch_function() -> PyObject*
-{
-  PyObject* method = PyObject_GetAttrString((PyObject*)THPVariableClass, "__torch_function__");
-  TORCH_INTERNAL_ASSERT(method != nullptr);
-  return method;
-}
-
 // checks if obj has a __torch_function__ implementation
 static auto check_has_torch_function(PyObject* obj) -> bool
 {
