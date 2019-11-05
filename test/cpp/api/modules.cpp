@@ -2167,6 +2167,41 @@ TEST_F(ModulesTest, PoissonNLLLoss) {
   }
 }
 
+TEST_F(ModulesTest, MarginRankingLoss) {
+  {
+    MarginRankingLoss loss;
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2)).clamp(0).mean()
+    ));
+  }
+  {
+    MarginRankingLoss loss {MarginRankingLossOptions().margin(0.5).reduction(torch::kSum)};
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2) + margin).clamp(0).sum()
+    ));
+  }
+  {
+    MarginRankingLoss loss {MarginRankingLossOptions().margin(0.5).reduction(torch::kMean)};
+    const auto input1 = torch::randn(15) * 10;
+    const auto input2 = torch::randn(15) * 10;
+    const auto target = torch::randn(15).sign();
+    const auto margin = 0.5;
+    ASSERT_TRUE(torch::allclose(
+      loss->forward(input1, input2, target),
+      (-target * (input1 - input2) + margin).clamp(0).mean()
+    ));
+  }
+}
+
 TEST_F(ModulesTest, PrettyPrintIdentity) {
   ASSERT_EQ(c10::str(Identity()), "torch::nn::Identity()");
 }
@@ -3089,6 +3124,13 @@ TEST_F(ModulesTest, PrettyPrintPoissonNLLLoss) {
     PoissonNLLLossOptions().log_input(false).full(true).eps(0.42)
     .reduction(torch::kSum))),
     "torch::nn::PoissonNLLLoss()");
+}
+
+TEST_F(ModulesTest, PrettyPrintMarginRankingLoss) {
+  ASSERT_EQ(c10::str(MarginRankingLoss()), "torch::nn::MarginRankingLoss()");
+  ASSERT_EQ(c10::str(MarginRankingLoss(
+    MarginRankingLossOptions().margin(0.5).reduction(torch::kSum))),
+    "torch::nn::MarginRankingLoss()");
 }
 
 TEST_F(ModulesTest, PrettyPrintCrossMapLRN2d) {

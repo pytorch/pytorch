@@ -1,13 +1,22 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
+import torch
+
 
 from . import backend_registry
 from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
 
 
-if sys.version_info >= (3, 0):
-    from . import api
+def is_available():
+    return sys.version_info >= (3, 0) and hasattr(torch._C, "_rpc_init")
+
+
+if is_available() and not torch._C._rpc_init():
+    raise RuntimeError("Failed to initialize torch.distributed.rpc")
+
+
+if is_available():
     from .api import _init_rpc
     from .api import *  # noqa: F401
     import torch.distributed.autograd
