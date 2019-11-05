@@ -358,6 +358,13 @@ class TestJit(JitTestCase):
 
         traced_rec = torch.jit.trace(rec, (input))
 
+    def test_trace_legacy_ctor(self):
+        class MyModule(nn.Module):
+            def forward(self, x):
+                return (x + 1, torch.FloatTensor([0]))
+
+        traced_rec = torch.jit.trace(MyModule(), torch.randn(2, 2))
+
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
         m = torch.jit.ScriptModule()
@@ -2337,6 +2344,7 @@ graph(%Ra, %Rb):
         self.assertEqual(len(list(g.inputs())), 2)
         FileCheck().check("mul").check("add").run(str(g))
 
+    @unittest.skipIf(IS_WINDOWS, 'Caffe2 ops not built by default on Windows; see https://github.com/pytorch/pytorch/issues/27215')
     def test_trace_c10_ops(self):
         try:
             _ = torch.ops._caffe2.GenerateProposals
@@ -11449,6 +11457,50 @@ a")
                     sum += 1
 
                 return sum
+
+    def test_list_comprehension_modulelist(self):
+        class Inner(torch.nn.Module):
+            def forward(self, x):
+                return x + 10
+
+        class M(torch.nn.Module):
+            __constants__ = ["module_list"]
+
+            def __init__(self, mod_list):
+                super(M, self).__init__()
+                self.module_list = mod_list
+
+            def forward(self, x):
+                out = torch.jit.annotate(List[Tensor], [mod(x) for mod in self.module_list])
+                return out
+
+        mod = M(nn.ModuleList([Inner(), Inner()]))
+        self.checkModule(mod, (torch.tensor(3),))
+
+        mod = M(nn.ModuleList([]))
+        torch.jit.script(mod)
+
+        class M2(M):
+            def __init__(self, mod_list):
+                super(M2, self).__init__(mod_list)
+
+            def forward(self, x):
+                out = [mod(x) for mod in self.module_list]
+                return out
+
+        mod = M2(nn.ModuleList([Inner(), Inner()]))
+        self.checkModule(mod, (torch.tensor(3),))
+
+        mod = M2(nn.ModuleList([]))
+        # defaults to List of Tensor for empty modulelist
+        self.assertEqual(torch.jit.script(mod)(torch.tensor(.5)), [])
+
+        def bad_type_annotation():
+            out = torch.jit.annotate(int, [x for x in [1, 2, 3]])
+            return out
+
+        with self.assertRaisesRegex(Exception, "Expected list type annotation"):
+            torch.jit.script(bad_type_annotation)
 
     def test_for_in_zip(self):
         def fn(x, y):

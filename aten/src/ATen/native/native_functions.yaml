@@ -1995,6 +1995,7 @@
 
 - func: cdist(Tensor x1, Tensor x2, float p=2, int? compute_mode=None) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
 
 - func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
   use_c10_dispatcher: full
@@ -5203,29 +5204,20 @@
 
 - func: l1_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_l1_loss_forward_out
-    CUDA: legacy::cuda::_thnn_l1_loss_forward_out
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_l1_loss_forward
-    CUDA: legacy::cuda::_thnn_l1_loss_forward
 
 - func: l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_l1_loss_backward_out
-    CUDA: legacy::cuda::_thnn_l1_loss_backward_out
+    CPU: l1_loss_backward_out
+    CUDA: l1_loss_backward_out
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_l1_loss_backward
-    CUDA: legacy::cuda::_thnn_l1_loss_backward
 
 - func: multi_margin_loss.out(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
