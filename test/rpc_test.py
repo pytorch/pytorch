@@ -696,7 +696,7 @@ class RpcTest(object):
         if self.rank == 0:
             assert self.world_size >= 3
 
-            num_repeat = 200
+            num_repeat = 100
             futs = []
 
             # Phase 1: Only worker1 has workload.

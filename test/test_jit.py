@@ -7616,6 +7616,14 @@ a")
 
             self.assertEqual(cu.test_call_python(*inputs), outputs)
 
+    def test_type_call_in_script(self):
+        @torch.jit.script
+        def fn(x):
+            return type(x)
+
+        with self.assertRaisesRegex(RuntimeError, "value of type type"):
+            fn(torch.tensor(.5))
+
     def test_python_call_annotation(self):
         def pyfunc(a):
             return a * 3.0
