@@ -149,6 +149,7 @@ class DispatchTable final {
     // they are never called. These, however, register kernels for
     // VariableTensorId.
     // TODO Stop generating those kernels and re-enable this assertion here.
+    //TORCH_CHECK(dispatch_strategy_.is_valid_, "Tried to register a kernel with dispatch key ", toString(dispatch_key), " for operator ", operator_name_, " that doesn't have tensor arguments.");
     kernels_.set(dispatch_key, kernel, operator_name_);
   }
 
@@ -186,27 +187,20 @@ class DispatchTable final {
    * Perform a dynamic dispatch on this table and find the kernel to call
    * for the given arguments.
    *
-   * @param stack Stack with arguments to invoke the kernel function with
+   * @param args Arguments to invoke the function with
    * @return Kernel function pointing to the right kernel for the given arguments.
    */
-   const KernelFunction& lookupBoxed(const Stack* stack) const {
-     return lookup_([&] () -> c10::optional<TensorTypeId> {
-       return dispatch_strategy_.get_dispatch_key_boxed(stack);
+   const KernelFunction& lookup(const Stack* stack) const {
+     return lookup_([=] () -> c10::optional<TensorTypeId> {
+       if (!dispatch_strategy_.is_valid_) {
+         return c10::nullopt;
+       }
+       return dispatch_strategy_.get_dispatch_key(stack, operator_name_);
      });
    }
 
-   /**
-    * Perform a dynamic dispatch on this table and find the kernel to call
-    * for the given arguments.
-    *
-    * @param args Arguments to invoke the kernel function with
-    * @return Kernel function pointing to the right kernel for the given arguments.
-    */
-   template<class... Args>
-   const KernelFunction& lookupUnboxed(const Args&... args) const {
-     return lookup_([&] () -> c10::optional<TensorTypeId> {
-       return dispatch_strategy_.get_dispatch_key_unboxed<Args...>(args...);
-     });
+   const KernelFunction& lookup(TensorTypeId dispatchKey) const {
+     return lookup_([=] () -> c10::optional<TensorTypeId> { return dispatchKey;});
    }
 
    bool isEmpty() const {
@@ -230,9 +224,15 @@ private:
     // TODO: a potential optimization is to store a bitfield of arg locations,
     size_t num_args_;
 
-    c10::optional<TensorTypeId> get_dispatch_key_boxed(const Stack* stack) const {
-      // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
-      //      but boxed doesn't yet. These should be aligned and do the same thing.
+    // An invalid dispatch strategy means we can't dispatch any kernels.
+    // You're able to create a dispatch table with an invalid dispatch strategy,
+    // but adding kernels to it will fail.
+    // This is used to allow creating operators with empty argument lists
+    // as long as they only have fallback kernels and no dispatched kernels.
+    bool is_valid_;
+
+    TensorTypeId get_dispatch_key(const Stack* stack, const std::string& operator_name) const {
+
       TensorTypeSet ts;
       for (const auto& ivalue : torch::jit::last(*stack, num_args_)) {
         if (C10_LIKELY(ivalue.isTensor())) {
@@ -245,26 +245,27 @@ private:
           }
         }
       }
-      if (ts.empty()) {
-        return c10::nullopt;
-      }
       // TODO: Don't use legacy extractor; blocked on c10 understanding
       // variable
       return c10::legacyExtractTypeId(ts);
     }
-
-    template<class... Args>
-    c10::optional<TensorTypeId> get_dispatch_key_unboxed(const Args&... args) const {
-      auto type_set = detail::multi_dispatch_tensor_type_set(args...);
-      if (type_set.empty()) {
-        return c10::nullopt;
-      }
-      return impl::dispatchTypeId(type_set);
-    }
   };
 
   static DispatchStrategy get_dispatch_strategy_(const FunctionSchema& schema) {
-    return {schema.arguments().size()};
+    bool is_valid = false;
+    for (size_t i = 0; i < schema.arguments().size(); ++i) {
+      const auto& type = schema.arguments()[i].type();
+      if (type->isSubtypeOf(TensorType::get())) {
+        is_valid = true;
+        break;
+      }
+      if (type->isSubtypeOf(ListType::ofTensors())) {
+        is_valid = true;
+        break;
+      }
+    }
+
+    return {schema.arguments().size(), is_valid};
   }
 
   template<class GetDispatchKeyFunc>
@@ -290,25 +291,11 @@ private:
               "Available functions are ", listAllDispatchKeys())
       }
 
-      // If the input is quantized, but the quantization is not supported.
-      if (dispatch_key.value() == TensorTypeId::QuantizedCPUTensorId) {
-        TORCH_CHECK(false, "Tried running '", operator_name_, "' with a",
-                    " quantized tensor but '", operator_name_, "' expects a",
-                    " non-quantized input.");
-      }
-
-      // If the input is not quantized, but the kernel is.
-      if (kernels_.lookup(TensorTypeId::QuantizedCPUTensorId)) {
-        TORCH_CHECK(false, "Tried running '", operator_name_, "' but the input",
-                    " is not quantized. Please ensure you have QuantStub",
-                    " during model conversion, or you manually quantize the",
-                    " input tensor.");
-      }
-
       const std::string dispatch_key_str = toString(*dispatch_key);
-      TORCH_CHECK(false, "Didn't find kernel to dispatch to for operator '", operator_name_,
-               "'. Tried to look up kernel for dispatch key '", dispatch_key_str,
-               "'. Registered dispatch keys are: ", listAllDispatchKeys());
+      TORCH_CHECK(false, "Could not run '", operator_name_, "' with arguments",
+                  " from the '", dispatch_key_str, "' backend. '",
+                  operator_name_, "' is only available for these backends: ",
+                  listAllDispatchKeys(), ".");
   }
 
   detail::KernelTable_ kernels_;

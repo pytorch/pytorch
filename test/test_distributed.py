@@ -1432,23 +1432,27 @@ class _DistTestBase(object):
 
         self._barrier()
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
     def test_all_gather_coalesced_simple(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_gather_coalesced_helper(group, group_id, rank)
 
     @skip_if_small_worldsize
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
     def test_all_gather_coalesced_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_gather_coalesced_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
     def test_all_gather_coalesced_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_gather_coalesced_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+    @unittest.skipIf(BACKEND == "nccl", "all_gather_coalesced does not support NCCL")
+    @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
     def test_all_gather_coalesced_with_empty(self):
         group, group_id, rank = self._init_global_test()
         input_tensors = [
