@@ -1047,7 +1047,6 @@ class TestNamedTensor(TestCase):
         def sum_all_outputs(output):
             if isinstance(output, torch.Tensor):
                 return output.sum()
-            assert isinstance(output, tuple)
             result = 0
             for out in output:
                 result = out + result
