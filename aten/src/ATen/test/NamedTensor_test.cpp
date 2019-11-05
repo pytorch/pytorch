@@ -12,6 +12,8 @@ using at::Dimname;
 using at::DimnameList;
 using at::NamedTensorMeta;
 using at::Symbol;
+using at::namedinference::TensorName;
+using at::namedinference::TensorNames;
 using c10::guts::make_unique;
 
 TEST(NamedTensorTest, defaultMetadata) {
@@ -207,6 +209,43 @@ TEST(NamedTensorTest, NoNamesGuard) {
     ASSERT_FALSE(at::impl::get_opt_names(tensor.unsafeGetTensorImpl()));
   }
   ASSERT_TRUE(at::NamesMode::is_enabled());
+}
+
+static std::vector<Dimname> nchw() {
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  auto H = dimnameFromString("H");
+  auto W = dimnameFromString("W");
+  return { N, C, H, W };
+}
+
+TEST(NamedTensorTest, TensorNamePrint) {
+  auto names = nchw();
+  {
+    auto N = TensorName(names, 0);
+    ASSERT_EQ(
+        c10::str(N),
+        "'N' (index 0 of ['N', 'C', 'H', 'W'])");
+  }
+  {
+    auto H = TensorName(names, 2);
+    ASSERT_EQ(
+        c10::str(H),
+        "'H' (index 2 of ['N', 'C', 'H', 'W'])");
+  }
+}
+
+TEST(NamedTensorTest, TensorNamesCheckUnique) {
+  auto names = nchw();
+  {
+    // smoke test to check that this doesn't throw
+    TensorNames(names).checkUnique("op_name");
+  }
+  {
+    std::vector<Dimname> nchh = { names[0], names[1], names[2], names[2] };
+    auto tensornames = TensorNames(nchh);
+    ASSERT_THROW(tensornames.checkUnique("op_name"), c10::Error);
+  }
 }
 
 

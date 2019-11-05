@@ -52,8 +52,7 @@ inline Tensor Tensor::toBackend(Backend b) const {
 inline TensorOptions Tensor::options() const {
   return TensorOptions().dtype(dtype())
                         .device(device())
-                        .layout(layout())
-                        .is_variable(is_variable());
+                        .layout(layout());
 }
 
 // all static inline to allow for inlining of the non-dynamic part of dispatch
