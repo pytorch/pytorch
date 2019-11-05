@@ -76,7 +76,7 @@ def process_group_init_backend_handler(
                 )
             )
         # TODO: add try-except and destroy _agent in all processes if any fails.
-        return dist.ProcessGroupAgent(self_name, group, num_send_recv_threads)
+        return dist.ProcessGroupAgent(self_name, group, num_send_recv_threads, kwargs["rpc_timeout"])
     except Exception as ex:
         dist.destroy_process_group()
         raise ex
