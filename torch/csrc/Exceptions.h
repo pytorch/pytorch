@@ -268,7 +268,7 @@ struct PyWarningHandler: at::WarningHandler {
 public:
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
   PyWarningHandler() noexcept(true);
-  ~PyWarningHandler() noexcept(false);
+  ~PyWarningHandler() noexcept(false) override;
 
   void process(const at::SourceLocation &source_location,
                const std::string &msg) override;

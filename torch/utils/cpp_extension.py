@@ -103,25 +103,22 @@ COMMON_NVCC_FLAGS = [
 ]
 
 # See comment in load_inline for more information
-# Takes as argument (original_function_name, safe_function_name)
 # The goal is to be able to call the safe version of the
 # function exactely as if it was the original one.
 # We need to create a pointer to this new function to give
 # it to pybind later.
-SAFE_FUNCTION_TEMPLATE = '''
 
-template <typename> struct {1}_t;
+SAFE_FUNCTION_DEFINITION = '''
+#include <functional>
 
 template <typename Ret, typename ...Args>
-struct {1}_t<Ret(Args...)> {{
-    static Ret call(Args&& ...args) {{
+auto _get_safe_version(Ret (*f)(Args...)) -> std::function<Ret(Args...)> {{
+    return [f](Args&& ...args) -> Ret {{
         HANDLE_TH_ERRORS
-        return {0}(std::forward<Args>(args)...);
+        return f(std::forward<Args>(args)...);
         END_HANDLE_TH_ERRORS_PYBIND
-    }}
-}};
-
-auto {1} = {1}_t<decltype({0})>::call;
+    }};
+}}
 
 '''
 
@@ -770,13 +767,10 @@ def load_inline(name,
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
 
-    # Adds a new `_safe_{function_name}` function that adds pytorch's
-    # error handling macros and call the original function without
-    # doing anything else.
-    def add_safe_version(function_name):
-        safe_fn_name = "_safe_{0}".format(function_name)
-        cpp_sources.append(SAFE_FUNCTION_TEMPLATE.format(function_name, safe_fn_name))
-        return safe_fn_name
+    # Adds a new `_get_safe_version(foo)` function that returns a new function
+    # that performs the same operation as `foo` but with pytorch error handling
+    # macros.
+    cpp_sources.append(SAFE_FUNCTION_DEFINITION)
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
@@ -795,9 +789,8 @@ def load_inline(name,
                     type(functions)))
         for function_name, docstring in functions.items():
             if with_pytorch_error_handling:
-                safe_fn_name = add_safe_version(function_name)
-                module_def.append('m.def("{0}", {1}, "{2}");'.format(
-                    function_name, safe_fn_name, docstring))
+                module_def.append('m.def("{0}", _get_safe_version({0}), "{1}");'.format(
+                    function_name, docstring))
             else:
                 module_def.append('m.def("{0}", {0}, "{1}");'.format(function_name, docstring))
         module_def.append('}')
