@@ -1216,6 +1216,8 @@ CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2);
 
+CAFFE2_API c10::optional<TypePtr> unifyTypeList(at::ArrayRef<TypePtr> elements);
+
 namespace detail {
 template <typename T>
 struct getTypePtr_ final {

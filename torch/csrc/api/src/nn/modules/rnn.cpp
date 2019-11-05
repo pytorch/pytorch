@@ -115,10 +115,25 @@ template <typename Derived>
 void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
   const std::string name = this->name();
   const std::string name_without_impl = name.substr(0, name.size() - 4);
-  stream << name_without_impl << "(input_size=" << options.input_size()
-         << ", hidden_size=" << options.hidden_size()
-         << ", layers=" << options.num_layers() << ", dropout=" << options.dropout()
-         << ")";
+  stream << name_without_impl
+         << "(" << options.input_size()
+         << ", " << options.hidden_size();
+  if (options.num_layers() != 1) {
+    stream << ", num_layers=" << options.num_layers();
+  }
+  if (!options.bias()) {
+    stream << ", bias=" << options.bias();
+  }
+  if (options.batch_first()) {
+    stream << ", batch_first=" << options.batch_first();
+  }
+  if (options.dropout() != 0) {
+    stream << ", dropout=" << options.dropout();
+  }
+  if (options.bidirectional()) {
+    stream << ", bidirectional=" << options.bidirectional();
+  }
+  stream << ")";
 }
 
 template <typename Derived>
@@ -223,11 +238,24 @@ RNNImpl::RNNImpl(const RNNOptions& options_)
       options(options_) {}
 
 void RNNImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::RNN(input_size=" << options.input_size()
-         << ", hidden_size=" << options.hidden_size()
-         << ", layers=" << options.num_layers() << ", dropout=" << options.dropout()
-         << ", activation=" << enumtype::get_enum_name(options.nonlinearity())
-         << ")";
+  stream << "torch::nn::RNN(" << options.input_size()
+         << ", " << options.hidden_size();
+  if (options.num_layers() != 1) {
+    stream << ", num_layers=" << options.num_layers();
+  }
+  if (!options.bias()) {
+    stream << ", bias=" << options.bias();
+  }
+  if (options.batch_first()) {
+    stream << ", batch_first=" << options.batch_first();
+  }
+  if (options.dropout() != 0) {
+    stream << ", dropout=" << options.dropout();
+  }
+  if (options.bidirectional()) {
+    stream << ", bidirectional=" << options.bidirectional();
+  }
+  stream << ")";
 }
 
 RNNOutput RNNImpl::forward(const Tensor& input, Tensor state) {
@@ -242,7 +270,7 @@ RNNOutput RNNImpl::forward(const Tensor& input, Tensor state) {
       input,
       std::move(state));
   } else {
-    AT_ERROR("Unhandled RNN activation function!");
+    AT_ERROR("Unknown nonlinearity");
   }
 }
 
