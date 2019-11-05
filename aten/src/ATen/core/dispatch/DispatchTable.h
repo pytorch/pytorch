@@ -291,10 +291,11 @@ private:
               "Available functions are ", listAllDispatchKeys())
       }
 
-      const std::string dispatch_key_str = dispatch_key.has_value() ? toString(*dispatch_key) : "None";
-      TORCH_CHECK(false, "Didn't find kernel to dispatch to for operator '", operator_name_,
-               "'. Tried to look up kernel for dispatch key '", dispatch_key_str,
-               "'. Registered dispatch keys are: ", listAllDispatchKeys());
+      const std::string dispatch_key_str = toString(*dispatch_key);
+      TORCH_CHECK(false, "Could not run '", operator_name_, "' with arguments",
+                  " from the '", dispatch_key_str, "' backend. '",
+                  operator_name_, "' is only available for these backends: ",
+                  listAllDispatchKeys(), ".");
   }
 
   detail::KernelTable_ kernels_;
