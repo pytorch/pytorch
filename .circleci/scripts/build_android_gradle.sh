@@ -4,6 +4,8 @@ set -eux -o pipefail
 export ANDROID_NDK_HOME=/opt/ndk
 export ANDROID_HOME=/opt/android/sdk
 
+# Must be in sync with GRADLE_VERSION in docker image for android
+# https://github.com/pietern/pytorch-dockerfiles/blob/master/build.sh#L155
 export GRADLE_VERSION=4.10.3
 export GRADLE_HOME=/opt/gradle/gradle-$GRADLE_VERSION
 export GRADLE_PATH=$GRADLE_HOME/bin/gradle
@@ -45,17 +47,45 @@ fi
 env
 echo "BUILD_ENVIRONMENT:$BUILD_ENVIRONMENT"
 
+GRADLE_PARAMS="-p android assembleRelease --debug --stacktrace"
+if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
+    GRADLE_PARAMS+=" -PABI_FILTERS=x86"
+fi
+
+if [ ! -z "{GRADLE_OFFLINE:-}" ]; then
+    GRADLE_PARAMS+=" --offline"
+fi
+
+# touch gradle cache files to prevent expiration
+while IFS= read -r -d '' file
+do
+  touch "$file" || true
+done < <(find /var/lib/jenkins/.gradle -type f -print0)
+
+env
+#[ -f /usr/local/bin/cmake ] && sudo mv -f /usr/local/bin/cmake /usr/local/bin/cmake-disabled-for-gradle || true
+#[ -f /usr/bin/cmake ] && sudo mv -f /usr/bin/cmake /usr/bin/cmake-disabled-for-gradle || true
+which cmake || true
+
+CMAKE_DIR=/opt/cmake_gradle
+sudo mkdir -p "$CMAKE_DIR"
+sudo chmod -R 777 "$CMAKE_DIR"
+
+pushd "$CMAKE_DIR"
+curl -Os "https://cmake.org/files/v3.7/cmake-3.7.0-Linux-x86_64.tar.gz"
+tar -C "$CMAKE_DIR" --strip-components 1 --no-same-owner -zxf cmake-*.tar.gz
+rm -f cmake-*.tar.gz
+popd
+
+$CMAKE_DIR/bin/cmake --version
+
 export GRADLE_LOCAL_PROPERTIES=~/workspace/android/local.properties
 rm -f $GRADLE_LOCAL_PROPERTIES
 echo "sdk.dir=/opt/android/sdk" >> $GRADLE_LOCAL_PROPERTIES
 echo "ndk.dir=/opt/ndk" >> $GRADLE_LOCAL_PROPERTIES
+echo "cmake.dir=$CMAKE_DIR" >> $GRADLE_LOCAL_PROPERTIES
 
-if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
-    $GRADLE_PATH -PABI_FILTERS=x86 -p ~/workspace/android/ assembleRelease
-else
-    $GRADLE_PATH -p ~/workspace/android/ assembleRelease
-fi
-
+$GRADLE_PATH $GRADLE_PARAMS || true
 
 find . -type f -name "*.a" -exec ls -lh {} \;
 
