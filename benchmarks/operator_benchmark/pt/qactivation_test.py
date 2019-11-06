@@ -42,24 +42,9 @@ class _ActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
     r"""Base class for all the activations."""
     def setup(self, dims, permute_dims, dtype):
         # Input dimensions
-        f_input = (torch.rand(*dims) - 0.5) * 1e6
-
-        # Get quantization paramerters and quantize
-        if dtype in (torch.qint8, torch.quint8):
-            observer = tq.MinMaxObserver(dtype=dtype,
-                                         qscheme=torch.per_tensor_affine,
-                                         reduce_range=False)
-            observer.forward(f_input)
-            scale, zero_point = observer.calculate_qparams()
-            scale, zero_point = scale.item(), zero_point.item()
-        else:
-            zero_point = 0
-            qinfo = torch.iinfo(dtype)
-            fmin, fmax = f_input.min().item(), f_input.max().item()
-            if fmax == fmin:
-                scale = 1.0
-            else:
-                scale = (fmax - fmin) / (qinfo.max - qinfo.min)
+        f_input = (torch.rand(*dims) - 0.5) * 256
+        scale = 1.0
+        zero_point = 0
 
         # Quantize the tensor
         self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
