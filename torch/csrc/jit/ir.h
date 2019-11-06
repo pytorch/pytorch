@@ -936,13 +936,6 @@ struct Block {
   TORCH_API void cloneFrom(Block* src, std::function<Value*(Value*)> value_map);
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
-  Block* parentBlock() {
-    if (!owningNode()) {
-      return nullptr;
-    }
-    return owningNode()->owningBlock();
-  }
-
  private:
   void reIndexTopology();
 

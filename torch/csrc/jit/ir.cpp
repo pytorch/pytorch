@@ -1342,17 +1342,10 @@ Block* Node::findCommonAncestorBlockWith(Node* n) {
   for (; d_1 > d_2; --d_1) {
     n1 = n1->owningBlock()->owningNode();
     // n2 contains n1
-    if (n1 == n2) {
-      return n1->owningBlock();
-    }
   }
 
   for (; d_2 > d_1; --d_2) {
     n2 = n2->owningBlock()->owningNode();
-    // n1 contains n2
-    if (n2 == n1) {
-      return n2->owningBlock();
-    }
   }
 
   // Now they are the same numer of blocks from the graph block,
