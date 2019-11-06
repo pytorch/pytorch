@@ -2055,4 +2055,4 @@ def _weight_norm(g, weight_v, weight_g, dim):
         div = g.op("Div", weight_v, norm_v)
         return g.op("Mul", div, weight_g)
     else:
-        return g.op("ATen", v, g, dim_i=dim, operator_s="_weight_norm")
+        return g.op("ATen", weight_v, weight_g, dim_i=dim, operator_s="_weight_norm")
