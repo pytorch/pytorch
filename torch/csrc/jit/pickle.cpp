@@ -1,7 +1,6 @@
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/pickle.h>
-#include <torch/csrc/jit/pickler.h>
 
 namespace torch {
 namespace jit {

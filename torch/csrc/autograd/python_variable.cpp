@@ -337,7 +337,7 @@ PyObject *THPVariable_get_names(THPVariable *self, void *unused)
   for (size_t i = 0; i < size; ++i) {
     PyObject* str = Py_None;
     if (dimnames[i].type() != at::NameType::WILDCARD) {
-      str = THPUtils_packString(dimnames[i].full_name().toUnqualString());
+      str = THPUtils_packString(dimnames[i].symbol().toUnqualString());
       if (!str) throw python_error();
     }
     PyTuple_SET_ITEM(tuple.get(), i, str);

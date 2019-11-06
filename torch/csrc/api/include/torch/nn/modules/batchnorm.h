@@ -27,7 +27,7 @@ class TORCH_API BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
  public:
   explicit BatchNormImpl(int64_t features)
       : BatchNormImpl(BatchNormOptions(features)) {}
-  explicit BatchNormImpl(BatchNormOptions options);
+  explicit BatchNormImpl(const BatchNormOptions& options_);
 
   void reset() override;
 

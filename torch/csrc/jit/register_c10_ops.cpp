@@ -138,7 +138,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         jit::tracer::setTracingState(nullptr);
       }
 
-      c10::Dispatcher::singleton().lookup(op, &stack).call(&stack);
+      c10::Dispatcher::singleton().callBoxed(op, &stack);
 
       // wrap tensor outputs as variable
       for (auto iter = stack.end() - output_size; iter != stack.end(); ++iter) {

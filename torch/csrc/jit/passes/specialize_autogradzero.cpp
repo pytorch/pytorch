@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 
 namespace torch {
@@ -44,6 +45,8 @@ void specializeAutogradZero(Graph& g) {
         if (all_zeros) {
           auto zero = g.createAutogradZero()->insertAfter(n)->output();
           for (auto o : n->outputs()) {
+            GRAPH_UPDATE("Replacing output %", o->debugName(),
+                         " with AutogradZero %", zero->debugName());
             o->replaceAllUsesWith(zero);
           }
         } else {
@@ -62,14 +65,21 @@ void specializeAutogradZero(Graph& g) {
             AT_ASSERT(state[input] != State::Unknown);
           }
           // hoist the nodes in the GradOf body to be before the linear block
+          GRAPH_UPDATE("Hoisting out ", getHeader(*it));
           for (auto it = body->nodes().begin(); it != body->nodes().end();) {
             auto block_node = *it++;
             block_node->moveBefore(n);
           }
 
-          for (size_t i = 0; i < n->outputs().size(); ++i)
+          for (size_t i = 0; i < n->outputs().size(); ++i) {
+            GRAPH_UPDATE("Replacing prim::GradOf's use %",
+                         n->outputs().at(i)->debugName(),
+                         " with hoisted value %",
+                         body->outputs().at(i)->debugName());
             n->outputs().at(i)->replaceAllUsesWith(body->outputs().at(i));
+          }
         }
+        GRAPH_UPDATE("Destroying ", getHeader(*it));
         it.destroyCurrent();
       } break;
       case prim::AutogradAdd: {
@@ -78,10 +88,14 @@ void specializeAutogradZero(Graph& g) {
         // if one is Autograd zero, we can just drop the add
         if (state[a] == State::Zero) {
           // Zero + b == b
+          GRAPH_UPDATE("Simplifying ", getHeader(n), " where %", a->debugName(),
+                       " is AutogradZero to %", b->debugName());
           n->output()->replaceAllUsesWith(b);
           it.destroyCurrent();
         } else if (state[b] == State::Zero) {
           // a + Zero == a
+          GRAPH_UPDATE("Simplifying ", getHeader(n), " where %", b->debugName(),
+                       " is AutogradZero to %", a->debugName());
           n->output()->replaceAllUsesWith(a);
           it.destroyCurrent();
         } else if (state[a] == State::Nonzero && state[b] == State::Nonzero) {
@@ -97,6 +111,8 @@ void specializeAutogradZero(Graph& g) {
           auto* add_output = add_node->output();
           state[add_output] = State::Nonzero;
           n->output()->replaceAllUsesWith(add_output);
+          GRAPH_UPDATE("Simplifying ", getHeader(n), " to ",
+                       getHeader(add_node));
           it.destroyCurrent();
         } else {
           // otherwise we have conditionally-Nonzero things, and we need

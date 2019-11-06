@@ -17,7 +17,7 @@ namespace nn {
 /// Creates a criterion that measures the mean absolute error (MAE) between each
 /// element in the input : math :`x` and target : `y`.
 struct TORCH_API L1LossImpl : Module {
-  explicit L1LossImpl(L1LossOptions options = {});
+  explicit L1LossImpl(const L1LossOptions& options_ = {});
 
   /// Pretty prints the `L1Loss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;

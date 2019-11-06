@@ -44,9 +44,54 @@ def get_trainer_version_based_on_optim(optim_def):
         return "fp32"
 
 
-def get_sparse_lookup_predictor_version(version):
-    assert version in {'fp32', 'fp16', 'uint8rowwise', 'fused_uint8rowwise'},\
-        "Unexpected version of sparse_lookup layer {0}".format(version)
+def get_sparse_lookup_predictor_version(
+    version,
+    blob_size=None,
+    min_blob_size_4bits=None,
+    embedding_dim=None,
+    sparse_feature_name=None,
+):
+    assert version in {
+        'fp32', 'fp16', 'uint8rowwise', 'fused_uint8rowwise', 'fused_uint4rowwise'
+    }, "Unexpected version of sparse_lookup layer {0}".format(version)
+    if version == 'fused_uint4rowwise':
+        if (
+            blob_size is not None
+            and min_blob_size_4bits is not None
+            and embedding_dim is not None
+        ):
+            if blob_size < min_blob_size_4bits:
+                logger.info(
+                    "{} fall back to uint8 because lookup table size {} < min_blob_size_4bits {}".format(
+                        sparse_feature_name,
+                        blob_size,
+                        min_blob_size_4bits,
+                    )
+                )
+                version = 'fused_uint8rowwise'
+
+            if embedding_dim % 2 == 1:
+                logger.info(
+                    "{} fall back to uint8 because lookup table dimension {} is not divisible by 2".format(
+                        sparse_feature_name, embedding_dim
+                    )
+                )
+                version = 'fused_uint8rowwise'
+        else:
+            raise ValueError(
+                (
+                    "When 4 bit quantization is enabled for {}, "
+                    "(i.e., Sparse lookup predictor version:{}), "
+                    "requires arguments blob_size:{}, "
+                    "min_blob_size_4bits:{}, embedding_dim:{}"
+                ).format(
+                    sparse_feature_name,
+                    version,
+                    blob_size,
+                    min_blob_size_4bits,
+                    embedding_dim
+                )
+            )
     return version
 
 
@@ -259,6 +304,10 @@ class SparseLookup(ModelLayer):
         elif version == 'fused_uint8rowwise':
             gathered_w = net.Gather([self.w, in_indices], 'gathered_w')
             return net.Fused8BitRowwiseQuantizedToFloat(gathered_w, out)
+        elif version == 'fused_uint4rowwise':
+            gathered_w = net.Gather([self.w, in_indices], 'gathered_w')
+            return net.Fused4BitRowwiseQuantizedToFloat(gathered_w, out)
+
         else:
             raise "Unsupported version of operators in SparseLookup " +\
                 "layer: {0} for sparse feature {1}".format(
@@ -302,6 +351,9 @@ class SparseLookup(ModelLayer):
         elif version == 'fused_uint8rowwise':
             net.__getattr__(layer_name + 'Fused8BitRowwise')(
                 op_input, self.output_schema.field_blobs())
+        elif version == 'fused_uint4rowwise':
+            net.__getattr__(layer_name + 'Fused4BitRowwise')(
+                op_input, self.output_schema.field_blobs())
         else:
             raise "Unsupported version of operator in SparseLookUp " +\
                 "layer: {0} for sparse feature {1}".format(
@@ -342,6 +394,9 @@ class SparseLookup(ModelLayer):
                     op_input, self.output_schema.field_blobs())
             elif version == 'fused_uint8rowwise':
                 net.__getattr__(layer_name + 'Fused8BitRowwise')(
+                    op_input, self.output_schema.field_blobs())
+            elif version == 'fused_uint4rowwise':
+                net.__getattr__(layer_name + 'Fused4BitRowwise')(
                     op_input, self.output_schema.field_blobs())
             else:
                 raise "Unsupported version of operator in SparseLookUp " +\
@@ -409,6 +464,9 @@ class SparseLookup(ModelLayer):
             elif version == 'fused_uint8rowwise':
                 net.__getattr__(layer_name + 'Fused8BitRowwise')(
                     op_input, self.output_schema.field_blobs())
+            elif version == 'fused_uint4rowwise':
+                net.__getattr__(layer_name + 'Fused4BitRowwise')(
+                    op_input, self.output_schema.field_blobs())
             else:
                 raise "Unsupported version of operator in SparseLookUp " +\
                     "layer: {0} for sparse feature {1}".format(
@@ -447,15 +505,27 @@ class SparseLookup(ModelLayer):
         self._add_ops(net, self.trainer_version)
 
     def add_ops(self, net):
-        cur_scope = get_current_scope()
+        version_info = get_current_scope().get(
+            get_sparse_lookup_predictor_version.__name__, {'version': 'fp32'}
+        )
+        lookup_table_blob_size = self.shape[0] * self.shape[1]
         version = get_sparse_lookup_predictor_version(
-            **cur_scope.get(get_sparse_lookup_predictor_version.__name__,
-                            {'version': 'fp32'}))
+            version_info['version'],
+            blob_size=lookup_table_blob_size,
+            min_blob_size_4bits=(
+                version_info['min_blob_size_4bits']
+                if 'min_blob_size_4bits' in version_info
+                else None
+            ),
+            embedding_dim=self.shape[1],
+            sparse_feature_name=self.sparse_key,
+        )
 
         # TODO(amalevich): Layer should not be responsible for decision about
         # quantization.
         if not self.support_8bit() and version in {'uint8rowwise',
-                                                   'fused_uint8rowwise'}:
+                                                   'fused_uint8rowwise',
+                                                   'fused_uint4rowwise'}:
             version = 'fp32'
 
         self._add_ops(net, version)

@@ -88,8 +88,8 @@ class TestFakeQuantizePerTensorAffine(TestCase):
         quant_max = torch.iinfo(torch_type).max
 
         X = torch.tensor(X).to(dtype=torch.float, device=device)
-        # quantize_linear and dequantize are only implemented in CPU
-        Y = torch.dequantize(torch.quantize_linear(X.cpu(), scale, zero_point, torch_type))
+        # quantize_per_tensor and dequantize are only implemented in CPU
+        Y = torch.dequantize(torch.quantize_per_tensor(X.cpu(), scale, zero_point, torch_type))
         Y_prime = torch.fake_quantize_per_tensor_affine(
             X, scale, zero_point, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)

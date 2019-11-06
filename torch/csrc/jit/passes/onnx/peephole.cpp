@@ -360,13 +360,18 @@ void hackFixupPadPackedShapes(Block* graph) {
 void fixDefaultRNNState(Graph* graph, Node* n, int input_index, int opset_version) {
   auto initial_state = n->inputs()[input_index];
 
-  // The RNN code in pytorch accepts an optional hidden state. When it
-  // is provided, everything works great. When it is not provided, it
-  // is default-initialized by constructing a new Variable, which gets
-  // traced as a Constant. Recognize that pattern here and replace it
-  // with something that doesn't fix the batch size.  Note that for
-  // multi-layer RNNs there will be a Slice operation between the
-  // Constant and the RNN.
+  // The RNN code in pytorch accepts an optional hidden state.
+  // 1- When it is provided as an input, everything works great.
+  // 2- When it is not provided, it is default-initialized by constructing a new Variable, which gets
+  //    traced as a ConstantOfShape with the expected Shape.
+  // 3- When the batch size is fixed, everything works great as well.
+  // 4- When h0 and c0 are specified but are not inputs of the model (they are Constants)
+  //    and the batch size is variable, the model should be saved with a batch size of 1
+  //    (or an error will occur), and we save the value of h0 and c0 with a batch size of 1.
+  //    When the model is then called with a different batch size value, h0 and c0 are broadcasted
+  //    to get the right shape.
+  // Recognize that last pattern here (4) and fix the shape.
+  // Note that for multi-layer RNNs there will be a Slice operation between the Constant and the RNN.
   bool needsFixing = initial_state->node()->kind() == onnx::Constant ||
       (initial_state->node()->kind() == onnx::Slice &&
        initial_state->node()->inputs()[0]->node()->kind() == onnx::Constant);
@@ -426,18 +431,11 @@ void fixDefaultRNNState(Graph* graph, Node* n, int input_index, int opset_versio
   concated_dims->addInput(unsqueezed_batch_size->outputs()[0]);
   concated_dims->addInput(hidden_size->outputs()[0]);
 
-  if (opset_version < 9) {
-    Node* constant_fill = graph->create(onnx::ConstantFill, 1);
-    constant_fill->insertBefore(n);
-    constant_fill->i_(attr::input_as_shape, 1);
-    constant_fill->addInput(concated_dims->outputs()[0]);
-    n->replaceInput(input_index, constant_fill->outputs()[0]);
-  } else {
-    Node* constant_of_shape = graph->create(onnx::ConstantOfShape, 1);
-    constant_of_shape->insertBefore(n);
-    constant_of_shape->addInput(concated_dims->outputs()[0]);
-    n->replaceInput(input_index, constant_of_shape->outputs()[0]);
-  }
+  Node* fixed_init_state = graph->create(onnx::Expand, 1);
+  fixed_init_state->insertBefore(n);
+  fixed_init_state->addInput(initial_state);
+  fixed_init_state->addInput(concated_dims->outputs()[0]);
+  n->replaceInput(input_index, fixed_init_state->outputs()[0]);
 
   if (initial_state->uses().size() == 0) {
     initial_state->node()->destroy();
@@ -639,15 +637,19 @@ void removeMaxPoolUnusedOutput(Block* b) {
 // writing your optimization in jit/passes/peephole.cpp rather than
 // here, as it will be generally applicable to the JIT as well.  The
 // optimizations here are ONLY applied on ONNX update
-void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version) {
+void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph, int opset_version, bool fixed_batch_size) {
   // TODO: decide on fixpoint strategy
   // TODO: make it easier not to do O(k) iterations over the graph, where
   // k is the number of distinct peephole optimizations
   hackFixupPadPackedShapes(graph->block());
   pushPackingPastRnn(graph->block());
   removeNopPacking(graph->block());
-  fixDefaultRnnHiddenState(graph->block(), opset_version);
-  fixDefaultLstmCellState(graph->block(), opset_version);
+  // we only need to fix the size of hidden state and cell state if the batch size is variable
+  if(!fixed_batch_size)
+  {
+    fixDefaultRnnHiddenState(graph->block(), opset_version);
+    fixDefaultLstmCellState(graph->block(), opset_version);
+  }
   fuseBroadcast(graph->block());
   fuseConsecutiveTransposes(graph->block());
   eliminateNopTranspose(graph->block());

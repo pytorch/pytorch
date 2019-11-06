@@ -26,7 +26,7 @@ class ReLU(torch.nn.ReLU):
 
         >>> m = nn.quantized.ReLU()
         >>> input = torch.randn(2)
-        >>> input = torch.quantize_linear(input, 1.0, 0, dtype=torch.qint32)
+        >>> input = torch.quantize_per_tensor(input, 1.0, 0, dtype=torch.qint32)
         >>> output = m(input)
     """
     def __init__(self, inplace=False):
@@ -61,7 +61,7 @@ class ReLU6(torch.nn.ReLU):
 
         >>> m = nn.quantized.ReLU6()
         >>> input = torch.randn(2)
-        >>> input = torch.quantize_linear(input, 1.0, 0, dtype=torch.qint32)
+        >>> input = torch.quantize_per_tensor(input, 1.0, 0, dtype=torch.qint32)
         >>> output = m(input)
     """
     def __init__(self, inplace=False):

@@ -279,8 +279,8 @@ class AnnotatedCustomConfigNestedModel(torch.nn.Module):
             'dtype': torch.quint8,
             'qscheme': torch.per_tensor_affine
         }
-        custom_qconfig = QConfig(activation=default_observer(**custom_options),
-                                 weight=default_weight_observer())
+        custom_qconfig = QConfig(activation=default_observer.with_args(**custom_options),
+                                 weight=default_weight_observer)
         self.sub2.fc1.qconfig = custom_qconfig
 
         self.sub2.fc1 = QuantWrapper(self.sub2.fc1)

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <ATen/core/op_registration/test_helpers.h>
+#include <ATen/core/boxing/test_helpers.h>
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
@@ -8,7 +8,6 @@
 using c10::RegisterOperators;
 using c10::OperatorKernel;
 using c10::TensorTypeId;
-using c10::KernelCache;
 using c10::Stack;
 using c10::guts::make_unique;
 using c10::intrusive_ptr;
@@ -553,20 +552,19 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithCache_thenCache
 
   // expect first time calling returns a 4 (4 is the initial value in the cache)
   auto stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  auto kernel = c10::Dispatcher::singleton().lookup(*op, &stack);
-  kernel.call(&stack);
+  c10::Dispatcher::singleton().callBoxed(*op, &stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(4, stack[0].toInt());
 
   // expect second time calling returns a 5
   stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  kernel.call(&stack);
+  c10::Dispatcher::singleton().callBoxed(*op, &stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(5, stack[0].toInt());
 
   // expect third time calling returns a 6
   stack = makeStack(dummyTensor(TensorTypeId::CPUTensorId));
-  kernel.call(&stack);
+  c10::Dispatcher::singleton().callBoxed(*op, &stack);
   EXPECT_EQ(1, stack.size());
   EXPECT_EQ(6, stack[0].toInt());
 }

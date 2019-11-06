@@ -140,6 +140,14 @@ class RpcTest(MultiProcessTestCase):
                                      init_method=RPC_INIT_URL)
         dist.join_rpc()
 
+    def test_init_invalid_backend(self):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Unrecognized RPC backend"):
+            dist.init_model_parallel(self_name='worker{}'.format(self.rank),
+                                     backend="invalid",
+                                     self_rank=self.rank,
+                                     init_method=RPC_INIT_URL)
+
     @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/25912")
     def test_invalid_names(self):
         store = dist.FileStore(self.file.name, self.world_size)

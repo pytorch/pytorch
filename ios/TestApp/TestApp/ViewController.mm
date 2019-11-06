@@ -1,5 +1,5 @@
 #import "ViewController.h"
-#import <LibTorch/LibTorch.h>
+#import <torch/script.h>
 
 @interface ViewController ()
 

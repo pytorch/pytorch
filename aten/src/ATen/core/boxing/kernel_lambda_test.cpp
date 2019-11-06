@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include <ATen/core/op_registration/test_helpers.h>
+#include <ATen/core/boxing/test_helpers.h>
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/Tensor.h>
@@ -7,7 +7,6 @@
 
 using c10::RegisterOperators;
 using c10::TensorTypeId;
-using c10::KernelCache;
 using c10::Stack;
 using c10::guts::make_unique;
 using c10::intrusive_ptr;

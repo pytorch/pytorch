@@ -36,7 +36,6 @@ class C10OperatorWrapper final : public Operator<Context> {
       Workspace* ws)
       : Operator<Context>(operator_def, ws),
         op_(op),
-        kernel_(at::nullopt),
         has_preallocated_outputs_(
             op_.schema().arguments().size() != 0 &&
             op_.schema().arguments().back().name() ==
@@ -127,11 +126,7 @@ class C10OperatorWrapper final : public Operator<Context> {
 
   void callKernel_() {
     AT_ASSERT(stack_.size() == op_.schema().arguments().size());
-    if (!kernel_.has_value()) {
-      // TODO if kernel is already set, try re-dispatch to assert it goes to the same kernel
-      kernel_ = c10::Dispatcher::singleton().lookup(op_, &stack_);
-    }
-    kernel_->call(&stack_);
+    c10::Dispatcher::singleton().callBoxed(op_, &stack_);
   }
 
   void popOutputs_() {
@@ -196,7 +191,6 @@ class C10OperatorWrapper final : public Operator<Context> {
   }
 
   c10::OperatorHandle op_;
-  c10::optional<OpKernel> kernel_;
 
   // has_preallocated_outputs_ is true iff the operator schema has a last
   // argument that is a TensorList and has a name equal to with the name equal

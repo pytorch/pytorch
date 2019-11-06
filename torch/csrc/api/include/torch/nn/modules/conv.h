@@ -24,7 +24,7 @@ class TORCH_API ConvImpl : public torch::nn::Cloneable<Derived> {
       ExpandingArray<D> kernel_size)
       : ConvImpl(ConvOptions<D>(input_channels, output_channels, kernel_size)) {
   }
-  explicit ConvImpl(ConvOptions<D> options);
+  explicit ConvImpl(const ConvOptions<D>& options_);
 
   void reset() override;
 

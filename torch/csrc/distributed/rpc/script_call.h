@@ -27,6 +27,8 @@ class TORCH_API ScriptCall {
   Message toMessage();
   static ScriptCall fromMessage(const Message& message);
 
+  virtual ~ScriptCall() = default;
+
  protected:
   virtual void toIValues(std::vector<at::IValue>& ivalues) const;
   static std::shared_ptr<Operator> fromIValues(

@@ -28,7 +28,7 @@ class FunctionalAPITest(QuantizationTestCase):
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
         zero_point = 1
-        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point, dtype=torch.quint8)
         qY = torch.relu(qX)
         qY_hat = qF.relu(qX)
         self.assertEqual(qY, qY_hat)
@@ -56,11 +56,11 @@ class FunctionalAPITest(QuantizationTestCase):
         dilation = (1, 1)
 
         X = torch.randn(N, iC, H, W, dtype=torch.float32)
-        qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
 
-        qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
+        qw = torch.quantize_per_tensor(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
         q_filters_ref = torch.ops.quantized.conv_prepack(qw,
@@ -105,7 +105,7 @@ class DynamicModuleAPITest(QuantizationTestCase):
         """test API functionality for nn.quantized.dynamic.Linear"""
         W = torch.rand(out_features, in_features).float()
         W_scale, W_zp = _calculate_dynamic_qparams(W, torch.qint8)
-        W_q = torch.quantize_linear(W, W_scale, W_zp, torch.qint8)
+        W_q = torch.quantize_per_tensor(W, W_scale, W_zp, torch.qint8)
         X = torch.rand(batch_size, in_features).float()
         B = torch.rand(out_features).float() if use_bias else None
         qlinear = nnqd.Linear(in_features, out_features)
@@ -191,7 +191,7 @@ class ModuleAPITest(QuantizationTestCase):
         y_ref = torch.relu(x)
         y6_ref = torch.nn.modules.ReLU6()(x)
 
-        qx = torch.quantize_linear(x, 1.0, 0, dtype=torch.qint32)
+        qx = torch.quantize_per_tensor(x, 1.0, 0, dtype=torch.qint32)
         qy = relu_module(qx)
         qy6 = relu6_module(qx)
 
@@ -217,9 +217,9 @@ class ModuleAPITest(QuantizationTestCase):
     def test_linear_api(self, batch_size, in_features, out_features, use_bias, use_fused):
         """test API functionality for nn.quantized.linear and nn._intrinsic.quantized.linear_relu"""
         W = torch.rand(out_features, in_features).float()
-        W_q = torch.quantize_linear(W, 0.1, 4, torch.qint8)
+        W_q = torch.quantize_per_tensor(W, 0.1, 4, torch.qint8)
         X = torch.rand(batch_size, in_features).float()
-        X_q = torch.quantize_linear(X, 0.2, 10, torch.quint8)
+        X_q = torch.quantize_per_tensor(X, 0.2, 10, torch.quint8)
         B = torch.rand(out_features).float() if use_bias else None
         scale = 0.5
         zero_point = 3
@@ -316,7 +316,7 @@ class ModuleAPITest(QuantizationTestCase):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
         scale, zero_point, dtype = 1.0, 2, torch.qint8
         # testing Quantize API
-        qr = torch.quantize_linear(r, scale, zero_point, dtype)
+        qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
         quant_m = nnq.Quantize(scale, zero_point, dtype)
         qr2 = quant_m(r)
         self.assertEqual(qr, qr2)
@@ -347,11 +347,11 @@ class ModuleAPITest(QuantizationTestCase):
         scale, zero_point = 1.0 / 255, 128
 
         X = torch.randn(N, iC, H, W, dtype=torch.float32)
-        qX = torch.quantize_linear(X, scale=scale, zero_point=128, dtype=torch.quint8)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=128, dtype=torch.quint8)
 
         w = torch.randn(oC, iC // g, kH, kW, dtype=torch.float32)
 
-        qw = torch.quantize_linear(w, scale=scale, zero_point=0, dtype=torch.qint8)
+        qw = torch.quantize_per_tensor(w, scale=scale, zero_point=0, dtype=torch.qint8)
 
         b = torch.randn(oC, dtype=torch.float32) if use_bias else None
 
@@ -514,8 +514,8 @@ class ModuleAPITest(QuantizationTestCase):
         scale, zero_point = 1.0 / 255, 128
 
         X = torch.randn(N, C, H, W, dtype=torch.float32)
-        qX = torch.quantize_linear(X, scale=scale, zero_point=zero_point,
-                                   dtype=torch.quint8)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch.quint8)
         qX_expect = torch.nn.functional.max_pool2d(qX, **kwargs)
 
         pool_under_test = torch.nn.quantized.MaxPool2d(**kwargs)

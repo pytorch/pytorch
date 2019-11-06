@@ -278,7 +278,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
-        [](const Node* node) {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto a = pop(stack);
             auto b = pop(stack);
@@ -289,7 +289,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
-        [](const Node* node) {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor weight;
             at::Tensor input;
@@ -310,7 +310,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::format(str self, ...) -> str",
-        [](const Node* node) {
+        [](const Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
           std::regex unsupported_options("\\{(.*)\\}");
           return [num_inputs, unsupported_options](Stack& stack) {
@@ -348,7 +348,7 @@ RegisterOperators reg({
       "aten::tensor(" #operator_type                                       \
       " t, *, ScalarType? dtype=None, Device? device=None"                 \
       ", bool requires_grad=False) -> Tensor",                             \
-      [](const Node* node) {                                               \
+      [](const Node* node) -> Operation {                                               \
         return [](Stack& stack) {                                          \
           c_type scalar_val;                                               \
           IValue dtype;                                                    \
@@ -366,7 +366,7 @@ RegisterOperators reg({
       Operator(                                                            \
           "aten::as_tensor(" #operator_type                                \
           " t, *, ScalarType? dtype=None, Device? device=None) -> Tensor", \
-          [](const Node* node) {                                           \
+          [](const Node* node) -> Operation {                                           \
             return [](Stack& stack) {                                      \
               c_type scalar_val;                                           \
               IValue dtype;                                                \
@@ -391,7 +391,7 @@ RegisterOperators reg({
     // tensor_new.cpp
     Operator(
         "aten::_infer_size(int[] a, int[] b) -> int[]",
-        [](const Node* node) {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto a = pop(stack);
             auto b = pop(stack);
@@ -402,7 +402,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_no_grad_embedding_renorm_(Tensor weight, Tensor input, float max_norm, float norm_type) -> Tensor",
-        [](const Node* node) {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             at::Tensor weight;
             at::Tensor input;
@@ -427,7 +427,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::as_tensor(Tensor(a) data, *, ScalarType? dtype=None, Device? device=None) -> Tensor(a|b)",
-        [](const Node* node) {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto device = pop(stack).toOptional<c10::Device>();
             auto dtype = pop(stack).toOptional<at::ScalarType>();
@@ -451,7 +451,7 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::_assert_int_or_pair(int[] vals, str name, str message) -> Tensor",
-        [](const Node* node) {
+        [](const Node* node) -> Operation {
           return [](Stack& stack) {
             // Everything is a list at the point this is used, so don't do
             // anything

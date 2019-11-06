@@ -16,7 +16,7 @@ class TORCH_API AvgPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   AvgPoolImpl(ExpandingArray<D> kernel_size)
       : AvgPoolImpl(AvgPoolOptions<D>(kernel_size)) {}
-  explicit AvgPoolImpl(AvgPoolOptions<D> options);
+  explicit AvgPoolImpl(const AvgPoolOptions<D>& options_);
 
   void reset() override;
 
@@ -86,7 +86,7 @@ class TORCH_API MaxPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
   MaxPoolImpl(ExpandingArray<D> kernel_size)
       : MaxPoolImpl(MaxPoolOptions<D>(kernel_size)) {}
-  explicit MaxPoolImpl(MaxPoolOptions<D> options);
+  explicit MaxPoolImpl(const MaxPoolOptions<D>& options_);
 
   void reset() override;
 
