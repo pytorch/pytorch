@@ -178,7 +178,7 @@ template<class Return, class... Args>
 inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
-    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
+    c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
     const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
     return kernel.template callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
   });
