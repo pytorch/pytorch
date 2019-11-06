@@ -100,7 +100,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     out_sizes.back() = N;
     // Allocate output Tensor and a buffer for fbgemmPacked to use
     auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
-    auto buffer = at::empty_like(output, output.options().dtype(at::kInt));
+    auto buffer = at::empty_like(output, output.options().dtype(at::kInt), at::MemoryFormat::Contiguous);
 
     int num_tasks = at::get_num_threads();
     at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {

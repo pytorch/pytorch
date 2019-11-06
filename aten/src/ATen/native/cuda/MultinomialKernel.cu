@@ -398,12 +398,12 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 
       // For sampling without replacement, we modify the distribution
       // for subsequent samples in this space
-      Tensor origDist = native::empty_like(self_v);
+      Tensor origDist = native::empty_like(self_v, at::MemoryFormat::Contiguous);
       origDist.copy_(self_v);
 
-      Tensor normDist = native::empty_like(self_v);
+      Tensor normDist = native::empty_like(self_v, at::MemoryFormat::Contiguous);
 
-      Tensor prefixSum = native::empty_like(self_v);
+      Tensor prefixSum = native::empty_like(self_v, at::MemoryFormat::Contiguous);
 
       // Renorm along rows
       normDist.copy_(origDist);
