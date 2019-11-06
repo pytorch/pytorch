@@ -12,7 +12,7 @@ import operator_benchmark as op_bench
 
 r"""Microbenchmarks for the quantized activations."""
 
-qactivation_configs = op_bench.cross_product_configs(
+qactivation_long_configs = op_bench.cross_product_configs(
     dims=(
         (1,), (1, 1), (1, 1, 1),     # Single element
         (2, 1), (1, 2),              # Rank=2 row-/col-major
@@ -25,6 +25,15 @@ qactivation_configs = op_bench.cross_product_configs(
     inplace=(False, True),
     dtype=(torch.quint8, torch.qint8, torch.qint32),
     tags=('long',)
+)
+
+qactivation_short_configs = op_bench.cross_product_configs(
+    dims=((3, 4, 5),      # Rank=3
+          (2, 3, 4, 5)),  # Rank=4,
+    permute_dims=(False,),
+    inplace=(False,),
+    dtype=(torch.quint8, torch.qint8, torch.qint32),
+    tags=('short',)
 )
 
 
@@ -65,8 +74,10 @@ class QReLU6Benchmark(_ActivationBenchmarkBase):
         self.set_module_name("QReLU6")
 
 
-op_bench.generate_pt_test(qactivation_configs, QReLUBenchmark)
-op_bench.generate_pt_test(qactivation_configs, QReLU6Benchmark)
+op_bench.generate_pt_test(qactivation_short_configs + qactivation_long_configs,
+                          QReLUBenchmark)
+op_bench.generate_pt_test(qactivation_short_configs + qactivation_long_configs,
+                          QReLU6Benchmark)
 
 
 if __name__ == "__main__":
