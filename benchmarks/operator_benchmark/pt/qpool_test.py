@@ -8,7 +8,7 @@ import torch
 import operator_benchmark as op_bench
 
 # 2D pooling will have input matrix of rank 3 or 4
-qmaxpool2d_configs = op_bench.config_list(
+qmaxpool2d_long_configs = op_bench.config_list(
     attrs=(
        #  C    H    W   k       s       p       d
        (  1,   3,   3, (3, 3), (1, 1), (0, 0), (1, 1)),  # dummy        # noqa
@@ -81,7 +81,7 @@ class QMaxPool2dBenchmark(op_bench.TorchBenchmarkBase):
 
 
 op_bench.generate_pt_test(qmaxpool2d_short_configs, QMaxPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_configs, QMaxPool2dBenchmark)
+op_bench.generate_pt_test(qmaxpool2d_long_configs, QMaxPool2dBenchmark)
 
 
 if __name__ == "__main__":
