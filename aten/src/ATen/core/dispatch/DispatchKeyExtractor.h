@@ -100,11 +100,11 @@ public:
 
 private:
   static c10::optional<TensorTypeId> typeSetToDispatchKey_(const TensorTypeSet& typeSet) {
-    if (C10_UNLIKELY(type_set.empty())) {
+    if (C10_UNLIKELY(typeSet.empty())) {
       return c10::nullopt;
     }
 
-    return impl::dispatchTypeId(type_set);
+    return impl::dispatchTypeId(typeSet);
   }
 
   explicit DispatchKeyExtractor(size_t num_args)
