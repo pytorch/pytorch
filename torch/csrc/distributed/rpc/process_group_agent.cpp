@@ -304,7 +304,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           // Unlike the other cases, need to add a tensor deleter, since the
           // data outlives the scope of this function.
           auto serializedPayload =
-              new std::string(std::move(serialize(message)));
+              new std::string(serialize(message));
           enqueueRecv(RecvWork(
               allWorkerInfo_[pg_->getRank()],
               message.type(),
