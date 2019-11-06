@@ -4,7 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
-import torch.quantization as tq
 
 import operator_benchmark as op_bench
 
@@ -54,29 +53,15 @@ class QMaxPool2dBenchmark(op_bench.TorchBenchmarkBase):
         self.pool_op = torch.nn.MaxPool2d(kernel_size=k, stride=s, padding=p,
                                           dilation=d, ceil_mode=ceil,
                                           return_indices=False)
-
-        # Input dimensions
+        # Input
         if N == 0:
-            f_input = (torch.rand(C, H, W) - 0.5) * 1e6
+            f_input = (torch.rand(C, H, W) - 0.5) * 256
         else:
-            f_input = (torch.rand(N, C, H, W) - 0.5) * 1e6
+            f_input = (torch.rand(N, C, H, W) - 0.5) * 256
 
-        # Get quantization paramerters and quantize
-        if dtype in (torch.qint8, torch.quint8):
-            observer = tq.MinMaxObserver(dtype=dtype,
-                                         qscheme=torch.per_tensor_affine,
-                                         reduce_range=False)
-            observer.forward(f_input)
-            scale, zero_point = observer.calculate_qparams()
-            scale, zero_point = scale.item(), zero_point.item()
-        else:
-            zero_point = 0
-            qinfo = torch.iinfo(dtype)
-            fmin, fmax = f_input.min().item(), f_input.max().item()
-            if fmax == fmin:
-                scale = 1.0
-            else:
-                scale = (fmax - fmin) / (qinfo.max - qinfo.min)
+        scale = 1.0
+        zero_point = 0
+
         # Quantize the tensor
         self.q_input = torch.quantize_per_tensor(f_input, scale=scale,
                                                  zero_point=zero_point,
@@ -94,8 +79,8 @@ class QMaxPool2dBenchmark(op_bench.TorchBenchmarkBase):
         return self.pool_op(self.q_input)
 
 
-op_bench.generate_pt_test(qmaxpool2d_short_configs, QMaxPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_long_configs, QMaxPool2dBenchmark)
+op_bench.generate_pt_test(qmaxpool2d_short_configs + qmaxpool2d_long_configs,
+                          QMaxPool2dBenchmark)
 
 
 if __name__ == "__main__":
