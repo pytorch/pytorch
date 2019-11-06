@@ -21,7 +21,16 @@ white_list = [
     ('slow_conv_transpose3d_backward', datetime.date(2019, 10, 30)),
     ('thnn_conv2d_backward', datetime.date(2019, 10, 30)),
     ('thnn_conv_depthwise2d_backward', datetime.date(2019, 10, 30)),
-    ('thnn_conv3d_backward', datetime.date(2019, 10, 30))
+    ('thnn_conv3d_backward', datetime.date(2019, 10, 30)),
+    ('empty_like', datetime.date(2019, 10, 30)),
+    ('rand_like', datetime.date(2019, 11, 11)),
+    ('ones_like', datetime.date(2019, 11, 11)),
+    ('full_like', datetime.date(2019, 11, 11)),
+    ('AutogradAnyNonZero', datetime.date(2019, 11, 11)),
+    ('_batch_norm_impl_index', datetime.date(2019, 11, 15)),
+    ('_batch_norm_impl_index_backward', datetime.date(2019, 11, 15)),
+    ('cudnn_batch_norm', datetime.date(2019, 11, 15)),
+    ('cudnn_batch_norm_backward', datetime.date(2019, 11, 15)),
 ]
 
 

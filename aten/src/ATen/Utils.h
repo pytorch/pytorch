@@ -95,8 +95,8 @@ static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tenso
   unwrapped.reserve(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     const auto& expr = tensors[i];
-    if (tensorTypeIdToBackend(impl::dispatchTypeId(expr.type_set())) != backend) {
-      AT_ERROR("Expected object of backend ", backend, " but got backend ", tensorTypeIdToBackend(impl::dispatchTypeId(expr.type_set())),
+    if (tensorTypeIdToBackend(c10::impl::dispatchTypeId(expr.type_set())) != backend) {
+      AT_ERROR("Expected object of backend ", backend, " but got backend ", tensorTypeIdToBackend(c10::impl::dispatchTypeId(expr.type_set())),
                " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
     }
     if (expr.scalar_type() != scalar_type) {
