@@ -305,6 +305,11 @@ static void THCTensor_(addmmImpl)(THCState *state, THCTensor *r_, THCTensor *t, 
     }
   }
 
+  if((r_->size(0) == 0) || (r_->size(1) == 0))
+  {
+    return;
+  }
+
   /* r_ */
   if(r_->stride(0) == 1 &&
      r_->stride(1) != 0)

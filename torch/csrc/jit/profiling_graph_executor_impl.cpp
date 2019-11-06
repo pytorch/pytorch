@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
@@ -18,34 +20,37 @@ namespace torch {
 namespace jit {
 
 static std::atomic<bool> profiling_mode{false};
+static std::atomic<bool> executor_mode{false};
+
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
+}
+std::atomic<bool>& getExecutorMode() {
+  return executor_mode;
+}
+
+static bool needsGradientInProfilingMode(Block* b) {
+  for (auto n : b->nodes()) {
+    if (n->kind() == prim::BailOut) {
+      auto ptt = n->output()->type()->expect<TensorType>();
+      if (ptt->requiresGrad() && *ptt->requiresGrad()) {
+        return true;
+      }
+    }
+
+    for (auto ib : n->blocks()) {
+      if (needsGradientInProfilingMode(ib)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 std::shared_ptr<Graph> ProfilingGraphExecutorImpl::prepareGraph(
     const std::shared_ptr<Graph>& graph,
     Stack& stack) {
   auto g = graph->copy();
-  ArgumentSpec spec =
-      arg_spec_creator_.create(autograd::GradMode::is_enabled(), stack);
-  arg_spec_creator_.specializeTypes(*g, spec);
-  runRequiredPasses(g);
-  PropagateRequiresGrad(g);
-  ConstantPropagation(g);
-  if (needsGradient(g)) {
-    auto diff_nodes = CreateAutodiffSubgraphs(
-        g, getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
-    for (Node* dnode : diff_nodes) {
-      auto diff_graph = std::move(dnode->g(attr::Subgraph));
-      Gradient gradient = differentiate(diff_graph);
-      // do not optimize DifferentiableGraphs, since
-      // ideally they will be profiled and then optimized separetely
-      // when their corresponding DifferentiableGraphOp is called
-      packGradient(gradient, dnode);
-    }
-    InlineAutodiffSubgraphs(
-        g, getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
-  }
   return g;
 }
 
@@ -54,54 +59,61 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     : GraphExecutorImplBase(graph), arg_spec_creator_(*this->graph) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
+  GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
   if (optimized_plan_) {
     return *optimized_plan_;
   }
 
-  if (!pr_) {
-    pr_ = ProfilingRecord::instrumentGraph(prepareGraph(graph, stack));
-    auto copy = pr_->graph()->copy();
-    LowerGradOf(*copy);
-    RemoveExpands(copy);
-    CanonicalizeOps(copy);
-    EliminateDeadCode(copy);
-    profiling_plan_ = ExecutionPlan(copy);
-    // fall-through
+  std::shared_ptr<Graph> copy;
+  if (getProfilingMode()) {
+    if (!pr_) {
+      pr_ = ProfilingRecord::instrumentGraph(prepareGraph(graph, stack));
+      auto copy = pr_->graph()->copy();
+      LowerGradOf(*copy);
+      specializeAutogradZero(*copy);
+      runRequiredPasses(copy);
+      GRAPH_DUMP("Profiled Graph: ", copy);
+      profiling_plan_ = ExecutionPlan(copy);
+      // fall-through
+    }
+
+    if (!pr_->ready()) {
+      return *profiling_plan_;
+    }
+    copy = pr_->graph()->copy();
+
+  } else {
+    copy = graph->copy();
   }
 
-  if (!pr_->ready()) {
-    return *profiling_plan_;
-  }
-
-  // copy already has differentiableGraphs
-  auto copy = pr_->graph()->copy();
   if (!getGraphExecutorOptimize()) {
     runRequiredPasses(copy);
     optimized_plan_ = ExecutionPlan(copy);
     return *optimized_plan_;
   }
 
-  // insert bailouts
   InsertGuards(copy);
-  // get rid of autograd specific ops
-  // we can probably make guard_elimination.cpp
-  // to handle these ops
-  specializeAutogradZero(*copy);
-  // hoist out GradOf blocks
-  // otherwise we will need to teach
-  // liveness and buildBailOut graphs
-  // about them
   LowerGradOf(*copy);
-  // constant fold into ConstantChunk
-  CanonicalizeOps(copy);
-  EliminateRedundantGuards(copy);
-  InsertBailOuts(copy);
-  // TODO: this runs specializeAutogradZero ??
-  GRAPH_DUMP("After InsertBailOuts: ", copy);
+  if (getProfilingMode()) {
+    EliminateRedundantGuards(copy);
+    InsertBailOuts(copy);
+    GRAPH_DUMP("After InsertBailOuts: ", copy);
+  }
+
+  specializeAutogradZero(*copy);
+  if (!getProfilingMode()) {
+    ClearUndefinedness(copy);
+  }
+
   runRequiredPasses(copy);
   ConstantPropagation(copy);
   runOptimization(copy);
-  if (needsGradient(copy)) {
+
+  // TODO: insert grad propagation
+  bool needs_gradient = getProfilingMode()
+      ? needsGradientInProfilingMode(copy->block())
+      : needsGradient(copy);
+  if (needs_gradient) {
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
@@ -120,6 +132,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
     runNondiffOptimization(copy);
   }
   EliminateDeadCode(copy);
+  GRAPH_DUMP("Optimized Graph : ", copy);
   // cache
   optimized_plan_ = ExecutionPlan(copy);
   return *optimized_plan_;
@@ -127,7 +140,11 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(Stack& stack) {
 
 
 GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
-  AT_ERROR("not supported");
+  GraphExecutorState state;
+  TORCH_INTERNAL_ASSERT(optimized_plan_);
+  auto opt_plan = *optimized_plan_;
+  state.execution_plans.emplace(ArgumentSpec{0, 0}, opt_plan);
+  return state;
 }
 
 } // namespace jit
