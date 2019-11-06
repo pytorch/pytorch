@@ -345,7 +345,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // 6. Check if it's a property of the original Python class that this
   // ScriptModule was derived from. The only class properties we handle are
   // methods.
-  std::cout << "Trying to get " << field.c_str() << std::endl;
   py::object unboundMethod = py::getattr(
       concreteType_->getPyClass(),
       field.c_str(),
@@ -359,7 +358,6 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
         py::cast<bool>(py::module::import("torch._jit_internal")
                            .attr("is_ignored_fn")(unboundMethod));
     if (isIgnoredFn) {
-      std::cout << "Binding ignored fn " << field.c_str() << std::endl;
       // Create a generated ScriptModule type with module_ set as cpp_module
       auto boundMethod = py::module::import("torch.jit._recursive")
                              .attr("lazy_bind")(concreteType_, unboundMethod);

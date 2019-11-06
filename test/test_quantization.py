@@ -697,7 +697,6 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn,
             [self.calib_data],
             inplace=False)
-        print(model_script._c._get_module('fc1')._get_method('forward').graph)
         result_eager = model_eager(self.calib_data[0][0])
         torch._C._jit_pass_quant_fusion(model_script._c._get_module('fc1')._get_method('forward').graph)
         result_script = model_script._c._get_method('forward')(self.calib_data[0][0])
@@ -719,8 +718,6 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         # compare the result of the two quantized models later
         linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
         linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
-        print(annotated_linear_model(self.calib_data[0][0]))
-        print(annotated_linear_model)
         model_eager = quantize(annotated_linear_model, test_only_eval_fn,
                                self.calib_data)
 
@@ -733,11 +730,8 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn,
             [self.calib_data],
             inplace=False)
-        print(model_eager)
-        print(model_script._c._get_module('fc1')._get_method('forward').graph)
         result_eager = model_eager(self.calib_data[0][0])
         result_script = get_forward(model_script._c)(self.calib_data[0][0])
-        print(result_eager, result_script)
         self.assertEqual(result_eager, result_script)
 
     @_tmp_donotuse_dont_inline_everything
@@ -812,7 +806,6 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         script_model.sub2.fc2.bias = torch.nn.Parameter(eager_model.sub2.fc2.bias.detach())
         script_model.fc3.weight = torch.nn.Parameter(eager_model.fc3.module.weight.detach())
         script_model.fc3.bias = torch.nn.Parameter(eager_model.fc3.module.bias.detach())
-        print(eager_model(self.calib_data[0][0]))
         # Quantize eager module
         quantized_eager_model = quantize(eager_model, test_only_eval_fn, self.calib_data)
 
@@ -828,9 +821,7 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             inplace=False)
 
         eager_result = quantized_eager_model(self.calib_data[0][0])
-        print(get_forward(quantized_script_model._c._get_module('fc3')).graph)
         script_result = get_forward(quantized_script_model._c)(self.calib_data[0][0])
-        print(eager_result, script_result)
         self.assertEqual(eager_result, script_result)
 
 

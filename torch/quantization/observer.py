@@ -596,6 +596,7 @@ class HistogramObserver(_ObserverBase):
                     - delta_begin * delta_begin * delta_begin
                 ) / 3
             return density * norm
+
         def _compute_quantization_error(next_start_bin, next_end_bin, norm_type):
             r"""
             Compute the quantization error if we use start_bin to end_bin as the
@@ -707,7 +708,7 @@ class HistogramObserver(_ObserverBase):
     def _combine_histograms(
         self, dst_histogram, dst_min, dst_max, src_histogram, src_min, src_max
     ):
-        # type: (Tensor, int, int, Tensor, int, int) -> Tensor
+        # type: (Tensor, float, float, Tensor, float, float) -> Tensor
         bins_dst = dst_histogram.size()[0]
         bins_src = src_histogram.size()[0]
 
