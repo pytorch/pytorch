@@ -12,7 +12,9 @@ namespace rpc {
 
 namespace {
 
-// Write the message into the given ostream
+// Write the message payload/tensors into the given std::string.
+// We send the id/type separately to avoid creating an extra tensor to
+// serialize.
 std::string serialize(const Message& message) {
   // We cast const void* to void* here because we need to create a tensor using
   // that memory space. If is fine as that tensor stays function-local, and will
@@ -25,8 +27,6 @@ std::string serialize(const Message& message) {
   std::vector<torch::Tensor> tensors = message.tensors();
   // append payload as a tensor
   tensors.push_back(torch::from_blob(payload, payload_size, {torch::kChar}));
-  // append id and autograd metadata as a tensor
-  tensors.push_back(torch::tensor({message.id()}, {torch::kInt64}));
 
   // optional: estimate output size, to avoid some unnecessary resizing.
   static constexpr size_t kBaseOverhead = 2048;
@@ -45,24 +45,38 @@ std::string serialize(const Message& message) {
   return out;
 }
 
-Message deserialize(MessageType type, const void* buf, size_t size) {
-  std::vector<torch::Tensor> tensors;
+enum {
+  // Using serialize() above.
+  SERIALIZATION_NORMAL = 0,
+  // For payload-only case, we can avoid torch::save()/load() copying overhead.
+  SERIALIZATION_PAYLOAD_ONLY = 1,
+};
 
-  torch::load(tensors, static_cast<const char*>(buf), size);
+Message deserialize(
+    MessageType type,
+    int64_t id,
+    int serialization,
+    const void* buf,
+    size_t size) {
+  if (serialization == SERIALIZATION_NORMAL) {
+    std::vector<torch::Tensor> tensors;
+    torch::load(tensors, static_cast<const char*>(buf), size);
 
-  TORCH_CHECK(tensors.size() >= 2, "Failed to deserialize a message.");
-  auto idTensor = std::move(tensors.back());
-  tensors.pop_back();
-  auto payloadTensor = std::move(tensors.back());
-  tensors.pop_back();
+    TORCH_CHECK(!tensors.empty(), "Failed to deserialize a message.");
+    auto payloadTensor = std::move(tensors.back());
+    tensors.pop_back();
 
-  TORCH_INTERNAL_ASSERT(1, idTensor.numel());
-  int64_t id = idTensor.storage().data<int64_t>()[0];
+    const char* data = static_cast<const char*>(payloadTensor.storage().data());
+    std::vector<char> payload(data, data + payloadTensor.numel());
 
-  const char* data = static_cast<const char*>(payloadTensor.storage().data());
-  std::vector<char> payload(data, data + payloadTensor.numel());
-
-  return Message(std::move(payload), std::move(tensors), type, id);
+    return Message(std::move(payload), std::move(tensors), type, id);
+  } else if (serialization == SERIALIZATION_PAYLOAD_ONLY) {
+    const char* data = static_cast<const char*>(buf);
+    std::vector<char> payload(data, data + size);
+    return Message(std::move(payload), {}, type, id);
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "unrecognized serialization ", serialization);
+  }
 }
 
 } // namespace
@@ -307,6 +321,8 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
           enqueueRecv(RecvWork(
               allWorkerInfo_[pg_->getRank()],
               message.type(),
+              message.id(),
+              SERIALIZATION_NORMAL,
               torch::from_blob(
                   (void*)serializedPayload->data(),
                   serializedPayload->length(),
@@ -334,13 +350,27 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
   // NB: this can be changed to use a native move capture when moved to C++14
   threadPool_.run(std::bind(
       [this](const SendWork& work) {
-        std::string serializedPayload = serialize(work.message_);
+        std::string serializedPayload; // keep in scope.
+
+        int serialization;
+        std::pair<const char*, size_t> data;
+        if (work.message_.tensors().empty()) {
+          data = {work.message_.payload().data(),
+                  work.message_.payload().size()};
+          serialization = SERIALIZATION_PAYLOAD_ONLY;
+        } else {
+          serializedPayload = serialize(work.message_);
+          data = {serializedPayload.data(), serializedPayload.size()};
+          serialization = SERIALIZATION_NORMAL;
+        }
 
         std::vector<torch::Tensor> preamble = {torch::tensor(
-            {(int64_t)pg_->getRank(),
-             (int64_t)serializedPayload.length(),
-             (int64_t)work.message_.type()},
-            {torch::kLong})};
+            {static_cast<int64_t>(pg_->getRank()),
+             static_cast<int64_t>(data.second),
+             static_cast<int64_t>(work.message_.type()) |
+                 (static_cast<int64_t>(serialization) << 32),
+             work.message_.id()},
+            {torch::kInt64})};
 
         // ProcessGroup is not thread-safe when sending with the same tag, hence
         // the lock
@@ -354,10 +384,8 @@ void ProcessGroupAgent::enqueueSend(SendWork work) {
                 pg_->send(preamble, dst, dst /* channelTag */));
           }
         } else {
-          std::vector<torch::Tensor> payload = {torch::from_blob(
-              (void*)serializedPayload.c_str(),
-              serializedPayload.length(),
-              {torch::kChar})};
+          std::vector<torch::Tensor> payload = {
+              torch::from_blob((void*)data.first, data.second, {torch::kChar})};
           pendingSends.reserve(2);
 
           sendCounts_.increment(dst);
@@ -381,8 +409,12 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
   threadPool_.run(std::bind(
       [&](RecvWork& work) {
         torch::Tensor& payload = work.payload_;
-        Message message =
-            deserialize(work.type_, payload.storage().data(), payload.numel());
+        Message message = deserialize(
+            work.type_,
+            work.id_,
+            work.serialization_,
+            payload.storage().data(),
+            payload.numel());
         if (message.isRequest()) {
           send(work.from_, cb_->operator()(message));
         } else if (message.isResponse()) {
@@ -424,13 +456,15 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
 void ProcessGroupAgent::listenLoop() {
   while (true) {
     // rank, tensor size, message type
-    std::vector<torch::Tensor> preamble = {torch::empty({3}, {torch::kInt64})};
+    std::vector<torch::Tensor> preamble = {torch::empty({4}, {torch::kInt64})};
     pg_->recvAnysource(preamble, pg_->getRank())->wait();
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 
     auto srcRank = preamble_items[0];
     auto size = preamble_items[1];
-    MessageType type = MessageType(preamble_items[2]);
+    MessageType type = MessageType(preamble_items[2] & 0xffffffff);
+    int serialization = preamble_items[2] >> 32;
+    int64_t id = preamble_items[3];
 
     if (type == MessageType::SHUTDOWN) {
       // FIXME: This LOG also prints warnings no InitGoogleLogging() was invoked
@@ -444,7 +478,12 @@ void ProcessGroupAgent::listenLoop() {
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
     pg_->recv(tensors, srcRank, pg_->getRank())->wait();
 
-    enqueueRecv(RecvWork(allWorkerInfo_[srcRank], type, std::move(tensors[0])));
+    enqueueRecv(RecvWork(
+        allWorkerInfo_[srcRank],
+        type,
+        id,
+        serialization,
+        std::move(tensors[0])));
   }
 }
 
