@@ -949,7 +949,7 @@ Tensor replication_pad1d_backward_cpu(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
   replication_pad1d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -991,7 +991,7 @@ Tensor replication_pad2d_backward_cpu(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
   replication_pad2d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -1033,7 +1033,7 @@ Tensor replication_pad3d_backward_cpu(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
   replication_pad3d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
