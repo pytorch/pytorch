@@ -99,7 +99,7 @@ public:
   }
 
 private:
-  static c10::optional<TensorTypeId> typeSetToDispatchKey_(const TensorTypeId& typeSet) {
+  static c10::optional<TensorTypeId> typeSetToDispatchKey_(const TensorTypeSet& typeSet) {
     if (C10_UNLIKELY(type_set.empty())) {
       return c10::nullopt;
     }
