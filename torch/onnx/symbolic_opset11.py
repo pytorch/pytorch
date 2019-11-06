@@ -53,19 +53,21 @@ def interpolate_quantized(g, input, output_size, dim, interpolate_mode, align_co
     output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
     output_size = g.op("Concat", input_size, output_size, axis_i=0)
 
-    return g.op("Resize",
-                input,
-                empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
-                empty_tensor,  # scales is not needed since we are sending out_size
-                output_size,
-                coordinate_transformation_mode_s=coordinate_transformation_mode,
-                cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
-                mode_s=interpolate_mode,  # nearest, linear, or cubic
-                nearest_mode_s="floor")  # only valid when mode="nearest"
+    output = g.op("Resize",
+                  input,
+                  empty_tensor,  # roi only takes effect whith coordinate_transformation_mode="tf_crop_and_resize"
+                  empty_tensor,  # scales is not needed since we are sending out_size
+                  output_size,
+                  coordinate_transformation_mode_s=coordinate_transformation_mode,
+                  cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                  mode_s=interpolate_mode,  # nearest, linear, or cubic
+                  nearest_mode_s="floor")  # only valid when mode="nearest"
+    sym_help._quantized_ops.add(output)
+    return output
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, align_corners=None):
-        if (input.debugName() == "Int8Quantize"):
+        if input in sym_help._quantized_ops:
             return interpolate_quantized(g, input, output_size, dim, interpolate_mode, align_corners)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \

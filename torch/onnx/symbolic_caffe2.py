@@ -2,6 +2,7 @@ import importlib
 from inspect import getmembers, isfunction
 from torch.onnx.symbolic_helper import parse_args
 import torch.onnx.symbolic_registry as sym_registry
+import torch.onnx.symbolic_helper as sym_help
 
 def register_quantized_ops(domain, version):
     # Register all the non-quantized ops
@@ -18,16 +19,22 @@ def linear_prepack(g, input, weight):
     return input
 
 def linear(g, input, weight, scale, zero_point):
-    return g.op("_caffe2::Int8FC", input, weight, scale, zero_point)
+    output = g.op("_caffe2::Int8FC", input, weight, scale, zero_point)
+    sym_help._quantized_ops.add(output)
+    return output
 
 def conv_prepack(g, input, weight, stride, padding, dilation, groups):
     return input
 
 def conv2d(g, input, weight, stride, padding, dilation, groups, scale, zero_point):
-    return g.op("_caffe2::Int8Conv", input, weight, stride, padding, dilation, groups, scale, zero_point)
+    output = g.op("_caffe2::Int8Conv", input, weight, stride, padding, dilation, groups, scale, zero_point)
+    sym_help._quantized_ops.add(output)
+    return output
 
 def conv2d_relu(g, input, weight, stride, padding, dilation, groups, scale, zero_point):
-    return g.op("_caffe2::Int8ConvRelu", input, weight, stride, padding, dilation, groups, scale, zero_point)
+    output = g.op("_caffe2::Int8ConvRelu", input, weight, stride, padding, dilation, groups, scale, zero_point)
+    sym_help._quantized_ops.add(output)
+    return output
 
 @parse_args('v', 'v', 'f', 'i')
 def add(g, input_a, input_b, scale, zero_point):
@@ -35,10 +42,16 @@ def add(g, input_a, input_b, scale, zero_point):
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
     }
-    return g.op("_caffe2::Int8Add", input_a, input_b, **kwargs)
+    output = g.op("_caffe2::Int8Add", input_a, input_b, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
 
 def upsample_nearest_2d(g, input, size, scale_factor, mode, align_corners):
-    return g.op("_caffe2::Int8ResizeNearest", input, scale_factor, scale_factor)
+    output = g.op("_caffe2::Int8ResizeNearest", input, scale_factor, scale_factor)
+    sym_help._quantized_ops.add(output)
+    return output
 
 def relu(g, input, scale, zero_point):
-    return g.op("_caffe2::Int8Relu", input, scale, zero_point)
+    output = g.op("_caffe2::Int8Relu", input, scale, zero_point)
+    sym_help._quantized_ops.add(output)
+    return output

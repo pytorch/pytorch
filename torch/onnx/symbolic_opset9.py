@@ -2046,9 +2046,9 @@ def quantize_per_tensor(g, input, scale, zero_point, dtype):
         "Y_scale_f": scale,
         "zero_point_i": zero_point,
     }
-    node = g.op("_caffe2::Int8Quantize", input, **kwargs)
-    node.setDebugName("Int8Quantize")
-    return node
+    output = g.op("_caffe2::Int8Quantize", input, **kwargs)
+    sym_help._quantized_ops.add(output)
+    return output
 
 @parse_args('v')
 def dequantize(g, input):
