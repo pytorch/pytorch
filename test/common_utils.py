@@ -462,7 +462,7 @@ try:
                 suppress_health_check=[hypothesis.HealthCheck.too_slow],
                 database=None,
                 max_examples=100,
-                verbosity=hypothesis.Verbosity.quiet))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -486,7 +486,7 @@ try:
                 database=None,
                 max_examples=100,
                 min_satisfying_examples=1,
-                verbosity=hypothesis.Verbosity.quiet))
+                verbosity=hypothesis.Verbosity.normal))
         hypothesis.settings.register_profile(
             "dev",
             hypothesis.settings(
@@ -1118,6 +1118,30 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
     u, _, v = A.svd()
     s = torch.arange(1., matrix_size + 1, dtype=dtype, device=device).mul_(1.0 / (matrix_size + 1)).diag()
     return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
+
+
+def random_matrix(rows, columns, *batch_dims, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    silent = kwargs.get("silent", False)
+    singular = kwargs.get("singular", False)
+    if silent and not torch._C.has_lapack:
+        return torch.ones(rows, columns, dtype=dtype, device=device)
+
+    A = torch.randn(batch_dims + (rows, columns), dtype=dtype, device=device)
+    u, _, v = A.svd(some=False)
+    s = torch.zeros(rows, columns, dtype=dtype, device=device)
+    k = min(rows, columns)
+    for i in range(k):
+        s[i, i] = (i + 1) / (k + 1)
+    if singular:
+        # make matrix singular
+        s[k - 1, k - 1] = 0
+        if k > 2:
+            # increase the order of singularity so that the pivoting
+            # in LU factorization will be non-trivial
+            s[0, 0] = 0
+    return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
 
 
 def brute_pdist(inp, p=2):

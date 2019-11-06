@@ -7,6 +7,8 @@ from torch.nn import _VF
 
 from torch.nn.utils.rnn import PackedSequence
 
+import warnings
+
 class QuantizedLinear(torch.jit.ScriptModule):
     __constants__ = ['scale', 'zero_point']
 
@@ -602,6 +604,9 @@ def quantize_rnn_cell_modules(module):
 
 
 def quantize_linear_modules(module, dtype=torch.int8):
+    warnings.warn("quantize_linear_modules function has been deprecated. "
+                  "Please use torch.quantization.quantize_dynamic API instead.")
+
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
