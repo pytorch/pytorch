@@ -16,7 +16,7 @@ void ReflectionPadImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 Tensor ReflectionPadImpl<D, Derived>::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kReflect));
+  return F::pad(input, F::PadFuncOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kReflect));
 }
 
 template <size_t D, typename Derived>
@@ -39,7 +39,7 @@ void ReplicationPadImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 Tensor ReplicationPadImpl<D, Derived>::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kReplicate));
+  return F::pad(input, F::PadFuncOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kReplicate));
 }
 
 template <size_t D, typename Derived>
@@ -65,7 +65,7 @@ void ZeroPad2dImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor ZeroPad2dImpl::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kConstant).value(0));
+  return F::pad(input, F::PadFuncOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kConstant).value(0));
 }
 
 // ============================================================================
@@ -79,7 +79,7 @@ void ConstantPadImpl<D, Derived>::reset() {}
 
 template <size_t D, typename Derived>
 Tensor ConstantPadImpl<D, Derived>::forward(const Tensor& input) {
-  return F::pad(input, PadOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kConstant).value(options.value()));
+  return F::pad(input, F::PadFuncOptions(at::ArrayRef<int64_t>(options.padding()).vec()).mode(torch::kConstant).value(options.value()));
 }
 
 template <size_t D, typename Derived>
