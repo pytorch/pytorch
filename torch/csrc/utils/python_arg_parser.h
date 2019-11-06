@@ -243,7 +243,7 @@ inline std::string PythonArgs::get_func_name(){
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  if (args[i] && THPVariable_CheckExact(args[i])) {
+  if (args[i] && THPVariable_Check(args[i], /*exact=*/true)) {
     return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
   return tensor_slow(i);

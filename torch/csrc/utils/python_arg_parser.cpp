@@ -146,12 +146,7 @@ auto FunctionParameter::check(PyObject* obj, bool is_exact_class=true) -> bool
   // the only overhead is checking for __torch_function__.
   switch (type_) {
     case ParameterType::TENSOR: {
-      if(is_exact_class){
-        return THPVariable_CheckExact(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
-      }
-      else{
-        return THPVariable_Check(obj) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
-      }
+      return THPVariable_Check(obj, /*exact=*/is_exact_class) || (allow_numbers_as_tensors && THPUtils_checkScalar(obj));
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:
@@ -163,17 +158,9 @@ auto FunctionParameter::check(PyObject* obj, bool is_exact_class=true) -> bool
       if (THPUtils_checkDouble(obj)) {
         return true;
       }
-      if(is_exact_class){
-        if (THPVariable_CheckExact(obj)) {
-          auto& var = ((THPVariable*)obj)->cdata;
-          return !var.requires_grad() && var.dim() == 0;
-        }
-      }
-      else{
-        if (THPVariable_Check(obj)) {
-          auto& var = ((THPVariable*)obj)->cdata;
-          return !var.requires_grad() && var.dim() == 0;
-        }
+      if (THPVariable_Check(obj, /*exact=*/is_exact_class)) {
+        auto& var = ((THPVariable*)obj)->cdata;
+        return !var.requires_grad() && var.dim() == 0;
       }
       return false;
     }
@@ -181,16 +168,9 @@ auto FunctionParameter::check(PyObject* obj, bool is_exact_class=true) -> bool
       if (THPUtils_checkLong(obj)) {
         return true;
       }
-      if(is_exact_class){
-        if (THPVariable_CheckExact(obj)) {
-          auto& var = ((THPVariable*)obj)->cdata;
-          return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
-        }
-      }else{
-        if (THPVariable_Check(obj)) {
-          auto& var = ((THPVariable*)obj)->cdata;
-          return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
-        }
+      if (THPVariable_Check(obj, /*exact=*/is_exact_class)) {
+        auto& var = ((THPVariable*)obj)->cdata;
+        return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
       }
       return false;
     }
