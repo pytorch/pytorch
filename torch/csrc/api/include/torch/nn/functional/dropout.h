@@ -7,27 +7,27 @@ namespace torch {
 namespace nn {
 namespace functional {
 
-inline Tensor dropout(Tensor input, const DropoutOptions& options) {
+inline Tensor dropout(Tensor input, const DropoutOptions& options, bool training = false) {
   if (options.inplace()) {
-    return torch::dropout_(input, options.p(), input->is_training());
+    return torch::dropout_(input, options.p(), training);
   } else {
-    return torch::dropout(input, options.p(), input->is_training()); 
+    return torch::dropout(input, options.p(), training); 
   }
 }
 
-inline Tensor dropout2d(Tensor input, const Dropout2dOptions& options) {
+inline Tensor dropout2d(Tensor input, const Dropout2dOptions& options, bool training = false) {
   if (options.inplace()) {
-    return torch::feature_dropout_(input, options.p(), input->is_training());
+    return torch::feature_dropout_(input, options.p(), training);
   } else {
-    return torch::feature_dropout(input, options.p(), input->is_training()); 
+    return torch::feature_dropout(input, options.p(), training); 
   }
 }
 
-inline Tensor dropout3d(Tensor input, const Dropout3dOptions& options) {
+inline Tensor dropout3d(Tensor input, const Dropout3dOptions& options, bool training = false) {
   if (options.inplace()) {
-    return torch::feature_dropout_(input, options.p(), input->is_training());
+    return torch::feature_dropout_(input, options.p(), training);
   } else {
-    return torch::feature_dropout(input, options.p(), input->is_training()); 
+    return torch::feature_dropout(input, options.p(), training); 
   }
 }
 

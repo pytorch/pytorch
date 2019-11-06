@@ -9,8 +9,10 @@ namespace nn {
 
 /// Options for `Dropout` and `FeatureDropout`.
 template <size_t D>
-struct DropoutOptions {
-  /* implicit */ DropoutOptions(double p = 0.5, bool inplace = false);
+struct DropoutOptionsBase {
+	  DropoutOptionsBase(double p)
+      : p_(p), inplace_(false) {}
+
   /// The probability with which a particular component of the input is set to
   /// zero.
   /// Changes to this parameter at runtime are effective.
@@ -21,14 +23,16 @@ struct DropoutOptions {
 };
 
 /// `DropoutOptions` specialized for 1-D Dropout.
-using DropoutOptions = DropoutOptions<1>;
+using DropoutOptions = DropoutOptionsBase<1>;
 
 /// `DropoutOptions` specialized for 2-D Dropout.
-using Dropout2dOptions = DropoutOptions<2>;
+using Dropout2dOptions = DropoutOptionsBase<2>;
 
 /// `DropoutOptions` specialized for 3-D Dropout.
-using Dropout3dOptions = DropoutOptions<3>;
+using Dropout3dOptions = DropoutOptionsBase<3>;
 
+/// `DropoutOptions` for old FeatureDropoutModule.
+using FeatureDropoutOptions = DropoutOptionsBase<2>;
 
 } // namespace nn
 } // namespace torch

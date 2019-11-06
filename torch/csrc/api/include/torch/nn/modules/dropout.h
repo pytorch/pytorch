@@ -17,7 +17,9 @@ namespace nn {
 template <size_t D, typename Derived>
 class TORCH_API DropoutImplBase : public torch::nn::Cloneable<Derived> {
  public:
-  explicit DropoutImplBase(const DropoutOptions<D>& options_ = DropoutOptions());
+  DropoutImplBase(double p)
+      : DropoutImplBase((DropoutOptions<D>)(p)) {}
+  explicit DropoutImplBase(const DropoutOptionsBase<D>& options_);
 
   void reset() override;
 
@@ -25,7 +27,7 @@ class TORCH_API DropoutImplBase : public torch::nn::Cloneable<Derived> {
   void pretty_print(std::ostream& stream) const override;
 
   /// The options with which this `Module` was constructed.
-  DropoutOptions<D> options;
+  DropoutOptionsBase<D> options;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Dropout ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -92,9 +94,11 @@ TORCH_MODULE(Dropout3d);
 /// 3-D features. This `FeatureDropout` module can instead deal with both 2-D
 /// and 3-D features.
 class TORCH_API FeatureDropoutImpl
-    : public detail::DropoutImplBase<FeatureDropoutImpl> {
+    : public DropoutImplBase<2, FeatureDropoutImpl> {
  public:
-  explicit FeatureDropoutImpl(const DropoutOptions& options_ = DropoutOptions());
+  FeatureDropoutImpl(double p)
+      : FeatureDropoutImpl(FeatureDropoutOptions(p)) {}
+  explicit FeatureDropoutImpl(const FeatureDropoutOptions& options_);
 
   /// During training, applies a noise mask to the input tensor.
   /// During evaluation, applies an identity function.
