@@ -140,3 +140,30 @@ TEST_F(NNUtilsTest, ClipGradValue) {
   utils::clip_grad_value_(params, clip_value);
   ASSERT_TRUE(torch::allclose(p1.grad(), p2.grad()));
 }
+
+TEST_F(NNUtilsTest, ConvertParameters) {
+  std::vector<torch::Tensor> parameters{
+    torch::arange(9, torch::kFloat32),
+    torch::arange(9, torch::kFloat32).view({3, 3}),
+    torch::arange(8, torch::kFloat32).view({2, 2, 2})
+  };
+
+  auto expected = torch::cat({
+    torch::arange(9, torch::kFloat32),
+    torch::arange(9, torch::kFloat32).view(-1),
+    torch::arange(8, torch::kFloat32).view(-1)
+  });
+  auto vector = utils::parameters_to_vector(parameters);
+  ASSERT_TRUE(vector.allclose(expected));
+
+  std::vector<torch::Tensor> zero_parameters{
+    torch::zeros({9}, torch::kFloat32),
+    torch::zeros({9}, torch::kFloat32).view({3, 3}),
+    torch::zeros({8}, torch::kFloat32).view({2, 2, 2})
+  };
+
+  utils::vector_to_parameters(vector, zero_parameters);
+  for (int i = 0; i < zero_parameters.size(); ++i) {
+    ASSERT_TRUE(zero_parameters[i].allclose(parameters[i]));
+  }
+}
