@@ -22,6 +22,17 @@ def register_version(domain, version):
         _registry[(domain, version)] = {}
     register_ops_in_version(domain, version)
 
+def register_quantized_ops(domain, version):
+    # Register all the non-quantized ops
+    register_version('', version)
+    # Register all quantized ops
+    module = importlib.import_module('torch.onnx.symbolic_caffe2')
+    _symbolic_versions['caffe2'] = module
+    quant_version_ops = getmembers(_symbolic_versions['caffe2'])
+    for op in quant_version_ops:
+        if isfunction(op[1]) and not is_registered_op(op[0], domain, version):
+            register_op(op[0], op[1], domain, version)
+
 
 def register_ops_helper(domain, version, iter_version):
     version_ops = get_ops_in_version(iter_version)

@@ -2482,6 +2482,7 @@ class TestQuantizedOps(unittest.TestCase):
                 qlinear = nnq.Linear(2, 2)
                 weight = torch.quantize_per_tensor(y, 1.0, 0, torch.qint8)
                 bias = torch.ones(2).to(torch.float)
+                qlinear.set_weight_bias(weight, bias)
                 out = qlinear(qx)
                 return out.dequantize()
         x = torch.ones(2, 2, 2, 2)

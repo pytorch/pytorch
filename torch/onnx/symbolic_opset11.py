@@ -48,7 +48,6 @@ def interpolate_quantized(g, input, output_size, dim, interpolate_mode, align_co
     coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \
         else "align_corners" if align_corners else "pytorch_half_pixel"
     empty_tensor = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
-    input_size = input.type().sizes()
     input_size = g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))
     output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx["Long"])
     output_size = g.op("Concat", input_size, output_size, axis_i=0)

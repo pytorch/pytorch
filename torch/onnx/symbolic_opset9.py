@@ -17,6 +17,7 @@ from functools import wraps
 
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
+import torch.onnx.symbolic_caffe2 as sym_caffe2
 
 import numpy
 import math
@@ -447,6 +448,9 @@ def prelu(g, self, weight):
 
 
 def relu(g, input):
+    if input in sym_help._quantized_ops:
+        return sym_caffe2.relu(g, input)
+
     return g.op("Relu", input)
 
 
