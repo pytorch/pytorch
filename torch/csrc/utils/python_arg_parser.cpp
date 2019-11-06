@@ -626,6 +626,7 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         // add object to overloaded_args. If it's a subclass of another class
         // we've already seen it will be inserted before the superclass,
         // otherwise it will be inserted at the end of the array
+        Py_INCREF(obj);
         overloaded_args.insert(overloaded_args.begin() + arg_index, obj);
         num_args_with_torch_function++;
       }

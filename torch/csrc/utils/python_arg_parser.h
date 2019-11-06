@@ -118,6 +118,11 @@ struct PythonArgs {
     , signature(signature)
     , args(args)
     , overloaded_args(overloaded_args) {}
+  ~PythonArgs() {
+    for (auto arg : overloaded_args) {
+      Py_DECREF(arg);
+    }
+  }
 
   int idx;
   bool traceable;
