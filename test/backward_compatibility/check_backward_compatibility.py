@@ -22,6 +22,8 @@ white_list = [
     ('thnn_conv2d_backward', datetime.date(2019, 10, 30)),
     ('thnn_conv_depthwise2d_backward', datetime.date(2019, 10, 30)),
     ('thnn_conv3d_backward', datetime.date(2019, 10, 30)),
+    ('thnn_conv3d', datetime.date(2019, 11, 4)),
+    ('thnn_conv3d.out', datetime.date(2019, 11, 6)),
     ('empty_like', datetime.date(2019, 10, 30)),
     ('rand_like', datetime.date(2019, 11, 11)),
     ('ones_like', datetime.date(2019, 11, 11)),
