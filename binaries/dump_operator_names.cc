@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/instruction.h>
 #include <torch/script.h>
+#include <c10/util/Flags.h>
 
 #include <fstream>
 
@@ -38,15 +39,29 @@ void dump_opnames(const script::Module& m, std::unordered_set<std::string>& opna
 }
 }
 
+C10_DEFINE_string(model, "", "The given torch script model.");
+C10_DEFINE_string(output, "", "The output yaml file of operator list.");
+
 int main(int argc, char** argv) {
-  if (argc != 3) {
-    std::cerr << "usage: <path-to-script-module> <path-to-output-yaml>\n";
+  c10::SetUsageMessage(
+    "Dump operators in a script module and its sub modules.\n"
+    "Example usage:\n"
+    "./dump_operator_names"
+    " --model=<model_file>"
+    " --output=<output.yaml>");
+
+  if (!c10::ParseCommandLineFlags(&argc, &argv)) {
+    std::cerr << "Failed to parse command line flags!" << std::endl;
     return 1;
   }
-  auto m = torch::jit::load(argv[1]);
+
+  CAFFE_ENFORCE_GE(FLAGS_model.size(), 0, "Model file must be specified.");
+  CAFFE_ENFORCE_GE(FLAGS_output.size(), 0, "Output yaml file must be specified.");
+
+  auto m = torch::jit::load(FLAGS_model);
   std::unordered_set<std::string> opnames;
   torch::jit::dump_opnames(m, opnames);
-  std::ofstream ofile(argv[2]);
+  std::ofstream ofile(FLAGS_output);
   for (const auto& name : opnames) {
     ofile << "- " << name << std::endl;
   }
