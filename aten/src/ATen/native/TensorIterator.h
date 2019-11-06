@@ -369,7 +369,7 @@ protected:
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
   bool have_differing_types_ = false;
-  bool no_broadcast_ = false;
+  bool all_ops_same_shape_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover

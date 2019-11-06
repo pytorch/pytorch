@@ -756,7 +756,7 @@ void TensorIterator::check_mem_overlaps() {
 }
 
 void TensorIterator::compute_shape() {
-  no_broadcast_ = true;
+  all_ops_same_shape_ = true;
   bool has_scalars = false;
   bool has_tensors = false;
   for (auto& op : operands_) {
@@ -773,12 +773,12 @@ void TensorIterator::compute_shape() {
       has_tensors = true;
     }
     if (has_scalars && has_tensors) {
-      no_broadcast_ = false;
+      all_ops_same_shape_ = false;
     }
     if (shape_.empty()) {
       shape_ = shape;
     } else if (!shape.equals(shape_)) {
-      no_broadcast_ = false;
+      all_ops_same_shape_ = false;
       shape_ = DimVector(infer_size(shape_, shape));
     }
   }
@@ -876,7 +876,7 @@ int TensorIterator::get_dim_to_split() const {
 }
 
 void TensorIterator::fast_set_up() {
-  //this function is called if all the inputs are 1d/contiguous to avoid needless reordering of dimensions
+  //this function is called if all the inputs are contiguous to avoid needless reordering of dimensions
   //and tracking output strides
   //TODO enable fast handling for reductions
   //TODO enable fast handling for channels_last
@@ -908,7 +908,7 @@ void TensorIterator::fast_set_up() {
 
 bool TensorIterator::can_use_fast_set_up() {
   if (is_reduction_) return false;
-  if (!no_broadcast_) {
+  if (!all_ops_same_shape_) {
     return false;
   }
   for (auto& op : operands_) {
