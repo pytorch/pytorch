@@ -264,7 +264,6 @@ class ConcreteTypeStore(object):
 
         # Search the type store for an already-available JIT type
         known_types = self.type_store[nn_module_type]
-        found = False
         for known_type in known_types:
             if raw_concrete_type.equals(known_type):
                 return known_type
@@ -278,7 +277,6 @@ concrete_type_store = ConcreteTypeStore()
 
 def create_methods_from_stubs(concrete_type, stubs):
     defs = [m.def_ for m in stubs]
-    name = [def_.name().name for def_ in defs]
     rcbs = [m.resolution_callback for m in stubs]
     defaults = [get_default_args(m.original_method) for m in stubs]
     concrete_type._create_methods(defs, rcbs, defaults)
@@ -419,7 +417,6 @@ def get_overload_annotations(mod):
             if method_overloads is None:
                 continue
 
-            original_name = item.__name__
             names = [name + "__" + str(i) for i in range(len(method_overloads))]
             overloads[item] = list(zip(names, method_overloads))
 
