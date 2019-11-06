@@ -446,11 +446,11 @@ class TestModels(JitTestCase):
             def forward(self, input):
                 # TODO: add future as input with default val
                 # see https://github.com/pytorch/pytorch/issues/8724
-                outputs = torch.empty((3, 0), dtype=torch.double)
-                h_t = torch.zeros((3, 51), dtype=torch.double)
-                c_t = torch.zeros((3, 51), dtype=torch.double)
-                h_t2 = torch.zeros((3, 51), dtype=torch.double)
-                c_t2 = torch.zeros((3, 51), dtype=torch.double)
+                outputs = torch.empty((3, 0))
+                h_t = torch.zeros((3, 51))
+                c_t = torch.zeros((3, 51))
+                h_t2 = torch.zeros((3, 51))
+                c_t2 = torch.zeros((3, 51))
 
                 output = torch.zeros([3, 51])
                 future = 2

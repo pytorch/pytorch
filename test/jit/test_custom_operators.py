@@ -109,8 +109,8 @@ class TestCustomOperators(JitTestCase):
         input = torch.ones(5, 5)
         trace = torch.jit.trace(torch.ops.aten.relu, [input])
         self.assertExpectedInline(canonical(trace.graph), '''\
-graph(%0 : Double(5, 5)):
-  %1 : Double(5, 5) = aten::relu(%0)
+graph(%0 : Float(5, 5)):
+  %1 : Float(5, 5) = aten::relu(%0)
   return (%1)
 ''')
 
