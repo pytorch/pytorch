@@ -652,18 +652,6 @@
     - bool sorted
 ]]
 [[
-  name: _th_abs
-  cname: abs
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_exp
   cname: exp
   types:

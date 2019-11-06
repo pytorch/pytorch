@@ -221,19 +221,6 @@ void THVector_(normal_fill_DEFAULT)(scalar_t *data,
       y[i] = CFUNC(x[i], c);  \
   } \
 
-#if defined(TH_REAL_IS_LONG)
-VECTOR_IMPLEMENT_FUNCTION(abs,std::abs)
-#endif /* long only part */
-
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_CHAR)
-VECTOR_IMPLEMENT_FUNCTION(abs,abs)
-#endif /* int only part */
-
-#if defined(TH_REAL_IS_BYTE)
-VECTOR_IMPLEMENT_FUNCTION(abs,)
-#endif /* unsigned, so identity */
-
-
 /* floating point only now */
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
@@ -252,7 +239,6 @@ VECTOR_IMPLEMENT_FUNCTION(tan,TH_MATH_NAME(tan))
 VECTOR_IMPLEMENT_FUNCTION(atan,TH_MATH_NAME(atan))
 VECTOR_IMPLEMENT_FUNCTION(tanh,TH_MATH_NAME(tanh))
 VECTOR_IMPLEMENT_FUNCTION_VALUE(pow,TH_MATH_NAME(pow))
-VECTOR_IMPLEMENT_FUNCTION(abs,TH_MATH_NAME(fabs))
 VECTOR_IMPLEMENT_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
 #undef TH_MATH_NAME
