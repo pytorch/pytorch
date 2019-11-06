@@ -50,25 +50,31 @@ class EvalEnv(object):
             return self.rcb(name)
         return getattr(builtins, name, None)
 
-def get_signature(fn, rcb, loc):
+def get_signature(fn, rcb, loc, is_method):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
+    signature = None
     if PY35:
-        sig = try_real_annotations(fn)
-        if sig is not None:
-            return sig
+        signature = try_real_annotations(fn)
 
-    type_line, source = None, None
-    try:
-        source = dedent(''.join(get_source_lines_and_file(fn)[0]))
-        type_line = get_type_line(source)
-    except TypeError:
-        pass
-    # This might happen both because we failed to get the source of fn, or
-    # because it didn't have any annotations.
-    if type_line is None:
-        return None
+    if signature is None:
+        type_line, source = None, None
+        try:
+            source = dedent(''.join(get_source_lines_and_file(fn)[0]))
+            type_line = get_type_line(source)
+        except TypeError:
+            pass
+        # This might happen both because we failed to get the source of fn, or
+        # because it didn't have any annotations.
+        if type_line is not None:
+            signature = parse_type_line(type_line, rcb, loc)
 
-    return parse_type_line(type_line, rcb, loc)
+    param_types, return_type = signature
+    arg_names = inspect.getfullargspec(fn).args
+    named_param_types = list(zip(arg_names, param_types))
+    if is_method:
+        # Chop off `self` arg
+        named_param_types = named_param_types[1:]
+    return named_param_types, return_type
 
 
 # This is essentially a weaker form of get_signature(), where we don't care if

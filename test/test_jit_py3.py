@@ -85,6 +85,22 @@ class TestScriptPy3(JitTestCase):
         self.assertEqual(out.sequence_features, [3.0])
         self.assertEqual(out.time_since_first, 3.0)
 
+    def test_ignore_with_types(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> torch.Tensor:
+                self.dropout_modality(in_batch)
+                return torch.tensor(1)
+
+            @torch.jit.ignore
+            def dropout_modality(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> Dict[str, Optional[torch.Tensor]]:
+                return in_batch
+
+        sm = torch.jit.script(M())
+        FileCheck().check("dropout_modality").check("in_batch").run(str(sm.graph))
+
     def test_named_tuple_slice_unpack(self):
         class MyCoolNamedTuple(NamedTuple):
             a : int

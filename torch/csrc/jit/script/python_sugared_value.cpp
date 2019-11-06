@@ -34,7 +34,7 @@ FunctionSchema PythonValue::getSchema(
   const auto fn_to_get_signature =
       moduleSelf_ ? py::getattr(self, "original_fn") : self;
   auto signature = annotations.attr("get_signature")(
-      fn_to_get_signature, rcb ? *rcb : py::none(), loc);
+      fn_to_get_signature, rcb ? *rcb : py::none(), loc, bool(moduleSelf_));
   std::vector<Argument> args, rets;
 
   if (moduleSelf_) {
@@ -42,17 +42,17 @@ FunctionSchema PythonValue::getSchema(
   }
   // We may mutate this if we can determine the number of args from Python
   // introspection.
+  using NamedArg = std::pair<std::string, TypePtr>;
   size_t actual_n_args = moduleSelf_ ? n_args + 1 : n_args;
   if (!signature.is_none()) {
-    std::vector<TypePtr> arg_types;
+    std::vector<NamedArg> arg_types;
     TypePtr ret_type;
     std::tie(arg_types, ret_type) =
-        py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
+        py::cast<std::pair<std::vector<NamedArg>, TypePtr>>(signature);
     args.reserve(arg_types.size());
-    size_t idx = 0; // Fake argument names by putting in the index
     for (auto& arg_type : arg_types) {
       args.push_back(
-          Argument(std::to_string(idx++), std::move(arg_type), {}, {}, false));
+          Argument(arg_type.first, std::move(arg_type.second), {}, {}, false));
     }
     rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
   } else {
