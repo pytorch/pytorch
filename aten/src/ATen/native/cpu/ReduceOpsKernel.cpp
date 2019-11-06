@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/ReduceOps.h>
@@ -29,8 +30,8 @@ static void mean_kernel_impl(TensorIterator& iter) {
     scalar_t factor = scalar_t(iter.num_output_elements()) / scalar_t(iter.numel());
     binary_kernel_reduce(
       iter,
-      MeanOps<scalar_t, scalar_t> {factor},
-      scalar_t(0)
+      MeanOps<acc_type<scalar_t, false>, scalar_t, scalar_t, scalar_t> {factor},
+      acc_type<scalar_t, false>(0)
     );
   });
 }
@@ -72,16 +73,16 @@ static void norm_kernel_tensor_iterator_impl(
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
-        NormZeroOps<scalar_t>(),
-        scalar_t(0)
+        NormZeroOps<acc_type<scalar_t, false>, scalar_t, scalar_t>(),
+        acc_type<scalar_t, false>(0)
       );
     });
   } else if (val == 1) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
-        NormOneOps<scalar_t>(),
-        scalar_t(0)
+        NormOneOps<acc_type<scalar_t, false>, scalar_t, scalar_t>(),
+        acc_type<scalar_t, false>(0)
       );
     });
   } else if (val == INFINITY) {
@@ -104,8 +105,8 @@ static void norm_kernel_tensor_iterator_impl(
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "norm_cpu", [&] {
       binary_kernel_reduce(
         iter,
-        NormOps<scalar_t> { scalar_t(val) },
-        scalar_t(0)
+        NormOps<acc_type<scalar_t, false>, scalar_t, scalar_t> { acc_type<scalar_t, false>(val) },
+        acc_type<scalar_t, false>(0)
       );
     });
   }

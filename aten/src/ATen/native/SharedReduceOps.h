@@ -114,11 +114,11 @@ struct WelfordOps {
   }
 };
 
-template <typename acc_t, typename factor_t>
+template <typename acc_t, typename data_t, typename out_t, typename factor_t>
 struct MeanOps {
   factor_t factor;
 
-  inline C10_DEVICE acc_t reduce(acc_t a, acc_t b, int64_t /*idx*/) const {
+  inline C10_DEVICE acc_t reduce(acc_t a, data_t b, int64_t /*idx*/) const {
     return combine(a, b);
   }
 
@@ -126,7 +126,7 @@ struct MeanOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
+  inline C10_DEVICE out_t project(acc_t a) const {
     return a * factor;
   }
 
@@ -184,11 +184,11 @@ struct AbsMaxOps {
 #endif
 };
 
-template <typename acc_t>
+template <typename acc_t, typename data_t, typename out_t>
 struct NormOps {
   acc_t norm_;
 
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
+  inline C10_DEVICE acc_t reduce(acc_t acc, data_t data, int64_t /*idx*/) const {
     return acc + compat_pow(std::abs(data), norm_);
   }
 
@@ -196,7 +196,7 @@ struct NormOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
+  inline C10_DEVICE out_t project(acc_t a) const {
     return compat_pow(a, acc_t(1.0)/norm_);
   }
 
@@ -210,17 +210,17 @@ struct NormOps {
   }
 };
 
-template <typename acc_t>
+template <typename acc_t, typename data_t, typename out_t>
 struct NormZeroOps {
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
-    return acc + (data==acc_t(0) ? acc_t(0) : acc_t(1));
+  inline C10_DEVICE acc_t reduce(acc_t acc, data_t data, int64_t /*idx*/) const {
+    return acc + (data==data_t(0) ? acc_t(0) : acc_t(1));
   }
 
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
+  inline C10_DEVICE out_t project(acc_t a) const {
     return a;
   }
 
@@ -231,9 +231,9 @@ struct NormZeroOps {
 #endif
 };
 
-template <typename acc_t>
+template <typename acc_t, typename data_t, typename out_t>
 struct NormOneOps {
-  inline C10_DEVICE acc_t reduce(acc_t acc, acc_t data, int64_t /*idx*/) const {
+  inline C10_DEVICE acc_t reduce(acc_t acc, data_t data, int64_t /*idx*/) const {
     return acc + std::abs(data);
   }
 
@@ -241,7 +241,7 @@ struct NormOneOps {
     return a + b;
   }
 
-  inline C10_DEVICE acc_t project(acc_t a) const {
+  inline C10_DEVICE out_t project(acc_t a) const {
     return a;
   }
 
