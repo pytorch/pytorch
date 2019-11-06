@@ -150,10 +150,10 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     } else {
         loss = input - target * at::log(input + eps);
     }
-    
+
     if (full) {
-        auto mask1 = (target > 1);
-        loss.masked_select(mask1) += (target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target)).masked_select(mask1);
+        auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target);
+        loss += stirling_term.masked_fill(target <= 1, 0);
     }
 
     return apply_loss_reduction(loss, reduction);
