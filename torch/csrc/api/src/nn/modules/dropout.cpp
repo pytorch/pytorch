@@ -8,42 +8,56 @@
 #include <ostream>
 #include <vector>
 
+namespace F = torch::nn::functional;
+
 namespace torch {
 namespace nn {
-namespace detail {
-template <typename Derived>
-DropoutImplBase<Derived>::DropoutImplBase(const DropoutOptions& options_)
+
+template <size_t D, typename Derived>
+DropoutImplBase<D, Derived>::DropoutImplBase(const DropoutOptions<D>& options_)
     : options(options_) {
-  TORCH_CHECK(options.rate() >= 0, "Dropout rate must not be less than zero");
-  TORCH_CHECK(options.rate() <= 1, "Dropout rate must not be greater than one");
+  TORCH_CHECK(options.p() >= 0 && options.p() <= 1,
+  	"dropout probability has to be between 0 and 1, but got ", options.p());
 }
 
-template <typename Derived>
-void DropoutImplBase<Derived>::reset() {}
+template <size_t D, typename Derived>
+void DropoutImplBase<D, Derived>::reset() {}
 
-template class DropoutImplBase<DropoutImpl>;
-template class DropoutImplBase<FeatureDropoutImpl>;
-} // namespace detail
-
-DropoutImpl::DropoutImpl(const DropoutOptions& options_) : DropoutImplBase(options_) {}
+template <size_t D, typename Derived>
+void AvgPoolImpl<D, Derived>::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Dropout" << D << "d"
+         << "(p=" << options.p()
+         << ", inplace=" << options.inplace() << ")";
+}
 
 Tensor DropoutImpl::forward(const Tensor& input) {
-  return torch::dropout(input, options.rate(), this->is_training());
+  return F::dropout(input, options);
 }
 
-void DropoutImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::Dropout(rate=" << options.rate() << ")";
+Tensor Dropout2dImpl::forward(const Tensor& input) {
+  return F::dropout2d(input, options);
 }
+
+Tensor Dropout3dImpl::forward(const Tensor& input) {
+  return F::dropout3d(input, options);
+}
+
+template class DropoutImplBase<1, DropoutImpl>;
+template class DropoutImplBase<2, Dropout2dImpl>;
+template class DropoutImplBase<3, Dropout3dImpl>;
+
+template class DropoutImplBase<FeatureDropoutImpl>;
 
 FeatureDropoutImpl::FeatureDropoutImpl(const DropoutOptions& options_)
     : DropoutImplBase(options_) {}
 
 Tensor FeatureDropoutImpl::forward(const Tensor& input) {
-  return torch::feature_dropout(input, options.rate(), this->is_training());
+  return torch::feature_dropout(input, options.p(), this->is_training());
 }
 
 void FeatureDropoutImpl::pretty_print(std::ostream& stream) const {
-  stream << "torch::nn::FeatureDropout(rate=" << options.rate() << ")";
+  stream << "torch::nn::FeatureDropout(rate=" << options.p() << ")";
 }
+
 } // namespace nn
 } // namespace torch

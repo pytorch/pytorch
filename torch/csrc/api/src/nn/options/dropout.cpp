@@ -3,7 +3,11 @@
 namespace torch {
 namespace nn {
 
-DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
+DropoutOptions::DropoutOptions(double p) : p_(p) {}
+
+template struct DropoutOptions<1>;
+template struct DropoutOptions<2>;
+template struct DropoutOptions<3>;
 
 } // namespace nn
 } // namespace torch
