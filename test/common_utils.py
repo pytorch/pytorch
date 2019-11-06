@@ -1120,6 +1120,30 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
     return u.matmul(s.expand(batch_dims + (matrix_size, matrix_size)).matmul(v.transpose(-2, -1)))
 
 
+def random_matrix(rows, columns, *batch_dims, **kwargs):
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    silent = kwargs.get("silent", False)
+    singular = kwargs.get("singular", False)
+    if silent and not torch._C.has_lapack:
+        return torch.ones(rows, columns, dtype=dtype, device=device)
+
+    A = torch.randn(batch_dims + (rows, columns), dtype=dtype, device=device)
+    u, _, v = A.svd(some=False)
+    s = torch.zeros(rows, columns, dtype=dtype, device=device)
+    k = min(rows, columns)
+    for i in range(k):
+        s[i, i] = (i + 1) / (k + 1)
+    if singular:
+        # make matrix singular
+        s[k - 1, k - 1] = 0
+        if k > 2:
+            # increase the order of singularity so that the pivoting
+            # in LU factorization will be non-trivial
+            s[0, 0] = 0
+    return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
+
+
 def brute_pdist(inp, p=2):
     """Computes the same as torch.pdist using primitives"""
     n = inp.shape[-2]

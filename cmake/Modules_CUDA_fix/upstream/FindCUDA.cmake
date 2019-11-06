@@ -673,7 +673,7 @@ endif()
 # Search for the cuda distribution.
 if(NOT CUDA_TOOLKIT_ROOT_DIR AND NOT CMAKE_CROSSCOMPILING)
   # Search in the CUDA_BIN_PATH first.
-  find_path(CUDA_TOOLKIT_ROOT_DIR
+  find_program(CUDA_TOOLKIT_ROOT_DIR_NVCC
     NAMES nvcc nvcc.exe
     PATHS
       ENV CUDA_TOOLKIT_ROOT
@@ -685,19 +685,22 @@ if(NOT CUDA_TOOLKIT_ROOT_DIR AND NOT CMAKE_CROSSCOMPILING)
     )
 
   # Now search default paths
-  find_path(CUDA_TOOLKIT_ROOT_DIR
+  find_program(CUDA_TOOLKIT_ROOT_DIR_NVCC
     NAMES nvcc nvcc.exe
     PATHS /opt/cuda/bin
     PATH_SUFFIXES cuda/bin
     DOC "Toolkit location."
     )
 
-  if (CUDA_TOOLKIT_ROOT_DIR)
+  if (CUDA_TOOLKIT_ROOT_DIR_NVCC)
+    get_filename_component(CUDA_TOOLKIT_ROOT_DIR_NVCC_PAR "${CUDA_TOOLKIT_ROOT_DIR_NVCC}" DIRECTORY)
+    get_filename_component(CUDA_TOOLKIT_ROOT_DIR "${CUDA_TOOLKIT_ROOT_DIR_NVCC_PAR}" DIRECTORY CACHE)
     string(REGEX REPLACE "[/\\\\]?bin[64]*[/\\\\]?$" "" CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT_DIR})
     # We need to force this back into the cache.
     set(CUDA_TOOLKIT_ROOT_DIR ${CUDA_TOOLKIT_ROOT_DIR} CACHE PATH "Toolkit location." FORCE)
     set(CUDA_TOOLKIT_TARGET_DIR ${CUDA_TOOLKIT_ROOT_DIR})
   endif()
+  unset(CUDA_TOOLKIT_ROOT_DIR_NVCC CACHE)
 
   if (NOT EXISTS ${CUDA_TOOLKIT_ROOT_DIR})
     if(CUDA_FIND_REQUIRED)
