@@ -36,6 +36,11 @@ ClassTypePtr ConcreteModuleType::createNewTypeFromThis() {
     cls->addAttribute(name, type, isParameter);
   }
 
+  for (const auto& moduleInfo : modules_) {
+    cls->addAttribute(
+        moduleInfo.name_, moduleInfo.getJitType(), /*is_parameter=*/false);
+  }
+
   jitType_ = std::move(cls);
   return jitType_;
 }
@@ -61,7 +66,7 @@ c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
   TORCH_INTERNAL_ASSERT(jitType_);
   const auto it = functionAttributes_.find(name);
   if (it != functionAttributes_.end()) {
-    return it->second->function();
+    return it->second.function_->function();
   }
   return c10::nullopt;
 }
@@ -81,12 +86,12 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
   TORCH_INTERNAL_ASSERT(jitType_);
   const auto it = std::find_if(
       modules_.cbegin(), modules_.cend(), [&](const ModuleInfo& info) {
-        return info.name == name;
+        return info.name_ == name;
       });
   if (it == modules_.end()) {
     return nullptr;
   }
-  return it->meta;
+  return it->meta_;
 }
 
 void ConcreteModuleType::setIterableModuleKind(IterableModuleKind kind) {
@@ -125,12 +130,21 @@ void ConcreteModuleType::addAttribute(
     bool isParameter) {
   TORCH_INTERNAL_ASSERT(type);
   TORCH_INTERNAL_ASSERT(!jitType_);
-  if (auto functionType = type->cast<FunctionType>()) {
-    functionAttributes_.emplace(std::move(name), std::move(functionType));
-  } else {
-    attributes_.emplace(
-        std::move(name), Attribute(unshapedType(type), isParameter));
-  }
+  // Function attributes should be handled separately
+  TORCH_INTERNAL_ASSERT(type->cast<FunctionType>() == nullptr);
+  attributes_.emplace(
+      std::move(name), Attribute(unshapedType(type), isParameter));
+}
+
+void ConcreteModuleType::addFunctionAttribute(
+    std::string name,
+    const TypePtr& type,
+    py::object pyFunction) {
+  TORCH_INTERNAL_ASSERT(type);
+  TORCH_INTERNAL_ASSERT(!jitType_);
+  functionAttributes_.emplace(
+      std::move(name),
+      FunctionAttribute{type->expect<FunctionType>(), std::move(pyFunction)});
 }
 
 void ConcreteModuleType::addModule(
@@ -139,6 +153,15 @@ void ConcreteModuleType::addModule(
   TORCH_INTERNAL_ASSERT(!jitType_);
   modules_.emplace_back(ModuleInfo{std::move(name), std::move(meta)});
 }
+
+void ConcreteModuleType::addModuleInterface(
+    std::string name,
+    const TypePtr& type) {
+  TORCH_INTERNAL_ASSERT(!jitType_);
+  TORCH_INTERNAL_ASSERT(type->cast<InterfaceType>() && type->is_module());
+  modules_.emplace_back(ModuleInfo{std::move(name), type});
+}
+
 
 void ConcreteModuleType::addOverload(
     std::string methodName,
@@ -175,8 +198,8 @@ void ConcreteModuleType::dump() const {
   }
   std::cout << "\nSubmodules: \n";
   for (const auto& info : modules_) {
-    std::cout << "\t" << info.name << ": "
-              << info.meta->getJitType()->python_str() << "\n";
+    std::cout << "\t" << info.name_ << ": "
+              << info.type_->python_str() << "\n";
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : overloads_) {
@@ -210,11 +233,15 @@ std::unordered_map<std::string, std::pair<TypePtr, bool>> ConcreteModuleType::
   return ret;
 }
 
-std::vector<std::string> ConcreteModuleType::getModuleNamesPy() const {
+std::vector<std::pair<std::string, TypePtr>> ConcreteModuleType::getModulesPy()
+    const {
   TORCH_INTERNAL_ASSERT(jitType_);
-  return fmap(modules_, [](const ConcreteModuleType::ModuleInfo& info) {
-    return info.name;
-  });
+  std::vector<std::pair<std::string, TypePtr>> ret;
+
+  for (const ModuleInfo& info: modules_) {
+    ret.emplace_back(std::make_pair(info.name_, info.getJitType()));
+  }
+  return ret;
 }
 
 } // namespace script

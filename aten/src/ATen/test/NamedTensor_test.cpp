@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorNames.h>
 #include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
 #include <ATen/core/EnableNamedTensor.h>
@@ -11,6 +12,8 @@ using at::Dimname;
 using at::DimnameList;
 using at::NamedTensorMeta;
 using at::Symbol;
+using at::namedinference::TensorName;
+using at::namedinference::TensorNames;
 using c10::guts::make_unique;
 
 TEST(NamedTensorTest, defaultMetadata) {
@@ -131,16 +134,34 @@ TEST(NamedTensorTest, dimnameToPosition) {
   ASSERT_EQ(dimname_to_position(tensor, H), 2);
 }
 
+static std::vector<Dimname> tensornames_unify_from_right(
+    DimnameList names,
+    DimnameList other_names) {
+  auto names_wrapper = at::namedinference::TensorNames(names);
+  auto other_wrapper = at::namedinference::TensorNames(other_names);
+  return names_wrapper.unifyFromRight(other_wrapper, "unify").toDimnameVec();
+}
+
 static void check_unify(
     DimnameList names,
     DimnameList other_names,
     DimnameList expected) {
+  // Check legacy at::unify_from_right
   const auto result = at::unify_from_right(names, other_names);
   ASSERT_TRUE(dimnames_equal(result, expected));
+
+  // Check with TensorNames::unifyFromRight.
+  // In the future we'll merge at::unify_from_right and
+  // TensorNames::unifyFromRight, but for now, let's test them both.
+  const auto also_result = tensornames_unify_from_right(names, other_names);
+  ASSERT_TRUE(dimnames_equal(also_result, expected));
 }
 
 static void check_unify_error(DimnameList names, DimnameList other_names) {
+  // In the future we'll merge at::unify_from_right and
+  // TensorNames::unifyFromRight. For now, test them both.
   ASSERT_THROW(at::unify_from_right(names, other_names), c10::Error);
+  ASSERT_THROW(tensornames_unify_from_right(names, other_names), c10::Error);
 }
 
 TEST(NamedTensorTest, unifyFromRight) {
@@ -149,7 +170,7 @@ TEST(NamedTensorTest, unifyFromRight) {
   auto H = dimnameFromString("H");
   auto W = dimnameFromString("W");
   auto None = dimnameFromString("*");
-  
+
   std::vector<Dimname> names = { N, C };
 
   check_unify({ N, C, H, W }, { N, C, H, W }, { N, C, H, W });
@@ -188,6 +209,43 @@ TEST(NamedTensorTest, NoNamesGuard) {
     ASSERT_FALSE(at::impl::get_opt_names(tensor.unsafeGetTensorImpl()));
   }
   ASSERT_TRUE(at::NamesMode::is_enabled());
+}
+
+static std::vector<Dimname> nchw() {
+  auto N = dimnameFromString("N");
+  auto C = dimnameFromString("C");
+  auto H = dimnameFromString("H");
+  auto W = dimnameFromString("W");
+  return { N, C, H, W };
+}
+
+TEST(NamedTensorTest, TensorNamePrint) {
+  auto names = nchw();
+  {
+    auto N = TensorName(names, 0);
+    ASSERT_EQ(
+        c10::str(N),
+        "'N' (index 0 of ['N', 'C', 'H', 'W'])");
+  }
+  {
+    auto H = TensorName(names, 2);
+    ASSERT_EQ(
+        c10::str(H),
+        "'H' (index 2 of ['N', 'C', 'H', 'W'])");
+  }
+}
+
+TEST(NamedTensorTest, TensorNamesCheckUnique) {
+  auto names = nchw();
+  {
+    // smoke test to check that this doesn't throw
+    TensorNames(names).checkUnique("op_name");
+  }
+  {
+    std::vector<Dimname> nchh = { names[0], names[1], names[2], names[2] };
+    auto tensornames = TensorNames(nchh);
+    ASSERT_THROW(tensornames.checkUnique("op_name"), c10::Error);
+  }
 }
 
 
