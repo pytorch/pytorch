@@ -7,7 +7,7 @@ namespace torch {
 namespace nn{
 namespace functional {
 
-inline Tensor avg_pool1d(const Tensor& input, const AvgPool1dOptions& options) {
+inline Tensor avg_pool1d(const Tensor& input, const AvgPool1dFuncOptions& options) {
   return torch::avg_pool1d(
       input,
       options.kernel_size(),
@@ -17,7 +17,7 @@ inline Tensor avg_pool1d(const Tensor& input, const AvgPool1dOptions& options) {
       options.count_include_pad());
 }
 
-inline Tensor avg_pool2d(const Tensor& input, const AvgPool2dOptions& options) {
+inline Tensor avg_pool2d(const Tensor& input, const AvgPool2dFuncOptions& options) {
   return torch::avg_pool2d(
       input,
       options.kernel_size(),
@@ -28,7 +28,7 @@ inline Tensor avg_pool2d(const Tensor& input, const AvgPool2dOptions& options) {
       options.divisor_override());
 }
 
-inline Tensor avg_pool3d(const Tensor& input, const AvgPool3dOptions& options) {
+inline Tensor avg_pool3d(const Tensor& input, const AvgPool3dFuncOptions& options) {
   return torch::avg_pool3d(
       input,
       options.kernel_size(),
@@ -41,7 +41,7 @@ inline Tensor avg_pool3d(const Tensor& input, const AvgPool3dOptions& options) {
 
 // ============================================================================
 
-inline Tensor max_pool1d(const Tensor& input, const MaxPool1dOptions& options) {
+inline Tensor max_pool1d(const Tensor& input, const MaxPool1dFuncOptions& options) {
    return torch::max_pool1d(
       input,
       options.kernel_size(),
@@ -51,7 +51,7 @@ inline Tensor max_pool1d(const Tensor& input, const MaxPool1dOptions& options) {
       options.ceil_mode());
 }
 
-inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, const MaxPool1dOptions& options) {
+inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, const MaxPool1dFuncOptions& options) {
   return torch::max_pool1d_with_indices(
       input,
       options.kernel_size(),
@@ -61,7 +61,7 @@ inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, c
       options.ceil_mode());
 }
 
-inline Tensor max_pool2d(const Tensor& input, const MaxPool2dOptions& options) {
+inline Tensor max_pool2d(const Tensor& input, const MaxPool2dFuncOptions& options) {
   return torch::max_pool2d(
       input,
       options.kernel_size(),
@@ -71,7 +71,7 @@ inline Tensor max_pool2d(const Tensor& input, const MaxPool2dOptions& options) {
       options.ceil_mode());
 }
 
-inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(const Tensor& input, const MaxPool2dOptions& options) {
+inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(const Tensor& input, const MaxPool2dFuncOptions& options) {
   return torch::max_pool2d_with_indices(
       input,
       options.kernel_size(),
@@ -81,7 +81,7 @@ inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(const Tensor& input, c
       options.ceil_mode());
 }
 
-inline Tensor max_pool3d(const Tensor& input, const MaxPool3dOptions& options) {
+inline Tensor max_pool3d(const Tensor& input, const MaxPool3dFuncOptions& options) {
   return torch::max_pool3d(
       input,
       options.kernel_size(),
@@ -91,7 +91,7 @@ inline Tensor max_pool3d(const Tensor& input, const MaxPool3dOptions& options) {
       options.ceil_mode());
 }
 
-inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, const MaxPool3dOptions& options) {
+inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, const MaxPool3dFuncOptions& options) {
   return torch::max_pool3d_with_indices(
       input,
       options.kernel_size(),
@@ -104,49 +104,49 @@ inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, c
 // ============================================================================
 
 inline Tensor adaptive_max_pool1d(const Tensor& input,
-  const AdaptiveMaxPool1dOptions& options) {
+  const AdaptiveMaxPool1dFuncOptions& options) {
    return std::get<0>(torch::adaptive_max_pool1d(input, options.output_size()));
 }
 
 inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
-  const Tensor& input, const AdaptiveMaxPool1dOptions& options) {
+  const Tensor& input, const AdaptiveMaxPool1dFuncOptions& options) {
    return torch::adaptive_max_pool1d(input, options.output_size());
 }
 
 inline Tensor adaptive_max_pool2d(const Tensor& input,
-  const AdaptiveMaxPool2dOptions& options) {
+  const AdaptiveMaxPool2dFuncOptions& options) {
    return std::get<0>(torch::adaptive_max_pool2d(input, options.output_size()));
 }
 
 inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
-  const Tensor& input, const AdaptiveMaxPool2dOptions& options) {
+  const Tensor& input, const AdaptiveMaxPool2dFuncOptions& options) {
    return torch::adaptive_max_pool2d(input, options.output_size());
 }
 
 inline Tensor adaptive_max_pool3d(const Tensor& input,
-  const AdaptiveMaxPool3dOptions& options) {
+  const AdaptiveMaxPool3dFuncOptions& options) {
    return std::get<0>(torch::adaptive_max_pool3d(input, options.output_size()));
 }
 
 inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
-  const Tensor& input, const AdaptiveMaxPool3dOptions& options) {
+  const Tensor& input, const AdaptiveMaxPool3dFuncOptions& options) {
    return torch::adaptive_max_pool3d(input, options.output_size());
 }
 
 // ============================================================================
 
 inline Tensor adaptive_avg_pool1d(const Tensor& input,
-  const AdaptiveAvgPool1dOptions& options) {
+  const AdaptiveAvgPool1dFuncOptions& options) {
    return torch::adaptive_avg_pool1d(input, options.output_size());
 }
 
 inline Tensor adaptive_avg_pool2d(const Tensor& input,
-  const AdaptiveAvgPool2dOptions& options) {
+  const AdaptiveAvgPool2dFuncOptions& options) {
    return torch::adaptive_avg_pool2d(input, options.output_size());
 }
 
 inline Tensor adaptive_avg_pool3d(const Tensor& input,
-  const AdaptiveAvgPool3dOptions& options) {
+  const AdaptiveAvgPool3dFuncOptions& options) {
    return torch::adaptive_avg_pool3d(input, options.output_size());
 }
 
@@ -187,7 +187,7 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
 }
 
 inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
-    const MaxUnpool1dOptions& options,
+    const MaxUnpool1dFuncOptions& options,
     const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
   auto output_size_ = _unpool_output_size(input, options.kernel_size(),
                                           options.stride(), options.padding(),
@@ -198,7 +198,7 @@ inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
 }
 
 inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
-  const MaxUnpool2dOptions& options,
+  const MaxUnpool2dFuncOptions& options,
   const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
   auto output_size_ = _unpool_output_size(input, options.kernel_size(),
                                           options.stride(), options.padding(),
@@ -208,7 +208,7 @@ inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
 }
 
 inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
-  const MaxUnpool3dOptions& options,
+  const MaxUnpool3dFuncOptions& options,
   const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
   auto output_size_ = _unpool_output_size(input, options.kernel_size(),
                                           options.stride(), options.padding(),
@@ -218,20 +218,20 @@ inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
                              options.stride(), options.padding());
 }
 
-inline Tensor lp_pool1d(const Tensor& input, const LPPool1dOptions& options) {
+inline Tensor lp_pool1d(const Tensor& input, const LPPool1dFuncOptions& options) {
   Tensor out = avg_pool1d(
     input.pow(options.norm_type()),
-    AvgPool1dOptions(options.kernel_size()).stride(options.stride()).padding(0).ceil_mode(options.ceil_mode()));
+    AvgPool1dFuncOptions(options.kernel_size()).stride(options.stride()).padding(0).ceil_mode(options.ceil_mode()));
 
   return (torch::sign(out) * relu(torch::abs(out))).mul((*options.kernel_size())[0]).pow(1. / options.norm_type());
 }
 
-inline Tensor lp_pool2d(const Tensor& input, const LPPool2dOptions& options) {
+inline Tensor lp_pool2d(const Tensor& input, const LPPool2dFuncOptions& options) {
   int kw = (*options.kernel_size())[0];
   int kh = (*options.kernel_size())[1];
   Tensor out = avg_pool2d(
     input.pow(options.norm_type()),
-    AvgPool2dOptions(options.kernel_size()).stride(options.stride()).padding(0).ceil_mode(options.ceil_mode()));
+    AvgPool2dFuncOptions(options.kernel_size()).stride(options.stride()).padding(0).ceil_mode(options.ceil_mode()));
 
   return (torch::sign(out) * relu(torch::abs(out))).mul(kw * kh).pow(1. / options.norm_type());
 }

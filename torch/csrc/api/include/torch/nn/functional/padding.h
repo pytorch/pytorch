@@ -27,7 +27,7 @@ inline Tensor _pad_circular(Tensor input, IntArrayRef padding) {
   return input;
 }
 
-inline Tensor pad(const Tensor& input, const PadOptions& options) {
+inline Tensor pad(const Tensor& input, const PadFuncOptions& options) {
   TORCH_CHECK(options.pad().size() % 2 == 0, "Padding length must be divisible by 2");
   TORCH_CHECK(((int64_t)(options.pad().size() / 2)) <= input.dim(), "Padding length too large");
   if (c10::get_if<enumtype::kConstant>(&options.mode())) {
