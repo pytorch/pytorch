@@ -41,8 +41,6 @@ unify_from_right(DimnameList names, DimnameList other, const char* action = "bro
       "index to work around this.");
 }
 
-namespace namedinference {
-
 // [NOTE] Writing name inference rules
 //
 // Operators that support named tensors are either composed of operations that
@@ -73,6 +71,7 @@ namespace namedinference {
 // The {} case is an optimization; if the user does not use named tensors they
 // pay no perf cost for it.
 
+namespace namedinference {
 
 // Propagates `names` to `result` if `names` is not empty.
 // `names` can be empty; see [NOTE] Writing name inference rules
