@@ -132,16 +132,6 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 }
 
-// checks if obj has a __torch_function__ implementation
-static auto check_has_torch_function(PyObject* obj) -> bool
-{
-  PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
-  if(method != nullptr){
-    return true;
-  }
-  return false;
-}
-
 auto FunctionParameter::check(PyObject* obj, bool is_exact_class=true) -> bool
 {
   // Checks that an argument is a tensor or convertible to a tensor.

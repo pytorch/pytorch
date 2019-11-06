@@ -647,4 +647,14 @@ static PyObject* PyTorch_LookupSpecial(PyObject *obj, char* name)
   return PyObject_FastGetAttrString((PyObject *)tp, name);
 }
 
+// checks if obj has a __torch_function__ implementation
+static auto check_has_torch_function(PyObject* obj) -> bool
+{
+  PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
+  if(method != nullptr){
+    return true;
+  }
+  return false;
+}
+
 } // namespace torch
