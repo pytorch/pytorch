@@ -2,6 +2,7 @@ from common_utils import run_tests
 from jit_utils import JitTestCase
 from torch.testing import FileCheck
 from typing import NamedTuple, List, Optional, Any
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
 import torch
@@ -373,7 +374,6 @@ class TestScriptPy3(JitTestCase):
                 def three(self, x):
                     # type: (Tensor) -> Tensor
                     return 3 * x
-
 
 if __name__ == '__main__':
     run_tests()

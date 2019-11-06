@@ -7,6 +7,7 @@ from copy import deepcopy
 from functools import reduce
 from itertools import product
 from operator import mul
+from math import pi
 
 
 import torch
@@ -282,10 +283,11 @@ def wrap_functional(fn, **kwargs):
 def poissonnllloss_no_reduce_test():
     t = torch.randn(10, 10)
     return dict(
-        fullname='PoissonNLLLLoss_no_reduce',
+        fullname='PoissonNLLLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.poisson_nll_loss(i, t.type_as(i), reduction='none')),
         input_fn=lambda: torch.rand(10, 10),
+        reference_fn=lambda i, *_: i.exp() - t.mul(i),
         pickle=False)
 
 
@@ -3158,17 +3160,37 @@ new_criterion_tests = [
         desc='dim_is_3',
     ),
     dict(
-        module_name='PoissonNLLLoss',
+        module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        desc='no_full_loss',  # without sterling approx
+        reference_fn=lambda i, t, _: (i.exp() - t.mul(i)).mean(),
+        desc='no_full_loss',
     ),
     dict(
         module_name='PoissonNLLLoss',
-        constructor_args=(False,),
+        constructor_args=(False, False),  # log_input=False, full=False
         input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        desc='full_loss',  # with sterling approx
+        reference_fn=lambda i, t, _: (i - t.mul((i + 1e-8).log())).mean(),
+        desc='no_full_loss_no_log_input',
+    ),
+    dict(
+        module_name='PoissonNLLLoss',
+        constructor_args=(True, True),  # log_input=True, full=True
+        input_size=(2, 3, 4, 5),
+        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
+        reference_fn=lambda i, t, _:
+            (i.exp() - t.mul(i) + (t.mul(t.log()) - t + 0.5 * (2. * pi * t).log()).masked_fill(t <= 1, 0)).mean(),
+        desc='full_loss',
+    ),
+    dict(
+        module_name='PoissonNLLLoss',
+        constructor_args=(False, True),  # log_input=False, full=True
+        input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
+        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
+        reference_fn=lambda i, t, _:
+            (i - t.mul((i + 1e-8).log()) + (t.mul(t.log()) - t + 0.5 * (2. * pi * t).log()).masked_fill(t <= 1, 0)).mean(),
+        desc='full_loss_no_log_input',
     ),
     dict(
         module_name='L1Loss',
