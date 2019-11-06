@@ -30,7 +30,7 @@ namespace jit {
 void dump_opnames(const script::Module& m, std::unordered_set<std::string>& opnames) {
   auto methods = m.get_methods();
   for (const auto& method : methods) {
-    const auto &func = method.function();
+    const auto& func = method.function();
     std::cout << "function name: " << func.name() << std::endl;
     torch::jit::Code code(func.graph());
     for (size_t i = 0; i < code.instructions().size(); ++i) {
