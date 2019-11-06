@@ -176,50 +176,59 @@ struct ConvertTracedAttrReferences {
         }
 
         WithInsertPoint guard(b->param_node()->next());
-        auto inp_node = inp->node();
-        if (inp_node->kind() == prim::TracedAttr) {
-          auto attr_qualname = c10::QualifiedName(inp_node->s(attr::scope));
-          if (prefix.isPrefixOf(attr_qualname)) {
-            // Prefix case: the attribute resides in this scope or a
-            // sub-scope. Continually emit GetAttr nodes until we've reached
-            // the proper attribute.
-            auto attr_atoms = attr_qualname.atoms();
-            Value* replaced_value = self;
-            for (size_t i = 0; i < attr_atoms.size(); i++) {
-              if (i < prefix_atoms.size()) {
-                TORCH_INTERNAL_ASSERT(attr_atoms[i] == prefix_atoms[i]);
-              } else {
-                replaced_value = b->owningGraph()->insertGetAttr(
-                    replaced_value, attr_atoms[i]);
-              } // if (i < prefix_atoms.size())
-            } // for (size_t i = 0; i < attr_atoms.size(); i++)
-            n->replaceInput(inp_idx, replaced_value);
-            local_remaps[inp] = replaced_value;
-          } else {
-            // Non-prefix case: this is a use of an attribute somewhere
-            // higher in the Module hierarchy. Add a captured input to
-            // the block for this attribute and add to the vector of
-            // Value*'s for the caller to handle.
-            Value* remapped = b->addInput()->copyMetadata(inp);
-            n->replaceInput(inp_idx, remapped);
-            unresolved_tracedattrs.push_back(inp);
-            local_remaps[inp] = remapped;
-          } // if (prefix.isPrefixOf(attr_qualname))
-        } // if (inp_node->kind() == prim::TracedAttr)
+        replaceTracedAttrInputOnNode(
+            n, inp_idx, prefix, self, local_remaps, unresolved_tracedattrs);
       } // for (Value *inp : n->inputs())
     } // for (Node *n : b->nodes())
     return unresolved_tracedattrs;
   }
 
+  void replaceTracedAttrInputOnNode(
+      Node* n,
+      size_t inp_idx,
+      const c10::QualifiedName& prefix,
+      Value* self,
+      std::unordered_map<Value*, Value*>& local_remaps,
+      std::vector<Value*>& unresolved_tracedattrs) {
+    auto inp = n->inputs()[inp_idx];
+    auto inp_node = inp->node();
+    auto prefix_atoms = prefix.atoms();
+    if (inp_node->kind() == prim::TracedAttr) {
+      auto attr_qualname = c10::QualifiedName(inp_node->s(attr::scope));
+      if (prefix.isPrefixOf(attr_qualname)) {
+        // Prefix case: the attribute resides in this scope or a
+        // sub-scope. Continually emit GetAttr nodes until we've reached
+        // the proper attribute.
+        auto attr_atoms = attr_qualname.atoms();
+        Value* replaced_value = self;
+        for (size_t i = 0; i < attr_atoms.size(); i++) {
+          if (i < prefix_atoms.size()) {
+            TORCH_INTERNAL_ASSERT(attr_atoms[i] == prefix_atoms[i]);
+          } else {
+            replaced_value = n->owningBlock()->owningGraph()->insertGetAttr(
+                replaced_value, attr_atoms[i]);
+          } // if (i < prefix_atoms.size())
+        } // for (size_t i = 0; i < attr_atoms.size(); i++)
+        n->replaceInput(inp_idx, replaced_value);
+        local_remaps[inp] = replaced_value;
+      } else {
+        // Non-prefix case: this is a use of an attribute somewhere
+        // higher in the Module hierarchy. Add a captured input to
+        // the block for this attribute and add to the vector of
+        // Value*'s for the caller to handle.
+        Value* remapped = n->owningBlock()->addInput()->copyMetadata(inp);
+        n->replaceInput(inp_idx, remapped);
+        unresolved_tracedattrs.push_back(inp);
+        local_remaps[inp] = remapped;
+      } // if (prefix.isPrefixOf(attr_qualname))
+    } // if (inp_node->kind() == prim::TracedAttr)
+  }
+
   // The previous pass should have deleted all uses of TracedAttr
   // nodes. Let's explicitly delete them here.
   void destroyTracedAttrNodes(const std::shared_ptr<Graph>& graph) {
-    for (auto node_itr = graph->nodes().begin();
-         node_itr != graph->nodes().end();) {
-      Node* n = *node_itr++;
-      if (n->kind() == prim::TracedAttr) {
-        n->destroy();
-      }
+    for (auto& kv : attr_qualname_to_value) {
+      kv.second->node()->destroy();
     }
   }
 
@@ -518,7 +527,7 @@ void FixupTraceScopeBlocks(
   convertReturnsToTuples(graph->block());
   if (!self) {
     // We have no Module, so we're just going to inline everything.
-    // This should give us a totally flag graph.
+    // This should give us a totally flat graph.
     inlineScopeBlocks(graph->block());
     // For TracedFork nodes
     lambdaLiftBlocksAndConvertToGraph(graph->block());

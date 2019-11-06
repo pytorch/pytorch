@@ -121,30 +121,12 @@ graph(%x : Tensor,
 )";
 
   torch::jit::Graph g;
-  torch::jit::script::parseIR(input_str, &g);
+  std::unordered_map<std::string, torch::jit::Value*> name_to_value;
+  torch::jit::script::parseIR(input_str, &g, name_to_value);
 
   std::vector<std::string> value_names{"6", "7", "9", "10"};
   std::unordered_set<std::string> value_names_set(
       value_names.begin(), value_names.end());
-  std::unordered_map<std::string, torch::jit::Value*> name_to_value;
-  std::function<void(Block*)> populate_values = [&](Block* b) {
-    for (Node* n : b->nodes()) {
-      if (n->outputs().size() == 1) {
-        auto name = n->output()->debugName();
-        if (value_names_set.count(name)) {
-          ASSERT_TRUE(!name_to_value.count(name));
-          name_to_value[name] = n->output();
-        }
-      }
-
-      for (Block* sub_b : n->blocks()) {
-        populate_values(sub_b);
-      }
-    }
-  };
-  populate_values(g.block());
-
-  ASSERT_EQ(name_to_value.size(), 4);
 
   /* clang-format off */
   int ref_blocks_from_graph[4][4] = {
@@ -165,11 +147,8 @@ graph(%x : Tensor,
       Value* j_val = name_to_value[value_names[j]];
       Block* common_ancestor =
           i_val->node()->findCommonAncestorBlockWith(j_val->node());
-      int blocks_from_graph_block = 0;
-      if (common_ancestor != g.block()) {
-        blocks_from_graph_block =
-            common_ancestor->param_node()->blocksFromGraphBlock();
-      }
+      int blocks_from_graph_block =
+          common_ancestor->param_node()->blocksFromGraphBlock();
       ASSERT_EQ(blocks_from_graph_block, ref_blocks_from_graph[i][j]);
     }
   }
