@@ -53,8 +53,7 @@ class QMaxPool2dBenchmark(op_bench.TorchBenchmarkBase):
         self.pool_op = torch.nn.MaxPool2d(kernel_size=k, stride=s, padding=p,
                                           dilation=d, ceil_mode=ceil,
                                           return_indices=False)
-
-        # Input dimensions
+        # Input
         if N == 0:
             f_input = (torch.rand(C, H, W) - 0.5) * 256
         else:
@@ -80,8 +79,8 @@ class QMaxPool2dBenchmark(op_bench.TorchBenchmarkBase):
         return self.pool_op(self.q_input)
 
 
-op_bench.generate_pt_test(qmaxpool2d_short_configs, QMaxPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_long_configs, QMaxPool2dBenchmark)
+op_bench.generate_pt_test(qmaxpool2d_short_configs + qmaxpool2d_long_configs,
+                          QMaxPool2dBenchmark)
 
 
 if __name__ == "__main__":

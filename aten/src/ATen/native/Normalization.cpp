@@ -103,8 +103,8 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   scalar_t* output_data = output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  Tensor alpha = at::empty_like(mean);
-  Tensor beta = at::empty_like(mean);
+  Tensor alpha = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor beta = at::empty_like(mean, at::MemoryFormat::Contiguous);
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
@@ -156,8 +156,8 @@ void batch_norm_cpu_inference_channels_last(Tensor& output, const Tensor& input,
   scalar_t* output_data = output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  Tensor alpha = at::empty_like(mean);
-  Tensor beta = at::empty_like(mean);
+  Tensor alpha = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor beta = at::empty_like(mean, at::MemoryFormat::Contiguous);
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
@@ -206,7 +206,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       && running_mean.is_contiguous()
       && running_var.is_contiguous()) {
 
-    Tensor output = at::empty_like(input);
+    Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
     batch_norm_cpu_inference_contiguous<scalar_t>(
       output, input, weight, bias, running_mean, running_var, eps);
     return std::make_tuple(output, save_mean, save_invstd);
@@ -225,7 +225,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     return std::make_tuple(output, save_mean, save_invstd);
   }
 
-  Tensor output = at::empty_like(input);
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
 
   int64_t n_input = input.size(1);
 
@@ -330,13 +330,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
   Tensor grad_weight;
   Tensor grad_bias;
   if (grad_input_mask[0]) {
-    grad_input = at::empty_like(input);
+    grad_input = at::empty_like(input, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
-    grad_weight = at::empty_like(weight);
+    grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    grad_bias = at::empty_like(weight);
+    grad_bias = at::empty_like(weight, at::MemoryFormat::Contiguous);
   }
 
   auto weight_a = conditional_accessor_1d<scalar_t>(weight);
