@@ -312,8 +312,7 @@ def init_process_group(backend,
                        world_size=-1,
                        rank=-1,
                        store=None,
-                       group_name='',
-                       transport=''):
+                       group_name=''):
     """
     Initializes the default distributed process group, and this will also
     initialize the distributed package.
@@ -353,9 +352,6 @@ def init_process_group(backend,
             applicable only if the environment variable ``NCCL_BLOCKING_WAIT``
             is set to 1.
         group_name (str, optional, deprecated): Group name.
-        transport (str, optional): Transport selection. Now it's only for the
-            ``gloo`` backend. ``tcp`` is available on Linux and ``uv`` is
-            available on macOS
 
     To enable ``backend == Backend.MPI``, PyTorch needs to built from source
     on a system that supports MPI. The same applies to NCCL as well.
@@ -408,8 +404,7 @@ def init_process_group(backend,
             backend,
             store,
             group_name=group_name,
-            timeout=timeout,
-            transport=transport)
+            timeout=timeout)
 
     _pg_group_ranks[_default_pg] = {i: i for i in range(_default_pg.size())}
     _backend = _pg_map[_default_pg][0]
@@ -422,8 +417,7 @@ def _new_process_group_helper(world_size,
                               backend,
                               store,
                               group_name=None,
-                              timeout=_default_pg_timeout,
-                              transport=''):
+                              timeout=_default_pg_timeout):
     """
     Create a new distributed process group.
 
@@ -478,8 +472,7 @@ def _new_process_group_helper(world_size,
                 prefix_store,
                 rank,
                 world_size,
-                timeout=timeout,
-                transport=transport)
+                timeout=timeout)
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif backend == Backend.NCCL:
@@ -1543,7 +1536,7 @@ def barrier(group=group.WORLD,
         work.wait()
 
 
-def new_group(ranks=None, timeout=_default_pg_timeout, backend=None, transport=''):
+def new_group(ranks=None, timeout=_default_pg_timeout, backend=None):
     """
     Creates a new distributed group.
 
@@ -1609,8 +1602,7 @@ def new_group(ranks=None, timeout=_default_pg_timeout, backend=None, transport='
                                    ranks,
                                    backend,
                                    default_store,
-                                   timeout=timeout,
-                                   transport=transport)
+                                   timeout=timeout)
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {

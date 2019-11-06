@@ -2,7 +2,6 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <c10d/FileStore.hpp>
-#include <c10d/GlooDeviceFactory.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 #include <c10d/test/CUDATest.hpp>
 #include <c10d/test/TestUtils.hpp>
@@ -51,7 +50,7 @@ class AsyncTest {
     ::c10d::ProcessGroupGloo::Options options;
     options.timeout = std::chrono::milliseconds(50);
     options.devices.push_back(
-        ::c10d::GlooDeviceFactory::makeDeviceForHostname("127.0.0.1"));
+        ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
     pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
         new ::c10d::ProcessGroupGloo(store, rank, size, options));

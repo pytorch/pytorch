@@ -1,5 +1,7 @@
 #include <c10d/ProcessGroupGloo.hpp>
 
+#include <c10d/GlooDeviceFactory.hpp>
+
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -30,28 +32,6 @@
 #include <gloo/config.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
-
-#if GLOO_HAVE_TRANSPORT_TCP
-#include <gloo/transport/tcp/device.h>
-#endif
-
-#if GLOO_HAVE_TRANSPORT_UV
-#include <gloo/transport/uv/device.h>
-#endif
-
-// On Linux, check that the tcp transport is available.
-#ifdef __linux__
-#if !GLOO_HAVE_TRANSPORT_TCP
-#error "Expected the tcp transport to be available on Linux."
-#endif
-#endif
-
-// On macOS, check that the uv transport is available.
-#ifdef __APPLE__
-#if !GLOO_HAVE_TRANSPORT_UV
-#error "Expected the uv transport to be available on macOS."
-#endif
-#endif
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
@@ -427,6 +407,78 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
 }
 
 } // namespace
+
+#ifdef __linux__ || __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForInterface(const std::string& interface) {
+  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface);
+}
+#endif
+
+#ifdef __linux__ || __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDeviceForHostname(const std::string& hostname) {
+  TORCH_CHECK(
+      doesHostnameResolveToUsableAddress(hostname),
+      "Cannot resolve ",
+      hostname,
+      " to a (local) address");
+  return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname);
+}
+#endif
+
+#ifdef __linux__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDefaultDevice() {
+  // Use the hostname to resolve the network address to
+  // use. Note: if the hostname does not resolve to an address (e.g.
+  // because of misconfigured /etc/hosts file), this will not work.
+  char hostname[HOST_NAME_MAX] = {0};
+  auto rv = gethostname(hostname, HOST_NAME_MAX);
+  if (rv != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+
+  // Use this machine's hostname if it resolves to an address.
+  if (doesHostnameResolveToUsableAddress(hostname)) {
+    return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname);
+  }
+
+  // Otherwise, use the loopback address.
+  TORCH_WARN_ONCE(
+      "Unable to resolve hostname to a (local) address. ",
+      "Using the loopback address as fallback. ",
+      "Manually set the network interface to bind to with GLOO_SOCKET_IFNAME.");
+  return createDeviceForHostname(kLoopbackAddress);
+}
+#endif
+
+#ifdef __APPLE__
+std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
+    createDefaultDevice() {
+  // Use the hostname to resolve the network address to
+  // use. Note: if the hostname does not resolve to an address (e.g.
+  // because of misconfigured /etc/hosts file), this will not work.
+  const auto hostNameMax = sysconf(_SC_HOST_NAME_MAX);
+  auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
+  auto rv = gethostname(hostname.get(), hostNameMax);
+  if (rv != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+
+  // Use this machine's hostname if it resolves to an address.
+  if (doesHostnameResolveToUsableAddress(hostname.get())) {
+    return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname.get());
+  }
+
+  // Otherwise, use the loopback address.
+  TORCH_WARN_ONCE(
+      "Unable to resolve hostname to a (local) address. ",
+      "Using the loopback address as fallback. ",
+      "Manually set the network interface to bind to with GLOO_SOCKET_IFNAME.");
+  return createDeviceForHostname(kLoopbackAddress);
+}
+#endif
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
