@@ -4,7 +4,6 @@
 #include <torch/nn/options/conv.h>
 #include <torch/nn/options/dropout.h>
 #include <torch/nn/options/fold.h>
-#include <torch/nn/options/linear.h>
 #include <torch/nn/options/loss.h>
 #include <torch/nn/options/normalization.h>
 #include <torch/nn/options/padding.h>
