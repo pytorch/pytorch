@@ -240,7 +240,7 @@ class TestRecursiveScript(JitTestCase):
             dir_scripted = set(dir(scripted_mod))
             for attr in dir_set:
                 # training is currently not copied over
-                if attr == "training":
+                if attr == "training" or attr == "__delitem__":
                     continue
                 self.assertTrue(attr in dir_scripted, attr)
 
