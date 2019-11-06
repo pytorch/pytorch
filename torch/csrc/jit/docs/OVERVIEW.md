@@ -352,7 +352,7 @@ JIT programs are created using either the tracing frontend (`torch.jit.trace`) o
 The tracer produces graphs by recording what actual operations are done on tensors.
 The entry point from Python into C++ for tracing using `torch.jit.trace` is `_create_method_from_trace`.
 
-A thread local instance of the TracingState object maintains a mapping between actual data being computing during the trace (e.g. Tensors) stored in IValues, and the abstract `Value*` in the Graph that would compute that value. The functions `void setValueTrace(const IValue&, Value*)` and `Value* getValueTrace(const IValue&)` are used by the tracer to maintain this mapping.
+A thread local instance of the TracingState object maintains a mapping between actual data being computed during the trace (e.g. Tensors) stored in IValues, and the abstract `Value*` in the Graph that would compute that value. The functions `void setValueTrace(const IValue&, Value*)` and `Value* getValueTrace(const IValue&)` are used by the tracer to maintain this mapping.
 
 An initial IValue to Value mapping is setup up between the inputs to the function being traced and symbolic Value inputs to the Graph being constructed. If we are tracing a `torch.nn.Module`, the tracer also adds Parameters and sub-Modules to the Module being constructed that correspond to the Python `torch.nn.Module` being traced.  These values are also added as mapping so that uses of the Parameters in the trace will create uses of the Parameters in the Graph.
 
@@ -384,7 +384,7 @@ The functions `addInputs` and `addOutput` are overloaded to handle the different
 
 Currently set/getValueTrace only works on Tensors and Futures. Other types are not natively traced. Instead aggregates like tuples or lists are often flattened into tensors at the end of a trace and explicitly constructed from individual tensors at the beginning of this trace.
 
-The tracer has special behavior when tracing calls to other TorchScript functions. This behavior is implemented in the GraphExecutor right before a Graph is about to be run. If tracing is enabled while running the graph, the GraphExecutor will disable tracing, run the graph as normal, and then inline the Graph into the trace. It then hooks up the IValues computed by running the Graph to inlined Graph's out Values in the inlined graph.
+The tracer has special behavior when tracing calls to other TorchScript functions. This behavior is implemented in the GraphExecutor right before a Graph is about to be run. If tracing is enabled while running the graph, the GraphExecutor will disable tracing, run the graph as normal, and then inline the Graph into the trace. It then hooks up the IValues computed by running the Graph to out Values in the inlined graph.
 
 > *When a trace calls a TorchScript function, that function is preserved as is, meaning that control-flow is preserved.* This makes it possible to "fix" tracing issues by writing the subset of the program that cannot be traced in script and having the trace invoke it.
 
@@ -392,7 +392,7 @@ The resulting Graph created by tracing is installed as the 'forward' method of t
 
 ## Script ##
 
-The script frontend directly converts Python syntax into Modules. Like many compilers this happens in two phases. First, we generate an abstract syntax tree (AST), which is constructed out of Tree objects. The compiler (misnamed, but that is the name of the file) then does semantic analysis on the Tree and lowers it into a Module. We can generate Trees in two ways: (1) using frontend.py, which takes the Python AST and transliterates it into Tree objects, or (2) via the Lexer and Parser which parse python syntax directly.  The Lexer/Parser path may seem redundant but it is crucially important. We need to define builtin functions ([script/builtin_functions.cpp](../script/builtin_functions.cpp)) when Python is not linked. We allow users to load TorchScript programs directly from strings without Python ([api/include/torch/jit.h](../../../api/include/torch/jit.h)). We also use this Python syntax as the serialization format for TorchScript, since it allows us to make changes to our IR without breaking backward compatibility. Furthermore, the Lexer is reused to implement the FunctionSchema parser, which turns FunctionSchema declarations from strings into FunctionSchema objects.
+The script frontend directly converts Python syntax into Modules. Like many compilers this happens in two phases. First, we generate an abstract syntax tree (AST), which is constructed out of Tree objects. The compiler (misnamed, but that is the name of the file) then does semantic analysis on the Tree and lowers it into a Module. We can generate Trees in two ways: (1) using frontend.py, which takes the Python AST and transliterates it into Tree objects, or (2) via the Lexer and Parser which parse python syntax directly.  The Lexer/Parser path may seem redundant but it is crucially important. We need to define builtin functions ([script/builtin_functions.cpp](../script/builtin_functions.cpp)) when Python is not linked. We allow users to load TorchScript programs directly from strings without Python ([api/include/torch/jit.h](../../api/include/torch/jit.h)). We also use this Python syntax as the serialization format for TorchScript, since it allows us to make changes to our IR without breaking backward compatibility. Furthermore, the Lexer is reused to implement the FunctionSchema parser, which turns FunctionSchema declarations from strings into FunctionSchema objects.
 
 The following sections look into each the stages in the script frontend in detail.
 
@@ -531,7 +531,7 @@ SugaredValues are how the compiler represents non-first class values during Grap
 
 SugaredValues are also how we interact with Python runtime during the compilation process. For instance, `math.pi` is resolved to 3.1415... by first resolving `math` to a SugaredValue representing accesses to Python modules (PythonModuleValue) whose `attr` function turns python numbers into  `prim::Constant` Nodes in the graph.
 
-Finally, normal Values are also represented by the SimpleValue SugaredValue in places where it is valid either a SugaredValue or a normal Value to appear.
+Finally, normal Values are also represented by the SimpleValue SugaredValue in places where it is valid that either a SugaredValue or a normal Value will appear.
 
 ## Resolver ##
 
@@ -601,7 +601,7 @@ In addition to being mutable, tensors also have a set of dynamically determined 
 * size - the precise size of the tensor
 * requires_grad - whether the tensor is recording its gradient with autograd
 
-Changes in these properties change how operators on tensor will evaluate and would make certain optimization invalid. For instance, if we have fuser capable of generating new cuda kernels but not cpu kernels, it is only valid to fuse operations where the inputs are known to run only on CUDA devices. The GraphExecutor's job is to still enable optimization even when certains combinations of properties prevent optimizations for occurring.
+Changes in these properties change how operators on tensor will evaluate and would make certain optimization invalid. For instance, if we have fuser capable of generating new cuda kernels but not cpu kernels, it is only valid to fuse operations where the inputs are known to run only on CUDA devices. The GraphExecutor's job is to still enable optimization even when certains combinations of properties prevent optimizations from occurring.
 
 Nodes in a graph are executed *serially* in the order they appear in a block. Nodes may be reordered either during optimization or by the interpreter itself if it can be proven that
 it is not distinguishable from the original serial execution order. These semantics are necessary since the combination of mutable tensors and potential alias between tensors makes it unsafe to perform arbitrary reordering otherwise. However, the AliasInfo object can accurately track how alias propagate through builtin operators so optimization passes can query when certain reorders or optimizations are safe.
@@ -797,7 +797,7 @@ graph(%x : Tensor,
   return (%30)
 ```
 
-Execution starts in `GraphExecutor::run`, which takes takes a Stack of inputs.
+Execution starts in `GraphExecutor::run`, which takes a Stack of inputs.
 
 *Specialization* The executor *specializes* the Graph for the particular set of inputs. Specialization is handled by the `ArgumentSpec` object which extracts a "signature" composed of all the properties being specialized. We only specialize to the properties of Tensors. The ArgumentSpec only records properties for Tensors that either appear directly in the inputs to the graph or inside Tuples that are inputs to the Graph. The properties recorded are currently:
 
@@ -1050,7 +1050,7 @@ one specifies a file(s) in `PYTORCH_JIT_LOG_LEVEL`.
 
 `GRAPH_DEBUG` can be enabled by prefixing a file name with an `>` as in `>alias_analysis`.
 `>>` and `>>>` are also valid and **currently** are equivalent to `GRAPH_DEBUG` as there is no logging level that is
-higher than `GRAPH_DEBUG`. 
+higher than `GRAPH_DEBUG`.
 
 ## DifferentiableGraphOp ##
 

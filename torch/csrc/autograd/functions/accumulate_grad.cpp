@@ -54,7 +54,11 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       // addition of !post_hooks().empty().
       variable.grad() = new_grad.detach();
     } else {
-      variable.grad() = new_grad.clone();
+      if (new_grad.is_sparse()) {
+        variable.grad() = new_grad.clone();
+      } else {
+        variable.grad() = new_grad.clone(at::MemoryFormat::Contiguous);
+      }
     }
   } else if (!GradMode::is_enabled()) {
     // This case is not strictly necessary, but it makes the first-order only case
