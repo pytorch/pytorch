@@ -18,7 +18,7 @@ cat_configs_short = op_bench.config_list(
         [512, 512, 2, 1],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=['short'],
 )
@@ -28,7 +28,7 @@ cat_configs_long = op_bench.cross_product_configs(
     N=[128, 1024],
     K=[1, 2],
     dim=[0, 1, 2],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
 
