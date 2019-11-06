@@ -837,7 +837,7 @@ class TestJit(JitTestCase):
 
         net = Net()
         t = torch.ones(2, requires_grad=True)
-        g, outputs, inputs = torch.jit.get_trace_graph(net, (t,), return_inputs=True)
+        g, outputs, inputs = torch.jit._get_trace_graph(net, (t,), return_inputs=True)
         self.assertEqual(outputs, self.createFunctionFromGraph(g)(*inputs))
         self.assertExportImport(g, (t,))
         g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
@@ -864,7 +864,7 @@ class TestJit(JitTestCase):
         t = torch.ones(1, 3, 227, 227, requires_grad=True)
 
         with torch.onnx.set_training(model, False):
-            g, _ = torch.jit.get_trace_graph(model, (t,))
+            g, _ = torch.jit._get_trace_graph(model, (t,))
 
         self.assertExportImport(g, (t,) + tuple(model.parameters()))
         g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
@@ -942,7 +942,7 @@ class TestJit(JitTestCase):
             z = (x + y) * (x + y) * (x + y) + t
             return z
 
-        g, _ = torch.jit.get_trace_graph(fn, (x, y))
+        g, _ = torch.jit._get_trace_graph(fn, (x, y))
         self.run_pass('cse', g)
         do_exactly = True
         FileCheck().check_count("add", 1).check_count("mul", 2, do_exactly) \
@@ -1735,7 +1735,7 @@ graph(%Ra, %Rb):
         x = torch.tensor([0.], requires_grad=True)
         with warnings.catch_warnings(record=True):
             with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
-                torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
+                torch.jit._get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
 
     def test_inplace_transplant(self):
         x = torch.tensor([0.], requires_grad=True)
@@ -1746,7 +1746,7 @@ graph(%Ra, %Rb):
             y.add_(3)
             return y
 
-        g, _ = torch.jit.get_trace_graph(fn, (x,))
+        g, _ = torch.jit._get_trace_graph(fn, (x,))
         self.run_pass('dce', g)
         FileCheck().check_count("aten::clone", 1, exactly=True) \
             .check_count("aten::add_", 2, exactly=True) \
@@ -1782,7 +1782,7 @@ graph(%Ra, %Rb):
             y = RegularFn.apply(y)
             return y
 
-        trace_graph, _ = torch.jit.get_trace_graph(fn, (x,), _force_outplace=True)
+        trace_graph, _ = torch.jit._get_trace_graph(fn, (x,), _force_outplace=True)
         self.run_pass('dce', trace_graph)
         ops = [n for n in trace_graph.nodes()]
         for op in ops:
@@ -2188,7 +2188,7 @@ graph(%Ra, %Rb):
         def doit(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        g, _ = torch.jit.get_trace_graph(doit, (x, y))
+        g, _ = torch.jit._get_trace_graph(doit, (x, y))
         self.run_pass('dce', g)
         self.run_pass('canonicalize', g)
         g2 = torch._C.Graph()
@@ -2232,15 +2232,15 @@ graph(%Ra, %Rb):
 
     def test_batchnorm(self):
         x = torch.ones(2, 2, 2, 2)
-        g, outputs, inputs = torch.jit.get_trace_graph(nn.BatchNorm2d(2), x,
-                                                       _force_outplace=True, return_inputs=True)
+        g, outputs, inputs = torch.jit._get_trace_graph(nn.BatchNorm2d(2), x,
+                                                        _force_outplace=True, return_inputs=True)
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
 
     def test_dropout(self):
         x = torch.ones(2, 2)
         with torch.random.fork_rng(devices=[]):
-            g, outputs, inputs = torch.jit.get_trace_graph(nn.Dropout(0.6), x, return_inputs=True)
+            g, outputs, inputs = torch.jit._get_trace_graph(nn.Dropout(0.6), x, return_inputs=True)
         with torch.random.fork_rng(devices=[]):
             m = self.createFunctionFromGraph(g)
             self.assertEqual(outputs, m(*inputs))
@@ -2269,7 +2269,7 @@ graph(%Ra, %Rb):
 
     def test_conv(self):
         x = torch.ones(20, 16, 50, 40)
-        g, outputs, inputs = torch.jit.get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True)
+        g, outputs, inputs = torch.jit._get_trace_graph(nn.Conv2d(16, 13, 3, bias=False), x, return_inputs=True)
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
 
@@ -2309,7 +2309,7 @@ graph(%Ra, %Rb):
         x = torch.ones(1, 3, 224, 224)
         model = torchvision.models.AlexNet()
         with torch.random.fork_rng(devices=[]):
-            g, outputs, inputs = torch.jit.get_trace_graph(model, x, return_inputs=True)
+            g, outputs, inputs = torch.jit._get_trace_graph(model, x, return_inputs=True)
         self.run_pass('cse', g)
         m = self.createFunctionFromGraph(g)
         with torch.random.fork_rng(devices=[]):
@@ -2323,7 +2323,7 @@ graph(%Ra, %Rb):
             out.copy_(x)
             return out
 
-        g, outputs, inputs = torch.jit.get_trace_graph(f, (x, ), return_inputs=True)
+        g, outputs, inputs = torch.jit._get_trace_graph(f, (x, ), return_inputs=True)
         self.run_pass('dce', g)
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
@@ -2339,7 +2339,7 @@ graph(%Ra, %Rb):
                 return x * self.a + self.b
 
         m = MyModule()
-        g, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),))
+        g, _ = torch.jit._get_trace_graph(m, (torch.randn(2, 2),))
         self.run_pass('dce', g)
         self.assertEqual(len(list(g.inputs())), 2)
         FileCheck().check("mul").check("add").run(str(g))
@@ -2379,7 +2379,7 @@ graph(%Ra, %Rb):
 
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
-        g, outputs, inputs = torch.jit.get_trace_graph(
+        g, outputs, inputs = torch.jit._get_trace_graph(
             lambda x: F.threshold(x, 0, 0, inplace=True), (x, ), return_inputs=True)
         m = self.createFunctionFromGraph(g)
         self.assertEqual(outputs, m(*inputs))
