@@ -110,6 +110,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   torch::utils::initializeQSchemes();
   torch::utils::initializeDtypes();
   torch::tensors::initialize_python_bindings();
+  torch::nested_tensor::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
 
@@ -698,6 +699,7 @@ PyObject* initModule() {
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
+  ASSERT_TRUE(THPNestedTensor_initModule(module));
   // NOTE: We need to be able to access OperatorExportTypes from ONNX for use in
   // the export side of JIT, so this ONNX init needs to appear before the JIT
   // init.
