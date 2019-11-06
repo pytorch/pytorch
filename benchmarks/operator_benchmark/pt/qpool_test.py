@@ -45,6 +45,36 @@ qmaxpool2d_short_configs = op_bench.config_list(
     tags=('short',)
 )
 
+qadaptive_avgpool2d_long_configs = op_bench.cross_product_configs(
+    input_size=(
+       # VGG16 pools with original input shape: (-1, 3, 224, 224)
+       (224, 224),  # MaxPool2d-4  # noqa
+       (112, 112),  # MaxPool2d-9  # noqa
+       ( 56,  56),  # MaxPool2d-16 # noqa
+       ( 14,  14),  # MaxPool2d-30 # noqa
+    ),
+    output_size=(
+       # VGG16 pools with original input shape: (-1, 3, 224, 224)
+       (224, 224),  # MaxPool2d-4  # noqa
+       (112, 112),  # MaxPool2d-9  # noqa
+       ( 56,  56),  # MaxPool2d-16 # noqa
+       ( 14,  14),  # MaxPool2d-30 # noqa
+    ),
+    N=range(6),
+    C=(1, 3, 64, 128),
+    contig=(False, True),
+    dtype=(torch.qint32, torch.qint8, torch.quint8),
+    tags=('long',)
+)
+
+qadaptive_avgpool2d_short_configs = op_bench.config_list(
+    attrs=((4, 3, (224, 224), (112, 112), True),),
+    attr_names=('N', 'C', 'input_size', 'output_size', 'contig'),
+    cross_product_configs={
+        'dtype': (torch.qint32, torch.qint8, torch.quint8),
+    },
+    tags=('short',)
+)
 
 class _QPool2dBenchmarkBase(op_bench.TorchBenchmarkBase):
     def setup(self, N, C, H, W, dtype, contig):
@@ -89,8 +119,20 @@ class QAvgPool2dBenchmark(_QPool2dBenchmarkBase):
         super(QAvgPool2dBenchmark, self).setup(N, C, H, W, dtype, contig)
 
 
+class QAdaptiveAvgPool2dBenchmark(_QPool2dBenchmarkBase):
+    def init(self, N, C, input_size, output_size, contig, dtype):
+        self.pool_op = torch.nn.AdaptiveAvgPool2d(output_size=output_size)
+        super(QAdaptiveAvgPool2dBenchmark, self).setup(N, C, *input_size, dtype,
+                                                       contig)
+
+
+op_bench.generate_pt_test(qadaptive_avgpool2d_short_configs,
+                          QAdaptiveAvgPool2dBenchmark)
 op_bench.generate_pt_test(qmaxpool2d_short_configs, QAvgPool2dBenchmark)
 op_bench.generate_pt_test(qmaxpool2d_short_configs, QMaxPool2dBenchmark)
+
+op_bench.generate_pt_test(qadaptive_avgpool2d_long_configs,
+                          QAdaptiveAvgPool2dBenchmark)
 op_bench.generate_pt_test(qmaxpool2d_long_configs, QMaxPool2dBenchmark)
 op_bench.generate_pt_test(qmaxpool2d_long_configs, QAvgPool2dBenchmark)
 
