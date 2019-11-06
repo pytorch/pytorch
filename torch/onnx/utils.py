@@ -399,7 +399,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)
-            torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
+            with torch.serialization._open_file_like(f, 'wb') as opened_file:
+                opened_file.write(proto)
         elif export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
             import zipfile
             compression = zipfile.ZIP_DEFLATED \
@@ -417,13 +418,13 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                 os.makedirs(f)
 
             model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
-            torch.serialization._with_file_like(
-                model_proto_file, "wb", lambda f: f.write(proto))
+            with torch.serialization._open_file_like(model_proto_file, 'wb') as opened_file:
+                opened_file.write(proto)
 
             for k, v in export_map.items():
                 weight_proto_file = os.path.join(f, k)
-                torch.serialization._with_file_like(
-                    weight_proto_file, "wb", lambda f: f.write(v))
+                with torch.serialization._open_file_like(weight_proto_file, 'wb') as opened_file:
+                    opened_file.write(v)
         else:
             raise RuntimeError('Unknown export type')
     finally:
