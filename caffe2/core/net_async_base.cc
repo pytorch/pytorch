@@ -458,15 +458,65 @@ void AsyncNetBase::finishTasks(const std::unordered_set<int>& task_ids) {
 }
 
 void AsyncNetBase::finalizeEvents() {
+  std::vector<OperatorBase*> pending_ops;
   for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
     auto status = query(task_id);
     if (status == EventStatus::EVENT_SCHEDULED) {
-      event(task_id).Finish();
+      // async cpu ops need to be handled separately,
+      // as they may potentially never finish
+      auto* op = lastTaskOp(task_id);
+      if (op->HasAsyncPart() &&
+          op->device_option().device_type() == PROTO_CPU) {
+        pending_ops.push_back(op);
+      } else {
+        event(task_id).Finish();
+      }
     } else if (status == EventStatus::EVENT_INITIALIZED) {
       event(task_id).SetFinished();
     }
+  }
+
+  // avoid events cancelling each other and causing
+  // a deadlock
+  std::atomic_flag error_happened = ATOMIC_FLAG_INIT;
+  for (auto* pending_op : pending_ops) {
+    pending_op->event().SetCallback(
+        [pending_op, &pending_ops, &error_happened]() {
+          // if one of the async cpu ops failed,
+          // we have to terminate other pending async cpu ops
+          auto status = pending_op->event().Query();
+          TORCH_CHECK(
+              status == EventStatus::EVENT_SUCCESS ||
+              status == EventStatus::EVENT_FAILED);
+          if (status == EventStatus::EVENT_FAILED) {
+            // go through all the ops and terminate them,
+            // we may get an exception in case of multiple
+            // SetFinished() calls
+            if (!error_happened.test_and_set()) {
+              for (auto* op : pending_ops) {
+                if (op != pending_op) {
+                  try {
+                    op->CancelAsyncCallback();
+                    op->event().SetFinished("Cancelled");
+                  } catch (const EnforceNotMet&) {
+                    // ignore
+                  }
+                }
+              }
+            }
+          }
+        });
+  }
+
+  // wait for all pending ops to be finished or be terminated
+  for (auto* pending_op : pending_ops) {
+    pending_op->event().Finish();
+  }
+
+  for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
     if (event(task_id).Query() != EventStatus::EVENT_SUCCESS) {
       success_ = false;
+      break;
     }
   }
 }
