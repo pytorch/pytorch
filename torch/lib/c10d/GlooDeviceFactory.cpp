@@ -34,7 +34,8 @@ C10_DEFINE_SHARED_REGISTRY(
 
 #if GLOO_HAVE_TRANSPORT_TCP
 static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
-    const std::string& interface, const std::string& hostname) {
+    const std::string& interface,
+    const std::string& hostname) {
   TORCH_CHECK(
       !interface.empty() || !hostname.empty(),
       "GlooDeviceFactory::makeTCPDevice(): interface or hostname "
@@ -49,18 +50,16 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
   return ::gloo::transport::tcp::CreateDevice(attr);
 }
 
-C10_REGISTER_CREATOR(
-    GlooDeviceRegistry,
-    TCP,
-    makeTCPDevice);
+C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice);
 #endif
 
 #if GLOO_HAVE_TRANSPORT_UV
 static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
-    const std::string& interface, const std::string& hostname) {
+    const std::string& interface,
+    const std::string& hostname) {
   TORCH_CHECK(
       !interface.empty() || !hostname.empty(),
-      "GlooDeviceFactory::makeTCPDevice(): interface or hostname "
+      "GlooDeviceFactory::makeUVDevice(): interface or hostname "
       "can't be empty");
 
   ::gloo::transport::uv::attr attr;
@@ -72,10 +71,7 @@ static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
   return ::gloo::transport::uv::CreateDevice(attr);
 }
 
-C10_REGISTER_CREATOR(
-    GlooDeviceRegistry,
-    UV,
-    makeUVDevice);
+C10_REGISTER_CREATOR(GlooDeviceRegistry, UV, makeUVDevice);
 #endif
 
 std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
