@@ -1099,7 +1099,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
       grad_input = at::empty_like(input, at::MemoryFormat::Contiguous);
     }
     if (output_mask[1]) {
-      grad_weight = at::zeros_like(weight);
+      grad_weight = at::zeros_like(weight, at::MemoryFormat::Contiguous);
     }
     if (output_mask[2]) {
       grad_bias = at::zeros({grad_output.size(1)}, grad_output.options());
