@@ -4,16 +4,6 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *centos7* ]]; then
-  # CentOS has gcc 4 but we need a newer compiler. Upgrade it.
-  sudo yum install -y centos-release-scl
-  sudo yum install -y devtoolset-4\*
-  sudo yum install -y scl-utils
-
-  source scl_source enable devtoolset-4 || yes
-  gcc --version
-fi
-
 # CMAKE_ARGS are only passed to 'cmake' and the -Dfoo=bar does not work with
 # setup.py, so we build a list of foo=bars and then either convert it to
 # -Dfoo=bars or export them before running setup.py
@@ -171,7 +161,6 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   export PATH="/usr/local/cuda/bin:$PATH"
 fi
 if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
-  build_args+=("USE_ROCM=ON")
   # This is needed to enable ImageInput operator in resnet50_trainer
   build_args+=("USE_OPENCV=ON")
   # This is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
