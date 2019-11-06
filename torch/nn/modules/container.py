@@ -6,6 +6,7 @@ import operator
 
 import torch
 from .module import Module
+from torch._jit_internal import _copy_to_script_wrapper
 
 
 class Container(Module):
@@ -61,6 +62,7 @@ class Sequential(Module):
         idx %= size
         return next(islice(iterator, idx, None))
 
+    @_copy_to_script_wrapper
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
@@ -79,14 +81,17 @@ class Sequential(Module):
             key = self._get_item_by_idx(self._modules.keys(), idx)
             delattr(self, key)
 
+    @_copy_to_script_wrapper
     def __len__(self):
         return len(self._modules)
 
+    @_copy_to_script_wrapper
     def __dir__(self):
         keys = super(Sequential, self).__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
 
+    @_copy_to_script_wrapper
     def __iter__(self):
         return iter(self._modules.values())
 
@@ -134,6 +139,7 @@ class ModuleList(Module):
             idx += len(self)
         return str(idx)
 
+    @_copy_to_script_wrapper
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
@@ -154,15 +160,18 @@ class ModuleList(Module):
         str_indices = [str(i) for i in range(len(self._modules))]
         self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
 
+    @_copy_to_script_wrapper
     def __len__(self):
         return len(self._modules)
 
+    @_copy_to_script_wrapper
     def __iter__(self):
         return iter(self._modules.values())
 
     def __iadd__(self, modules):
         return self.extend(modules)
 
+    @_copy_to_script_wrapper
     def __dir__(self):
         keys = super(ModuleList, self).__dir__()
         keys = [key for key in keys if not key.isdigit()]
@@ -250,6 +259,7 @@ class ModuleDict(Module):
         if modules is not None:
             self.update(modules)
 
+    @_copy_to_script_wrapper
     def __getitem__(self, key):
         return self._modules[key]
 
@@ -259,12 +269,15 @@ class ModuleDict(Module):
     def __delitem__(self, key):
         del self._modules[key]
 
+    @_copy_to_script_wrapper
     def __len__(self):
         return len(self._modules)
 
+    @_copy_to_script_wrapper
     def __iter__(self):
         return iter(self._modules)
 
+    @_copy_to_script_wrapper
     def __contains__(self, key):
         return key in self._modules
 
@@ -283,16 +296,19 @@ class ModuleDict(Module):
         del self[key]
         return v
 
+    @_copy_to_script_wrapper
     def keys(self):
         r"""Return an iterable of the ModuleDict keys.
         """
         return self._modules.keys()
 
+    @_copy_to_script_wrapper
     def items(self):
         r"""Return an iterable of the ModuleDict key/value pairs.
         """
         return self._modules.items()
 
+    @_copy_to_script_wrapper
     def values(self):
         r"""Return an iterable of the ModuleDict values.
         """

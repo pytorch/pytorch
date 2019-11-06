@@ -234,7 +234,7 @@ class TestRecursiveScript(JitTestCase):
         self.assertEqual(m.original_name, 'MyModule')
 
     def test_dir(self):
-        def test_module_repr(mod):
+        def test_module_dir(mod):
             dir_set = dir(mod)
             scripted_mod = torch.jit.script(mod)
             dir_scripted = set(dir(scripted_mod))
@@ -253,14 +253,14 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, x):
                 return self.lin(x) + self.conv(x)
 
-        test_module_repr(MyModule())
+        test_module_dir(MyModule())
 
         # test custom __dir__ for containers
         conv = nn.Conv2d(10, 10, 3)
         linear = nn.Linear(10, 10)
 
-        test_module_repr(nn.Sequential(conv, linear))
-        test_module_repr(nn.ModuleDict(OrderedDict([("conv", conv), ("linear", linear)])))
+        test_module_dir(nn.Sequential(conv, linear))
+        test_module_dir(nn.ModuleDict(OrderedDict([("conv", conv), ("linear", linear)])))
 
     def test_class_compile(self):
         def other_fn(a, b):

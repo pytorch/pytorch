@@ -8,7 +8,7 @@ import warnings
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args
-from torch.nn import Module, ModuleList, Sequential, ModuleDict
+from torch.nn import Module, Sequential
 from torch._six import get_function_from_type, bind_method
 
 
@@ -384,18 +384,16 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
         # nn.Module.forward)
         script_module.__dict__[name] = script_method
 
-    # In order to continue to expose module container functions to python,
-    # we add on the methods that we had previously exposed in the previous
-    # version of this api.
 
-    if isinstance(nn_module, (ModuleList, Sequential)):
-        add_python_modulelist_methods(script_module, nn_module)
+    # copy over python methods to script module if they aren't defined on the script module
+    # this is currently an internal api used only on module containers
+    for name in dir(nn_module):
+        item = getattr(nn_module, name, None)
+        if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.COPY_TO_SCRIPT_WRAPPER:
+            add_python_attr_to_scripted_model(script_module, nn_module, name)
 
     if isinstance(nn_module, Sequential):
         add_sequential_forward(script_module, nn_module)
-
-    if isinstance(nn_module, ModuleDict):
-        add_python_moduledict_methods(script_module, nn_module)
 
     return script_module
 
@@ -412,18 +410,9 @@ def script_model_defines_attr(script_model, attr):
         return False
     return script_attr != default_attr
 
-def add_python_attributes_to_scripted_model(script_model, orig, attr_list):
-    for method in attr_list:
-        if hasattr(orig, method) and script_model_defines_attr(script_model, method):
-            setattr(script_model, method, getattr(orig, method))
-
-def add_python_modulelist_methods(script_module, orig):
-    exposed_attrs = ['__getitem__', '__len__', '__iter__', '__dir__']
-    add_python_attributes_to_scripted_model(script_module, orig, exposed_attrs)
-
-def add_python_moduledict_methods(script_module, orig):
-    exposed_attrs = ['__contains__', '__iter__', '__dir__', 'keys', 'items', 'values']
-    add_python_attributes_to_scripted_model(script_module, orig, exposed_attrs)
+def add_python_attr_to_scripted_model(script_model, orig, attr):
+    if hasattr(orig, attr) and script_model_defines_attr(script_model, attr):
+        setattr(script_model, attr, getattr(orig, attr))
 
 def add_sequential_forward(script_module, nn_module):
     forward_func = getattr(nn_module.forward, "__func__", None)
