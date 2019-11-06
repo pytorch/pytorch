@@ -25,11 +25,22 @@ struct SendWork {
 // SendWork wraps a Message and RecvWork wraps a Tensor. The difference here is
 // to allow us to run serialization/deserialization in the worker threads.
 struct RecvWork {
-  RecvWork(const WorkerInfo& from, MessageType type, torch::Tensor&& payload)
-      : from_(from), type_(type), payload_(payload) {}
+  RecvWork(
+      const WorkerInfo& from,
+      MessageType type,
+      int64_t id,
+      int32_t serialization,
+      torch::Tensor&& payload)
+      : from_(from),
+        type_(type),
+        id_(id),
+        serialization_(serialization),
+        payload_(payload) {}
 
   const WorkerInfo& from_;
   const MessageType type_;
+  const int64_t id_;
+  const int32_t serialization_;
   torch::Tensor payload_;
 };
 
