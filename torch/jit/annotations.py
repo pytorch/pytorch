@@ -68,6 +68,9 @@ def get_signature(fn, rcb, loc, is_method):
         if type_line is not None:
             signature = parse_type_line(type_line, rcb, loc)
 
+    if signature is None:
+        return None
+
     param_types, return_type = signature
     arg_names = inspect.getfullargspec(fn).args
     named_param_types = list(zip(arg_names, param_types))
