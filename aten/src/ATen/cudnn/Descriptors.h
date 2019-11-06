@@ -140,8 +140,8 @@ public:
   void set(const at::Tensor &t, int64_t pad = 0);
 
 private:
-  void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t filter_format) {
-    AT_CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, filter_format, dim, size));
+  void set(cudnnDataType_t dataType, int dim, int* size) {
+    AT_CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, CUDNN_TENSOR_NCHW, dim, size));
   }
 };
 
