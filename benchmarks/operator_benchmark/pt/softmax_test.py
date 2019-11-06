@@ -16,27 +16,29 @@ Microbenchmarks for the softmax operators.
 
 # Configs for softmax ops
 softmax_configs_short = op_bench.config_list(
+    attr_names=[
+        'N', 'C', 'H', 'W'
+    ],
     attrs=[
         [4, 3, 256, 256],
         [8, 3, 512, 512],
     ],
-    attr_names=[
-        'N', 'C', 'H', 'W'
-    ],
+    cross_product_configs={
+        'device': ['cpu', 'cuda'],
+    },
     tags=['short']
 )
 
-softmax_configs_long = op_bench.config_list(
-    attrs=[
-        [8, 3, 128, 128],
-        [16, 512, 14, 14],
-        [16, 256, 28, 28],
-    ],
-    attr_names=[
-        'N', 'C', 'H', 'W'
-    ],
+
+softmax_configs_long = op_bench.cross_product_configs(
+    N=[8, 16],
+    C=[3, 64],
+    H=[64, 128],
+    W=[64, 128],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
+
 
 softmax_ops_list = op_bench.op_list(
     attr_names=['op_name', 'op_func'],
@@ -49,8 +51,8 @@ softmax_ops_list = op_bench.op_list(
 
 
 class SoftmaxBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, N, C, H, W, op_func):
-        self.input_one = torch.rand(N, C, H, W)
+    def init(self, N, C, H, W, device, op_func):
+        self.input_one = torch.rand(N, C, H, W, device=device)
         self.op_func = op_func()
 
     def forward(self):

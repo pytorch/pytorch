@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/nn/cloneable.h>
-#include <torch/nn/cloneable.h>
+#include <torch/nn/modules/_functions.h>
 #include <torch/nn/functional/normalization.h>
 #include <torch/nn/options/normalization.h>
 #include <torch/nn/pimpl.h>
@@ -15,7 +15,7 @@ namespace nn {
 
 class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
  public:
-  explicit LayerNormImpl(std::vector<int64_t> normalized_shape)
+  LayerNormImpl(std::vector<int64_t> normalized_shape)
       : LayerNormImpl(LayerNormOptions(normalized_shape)) {}
   explicit LayerNormImpl(const LayerNormOptions& options_);
 
@@ -51,6 +51,51 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
 /// provides, or the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(LayerNorm);
+
+/// Applies local response normalization over an input signal composed
+/// of several input planes, where channels occupy the second dimension.
+/// Applies normalization across channels
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LocalResponseNorm to learn
+/// about the exact behavior of this module.
+class TORCH_API LocalResponseNormImpl : public Cloneable<LocalResponseNormImpl> {
+ public:
+  LocalResponseNormImpl(int64_t size)
+      : LocalResponseNormImpl(LocalResponseNormOptions(size)) {}
+  explicit LocalResponseNormImpl(const LocalResponseNormOptions& options_);
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `LocalResponseNormImpl` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  LocalResponseNormOptions options;
+};
+
+TORCH_MODULE(LocalResponseNorm);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CrossMapLRN2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class TORCH_API CrossMapLRN2dImpl : public torch::nn::Cloneable<CrossMapLRN2dImpl> {
+ public:
+  CrossMapLRN2dImpl(int64_t size)
+      : CrossMapLRN2dImpl(CrossMapLRN2dOptions(size)) {}
+  explicit CrossMapLRN2dImpl(const CrossMapLRN2dOptions& options_)
+      : options(options_) {}
+
+  void reset() override;
+
+  /// Pretty prints the `CrossMapLRN2d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  torch::Tensor forward(const torch::Tensor& input);
+
+  CrossMapLRN2dOptions options;
+};
+
+TORCH_MODULE(CrossMapLRN2d);
 
 } // namespace nn
 } // namespace torch

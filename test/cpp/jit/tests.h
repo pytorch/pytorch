@@ -63,6 +63,8 @@ namespace jit {
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
   _(ClassDerive)                       \
+  _(ModuleInterfaceSerialization)      \
+  _(ClassTypeAddRemoveAttr)            \
   _(Inliner)                           \
   _(LiteInterpreterAdd)                \
   _(LiteInterpreterConv)
