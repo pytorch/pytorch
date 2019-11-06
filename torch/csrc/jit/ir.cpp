@@ -585,7 +585,22 @@ void Graph::dump() const {
   std::cout << *this << "\n";
 }
 
-void LintGraph(std::shared_ptr<Graph>& graph) {
+void Graph::push_scope(const std::string& scope_name) {
+  current_scope_ = current_scope_->push(Symbol::scope(scope_name));
+  Node* block_node = insertNode(create(prim::TracedModuleForward, 0));
+  block_node->s_(attr::scope, scope_name);
+  Block* b = block_node->addBlock();
+  setInsertPoint(b);
+}
+void Graph::pop_scope() {
+  current_scope_ = current_scope_->parent();
+  if (insertPoint()->owningBlock()->owningNode()->kind() ==
+      prim::TracedModuleForward) {
+    setInsertPoint(insertPoint()->owningBlock()->owningNode()->next());
+  }
+}
+
+void LintGraph(const std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
