@@ -99,12 +99,17 @@ Message RequestCallbackImpl::processRpc(
       return RemoteRet(rrefId, forkId).toMessage();
     }
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
+      auto agent = RpcAgent::getDefaultRpcAgent();
+      std::cout << agent->getWorkerInfo().id_ << " ++ in script fetch all for \n" << std::flush;
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      return ScriptRRefFetchRet({rref->getValue()}).toMessage();
+      std::cout << agent->getWorkerInfo().id_ << " ++ before getting value \n" << std::flush;
+      auto ret = {rref->getValue()};
+      std::cout << agent->getWorkerInfo().id_ << " ++ got value \n" << std::flush;
+      return ScriptRRefFetchRet(ret).toMessage();
     }
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
