@@ -19,12 +19,10 @@ class TORCH_API FoldImpl : public torch::nn::Cloneable<FoldImpl> {
       : FoldImpl(FoldOptions(output_size, kernel_size)) {}
   explicit FoldImpl(const FoldOptions& options_);
 
-  void reset() override {}
+  void reset() override;
 
   /// Pretty prints the `Fold` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override {
-    stream << "torch::nn::Fold";
-  }
+  void pretty_print(std::ostream& stream) const override;
 
   Tensor forward(const Tensor& input);
 
@@ -49,7 +47,7 @@ class TORCH_API UnfoldImpl : public Cloneable<UnfoldImpl> {
       : UnfoldImpl(UnfoldOptions(kernel_size)) {}
   explicit UnfoldImpl(const UnfoldOptions& options_);
 
-  void reset() override {}
+  void reset() override;
 
   /// Pretty prints the `Unfold` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;

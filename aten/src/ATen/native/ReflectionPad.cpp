@@ -500,7 +500,7 @@ Tensor reflection_pad1d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
@@ -534,7 +534,7 @@ Tensor reflection_pad2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;

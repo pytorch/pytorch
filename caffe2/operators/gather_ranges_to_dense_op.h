@@ -26,8 +26,6 @@ class GatherRangesToDenseOp final : public Operator<Context> {
         minObservation_(this->template GetSingleArgument<int64_t>(
             "min_observation",
             10000)),
-        maxEmptyRatio_(
-            this->template GetSingleArgument<float>("max_empty_ratio", 0.9)),
         maxMismatchedRatio_(this->template GetSingleArgument<float>(
             "max_mismatched_ratio",
             0.01)) {
@@ -45,7 +43,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   }
 
   ~GatherRangesToDenseOp() noexcept override {
-    if (totalRanges_ > 0) {
+    if (totalRanges_ > minObservation_) {
       LOG(INFO) << "In GatherRangesToDenseOp:\n"
                 << "  Lifetime empty ranges for each feature is "
                 << emptyRanges_ << ".\n"
@@ -172,15 +170,6 @@ class GatherRangesToDenseOp final : public Operator<Context> {
             totalRanges_,
             ") which exceeds ",
             maxMismatchedRatio_);
-        if (totalRanges_ * maxEmptyRatio_ <= emptyRanges_[j]) {
-          LOG(ERROR) << "Ratio of empty range for feature at index " << j
-                     << " is "
-                     << (static_cast<double>(emptyRanges_[j]) /
-                         static_cast<double>(totalRanges_))
-                     << " (" << emptyRanges_[j] << "/" << totalRanges_
-                     << ") which exceeds " << maxEmptyRatio_ << "\n"
-                     << this->getErrorMsg();
-        }
       }
     }
 
@@ -195,10 +184,10 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   vector<int64_t> emptyRanges_;
   vector<int64_t> mismatchedRanges_;
   // To avoid false alarm due to insufficient sample (e.g., first batch being
-  // empty and causing 100% to be empty), use a threshold to ensure enough
-  // samples are gathered before decideding whether there is an alarm or not.
+  // mismatched and causing 100% to be mismatched), use a threshold to ensure
+  // enough samples are gathered before decideding whether there is an alarm or
+  // not.
   int64_t minObservation_ = 0;
-  float maxEmptyRatio_ = 0;
   float maxMismatchedRatio_ = 0;
 };
 
