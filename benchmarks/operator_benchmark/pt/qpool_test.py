@@ -78,7 +78,7 @@ qadaptive_avgpool2d_short_configs = op_bench.config_list(
 
 class _QPool2dBenchmarkBase(op_bench.TorchBenchmarkBase):
     def setup(self, N, C, H, W, dtype, contig):
-        # Input dimensions
+        # Input
         if N == 0:
             f_input = (torch.rand(C, H, W) - 0.5) * 256
         else:
@@ -125,16 +125,12 @@ class QAdaptiveAvgPool2dBenchmark(_QPool2dBenchmarkBase):
         super(QAdaptiveAvgPool2dBenchmark, self).setup(N, C, *input_size, dtype,
                                                        contig)
 
-
-op_bench.generate_pt_test(qadaptive_avgpool2d_short_configs,
+op_bench.generate_pt_test(qadaptive_avgpool2d_short_configs + qadaptive_avgpool2d_long_configs,
                           QAdaptiveAvgPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_short_configs, QAvgPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_short_configs, QMaxPool2dBenchmark)
-
-op_bench.generate_pt_test(qadaptive_avgpool2d_long_configs,
-                          QAdaptiveAvgPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_long_configs, QMaxPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_long_configs, QAvgPool2dBenchmark)
+op_bench.generate_pt_test(qmaxpool2d_short_configs + qmaxpool2d_long_configs,
+                          QAvgPool2dBenchmark)
+op_bench.generate_pt_test(qmaxpool2d_short_configs + qmaxpool2d_long_configs,
+                          QMaxPool2dBenchmark)
 
 
 if __name__ == "__main__":
