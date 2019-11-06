@@ -19,9 +19,18 @@ static inline Device ensure_has_index(Device device) {
   return impl->getDevice();
 }
 
-static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static inline Tensor to_impl(const Tensor& tensor, const TensorOptions& options, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  Tensor self;
+  if (tensor.dim() >= 2 && !optional_memory_format.has_value()) {
+    auto tr = tensor.transpose(0, 1);
+    auto empty = at::empty_like(tr, tensor.options());
+    empty.copy_(tr);
+    self = empty.transpose(0, 1);
+  } else {
+    self = tensor;
+  }
   auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
+      optional_memory_format.value_or(MemoryFormat::Preserve);
 
   if (self.options() == options && !copy &&
       (memory_format == MemoryFormat::Preserve ||
