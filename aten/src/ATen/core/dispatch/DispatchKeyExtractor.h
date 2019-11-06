@@ -95,7 +95,11 @@ public:
   template<class... Args>
   c10::optional<TensorTypeId> getDispatchKeyUnboxed(const Args&... args) const {
     auto type_set = detail::multi_dispatch_tensor_type_set(args...);
+    return typeSetToDispatchKey_(type_set);
+  }
 
+private:
+  static c10::optional<TensorTypeId> typeSetToDispatchKey_(const TensorTypeId& typeSet) {
     if (C10_UNLIKELY(type_set.empty())) {
       return c10::nullopt;
     }
@@ -103,7 +107,6 @@ public:
     return impl::dispatchTypeId(type_set);
   }
 
-private:
   explicit DispatchKeyExtractor(size_t num_args)
   : num_args_(num_args) {}
 
