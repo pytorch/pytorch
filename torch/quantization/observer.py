@@ -299,9 +299,6 @@ class MinMaxObserver(_ObserverBase):
 
     def forward(self, x_orig):
         r"""Records the running minimum and maximum of ``x``."""
-        return self._forward(x_orig)
-
-    def _forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
         min_val = self.min_val
         max_val = self.max_val

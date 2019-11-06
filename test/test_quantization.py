@@ -698,11 +698,9 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             [self.calib_data],
             inplace=False)
         result_eager = model_eager(self.calib_data[0][0])
-        torch._C._jit_pass_quant_fusion(model_script._c._get_module('fc1')._get_method('forward').graph)
         result_script = model_script._c._get_method('forward')(self.calib_data[0][0])
         self.assertEqual(result_eager, result_script)
 
-    @_tmp_donotuse_dont_inline_everything
     def test_observer_with_ignored_function(self):
         r"""Test observers with ignored fucntion and make sure it works in
         graph mode
