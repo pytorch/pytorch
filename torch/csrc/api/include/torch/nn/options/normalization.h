@@ -22,7 +22,25 @@ struct TORCH_API LayerNormOptions {
   TORCH_ARG(bool, elementwise_affine) = true;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LayerNorm, LayerNormFuncOptions)
+// ============================================================================
+
+namespace functional {
+
+/// Options for the `LayerNorm` module.
+struct TORCH_API LayerNormFuncOptions {
+  /* implicit */ LayerNormFuncOptions(std::vector<int64_t> normalized_shape);
+  /// input shape from an expected input.
+  TORCH_ARG(std::vector<int64_t>, normalized_shape);
+
+  TORCH_ARG(Tensor, weight) = {};
+
+  TORCH_ARG(Tensor, bias) = {};
+
+  /// a value added to the denominator for numerical stability. ``Default: 1e-5``.
+  TORCH_ARG(double, eps) = 1e-5;
+};
+
+} // namespace functional
 
 // ============================================================================
 
@@ -72,6 +90,9 @@ struct TORCH_API NormalizeFuncOptions {
   TORCH_ARG(int64_t, dim) = 1;
   /// Small value to avoid division by zero. Default: 1e-12
   TORCH_ARG(double, eps) = 1e-12;
+  /// the output tensor. If :attr:`out` is used, this
+  /// operation won't be differentiable.
+  TORCH_ARG(c10::optional<Tensor>, out) = c10::nullopt;
 };
 
 } // namespace functional

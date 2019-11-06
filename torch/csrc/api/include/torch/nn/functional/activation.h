@@ -65,43 +65,40 @@ inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxFuncOption
   return ret;
 }
 
-inline Tensor softmax(const Tensor& input, const SoftmaxFuncOptions& options,
-                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
+inline Tensor softmax(const Tensor& input, const SoftmaxFuncOptions& options) {
   int64_t dim = options.dim();
   Tensor ret;
 
-  if (dtype == c10::nullopt) {
+  if (options.dtype() == c10::nullopt) {
     ret = input.softmax(dim);
   } else {
-    ret = input.softmax(dim, dtype);
+    ret = input.softmax(dim, options.dtype());
   }
 
   return ret;
 }
 
-inline Tensor softmin(const Tensor& input, const SoftminFuncOptions& options,
-                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
+inline Tensor softmin(const Tensor& input, const SoftminFuncOptions& options) {
   int64_t dim = options.dim();
   Tensor ret;
 
-  if (dtype == c10::nullopt) {
+  if (options.dtype() == c10::nullopt) {
     ret = (-input).softmax(dim);
   } else {
-    ret = (-input).softmax(dim, dtype);
+    ret = (-input).softmax(dim, options.dtype());
   }
 
   return ret;
 }
 
-inline Tensor log_softmax(const Tensor& input, const LogSoftmaxFuncOptions& options,
-                          c10::optional<torch::Dtype> dtype = c10::nullopt) {
+inline Tensor log_softmax(const Tensor& input, const LogSoftmaxFuncOptions& options) {
   int64_t dim = options.dim();
   Tensor ret;
 
-  if (dtype == c10::nullopt) {
+  if (options.dtype() == c10::nullopt) {
     ret = input.log_softmax(dim);
   } else {
-    ret = input.log_softmax(dim, dtype);
+    ret = input.log_softmax(dim, options.dtype());
   }
 
   return ret;
@@ -125,15 +122,14 @@ inline Tensor relu(Tensor& input, const ReLUFuncOptions& options = {}) {
 
 inline Tensor relu6(Tensor& input, const ReLU6FuncOptions& options = {}) {
   return hardtanh(input,
-    HardtanhOptions().min_val(0).max_val(6).inplace(options.inplace()));
+    HardtanhFuncOptions().min_val(0).max_val(6).inplace(options.inplace()));
 }
 
-inline Tensor rrelu(Tensor& input, const RReLUFuncOptions& options = {},
-                    bool training = false) {
+inline Tensor rrelu(Tensor& input, const RReLUFuncOptions& options = {}) {
   if (options.inplace()) {
-    return torch::rrelu_(input, options.lower(), options.upper(), training);
+    return torch::rrelu_(input, options.lower(), options.upper(), options.training());
   } else {
-    return torch::rrelu(input, options.lower(), options.upper(), training);
+    return torch::rrelu(input, options.lower(), options.upper(), options.training());
   }
 }
 

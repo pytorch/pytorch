@@ -187,32 +187,29 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
 }
 
 inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
-    const MaxUnpool1dFuncOptions& options,
-    const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+    const MaxUnpool1dFuncOptions& options) {
   auto output_size_ = _unpool_output_size(input, options.kernel_size(),
                                           options.stride(), options.padding(),
-                                          output_size);
+                                          options.output_size());
   output_size_.push_back(1);
   return torch::max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3),
                              output_size_).squeeze(3);
 }
 
 inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
-  const MaxUnpool2dFuncOptions& options,
-  const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+  const MaxUnpool2dFuncOptions& options) {
   auto output_size_ = _unpool_output_size(input, options.kernel_size(),
                                           options.stride(), options.padding(),
-                                          output_size);
+                                          options.output_size());
 
   return torch::max_unpool2d(input, indices, output_size_);
 }
 
 inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
-  const MaxUnpool3dFuncOptions& options,
-  const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+  const MaxUnpool3dFuncOptions& options) {
   auto output_size_ = _unpool_output_size(input, options.kernel_size(),
                                           options.stride(), options.padding(),
-                                          output_size);
+                                          options.output_size());
 
   return torch::max_unpool3d(input, indices, output_size_,
                              options.stride(), options.padding());
