@@ -507,8 +507,6 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_set_attribute",
           [](Module& self, const std::string& name, py::object value) {
-            auto attr = self.find_attribute(name);
-            TORCH_CHECK(attr, "Could not find attribute '", name, "'");
             auto ivalue =
                 toIValue(std::move(value), self.type()->getAttribute(name));
             self.set_attribute(name, ivalue);
@@ -976,11 +974,12 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly("jit_type", &ConcreteModuleType::getJitType)
       .def("get_constants", &ConcreteModuleType::getConstantsPy)
       .def("get_attributes", &ConcreteModuleType::getAttributesPy)
-      .def("get_module_names", &ConcreteModuleType::getModuleNamesPy)
+      .def("get_modules", &ConcreteModuleType::getModulesPy)
       .def("add_constant", &ConcreteModuleType::addConstant)
       .def("add_attribute", &ConcreteModuleType::addAttribute)
       .def("add_function_attribute", &ConcreteModuleType::addFunctionAttribute)
       .def("add_module", &ConcreteModuleType::addModule)
+      .def("add_module_interface", &ConcreteModuleType::addModuleInterface)
       .def("add_pyclass", &ConcreteModuleType::addPyClass)
       .def("add_overload", &ConcreteModuleType::addOverload)
       .def("add_jit_type", &ConcreteModuleType::addJitType)
