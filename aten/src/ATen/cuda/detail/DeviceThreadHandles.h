@@ -127,8 +127,12 @@ struct DeviceThreadHandlePool {
     }
     };
 
+    // Warning:
+    // If you want to change this function, be aware that this fucntion will be called
+    // by multiple threads and there is no mutex guarding the call of this function, so
+    // make sure your implementation is thread-safe.
     PoolWindow *newPoolWindow() {
-        // The returned pointer has to be owned by a thread local variable
+        // The returned pointer will be owned by a thread local variable
         // so that different threads does not share the same PoolWindow.
         return new PoolWindow(*this);
     }
