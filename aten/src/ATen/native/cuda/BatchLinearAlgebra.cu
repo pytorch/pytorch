@@ -846,7 +846,9 @@ AT_ERROR("lu: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   auto self_data = self.data_ptr<scalar_t>();
+  magma_int_t m = magma_int_cast(self.size(-2), "m");
   magma_int_t n = magma_int_cast(self.size(-1), "n");
+  magma_int_t k = std::min(m, n);
 
   if (self.dim() == 2) {
     // If `pivots` is defined, then we have to compute them.
@@ -856,12 +858,12 @@ AT_ERROR("lu: MAGMA library not found in "
     // The data is later copied back to the appropriate output tensor.
     Tensor info_tmp = at::zeros({}, at::kInt);
     if (get_pivots) {
-      Tensor piv_tmp = at::empty({n}, at::kInt);
+      Tensor piv_tmp = at::empty({k}, at::kInt);
       magmaLu<scalar_t>(
-        n, n, self_data, n, piv_tmp.data_ptr<magma_int_t>(), info_tmp.data_ptr<magma_int_t>());
+        m, n, self_data, m, piv_tmp.data_ptr<magma_int_t>(), info_tmp.data_ptr<magma_int_t>());
       pivots.copy_(piv_tmp);
     } else {
-      magmaLuNoPiv<scalar_t>(n, n, self_data, n, info_tmp.data_ptr<magma_int_t>());
+      magmaLuNoPiv<scalar_t>(m, n, self_data, m, info_tmp.data_ptr<magma_int_t>());
     }
     infos.copy_(info_tmp);
   } else {
@@ -888,11 +890,11 @@ AT_ERROR("lu: MAGMA library not found in "
         pivots_array[i] = &pivots_data[i * pivots_matrix_stride];
       }
       magmaLuBatched<scalar_t>(
-        n, n, self_array, n, pivots_array,
+        m, n, self_array, m, pivots_array,
         infos.data_ptr<magma_int_t>(), batch_size, magma_queue);
     } else {
       magmaLuNoPivBatched<scalar_t>(
-        n, n, self_array, n, infos.data_ptr<magma_int_t>(),
+        m, n, self_array, m, infos.data_ptr<magma_int_t>(),
         batch_size, magma_queue);
     }
   }
@@ -903,10 +905,13 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool p
   TORCH_CHECK(self.dim() >= 2,
            "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
            " instead");
-  squareCheckInputs(self);
+  auto m = self.size(-2);
+  auto n = self.size(-1);
+  auto k = std::min(m, n);
   auto req_size = self.sizes().vec();
   req_size.pop_back();
-  Tensor pivots_tensor = at::arange(1, self.size(-1) + 1, self.options().dtype(at::kInt)).expand(req_size).contiguous();
+  req_size.back() = k;
+  Tensor pivots_tensor = at::arange(1, k + 1, self.options().dtype(at::kInt)).expand(req_size).contiguous();
   req_size.pop_back();
   auto infos_tensor = at::zeros(req_size, self.options().dtype(at::kInt));
 
@@ -916,14 +921,46 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool p
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_cuda", [&]{
-      apply_lu<scalar_t>(self_working_copy, pivots_tensor, infos_tensor, pivot);
-    });
+        apply_lu<scalar_t>(self_working_copy, pivots_tensor, infos_tensor, pivot);
+        if (self.dim() > 2 && pivot && m == n && m <= 32) {
+          /*
+            The magma implementation of small singular square batch
+            matrices has a bug that results nan values in the LU
+            factorization results, see
+            https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
+
+            TODO: disable this block for magma versions that implement a bug fix
+          */
+          auto batch_size = infos_tensor.numel();
+          auto infos_array = infos_tensor.view({batch_size});
+          auto infos_cpu = infos_array.to(at::kCPU);
+          auto infos_data = infos_cpu.data_ptr<int>();
+          auto input_array = self.view({batch_size, m, n});
+          auto working_array = self_working_copy.view({batch_size, m, n});
+          auto pivots_array = pivots_tensor.view({batch_size, k});
+          for (int64_t i = 0; i < batch_size; i++) {
+            auto info = infos_data[i];
+            if (info > 0) {
+              /*
+                We'll recompute LU factorization of singular matrices
+                using the non-batch implementation to workaround the
+                magma bug (magma issue 13).
+              */
+              working_array[i].copy_(input_array[i]);
+              auto matrix = working_array[i];
+              auto pivots = pivots_array[i];
+              auto infos = infos_array[i];
+              apply_lu<scalar_t>(matrix, pivots, infos, pivot);
+            }
+          }
+        }
+      });
   }
   if (check_errors) {
     if (self.dim() == 2) {
-      singleCheckErrors(infos_tensor.item<int64_t>(), "lu");
+      singleCheckErrors(infos_tensor.item<int64_t>(), "lu", /*allow_singular=*/true);
     } else {
-      batchCheckErrors(infos_tensor, "lu");
+      batchCheckErrors(infos_tensor, "lu", /*allow_singular=*/true);
     }
   }
   return std::make_tuple(self_working_copy, pivots_tensor, infos_tensor);
