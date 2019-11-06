@@ -47,7 +47,7 @@ class TestDocCoverage(unittest.TestCase):
             # below are some jit functions
             'wait', 'fork', 'parse_type_comment', 'import_ir_module',
             'import_ir_module_from_buffer', 'merge_type_from_type_comment',
-            'parse_ir', 'parse_schema',
+            'parse_ir', 'parse_schema', 'make_bytes', 'read_into',
 
             # below are symbols mistakely binded to torch.*, but should
             # go to torch.nn.functional.* instead
