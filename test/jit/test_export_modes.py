@@ -95,4 +95,3 @@ class TestExportModes(JitTestCase):
         torch.onnx.export_to_pretty_string(
             ModelWithAtenFmod(), (x, y), f,
             operator_export_type=OperatorExportTypes.ONNX_ATEN)
-
