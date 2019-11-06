@@ -736,7 +736,11 @@ struct TORCH_API Node {
     return getAttr<TensorsAttr>(name);
   }
 
-private:
+  Block* findCommonAncestorBlockWith(Node* n);
+
+  size_t blocksFromGraphBlock();
+
+ private:
   void printAttrValue(std::ostream& out, const Symbol& name) const;
   void printAttributes(std::ostream &out, bool ignore_subgraph) const;
 
