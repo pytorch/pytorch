@@ -244,7 +244,7 @@ Module Module::clone_impl(
     } else {
       r.register_attribute(
           s.name,
-          s.value.type(),
+          type()->getAttribute(s.name),
           s.value,
           *entity_type(s.name) == EntityType::PARAMETER);
     }
