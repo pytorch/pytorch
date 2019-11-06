@@ -102,6 +102,7 @@ def prepare_script(model, qconfig_dict, inplace=False):
                                         'forward',
                                         qconfig_dict,
                                         True)
+    print('after prepare:', model._c._get_module('fc1')._get_modules())
     return model
 
 def convert_script(model, inplace=False):

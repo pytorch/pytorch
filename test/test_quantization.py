@@ -674,7 +674,7 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
 )
 class GraphModePostTrainingQuantTest(QuantizationTestCase):
     @_tmp_donotuse_dont_inline_everything
-    def test_single_liner(self):
+    def test_single_linear(self):
         r"""Compare the result of quantizing single linear layer in
         eager mode and graph mode
         """
@@ -709,16 +709,18 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         graph mode
         """
         # eager mode
-        annotated_linear_model = AnnotatedSingleLayerLinearModel()
+        annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
         qconfig = QConfig(
             activation=default_histogram_observer,
             weight=default_weight_observer)
         annotated_linear_model.qconfig = qconfig
-        linear_model = SingleLayerLinearModel()
+        linear_model = SingleLayerLinearModel().eval()
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
         linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
         linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+        print(annotated_linear_model(self.calib_data[0][0]))
+        print(annotated_linear_model)
         model_eager = quantize(annotated_linear_model, test_only_eval_fn,
                                self.calib_data)
 
@@ -731,8 +733,11 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn,
             [self.calib_data],
             inplace=False)
+        print(model_eager)
+        print(model_script._c._get_module('fc1')._get_method('forward').graph)
         result_eager = model_eager(self.calib_data[0][0])
         result_script = get_forward(model_script._c)(self.calib_data[0][0])
+        print(result_eager, result_script)
         self.assertEqual(result_eager, result_script)
 
     @_tmp_donotuse_dont_inline_everything
