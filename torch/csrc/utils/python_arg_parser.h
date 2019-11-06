@@ -652,6 +652,7 @@ static auto check_has_torch_function(PyObject* obj) -> bool
 {
   PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
   if(method != nullptr){
+    Py_DECREF(method);
     return true;
   }
   return false;
