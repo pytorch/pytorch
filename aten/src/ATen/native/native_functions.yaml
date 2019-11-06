@@ -1895,6 +1895,10 @@
     CUDA: batch_norm_cuda
     MkldnnCPU: mkldnn_batch_norm
 
+- func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out) -> (Tensor(a!), Tensor, Tensor)
+  dispatch:
+    CUDA: batch_norm_cuda_out
+
 - func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
   dispatch:
     CUDA: batch_norm_stats_cuda
