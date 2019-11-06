@@ -40,7 +40,7 @@ qactivation_short_configs = op_bench.cross_product_configs(
 class _ActivationBenchmarkBase(op_bench.TorchBenchmarkBase):
     r"""Base class for all the activations."""
     def setup(self, dims, permute_dims, dtype):
-        # Input dimensions
+        # Input
         f_input = (torch.rand(*dims) - 0.5) * 256
         scale = 1.0
         zero_point = 0
@@ -74,10 +74,10 @@ class QReLU6Benchmark(_ActivationBenchmarkBase):
         self.set_module_name("QReLU6")
 
 
-op_bench.generate_pt_test(qactivation_short_configs, QReLUBenchmark)
-op_bench.generate_pt_test(qactivation_short_configs, QReLU6Benchmark)
-op_bench.generate_pt_test(qactivation_long_configs, QReLUBenchmark)
-op_bench.generate_pt_test(qactivation_long_configs, QReLU6Benchmark)
+op_bench.generate_pt_test(qactivation_short_configs + qactivation_long_configs,
+                          QReLUBenchmark)
+op_bench.generate_pt_test(qactivation_short_configs + qactivation_long_configs,
+                          QReLU6Benchmark)
 
 
 if __name__ == "__main__":
