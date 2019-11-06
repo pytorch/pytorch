@@ -380,25 +380,60 @@ bool ConvDNNLowPPackWeightOp::TakeDepthWise3x3x3FastPath_() {
   return ret;
 }
 
-bool ConvDNNLowPPackWeightOp::TakeGConvFastPath_() {
-  if (this->debug_def().engine() == "DNNLOWP_ACC16" ||
-      this->kernel_.size() != 2) {
-    return false;
-  }
+fbgemm::conv_param_t<> ConvDNNLowPPackWeightOp::GetConvParam_() {
+  CAFFE_ENFORCE_EQ(this->kernel_.size(), 2);
 
   auto& filter = InputTensorCPU_(FILTER);
   const int M = filter.dim32(0), C = filter.dim32(filter.dim() - 1) * group_;
-  fbgemm::conv_param_t<> conv_p(
-      1,
+
+  return fbgemm::conv_param_t<>(
+      1, // dummy
       C,
       M,
-      {1, 1},
+      {this->kernel_[0] * this->stride_[0],
+       this->kernel_[1] * this->stride_[1]}, // dummy
       group_,
       {this->kernel_[0], this->kernel_[1]},
       {this->stride_[0], this->stride_[1]},
       {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
+}
 
-  return fbgemm::fbgemmOptimizedGConv(conv_p);
+fbgemm::conv_param_t<3> ConvDNNLowPPackWeightOp::GetConv3DParam_() {
+  CAFFE_ENFORCE_EQ(this->kernel_.size(), 3);
+
+  auto& filter = InputTensorCPU_(FILTER);
+  const int M = filter.dim32(0), C = filter.dim32(filter.dim() - 1) * group_;
+
+  return fbgemm::conv_param_t<3>(
+      1, // dummy
+      C,
+      M,
+      {1,
+       this->kernel_[1] * this->stride_[1],
+       this->kernel_[2] * this->stride_[2]}, // dummy
+      group_,
+      {this->kernel_[0], this->kernel_[1], this->kernel_[2]},
+      {this->stride_[0], this->stride_[1], this->stride_[2]},
+      {this->pads_[0],
+       this->pads_[1],
+       this->pads_[2],
+       this->pads_[3],
+       this->pads_[4],
+       this->pads_[5]});
+}
+
+bool ConvDNNLowPPackWeightOp::TakeGConvFastPath_() {
+  if (this->debug_def().engine() == "DNNLOWP_ACC16" ||
+      (this->kernel_.size() != 2 && this->kernel_.size() != 3)) {
+    return false;
+  }
+
+  if (this->kernel_.size() == 2) {
+    return fbgemm::fbgemmOptimizedGConv(GetConvParam_());
+  } else {
+    CAFFE_ENFORCE_EQ(this->kernel_.size(), 3);
+    return fbgemm::fbgemmOptimizedGConv(GetConv3DParam_());
+  }
 }
 
 bool ConvDNNLowPPackWeightOp::RunOnDevice() {
@@ -543,18 +578,19 @@ bool ConvDNNLowPPackWeightOp::RunOnDevice() {
       Y->W_depthwise.reset(new fbgemm::PackedDepthWiseConvMatrix(
           group_, 3 * 3 * 3, W_quantized.data()));
     } else if (TakeGConvFastPath_()) {
-      fbgemm::conv_param_t<> conv_p(
-          1,
-          group_ * C_per_group,
-          M,
-          {1, 1},
-          group_,
-          {this->kernel_[0], this->kernel_[1]},
-          {this->stride_[0], this->stride_[1]},
-          {this->pads_[0], this->pads_[1], this->pads_[2], this->pads_[3]});
-
-      Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
-          fbgemm::matrix_op_t::Transpose, conv_p, W_quantized.data()));
+      if (this->kernel_.size() == 2) {
+        Y->W_gconv.reset(new fbgemm::PackWeightMatrixForGConv<int8_t>(
+            fbgemm::matrix_op_t::Transpose,
+            GetConvParam_(),
+            W_quantized.data()));
+      } else {
+        CAFFE_ENFORCE_EQ(this->kernel_.size(), 3);
+        Y->W_gconv3d.reset(
+            new fbgemm::PackWeightMatrixForGConv<int8_t, int32_t, 3>(
+                fbgemm::matrix_op_t::Transpose,
+                GetConv3DParam_(),
+                W_quantized.data()));
+      }
     } else {
       Y->W.reset(new fbgemm::PackBMatrix<int8_t>(
           fbgemm::matrix_op_t::Transpose,
@@ -712,6 +748,9 @@ void Int8FCDNNLowpPackedWeightBlobShapeFunctions::SetupExternalTensorDescriptor(
   desc->dimensions = shape.size();
   shapes->emplace_back(shape.cbegin(), shape.cend());
   desc->shape = shapes->back().data();
+
+  // not an offline tensor
+  desc->isOffline = 0;
 }
 
 void Int8ConvDNNLowpPackedWeightBlobShapeFunctions::
@@ -757,6 +796,9 @@ void Int8ConvDNNLowpPackedWeightBlobShapeFunctions::
   desc->dimensions = shape.size();
   shapes->emplace_back(shape.cbegin(), shape.cend());
   desc->shape = shapes->back().data();
+
+  // not an offline tensor
+  desc->isOffline = 0;
 }
 
 // Explicitly register TypeMeta
