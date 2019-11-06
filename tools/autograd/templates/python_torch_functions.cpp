@@ -502,17 +502,33 @@ void initTorchFunctions(PyObject* module) {
 PyObject* handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyTypeObject &torch_api) {
   PyObject* torch_api_function =
     PyObject_FastGetAttrString((PyObject*)&torch_api, const_cast<char*>(r.get_func_name().data()));
+  TORCH_INTERNAL_ASSERT(torch_api_function != NULL, "torch API function must exist");
   PyObject* ret = nullptr;
-  // there must be at least one overloaded argument at this point, since r.has_torch_function() is true
-  // so ret will never be returned unset
   for (auto arg : r.overloaded_args) {
     PyObject* torch_function = PyObject_FastGetAttrString(arg, "__torch_function__");
     ret = PyObject_CallFunctionObjArgs(torch_function, torch_api_function, args, kwargs, NULL);
-    if (ret != Py_NotImplemented) {
-      return ret;
+    if (ret == Py_NotImplemented) {
+      // if ret returns NotImplemented, we check the next implementation in the
+      // precedence order, decrementing the reference count so as not to leak
+      // references to NotImplemented
+      Py_DECREF(ret);
+      ret = nullptr;
+    }
+    else {
+      // Return the reference to the result. This also covers the case where ret
+      // is NULL and __torch_function__ raised an exception, which we allow to
+      // propagate and return NULL
+      break;
     }
   }
-  TORCH_INTERNAL_ASSERT(ret != nullptr, "__torch_function__ return value cannot be nullptr");
+  Py_DECREF(torch_api_function);
+  if ((ret == nullptr) && (PyErr_Occurred() == NULL)) {
+    // if ret is null either an exception occurerd, so we return null, or
+    // __torch_function__ returned NotImplemented, so we return a new reference
+    // to NotImplemented
+    ret = Py_NotImplemented;
+    Py_INCREF(Py_NotImplemented);
+  }
   return ret;
 }
 
