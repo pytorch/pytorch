@@ -18,7 +18,8 @@ class Report:
         self.errors = errors
         if len(errors) != self.num_errors:
             if len(errors) == 10000 and self.num_errors > 10000:
-                "When there are more than 10k errors, cuda-memcheck only display 10k"
+                # When there are more than 10k errors, cuda-memcheck only display 10k
+                self.num_errors = 10000
             else:
                 raise ParseError("Number of errors does not match")
 
