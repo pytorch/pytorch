@@ -222,11 +222,11 @@ namespace detail {
     }
   };
 
-  template<class KernelFunctor, bool AllowDeprecatedTypes, class Enable = void> struct wrap_kernel_functor_boxed final {};
+  template<class KernelFunctor, bool AllowDeprecatedTypes, class Enable = void> struct make_boxed_from_unboxed_functor final {};
 
   // SFINAE version for kernels that return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
@@ -240,7 +240,7 @@ namespace detail {
 
   // SFINAE version for kernels that don't return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct wrap_kernel_functor_boxed<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {

@@ -524,7 +524,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsInSameOpCallOutOfSc
 }
 
 bool called_stackbased_kernel = false;
-void stackBasedKernel(c10::OperatorKernel* functor, const OperatorHandle&, c10::Stack* stack) {
+void stackBasedKernel(const OperatorHandle&, c10::Stack* stack) {
   called_stackbased_kernel = true;
 }
 
@@ -532,18 +532,18 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndNoneCanInf
   bool called_kernel = false;
   expectThrows<c10::Error>([&] {
     auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
-      .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel)
-      .kernel(c10::TensorTypeId::CUDATensorId, &stackBasedKernel)
-      .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel));
+      .kernel<&stackBasedKernel>(c10::TensorTypeId::CPUTensorId)
+      .kernel<&stackBasedKernel>(c10::TensorTypeId::CUDATensorId)
+      .kernel<&stackBasedKernel>(c10::TensorTypeId::XLATensorId));
   }, "Cannot infer operator schema for this kind of kernel in registration of operator _test::dummy");
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndNoneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel)
-    .kernel(c10::TensorTypeId::CUDATensorId, &stackBasedKernel)
-    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel));
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::CPUTensorId)
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::CUDATensorId)
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::XLATensorId));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -567,9 +567,9 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndNoneCanI
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndOnlyOneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
-    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel)
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::CPUTensorId)
     .kernel<MockKernel>(c10::TensorTypeId::CUDATensorId, &called_kernel)
-    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel));
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::XLATensorId));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -593,9 +593,9 @@ TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsByNameAndOnlyOneCan
 TEST(OperatorRegistrationTest, whenRegisteringMultipleKernelsBySchemaAndOnlyOneCanInferSchema_thenSucceeds) {
   bool called_kernel = false;
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .kernel(c10::TensorTypeId::CPUTensorId, &stackBasedKernel)
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::CPUTensorId)
     .kernel<MockKernel>(c10::TensorTypeId::CUDATensorId, &called_kernel)
-    .kernel(c10::TensorTypeId::XLATensorId, &stackBasedKernel));
+    .kernel<&stackBasedKernel>(c10::TensorTypeId::XLATensorId));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value()); // assert schema is registered
@@ -629,12 +629,12 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
   }, "Tried to register kernels for same operator that infer a different function schema");
 }
 
-void backend_fallback_kernel(c10::OperatorKernel*, const c10::OperatorHandle& op, c10::Stack* stack) {
+void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {
   (*stack)[1] = (*stack)[1].toString()->string() + op.schema().name();
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernel_thenCanBeCalled) {
-  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction(&backend_fallback_kernel));
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
@@ -644,7 +644,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernel_thenCanBeCal
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelForWrongBackend_thenCannotBeCalled) {
-  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CUDATensorId, c10::KernelFunction::makeFromBoxedFunction(&backend_fallback_kernel));
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CUDATensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()");
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
@@ -657,7 +657,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelForWrongBacke
 bool called = false;
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForDifferentBackend_thenRegularKernelCanBeCalled) {
-  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction(&backend_fallback_kernel));
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
       .kernel(c10::TensorTypeId::CUDATensorId, [] (Tensor, std::string) {
@@ -672,7 +672,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForDifferentBackend_thenFallbackKernelCanBeCalled) {
-  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction(&backend_fallback_kernel));
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
       .kernel(c10::TensorTypeId::CUDATensorId, [] (Tensor, std::string) {
@@ -688,7 +688,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForSameBackend_thenCallsRegularKernel) {
-  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction(&backend_fallback_kernel));
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
       .kernel(c10::TensorTypeId::CPUTensorId, [] (Tensor, std::string) {
@@ -703,7 +703,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndCatchallKernelForSameBackend_thenCallsFallbackKernel) {
-  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction(&backend_fallback_kernel));
+  auto registrar = c10::Dispatcher::singleton().registerBackendFallbackKernel(c10::TensorTypeId::CPUTensorId, c10::KernelFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 
   auto registrar1 = c10::RegisterOperators().op("_test::dummy(Tensor dummy, str input) -> ()", c10::RegisterOperators::options()
       .catchAllKernel([] (Tensor, std::string) {

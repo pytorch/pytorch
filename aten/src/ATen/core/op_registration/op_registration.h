@@ -51,13 +51,15 @@ public:
     Options& operator=(Options&&) noexcept = delete;
 
     // internal-only for registering stack based kernels
-    Options&& kernel(TensorTypeId dispatch_key, KernelFunction::BoxedKernelFunction* kernel_func) && {
-      return std::move(*this).kernel(dispatch_key, KernelFunction::makeFromBoxedFunction(kernel_func), nullptr);
+    template<KernelFunction::BoxedKernelFunction* kernel_func>
+    Options&& kernel(TensorTypeId dispatch_key) && {
+      return std::move(*this).kernel(dispatch_key, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullptr);
     }
 
     // internal-only for registering stack based catch-all kernels
-    Options&& catchAllKernel(KernelFunction::BoxedKernelFunction* kernel_func) && {
-      return std::move(*this).kernel(c10::nullopt, KernelFunction::makeFromBoxedFunction(kernel_func), nullptr);
+    template<KernelFunction::BoxedKernelFunction* kernel_func>
+    Options&& catchAllKernel() && {
+      return std::move(*this).kernel(c10::nullopt, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullptr);
     }
 
     // internal only for registering caffe2 ops

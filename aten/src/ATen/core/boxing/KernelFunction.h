@@ -22,7 +22,10 @@ template<class Return, class... Args> struct boxAndCallBoxedFunc;
  */
 class CAFFE2_API KernelFunction final {
 public:
-  using BoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, Stack*);
+  // This is how boxed kernels are actually stored
+  using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, Stack*);
+  // This is the public API for how boxed kernels are defined
+  using BoxedKernelFunction = void(const OperatorHandle&, Stack*);
 
   KernelFunction()
   : functorFactory_()
@@ -141,13 +144,14 @@ public:
    * Example:
    *
    * > void boxed_func(OperatorKernel*, Stack* stack) {...}
-   * > KernelFunction func = KernelFunction::makeFromBoxedFunction(&boxed_func);
+   * > KernelFunction func = KernelFunction::makeFromBoxedFunction<&boxed_func>();
    */
-  static KernelFunction makeFromBoxedFunction(BoxedKernelFunction* func) {
+  template<BoxedKernelFunction* func>
+  static KernelFunction makeFromBoxedFunction() {
     return KernelFunction(
       nullptr,  // no functorFactory_, this can only be called in a boxed way.
       nullptr,  // no functor_ object either
-      func,
+      &make_boxed_function<func>,
       nullptr  // no unboxed function pointer
     );
   }
@@ -171,7 +175,7 @@ public:
     return KernelFunction(
       nullptr, // no functorFactory_ because we already have the functor_
       std::move(kernelFunctor),
-      &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowLegacyTypes>::call,
+      &detail::make_boxed_from_unboxed_functor<KernelFunctor, AllowLegacyTypes>::call,
       reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
     );
   }
@@ -204,7 +208,7 @@ public:
     return KernelFunction(
       std::move(kernelFunctorFactory),
       nullptr, // delay creation of functor_ (it will be created by calling functorFactory_ later)
-      &detail::wrap_kernel_functor_boxed<KernelFunctor, AllowLegacyTypes>::call,
+      &detail::make_boxed_from_unboxed_functor<KernelFunctor, AllowLegacyTypes>::call,
       reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
     );
   }
@@ -347,12 +351,17 @@ public:
 
 private:
 
-  explicit KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, BoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
+  explicit KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
   : functorFactory_(std::move(functorFactory))
   , functor_(std::move(functor))
   , boxed_kernel_func_(boxed_kernel_func)
   , unboxed_kernel_func_(unboxed_kernel_func)
   {}
+
+  template<BoxedKernelFunction* func>
+  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack) {
+    func(opHandle, stack);
+  }
 
   OperatorKernel* getFunctor_() const {
     if (functor_.get() == nullptr) {
@@ -377,14 +386,14 @@ private:
   std::function<std::unique_ptr<OperatorKernel>()> functorFactory_;
   mutable std::shared_ptr<OperatorKernel> functor_;
 
-  BoxedKernelFunction* boxed_kernel_func_;
+  InternalBoxedKernelFunction* boxed_kernel_func_;
   void* unboxed_kernel_func_;
 };
 
 namespace detail {
 template<class Return, class... Args>
 struct boxAndCallBoxedFunc final {
-  static Return call(KernelFunction::BoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
+  static Return call(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
     // TODO Reuse stack vector instead of allocating?
     std::vector<IValue> stack {std::forward<Args>(args)...};
 
@@ -396,7 +405,7 @@ struct boxAndCallBoxedFunc final {
 };
 template<class... Args>
 struct boxAndCallBoxedFunc<void, Args...> final {
-  static void call(KernelFunction::BoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
+  static void call(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
     // TODO Reuse stack vector instead of allocating?
     std::vector<IValue> stack {std::forward<Args>(args)...};
 
