@@ -122,7 +122,7 @@ void multinomial_apply(Tensor& result, const Tensor& self, const int64_t n_sampl
 }
 
 static void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, Generator *gen) {
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "multinomial", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "multinomial", [&] {
     multinomial_apply<scalar_t>(result, self, n_sample, with_replacement, gen);
   });
 }
