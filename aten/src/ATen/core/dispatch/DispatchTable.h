@@ -189,11 +189,10 @@ class DispatchTable final {
    * @param stack Stack with arguments to invoke the kernel function with
    * @return Kernel function pointing to the right kernel for the given arguments.
    */
-   const KernelFunction& lookupBoxed(const Stack* stack) const {
-     return lookup_([&] () -> c10::optional<TensorTypeId> {
-       return dispatch_strategy_.get_dispatch_key_boxed(stack);
-     });
-   }
+  const KernelFunction& lookupBoxed(const Stack* stack) const {
+    c10::optional<TensorTypeId> dispatchKey = dispatch_strategy_.get_dispatch_key_boxed(stack);
+    return lookup_(dispatchKey);
+  }
 
    /**
     * Perform a dynamic dispatch on this table and find the kernel to call
@@ -204,9 +203,8 @@ class DispatchTable final {
     */
    template<class... Args>
    const KernelFunction& lookupUnboxed(const Args&... args) const {
-     return lookup_([&] () -> c10::optional<TensorTypeId> {
-       return dispatch_strategy_.get_dispatch_key_unboxed<Args...>(args...);
-     });
+     c10::optional<TensorTypeId> dispatchKey = dispatch_strategy_.get_dispatch_key_unboxed<Args...>(args...);
+     return lookup_(dispatchKey);
    }
 
    bool isEmpty() const {
@@ -255,11 +253,16 @@ private:
 
     template<class... Args>
     c10::optional<TensorTypeId> get_dispatch_key_unboxed(const Args&... args) const {
-      auto type_set = detail::multi_dispatch_tensor_type_set(args...);
-      if (type_set.empty()) {
+      auto typeSet = detail::multi_dispatch_tensor_type_set(args...);
+      return type_set_to_dispatch_key_(typeSet);
+    }
+
+  private:
+    static c10::optional<TensorTypeId> type_set_to_dispatch_key_(const TensorTypeSet& typeSet) {
+      if (typeSet.empty()) {
         return c10::nullopt;
       }
-      return impl::dispatchTypeId(type_set);
+      return impl::dispatchTypeId(typeSet);
     }
   };
 
@@ -267,9 +270,7 @@ private:
     return {schema.arguments().size()};
   }
 
-  template<class GetDispatchKeyFunc>
-  const KernelFunction& lookup_(const GetDispatchKeyFunc& getDispatchKey) const {
-      c10::optional<TensorTypeId> dispatch_key = getDispatchKey();
+  const KernelFunction& lookup_(c10::optional<TensorTypeId> dispatch_key) const {
       if (dispatch_key.has_value()) {
         const auto* found = kernels_.lookup(*dispatch_key);
 
