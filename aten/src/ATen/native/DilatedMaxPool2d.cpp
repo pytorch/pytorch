@@ -487,7 +487,7 @@ Tensor max_pool2d_with_indices_backward_cpu(
   bool ceil_mode,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
   max_pool2d_with_indices_backward_out_cpu_template(
     gradInput,
     gradOutput_,

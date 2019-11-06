@@ -73,14 +73,16 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
 
 class ProcessGroupNCCLErrorsTest : public ::testing::Test {
  protected:
-  bool skipTest() {
+  std::pair<bool, std::string> skipTest() {
     if (cudaNumDevices() == 0) {
-      return true;
+      return std::make_pair(true, "Skipping test since CUDA is not available");
     }
 #ifdef USE_C10D_NCCL
-    return torch::cuda::nccl::version() < kNcclErrorHandlingVersion;
+    return torch::cuda::nccl::version() < kNcclErrorHandlingVersion
+        ? std::make_pair(true, "Skipping test since NCCL version is too old")
+        : std::make_pair(false, "");
 #else
-    return false;
+    return std::make_pair(false, "");
 #endif
   }
 
@@ -106,7 +108,11 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
 };
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
-  if (skipTest()) {
+  bool skip;
+  std::string skipReason;
+  std::tie(skip, skipReason) = skipTest();
+  if (skip) {
+    LOG(INFO) << skipReason;
     return;
   }
 
@@ -141,7 +147,11 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
 }
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
-  if (skipTest()) {
+  bool skip;
+  std::string skipReason;
+  std::tie(skip, skipReason) = skipTest();
+  if (skip) {
+    LOG(INFO) << skipReason;
     return;
   }
 
