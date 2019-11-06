@@ -32,12 +32,12 @@ C10_DEFINE_SHARED_REGISTRY(
     const std::string& /* interface */,
     const std::string& /* hostname */);
 
-#ifdef __linux__
+#if GLOO_HAVE_TRANSPORT_TCP
 static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
     const std::string& interface, const std::string& hostname) {
   TORCH_CHECK(
       !interface.empty() || !hostname.empty(),
-      "GlooDeviceFactory::makeTCPDevice(): interface and hostname "
+      "GlooDeviceFactory::makeTCPDevice(): interface or hostname "
       "can't be empty");
 
   ::gloo::transport::tcp::attr attr;
@@ -55,7 +55,7 @@ C10_REGISTER_CREATOR(
     makeTCPDevice);
 #endif
 
-#ifdef __APPLE__
+#if GLOO_HAVE_TRANSPORT_UV
 static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
     const std::string& interface, const std::string& hostname) {
   TORCH_CHECK(
