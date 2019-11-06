@@ -6,7 +6,6 @@ from __future__ import unicode_literals
 import random
 
 import torch
-import torch.quantization as tq
 import torch.nn.quantized as nnq
 
 import operator_benchmark as op_bench
