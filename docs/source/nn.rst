@@ -349,6 +349,12 @@ Non-linear activations (weighted sum, nonlinearity)
 .. autoclass:: CELU
     :members:
 
+:hidden:`GELU`
+~~~~~~~~~~~~~~
+
+.. autoclass:: GELU
+    :members:
+
 :hidden:`Sigmoid`
 ~~~~~~~~~~~~~~~~~
 
@@ -489,6 +495,12 @@ Normalization layers
 
 Recurrent layers
 ----------------------------------
+
+:hidden:`RNNBase`
+~~~~~~~~~~~~~
+
+.. autoclass:: RNNBase
+    :members:
 
 :hidden:`RNN`
 ~~~~~~~~~~~~~

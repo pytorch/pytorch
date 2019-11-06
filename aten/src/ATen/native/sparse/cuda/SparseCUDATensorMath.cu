@@ -111,7 +111,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
           r__ = r_;
         } else {
           // TODO: how... strange
-          r__ = r_.transpose(0, 1).clone();
+          r__ = r_.transpose(0, 1).clone(at::MemoryFormat::Contiguous);
           r__.transpose_(0, 1);
         }
 
