@@ -70,6 +70,8 @@ RECURSIVE              = YES
 # Blacklist certain file patterns from the INPUT section.
 EXCLUDE = ../../../torch/csrc/api/include/torch/nn/pimpl-inl.h \
           ../../../torch/csrc/api/include/torch/detail
+# Increase the max node size for our large files
+DOT_GRAPH_MAX_NODES    = 100
 ################################################################################
 # Output formats for Doxygen to create.                                        #
 ################################################################################

@@ -1638,13 +1638,13 @@ class TestOperators(hu.HypothesisTestCase):
         op = core.CreateOperator("Shape", ["data"], ["shape"], axes=axes)
         self.assertReferenceChecks(gc, op, [data, axes], shape_ref)
 
-    @given(data=hu.tensor(), **hu.gcs_cpu_only)
-    def test_has_elements(self, data, gc, dc):
-        op = core.CreateOperator("HasElements", ["data"], ["has_elements"])
-        self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) > 0, ))
+    @given(x=hu.tensor(), y=hu.tensor(), **hu.gcs_cpu_only)
+    def test_has_elements(self, x, y, gc, dc):
+        op = core.CreateOperator("HasElements", ["x", "y"], ["has_elements"])
+        self.assertReferenceChecks(gc, op, [x, y], lambda x, y: (len(x) > 0 or len(y) > 0, ))
 
-        op = core.CreateOperator("IsEmpty", ["data"], ["is_empty"])
-        self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) == 0, ))
+        op = core.CreateOperator("IsEmpty", ["x"], ["is_empty"])
+        self.assertReferenceChecks(gc, op, [x], lambda x: (len(x) == 0, ))
 
     @given(initial_iters=st.integers(0, 100),
            max_iters=st.integers(0, 100))

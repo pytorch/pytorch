@@ -1,9 +1,9 @@
 from .module import Module as Module
-from .activation import CELU as CELU, ELU as ELU, GLU as GLU, Hardshrink as Hardshrink, Hardtanh as Hardtanh, \
-    LeakyReLU as LeakyReLU, LogSigmoid as LogSigmoid, LogSoftmax as LogSoftmax, PReLU as PReLU, RReLU as RReLU, \
-    ReLU as ReLU, ReLU6 as ReLU6, SELU as SELU, Sigmoid as Sigmoid, Softmax as Softmax, Softmax2d as Softmax2d, \
-    Softmin as Softmin, Softplus as Softplus, Softshrink as Softshrink, Softsign as Softsign, Tanh as Tanh, \
-    Tanhshrink as Tanhshrink, Threshold as Threshold
+from .activation import CELU as CELU, ELU as ELU, GLU as GLU, GELU as GELU, Hardshrink as Hardshrink, \
+    Hardtanh as Hardtanh, LeakyReLU as LeakyReLU, LogSigmoid as LogSigmoid, LogSoftmax as LogSoftmax, PReLU as PReLU, \
+    RReLU as RReLU, ReLU as ReLU, ReLU6 as ReLU6, SELU as SELU, Sigmoid as Sigmoid, Softmax as Softmax, \
+    Softmax2d as Softmax2d, Softmin as Softmin, Softplus as Softplus, Softshrink as Softshrink, Softsign as Softsign, \
+    Tanh as Tanh, Tanhshrink as Tanhshrink, Threshold as Threshold
 from .adaptive import AdaptiveLogSoftmaxWithLoss as AdaptiveLogSoftmaxWithLoss
 from .batchnorm import BatchNorm1d as BatchNorm1d, BatchNorm2d as BatchNorm2d, BatchNorm3d as BatchNorm3d, \
     SyncBatchNorm as SyncBatchNorm
@@ -17,7 +17,7 @@ from .dropout import AlphaDropout as AlphaDropout, Dropout as Dropout, Dropout2d
 from .fold import Fold as Fold, Unfold as Unfold
 from .instancenorm import InstanceNorm1d as InstanceNorm1d, InstanceNorm2d as InstanceNorm2d, \
     InstanceNorm3d as InstanceNorm3d
-from .linear import Bilinear as Bilinear, Linear as Linear
+from .linear import Bilinear as Bilinear, Identity as Identity, Linear as Linear
 from .loss import BCELoss as BCELoss, BCEWithLogitsLoss as BCEWithLogitsLoss, CTCLoss as CTCLoss, \
     CosineEmbeddingLoss as CosineEmbeddingLoss, CrossEntropyLoss as CrossEntropyLoss, \
     HingeEmbeddingLoss as HingeEmbeddingLoss, KLDivLoss as KLDivLoss, L1Loss as L1Loss, MSELoss as MSELoss, \
