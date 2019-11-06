@@ -25,6 +25,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/math_compat.h>
 
 #include <algorithm>
 #include <bitset>

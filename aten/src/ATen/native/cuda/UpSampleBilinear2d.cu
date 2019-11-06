@@ -327,7 +327,7 @@ Tensor upsample_bilinear2d_cuda(
     bool align_corners,
     double scales_1,
     double scales_2) {
-  Tensor output = at::empty_like(input);
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
   upsample_bilinear2d_out_cuda_template(
       output, input, output_size, align_corners, scales_1, scales_2);
   return output;
@@ -353,7 +353,7 @@ Tensor upsample_bilinear2d_backward_cuda(
     bool align_corners,
     double scales_1,
     double scales_2) {
-  Tensor grad_input = at::empty_like(grad_output);
+  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
   upsample_bilinear2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_1, scales_2);
   return grad_input;

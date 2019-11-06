@@ -297,7 +297,7 @@ Tensor& upsample_nearest3d_out_cuda(
 
 Tensor upsample_nearest3d_cuda(const Tensor& input, IntArrayRef output_size,
                                double scales_1, double scales_2, double scales_3) {
-  Tensor output = at::empty_like(input);
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
   upsample_nearest3d_out_cuda_template(output, input, output_size, scales_1, scales_2, scales_3);
   return output;
 }
@@ -322,7 +322,7 @@ Tensor upsample_nearest3d_backward_cuda(
     double scales_1,
     double scales_2,
     double scales_3) {
-  Tensor grad_input = at::empty_like(grad_output);
+  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
   upsample_nearest3d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales_1, scales_2, scales_3);
   return grad_input;

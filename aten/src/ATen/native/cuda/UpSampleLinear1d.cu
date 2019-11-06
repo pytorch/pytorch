@@ -243,7 +243,7 @@ Tensor upsample_linear1d_cuda(
     IntArrayRef output_size,
     bool align_corners,
     double scales_1) {
-  Tensor output = at::empty_like(input);
+  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
   upsample_linear1d_out_cuda_template(
       output, input, output_size, align_corners, scales_1);
   return output;
@@ -267,7 +267,7 @@ Tensor upsample_linear1d_backward_cuda(
     IntArrayRef input_size,
     bool align_corners,
     double scales_1) {
-  Tensor grad_input = at::empty_like(grad_output);
+  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
   upsample_linear1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_1);
   return grad_input;
