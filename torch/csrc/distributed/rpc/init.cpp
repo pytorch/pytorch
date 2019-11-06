@@ -25,12 +25,13 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* rpc_init(PyObject* /* unused */) {
-  auto dist_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
-  if (!dist_module) {
+  auto rpc_module =
+      THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc"));
+  if (!rpc_module) {
     throw python_error();
   }
 
-  auto module = py::handle(dist_module).cast<py::module>();
+  auto module = py::handle(rpc_module).cast<py::module>();
 
   auto workerInfo = shared_ptr_class_<WorkerInfo>(module, "WorkerInfo")
                         .def_readonly("name", &WorkerInfo::name_)
