@@ -454,7 +454,7 @@ class JitTestCase(TestCase):
             recording_inputs = reference_tensors
 
         # `check_trace` is set to False because check_trace is run with @no_grad
-        # Also, `checkTrace` already does all the checks 
+        # Also, `checkTrace` already does all the checks
         # against python function
         ge = torch.jit.trace(func, input_tensors, check_tolerance=check_tolerance,
                              _force_outplace=_force_outplace, check_trace=False)

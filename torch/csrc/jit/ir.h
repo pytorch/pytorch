@@ -637,11 +637,12 @@ struct TORCH_API Node {
   virtual ~Node() = default;
 
   // Methods for accessing attributes
-  void copyAttributes(const Node& rhs) {
+  Node* copyAttributes(const Node& rhs) {
     values_.clear();
     for (const AVPtr& i : rhs.values_) {
       values_.push_back(i->clone());
     }
+    return this;
   }
   bool hasAttribute(Symbol name) const {
     AT_ASSERT(name.is_attr());
@@ -912,6 +913,9 @@ struct Block {
   void eraseOutput(size_t i) {
     output_->removeInput(i);
   }
+  void replaceOutput(size_t i, Value* n) {
+    output_->replaceInput(i, n);
+  }
   void permuteOutputs(const std::vector<size_t>& new_inputs) {
     output_->permuteInputs(new_inputs);
   }
@@ -1033,12 +1037,9 @@ struct Graph {
     return unique_names_;
   }
 
-  void push_scope(const std::string& scope_name) {
-    current_scope_ = current_scope_->push(Symbol::scope(scope_name));
-  }
-  void pop_scope() {
-    current_scope_ = current_scope_->parent();
-  }
+  TORCH_API void push_scope(const std::string& scope_name);
+  TORCH_API void pop_scope();
+
   ScopePtr current_scope() {
     return current_scope_;
   }
@@ -1324,7 +1325,7 @@ struct TORCH_API PythonOp : public Node {
   virtual void lint_python() const = 0;
 };
 
-TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
+TORCH_API void LintGraph(const std::shared_ptr<Graph>& graph);
 
 TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
 
