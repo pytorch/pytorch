@@ -39,9 +39,9 @@ qmaxpool2d_short_configs = op_bench.config_list(
     attr_names=('C', 'H', 'W',        # Input layout
                 'k', 's', 'p', 'd'),  # Pooling parameters
     cross_product_configs={
-        'N': 2,
-        'ceil': False,
-        'contig': True,
+        'N': (2,),
+        'ceil': (False,),
+        'contig': (True,),
         'dtype': (torch.qint32, torch.qint8, torch.quint8),
     },
     tags=('short',)
