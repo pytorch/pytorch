@@ -26,8 +26,10 @@ constexpr int RREF_TUPLE_SIZE = 2;
 //////////////////////////  PyFutureToHere  /////////////////////////////////
 
 template <typename T>
-PyFutureToHere<T>::PyFutureToHere(std::shared_ptr<ivalue::Future> future)
-    : future_(std::move(future)) {}
+PyFutureToHere<T>::PyFutureToHere(
+    std::shared_ptr<UserRRef<T>> rref,
+    std::shared_ptr<ivalue::Future> future)
+    : rref_(std::move(rref)), future_(std::move(future)) {}
 
 template <>
 py::object PyFutureToHere<IValue>::wait() const {
@@ -102,10 +104,12 @@ std::shared_ptr<PyFuture> PyRRef::toHere() {
   } else {
     if (rref_->isPyObj()) {
       auto userRRef = std::static_pointer_cast<UserRRef<py::object>>(rref_);
-      return std::make_shared<PyFutureToHere<py::object>>(userRRef->toHere());
+      return std::make_shared<PyFutureToHere<py::object>>(
+          userRRef, userRRef->toHere());
     } else {
       auto userRRef = std::static_pointer_cast<UserRRef<IValue>>(rref_);
-      return std::make_shared<PyFutureToHere<IValue>>(userRRef->toHere());
+      return std::make_shared<PyFutureToHere<IValue>>(
+          userRRef, userRRef->toHere());
     }
   }
 }

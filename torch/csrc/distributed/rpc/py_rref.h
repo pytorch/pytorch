@@ -16,11 +16,16 @@ struct PyFuture {
 template <typename T>
 class PyFutureToHere final : public PyFuture {
  public:
-  explicit PyFutureToHere(std::shared_ptr<ivalue::Future> future);
+  explicit PyFutureToHere(
+      std::shared_ptr<UserRRef<T>> rref,
+      std::shared_ptr<ivalue::Future> future);
   py::object wait() const override;
   ~PyFutureToHere() override = default;
 
  private:
+  // Holding a shared_ptr tot the rref to prevent it been deleted while blocking
+  // on wait().
+  const std::shared_ptr<UserRRef<T>> rref_;
   const std::shared_ptr<ivalue::Future> future_;
 };
 
