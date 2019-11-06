@@ -9,6 +9,28 @@
 
 namespace at { namespace native {
 
+// We manually overload abs because std::abs does not work with ROCm.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t abs_wrapper(scalar_t v) {
+  return ::abs(v);
+}
+
+__host__ __device__ static inline uint8_t abs_wrapper(uint8_t v) {
+  return v;
+}
+
+__host__ __device__ static inline bool abs_wrapper(bool v) {
+  return v;
+}
+
+void abs_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::Bool, iter.dtype(), "abs_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      return abs_wrapper(a);
+    });
+  });
+}
+
 void bitwise_not_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     gpu_kernel(iter, []GPU_LAMBDA(bool a) {
@@ -247,6 +269,7 @@ void lgamma_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+REGISTER_DISPATCH(abs_stub, &abs_kernel_cuda);
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel_cuda);
 REGISTER_DISPATCH(asin_stub, &asin_kernel_cuda);
