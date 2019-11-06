@@ -36,9 +36,9 @@
 /// This advanced handler will only be used in the current thread.
 /// If any other thread is used, warnings will be processed as
 /// cpp warnings.
-#define HANDLE_TH_ERRORS                                           \
-  try {                                                            \
-    torch::PyWarningHandler __enforce_warning_buffer;          \
+#define HANDLE_TH_ERRORS                                             \
+  try {                                                              \
+    torch::PyWarningHandler __enforce_warning_buffer;                \
     try{
 
 #define CATCH_TH_ERRORS(retval)                                      \
