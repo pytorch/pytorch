@@ -346,7 +346,7 @@ class ONNXTracedModule(Module):
         def wrapper(*args):
             trace_inputs = _unflatten(args[:len(in_vars)], in_desc)
 
-            ret_inputs.append(tuple(x.clone() for x in args))
+            ret_inputs.append(tuple(x.clone(memory_format=torch.preserve_format) for x in args))
             if self._return_inputs_states:
                 inputs_states.append(_unflatten(args[:len(in_vars)], in_desc))
             outs.append(self.inner(*trace_inputs))
@@ -379,12 +379,12 @@ def _clone_inputs(args):
             return None
         elif isinstance(a, torch.Tensor):
             # TODO: figure out one liner to .clone() and set requires_grad
-            v = Variable(a.data.clone(), requires_grad=a.requires_grad)
+            v = Variable(a.data.clone(memory_format=torch.preserve_format), requires_grad=a.requires_grad)
             if a.grad is not None:
                 v.grad = clone_input(v.grad)
             return v
         else:
-            return a.clone()
+            return a.clone(memory_format=torch.preserve_format)
     return function._nested_map(lambda x: isinstance(x, torch.Tensor),
                                 clone_input, condition_msg="tensors")(args)
 
@@ -490,11 +490,11 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
             raise ValueError(("Model returns {} outputs, but default loss function "
                               "(torch.sum) can only handle a single output").format(len(out)))
         out_vars, _ = _flatten(out)
-        saved_outs = [v.data.clone() for v in out_vars]
+        saved_outs = [v.data.clone(memory_format=torch.preserve_format) for v in out_vars]
         loss = loss_fn(*out)
         grads = torch.autograd.grad([loss], in_vars)
         # TODO: I'm not sure if the clone here is necessary but it is safer
-        saved_grads = [v.data.clone() for v in grads]
+        saved_grads = [v.data.clone(memory_format=torch.preserve_format) for v in grads]
         return (saved_outs, saved_grads)
 
     with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
