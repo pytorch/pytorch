@@ -6,7 +6,6 @@ from __future__ import unicode_literals
 import random
 
 import torch
-import torch.quantization as tq
 import torch.nn.quantized as nnq
 
 import operator_benchmark as op_bench
@@ -15,12 +14,18 @@ r"""Microbenchmarks for the quantized activations."""
 
 qactivation_configs = op_bench.cross_product_configs(
     dims=(
-        (1,), (1, 1), (1, 1, 1),     # Single element
-        (2, 1), (1, 2),              # Rank=2 row-/col-major
-        (3, 4, 5),                   # Rank=3
-        (1, 3, 4, 5), (2, 3, 4, 5),  # Rank=4, batch=1, batch>1
-        (4, 1, 1, 1),                # Rank=4, all other single dimensions
-        (2, 1, 2, 1, 2, 1),          # Rank>4
+        # VGG-16 relu's with original shape: (-1, 3, 224, 224)
+        ( 64, 224, 224),  # ReLU-1   # noqa
+        (128, 112, 112),  # ReLU-6   # noqa
+        (256,  56,  56),  # ReLU-11  # noqa
+        (512,  28,  28),  # ReLU-18  # noqa
+        (512,  14,  14),  # ReLU-25  # noqa
+        # Batch = 16
+        (16,  64, 224, 224),  # ReLU-1   # noqa
+        (16, 128, 112, 112),  # ReLU-6   # noqa
+        (16, 256,  56,  56),  # ReLU-11  # noqa
+        (16, 512,  28,  28),  # ReLU-18  # noqa
+        (16, 512,  14,  14),  # ReLU-25  # noqa
     ),
     permute_dims=(False, True),
     inplace=(False, True),
