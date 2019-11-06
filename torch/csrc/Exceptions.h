@@ -36,63 +36,63 @@
 /// This advanced handler will only be used in the current thread.
 /// If any other thread is used, warnings will be processed as
 /// cpp warnings.
-#define HANDLE_TH_ERRORS                                           \
-  try {                                                            \
-    torch::PyWarningHandler __enforce_warning_buffer;          \
+#define HANDLE_TH_ERRORS                                             \
+  try {                                                              \
+    torch::PyWarningHandler __enforce_warning_buffer;                \
     try{
 
-#define CATCH_TH_ERRORS(retstmnt)                                      \
+#define CATCH_TH_ERRORS(retstmnt)                                    \
     catch (python_error & e) {                                       \
-      retstmnt;                                                 \
+      retstmnt;                                                      \
     }                                                                \
     catch (const c10::IndexError& e) {                               \
       auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
       PyErr_SetString(PyExc_IndexError, msg.c_str());                \
-      retstmnt;                                                 \
+      retstmnt;                                                      \
     }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
       PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
-      retstmnt;                                                 \
+      retstmnt;                                                      \
     }                                                                \
     catch (torch::PyTorchError & e) {                                \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(e.python_type(), msg.c_str());                 \
-      retstmnt;                                                 \
+      retstmnt;                                                      \
     }                                                                \
     catch (const std::exception& e) {                                \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
-      retstmnt;                                                 \
+      retstmnt;                                                      \
     }
 
-#define END_HANDLE_TH_ERRORS_PYBIND                              \
-    }                                                                \
-    catch (py::error_already_set & e) {                                       \
+#define END_HANDLE_TH_ERRORS_PYBIND                                      \
+    }                                                                    \
+    catch (py::error_already_set & e) {                                  \
       /* Unpack already stored error to be detectable by warning code */ \
-      e.restore(); \
-      throw;                                                 \
-    }                                                                \
-    catch (py::builtin_exception & e) {                                       \
+      e.restore();                                                       \
+      throw;                                                             \
+    }                                                                    \
+    catch (py::builtin_exception & e) {                                  \
       /* Unpack already stored error to be detectable by warning code */ \
-      e.set_error(); \
-      throw;                                                 \
-    }                                                                \
-    CATCH_TH_ERRORS(throw)                                          \
-  }                                                                  \
-  catch (py::error_already_set & e) {                                       \
-    /* Repack already stored error */ \
-    throw py::error_already_set();                                                 \
-  }                                                                \
-  catch (py::builtin_exception & e) {                                       \
-    /* Repack already stored error */ \
-    throw py::error_already_set();                                                 \
-  }                                                                \
+      e.set_error();                                                     \
+      throw;                                                             \
+    }                                                                    \
+    CATCH_TH_ERRORS(throw)                                               \
+  }                                                                      \
+  catch (py::error_already_set & e) {                                    \
+    /* Repack already stored error */                                    \
+    throw py::error_already_set();                                       \
+  }                                                                      \
+  catch (py::builtin_exception & e) {                                    \
+    /* Repack already stored error */                                    \
+    throw py::error_already_set();                                       \
+  }                                                                      \
   CATCH_TH_ERRORS(throw py::error_already_set())
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                             \
     }                                                                \
-    CATCH_TH_ERRORS(return retval)                                          \
+    CATCH_TH_ERRORS(return retval)                                   \
   }                                                                  \
   CATCH_TH_ERRORS(return retval)
 
