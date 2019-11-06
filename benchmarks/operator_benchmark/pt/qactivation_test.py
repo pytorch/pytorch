@@ -25,7 +25,7 @@ qactivation_configs = op_bench.cross_product_configs(
     permute_dims=(False, True),
     inplace=(False, True),
     dtype=(torch.quint8, torch.qint8, torch.qint32),
-    tags=('short',)
+    tags=('long',)
 )
 
 
