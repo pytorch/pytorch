@@ -9,18 +9,18 @@ import torch.quantization as tq
 import operator_benchmark as op_bench
 
 # 2D pooling will have input matrix of rank 3 or 4
-qmaxpool2d_configs = op_bench.config_list(  # noqa: E121
+qmaxpool2d_configs = op_bench.config_list(
     attrs=(
        #  C    H    W   k       s       p       d
-       (  1,   3,   3, (3, 3), (1, 1), (0, 0), (1, 1)),  # dummy
-       (  3,  64,  64, (3, 3), (1, 1), (0, 0), (1, 1)),  # dummy
-       (  3,  64,  64, (3, 3), (2, 2), (1, 1), (2, 2)),  # dummy
+       (  1,   3,   3, (3, 3), (1, 1), (0, 0), (1, 1)),  # dummy        # noqa
+       (  3,  64,  64, (3, 3), (1, 1), (0, 0), (1, 1)),  # dummy        # noqa
+       (  3,  64,  64, (3, 3), (2, 2), (1, 1), (2, 2)),  # dummy        # noqa
        # VGG16 pools with original input shape: (-1, 3, 224, 224)
-       ( 64, 224, 224, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-4
-       (128, 112, 112, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-9
-       (256,  56,  56, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-16
-       (512,  28,  28, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-23
-       (512,  14,  14, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-30
+       ( 64, 224, 224, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-4  # noqa
+       (128, 112, 112, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-9  # noqa
+       (256,  56,  56, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-16 # noqa
+       (512,  28,  28, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-23 # noqa
+       (512,  14,  14, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-30 # noqa
     ),
     attr_names=('C', 'H', 'W',  # Input layout
                 'k', 's', 'p', 'd',  # Pooling parameters
