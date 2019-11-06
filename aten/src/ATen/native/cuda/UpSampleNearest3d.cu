@@ -26,7 +26,10 @@ __global__ void upsample_nearest3d_out_frame(
     size_t dst_dim_d,
     size_t dst_dim_h,
     size_t dst_dim_w,
-    scalar_t* output) {
+    scalar_t* output,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
 
   size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
@@ -37,15 +40,15 @@ __global__ void upsample_nearest3d_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (float)src_dim_d / (float)dst_dim_d;
+  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_d / dst_dim_d;
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
   int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
 
-  scale_factor = (float)src_dim_h / (float)dst_dim_h;
+  scale_factor = (scales_2 > 0.) ? (float)(1. / (float)(scales_2)) : (float)src_dim_h / dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
 
-  scale_factor = (float)src_dim_w / (float)dst_dim_w;
+  scale_factor = (scales_3 > 0.) ? (float)(1. / (float)(scales_3)) : (float)src_dim_w / dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
   int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
 
@@ -71,7 +74,10 @@ __global__ void upsample_nearest3d_backward_out_frame(
     size_t dst_dim_d,
     size_t dst_dim_h,
     size_t dst_dim_w,
-    scalar_t* grad_i) {
+    scalar_t* grad_i,
+    double scales_1,
+    double scales_2,
+    double scales_3) {
 
   size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_d * dst_dim_h * dst_dim_w)
@@ -82,17 +88,17 @@ __global__ void upsample_nearest3d_backward_out_frame(
 
   int c = (dst_idx / (dst_c_stride)) % dim_c;
 
-  float scale_factor = (float)src_dim_d / (float)dst_dim_d;
+  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_d / dst_dim_d;
   int dst_z = (dst_idx / dst_dim_h / dst_dim_w) % dst_dim_d;
   int src_z = nearest_neighbor_compute_source_index(scale_factor, dst_z, src_dim_d);
   int src_z_up = nearest_neighbor_compute_source_index(scale_factor, dst_z+1, src_dim_d+1);
 
-  scale_factor = (float)src_dim_h / (float)dst_dim_h;
+  scale_factor = (scales_2 > 0.) ? (float)(1. / (float)(scales_2)) : (float)src_dim_h / dst_dim_h;
   int dst_y = (dst_idx / dst_dim_w) % dst_dim_h;
   int src_y = nearest_neighbor_compute_source_index(scale_factor, dst_y, src_dim_h);
   int src_y_up = nearest_neighbor_compute_source_index(scale_factor, dst_y+1, src_dim_h+1);
 
-  scale_factor = (float)src_dim_w / (float)dst_dim_w;
+  scale_factor = (scales_3 > 0.) ? (float)(1. / (float)(scales_3)) : (float)src_dim_w / dst_dim_w;
   int dst_x = dst_idx % dst_dim_w;
   int src_x = nearest_neighbor_compute_source_index(scale_factor, dst_x, src_dim_w);
   int src_x_up = nearest_neighbor_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
@@ -184,7 +190,10 @@ static void upsample_nearest3d_out_cuda_template(
             output_depth,
             output_height,
             output_width,
-            odata);
+            odata,
+            scales_1,
+            scales_2,
+            scales_3);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -264,7 +273,10 @@ static void upsample_nearest3d_backward_out_cuda_template(
                 input_depth,
                 input_height,
                 input_width,
-                idata);
+                idata,
+                scales_1,
+                scales_2,
+                scales_3);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());

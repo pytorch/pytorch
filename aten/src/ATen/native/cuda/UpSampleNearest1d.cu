@@ -21,12 +21,13 @@ __global__ void upsample_nearest1d_out_frame(
     size_t dim_c,
     size_t src_dim_w,
     size_t dst_dim_w,
-    scalar_t* output) {
+    scalar_t* output,
+    double scales_1) {
   size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_w)
     return;
 
-  float scale_factor = (float)src_dim_w / (float)dst_dim_w;
+  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_w / dst_dim_w;
 
   int c = (dst_idx / dst_dim_w) % dim_c;
 
@@ -53,13 +54,14 @@ __global__ void upsample_nearest1d_backward_out_frame(
     size_t dim_c,
     size_t src_dim_w,
     size_t dst_dim_w,
-    scalar_t* grad_i) {
+    scalar_t* grad_i,
+    double scales_1) {
 
   size_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_w)
     return;
 
-  float scale_factor = (float)src_dim_w / (float)dst_dim_w;
+  float scale_factor = (scales_1 > 0.) ? (float)(1. / (float)(scales_1)) : (float)src_dim_w / dst_dim_w;
 
   int c = (dst_idx / (dst_dim_w)) % dim_c;
 
@@ -119,7 +121,7 @@ static void upsample_nearest1d_out_cuda_template(
         auto odata = output.data_ptr<scalar_t>();
 
         upsample_nearest1d_out_frame<scalar_t><<<gdim, bdim, 0, stream>>>(
-            idata, nbatch, channels, input_width, output_width, odata);
+            idata, nbatch, channels, input_width, output_width, odata, scales_1);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
@@ -174,7 +176,7 @@ static void upsample_nearest1d_backward_out_cuda_template(
 
         upsample_nearest1d_backward_out_frame<scalar_t, accscalar_t>
             <<<gdim, bdim, 0, stream>>>(
-                odata, nbatch, channels, output_width, input_width, idata);
+                odata, nbatch, channels, output_width, input_width, idata, scales_1);
       });
 
   AT_CUDA_CHECK(cudaGetLastError());
