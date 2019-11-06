@@ -12,7 +12,7 @@ import operator_benchmark as op_bench
 
 r"""Microbenchmarks for the quantized activations."""
 
-qactivation_configs = op_bench.cross_product_configs(
+qactivation_long_configs = op_bench.cross_product_configs(
     dims=(
         # VGG-16 relu's with original shape: (-1, 3, 224, 224)
         ( 64, 224, 224),  # ReLU-1   # noqa
@@ -82,8 +82,8 @@ class QReLU6Benchmark(_ActivationBenchmarkBase):
 
 op_bench.generate_pt_test(qactivation_short_configs, QReLUBenchmark)
 op_bench.generate_pt_test(qactivation_short_configs, QReLU6Benchmark)
-op_bench.generate_pt_test(qactivation_configs, QReLUBenchmark)
-op_bench.generate_pt_test(qactivation_configs, QReLU6Benchmark)
+op_bench.generate_pt_test(qactivation_long_configs, QReLUBenchmark)
+op_bench.generate_pt_test(qactivation_long_configs, QReLU6Benchmark)
 
 
 if __name__ == "__main__":
