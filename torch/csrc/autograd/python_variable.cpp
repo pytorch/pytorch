@@ -14,7 +14,7 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
-#include <torch/csrc/autograd/utils/python_error_messages.h>
+#include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/auto_gil.h>
@@ -335,8 +335,18 @@ PyObject *THPVariable_get_names(THPVariable *self, void *unused)
 
   const auto dimnames = self->cdata.names();
   for (size_t i = 0; i < size; ++i) {
-    PyObject* str = Py_None;
-    if (dimnames[i].type() != at::NameType::WILDCARD) {
+    PyObject* str;
+    if (dimnames[i].type() == at::NameType::WILDCARD) {
+      // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
+      // deallocated, it'll decrement the refcount on Py_None, which is bad.
+      // To avoid this, we "create" a new reference to Py_None by increasing
+      // the refcount.
+      // Sources:
+      // - https://docs.python.org/3/c-api/tuple.html#c.PyTuple_SetItem
+      // - https://stackoverflow.com/questions/16400600/how-to-return-a-tuple-containing-a-none-value-from-the-c-api
+      Py_INCREF(Py_None);
+      str = Py_None;
+    } else {
       str = THPUtils_packString(dimnames[i].symbol().toUnqualString());
       if (!str) throw python_error();
     }

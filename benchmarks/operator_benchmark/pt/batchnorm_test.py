@@ -11,36 +11,41 @@ import torch.nn.functional as F
 
 """Microbenchmarks for batchnorm operator."""
 
-configs_short = op_bench.config_list(
+batchnorm_configs_short = op_bench.config_list(
+    attr_names=["M", "N", "K"],
     attrs=[
         [1, 256, 3136],
     ],
-    attr_names=["M", "N", "K"],
+    cross_product_configs={
+        'device': ['cpu', 'cuda'],
+    },
     tags=["short"]
 )
 
-configs_long = op_bench.cross_product_configs(
+batchnorm_configs_long = op_bench.cross_product_configs(
     M=[1, 128],
     N=[2 ** 16, 2048],
     K=[1],
+    device=['cpu', 'cuda'],
     tags=["long"]
 )
 
 
 class BatchNormBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K):
-        self.input_one = torch.rand(M, N, K)
-        self.mean = torch.rand(N)
-        self.var = torch.rand(N)
-        self.weight = torch.rand(N)
-        self.bias = torch.rand(N)
+    def init(self, M, N, K, device):
+        self.input_one = torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
+        self.mean = torch.rand(N, device=device)
+        self.var = torch.rand(N, device=device)
+        self.weight = torch.rand(N, device=device)
+        self.bias = torch.rand(N, device=device)
         self.set_module_name("batchnorm")
 
     def forward(self):
         return F.batch_norm(self.input_one, self.mean, self.var, self.weight, self.bias)
 
 
-op_bench.generate_pt_test(configs_short + configs_long, BatchNormBenchmark)
+op_bench.generate_pt_test(batchnorm_configs_short + batchnorm_configs_long, BatchNormBenchmark)
+op_bench.generate_pt_gradient_test(batchnorm_configs_short + batchnorm_configs_long, BatchNormBenchmark)
 
 
 if __name__ == "__main__":

@@ -78,7 +78,7 @@ struct ConstantTableValue : public SugaredValue {
       const std::string& field) override {
     const char* field_s = field.c_str();
     char* end;
-    int64_t offset = std::strtoll(field_s + 1, &end, 10);
+    int64_t offset = strtoll(field_s + 1, &end, 10);
     if (field.size() < 2 || *end != 0)
       throw ErrorReport(loc) << "invalid constant specifier: " << field;
     if (offset < 0 || size_t(offset) >= constants_->size()) {
@@ -255,7 +255,9 @@ struct SourceImporterImpl : public Resolver,
       // ClassTypes)
       return importNamedTuple(qualified_name, class_def);
     } else if (superclass_name == "Interface") {
-      cu_->define_interface(qualified_name, class_def, shared_from_this());
+      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/false);
+    } else if (superclass_name == "ModuleInterface") {
+      cu_->define_interface(qualified_name, class_def, shared_from_this(), /*is_module=*/true);
     } else {
       throw ErrorReport(class_def.range())
           << "Torchscript does not support class inheritance.";
@@ -390,11 +392,7 @@ struct SourceImporterImpl : public Resolver,
       field_types.emplace_back(std::move(type));
     }
 
-    auto tt = TupleType::create(
-        field_types,
-        qualified_name,
-        TupleType::namedTupleSchemaFromNamesAndTypes(
-            qualified_name, field_names, field_types));
+    auto tt = TupleType::createNamed(qualified_name, field_names, field_types);
     cu_->register_type(tt);
   }
 

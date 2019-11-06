@@ -171,26 +171,58 @@ public:
     const __m256 imag_mask = _mm256_castsi256_ps(_mm256_setr_epi32(0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF,
                                                                    0x00000000, 0xFFFFFFFF, 0x00000000, 0xFFFFFFFF));
     return _mm256_and_ps(values, imag_mask);
-    }
+  }
   Vec256<std::complex<float>> imag() const {
     return _mm256_permute_ps(imag_(), 0x55);        //b        a
   }
   __m256 conj_() const {
-    const __m256 conj_mask = _mm256_setr_ps(1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0);
-    return _mm256_mul_ps(values, conj_mask);        //a        -b
+    const __m256 sign_mask = _mm256_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
+    return _mm256_xor_ps(values, sign_mask);        // a       -b
   }
   Vec256<std::complex<float>> conj() const {
     return conj_();
   }
-  Vec256<std::complex<float>> acos() const {
-    return map(std::acos);
+  Vec256<std::complex<float>> log() const {
+    // Most trigonomic ops use the log() op to improve complex number performance.
+    return map(std::log);
+  }
+  Vec256<std::complex<float>> log2() const {
+    const __m256 log2_ = _mm256_set1_ps(std::log(2));
+    return _mm256_div_ps(log(), log2_);
+  }
+  Vec256<std::complex<float>> log10() const {
+    const __m256 log10_ = _mm256_set1_ps(std::log(10));
+    return _mm256_div_ps(log(), log10_);
+  }
+  Vec256<std::complex<float>> log1p() const {
+    AT_ERROR("not supported for complex numbers");
   }
   Vec256<std::complex<float>> asin() const {
-    return map(std::asin);
+    // asin(x)
+    // = -i*ln(iz + sqrt(1 -z^2))
+    // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
+    // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
+    const __m256 one = _mm256_set1_ps(1);
+
+    auto conj = conj_();
+    auto b_a = _mm256_permute_ps(conj, 0x55);                         //-b        a
+    auto ab = _mm256_mul_ps(conj, b_a);                               //-ab       -ab
+    auto im = _mm256_add_ps(ab, ab);                                  //-2ab      -2ab
+
+    auto val_2 = _mm256_mul_ps(values, values);                       // a*a      b*b
+    auto re = _mm256_hsub_ps(val_2, _mm256_permute_ps(val_2, 0x55));  // a*a-b*b  b*b-a*a
+    re = _mm256_sub_ps(one, re);
+
+    auto root = Vec256(_mm256_blend_ps(re, im, 0xAA)).sqrt();         //sqrt(re + i*im)
+    auto ln = Vec256(_mm256_add_ps(b_a, root)).log();                 //ln(iz + sqrt())
+    return Vec256(_mm256_permute_ps(ln.values, 0x55)).conj();         //-i*ln()
   }
-  Vec256<std::complex<float>> atan() const {
-    return map(std::atan);
+  Vec256<std::complex<float>> acos() const {
+    // acos(x) = pi/2 - asin(x)
+    const __m256 pi_2 = _mm256_setr_ps(M_PI/2, 0.0, M_PI/2, 0.0, M_PI/2, 0.0, M_PI/2, 0.0);
+    return _mm256_sub_ps(pi_2, asin());
   }
+  Vec256<std::complex<float>> atan() const;
   Vec256<std::complex<float>> atan2(const Vec256<std::complex<float>> &b) const {
     AT_ERROR("not supported for complex numbers");
   }
@@ -204,18 +236,6 @@ public:
     return map(std::exp);
   }
   Vec256<std::complex<float>> expm1() const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vec256<std::complex<float>> log() const {
-    return map(std::log);
-  }
-  Vec256<std::complex<float>> log2() const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vec256<std::complex<float>> log10() const {
-    return map(std::log10);
-  }
-  Vec256<std::complex<float>> log1p() const {
     AT_ERROR("not supported for complex numbers");
   }
   Vec256<std::complex<float>> sin() const {
@@ -253,14 +273,32 @@ public:
     return _mm256_round_ps(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
   Vec256<std::complex<float>> sqrt() const {
-    return map(std::sqrt);
+    //   sqrt(a + bi)
+    // = sqrt(2)/2 * [sqrt(sqrt(a**2 + b**2) + a) + sgn(b)*sqrt(sqrt(a**2 + b**2) - a)i]
+    // = sqrt(2)/2 * [sqrt(abs() + a) + sgn(b)*sqrt(abs() - a)i]
+
+    const __m256 scalar = _mm256_set1_ps(std::sqrt(2)/2);              //sqrt(2)/2      sqrt(2)/2
+    const __m256 sign_mask = _mm256_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
+    auto sign = _mm256_and_ps(values, sign_mask);
+    auto factor = _mm256_or_ps(scalar, sign);
+
+    auto a_a = _mm256_xor_ps(_mm256_moveldup_ps(values), sign_mask);   // a             -a
+    auto res_re_im = _mm256_sqrt_ps(_mm256_add_ps(abs_(), a_a));       // sqrt(abs + a) sqrt(abs - a)
+    return _mm256_mul_ps(factor, res_re_im);
   }
   Vec256<std::complex<float>> reciprocal() const;
   Vec256<std::complex<float>> rsqrt() const {
-    return map([](const std::complex<float> &x) { return (std::complex<float>)(1)/std::sqrt(x); });
+    return sqrt().reciprocal();
   }
   Vec256<std::complex<float>> pow(const Vec256<std::complex<float>> &exp) const {
-    AT_ERROR("not supported for complex numbers");
+    __at_align32__ std::complex<double> x_tmp[size()];
+    __at_align32__ std::complex<double> y_tmp[size()];
+    store(x_tmp);
+    exp.store(y_tmp);
+    for (int i = 0; i < size(); i++) {
+      x_tmp[i] = std::pow(x_tmp[i], y_tmp[i]);
+    }
+    return loadu(x_tmp);
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
@@ -295,11 +333,11 @@ template <> Vec256<std::complex<float>> inline operator-(const Vec256<std::compl
 
 template <> Vec256<std::complex<float>> inline operator*(const Vec256<std::complex<float>> &a, const Vec256<std::complex<float>> &b) {
   //(a + bi)  * (c + di) = (ac - bd) + (ad + bc)i
-  const __m256 neg = _mm256_setr_ps(1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0);
+  const __m256 sign_mask = _mm256_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
   auto ac_bd = _mm256_mul_ps(a, b);         //ac       bd
 
   auto d_c = _mm256_permute_ps(b, 0x55);    //d        c
-  d_c = _mm256_mul_ps(neg, d_c);            //d       -c
+  d_c = _mm256_xor_ps(sign_mask, d_c);      //d       -c
   auto ad_bc = _mm256_mul_ps(a, d_c);       //ad      -bc
 
   auto ret = _mm256_hsub_ps(ac_bd, ad_bc);  //ac - bd  ad + bc
@@ -310,11 +348,11 @@ template <> Vec256<std::complex<float>> inline operator/(const Vec256<std::compl
   //re + im*i = (a + bi)  / (c + di)
   //re = (ac + bd)/abs_2()
   //im = (bc - ad)/abs_2()
-  const __m256 neg = _mm256_setr_ps(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+  const __m256 sign_mask = _mm256_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
   auto ac_bd = _mm256_mul_ps(a, b);         //ac       bd
 
-  auto d_c = _mm256_permute_ps(b, 0x05);    //d        c
-  d_c = _mm256_mul_ps(neg, d_c);            //-d       c
+  auto d_c = _mm256_permute_ps(b, 0x55);    //d        c
+  d_c = _mm256_xor_ps(sign_mask, d_c);      //-d       c
   auto ad_bc = _mm256_mul_ps(a, d_c);       //-ad      bc
 
   auto re_im = _mm256_hadd_ps(ac_bd, ad_bc);//ac + bd  bc - ad
@@ -326,9 +364,20 @@ Vec256<std::complex<float>> Vec256<std::complex<float>>::reciprocal() const {
   //re + im*i = (a + bi)  / (c + di)
   //re = (ac + bd)/abs_2() = c/abs_2()
   //im = (bc - ad)/abs_2() = d/abs_2()
-  const __m256 neg = _mm256_setr_ps(1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0);
-  auto c_d = _mm256_mul_ps(neg, values);    //c       -d
+  const __m256 sign_mask = _mm256_setr_ps(0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0);
+  auto c_d = _mm256_xor_ps(sign_mask, values);    //c       -d
   return _mm256_div_ps(c_d, abs_2_());
+}
+
+Vec256<std::complex<float>> Vec256<std::complex<float>>::atan() const {
+  // atan(x) = i/2 * ln((i + z)/(i - z))
+  const __m256 i = _mm256_setr_ps(0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
+  const Vec256 i_half = _mm256_setr_ps(0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5);
+
+  auto sum = Vec256(_mm256_add_ps(i, values));                      // a        1+b
+  auto sub = Vec256(_mm256_sub_ps(i, values));                      // -a       1-b
+  auto ln = (sum/sub).log();                                        // ln((i + z)/(i - z))
+  return i_half*ln;                                                 // i/2*ln()
 }
 
 template <>

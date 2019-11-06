@@ -124,6 +124,10 @@ def supports(o, factory_methods):
     if "_out" in o['name']:
         return False
 
+    # skip if no return, previously it is 'void'
+    if len(o['returns']) == 0:
+        return False
+
     # skip return types we cannot handle
     for ret in o['returns']:
         if not value_has_tensors(ret) and ret['type'] not in RETURN_MAP:

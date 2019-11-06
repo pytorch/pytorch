@@ -1,6 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-from test_pytorch_common import TestCase, run_tests, flatten
+from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack
 
 import torch
 import torch.onnx
@@ -490,6 +490,10 @@ class TestOperators(TestCase):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x[:, 1:2], x)
 
+    def test_slice_dynamic(self):
+        x = torch.rand(3, 4, requires_grad=True)
+        self.assertONNX(lambda x: x[x.size(0):, x.size(1) - 3], x, opset_version=10)
+
     def test_sign(self):
         x = torch.rand(3, 4, requires_grad=True)
         self.assertONNX(lambda x: x.sign(), x)
@@ -794,6 +798,12 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
 
+    def test_meshgrid(self):
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.ones(5, requires_grad=True)
+        self.assertONNX(lambda x, y, z: torch.meshgrid(x, y, z), (x, y, z))
+
     def test_topk(self):
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)
@@ -813,6 +823,11 @@ class TestOperators(TestCase):
     def test_round(self):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 2.5000], requires_grad=True)
         self.assertONNX(lambda x: torch.round(x), x, opset_version=11)
+
+    @skipIfNoLapack
+    def test_det(self):
+        x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
+        self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
 
 
 if __name__ == '__main__':

@@ -4,8 +4,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 
-#include <ATen/core/ATenDispatch.h>
-
 #include <torch/csrc/jit/operator.h>
 
 using namespace at;
@@ -56,13 +54,4 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   // Ensure that non-MSNPU operator still works
   Tensor d = empty({5, 5}, at::kCPU);
   ASSERT_EQ(d.device().type(), at::kCPU);
-
-  // Attempt to register on a schema that has already has a function
-  EXPECT_ANY_THROW(
-    torch::RegisterOperators()
-      .op(torch::RegisterOperators::options()
-        .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-        .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(TensorTypeId::MSNPUTensorId)
-        .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  );
 }

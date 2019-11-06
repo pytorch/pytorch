@@ -389,6 +389,10 @@ bool Type::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   return false;
 }
 
+bool Type::is_module() const {
+  return false;
+}
+
 std::string TensorType::str() const {
   return "Tensor";
 }
@@ -440,10 +444,10 @@ std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
     return out;
 }
 
-std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(
-    c10::QualifiedName qualName,
-    std::vector<std::string> field_names,
-    std::vector<TypePtr> field_types) {
+TupleTypePtr TupleType::createNamed(
+    const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<std::string>& field_names,
+    const std::vector<TypePtr>& field_types) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
   std::vector<Argument> arguments;
   for (size_t i = 0; i < field_names.size(); ++i) {
@@ -454,11 +458,12 @@ std::shared_ptr<FunctionSchema> TupleType::namedTupleSchemaFromNamesAndTypes(
   }
 
   auto schema = std::make_shared<FunctionSchema>(
-      /*name=*/qualName.name(),
+      /*name=*/qualName.value_or(c10::QualifiedName()).name(),
       /*overload_name=*/std::string(""),
       /*arguments=*/arguments,
       /*returns=*/std::vector<Argument>{});
-  return schema;
+  return std::shared_ptr<TupleType>(new TupleType(
+      field_types, qualName, schema)); // NOLINT(modernize-make-shared)
 }
 
 TupleType::TupleType(
@@ -560,14 +565,21 @@ bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const 
   return Type::isSubtypeOfExt(rhs, why_not);
 }
 
-InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName) {
+InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module) {
   return InterfaceTypePtr(
-      new InterfaceType(std::move(qualifiedName)));
+      new InterfaceType(std::move(qualifiedName), is_module));
 }
 
 bool InterfaceType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
+    if (!is_module() && iface->is_module()) {
+      if (why_not) {
+        *why_not << "Interface '" << python_str() << "' is not a subtype of "
+                  << "the module interface '" << rhs->python_str() << "'.\n";
+      }
+      return false;
+    }
     for (const FunctionSchema& schema : *iface->methods_) {
       auto self_schema = getMethod(schema.name());
       if (!self_schema) {
@@ -606,9 +618,10 @@ const FunctionSchema* InterfaceType::getMethod(const std::string& name) const {
 void InterfaceType::addMethod(FunctionSchema schema) {
   methods_->emplace_back(std::move(schema));
 }
-InterfaceType::InterfaceType(QualifiedName name)
+InterfaceType::InterfaceType(QualifiedName name, bool is_module)
     : NamedType(InterfaceType::Kind, std::move(name)),
-      methods_(std::make_shared<std::vector<FunctionSchema>>()) {}
+      methods_(std::make_shared<std::vector<FunctionSchema>>()),
+      is_module_(is_module) {}
 
 InterfaceType::~InterfaceType() = default;
 
