@@ -646,12 +646,8 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     throw TypeError("expected Tensor as argument %d, but got %s", i,
         Py_TYPE(obj)->tp_name);
   }
-  at::Tensor tensor;
-  {
-    at::AutoNonVariableTypeMode guard;
-    tensor = scalar_to_tensor(scalar);
-    tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  }
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return autograd::make_variable(tensor);
 }
 
