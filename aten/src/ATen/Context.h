@@ -142,22 +142,22 @@ CAFFE2_API Allocator* getCPUAllocator();
 
 static inline DeprecatedTypeProperties& getNonVariableDeprecatedTypeProperties(Backend p, ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      p, s);
+      p, s, /*is_variable*/false);
 }
 
 static inline DeprecatedTypeProperties& CPU(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      Backend::CPU, s);
+      Backend::CPU, s, /*is_variable*/false);
 }
 
 static inline DeprecatedTypeProperties& CUDA(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      Backend::CUDA, s);
+      Backend::CUDA, s, /*is_variable*/false);
 }
 
 static inline DeprecatedTypeProperties& HIP(ScalarType s) {
   return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-      Backend::HIP, s);
+      Backend::HIP, s, /*is_variable*/false);
 }
 
 static inline bool hasCUDA() {

@@ -620,13 +620,8 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto& tracing_state = getTracingState();
   auto& graph = tracing_state->graph;
 
-  Variable size_var;
-  {
-    // Make sure this scalar to tensor isn't traced!
-    at::AutoNonVariableTypeMode guard;
-    size_var =
-        autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
-  }
+  auto size_var =
+      autograd::make_variable(scalar_to_tensor(at::Scalar(var.size(dim))));
   auto* value = getValueTrace(var);
   auto dim_val = graph->insertConstant(dim);
   recordSourceLocation(dim_val->node());
