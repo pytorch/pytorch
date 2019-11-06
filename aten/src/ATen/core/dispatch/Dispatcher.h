@@ -151,6 +151,20 @@ public:
     return operatorIterator_->op.options();
   }
 
+  template<class Return, class... Args>
+  Return callUnboxed(Args... args) const {
+    return c10::Dispatcher::singleton().callUnboxed<Return, Args...>(*this, std::forward<Args>(args)...);
+  }
+
+  template<class Return, class... Args>
+  Return callUnboxedOnly(Args... args) const {
+    return c10::Dispatcher::singleton().callUnboxedOnly<Return, Args...>(*this, std::forward<Args>(args)...);
+  }
+
+  void callBoxed(Stack* stack) const {
+    c10::Dispatcher::singleton().callBoxed(*this, stack);
+  }
+
 private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorIterator_(std::move(operatorIterator)) {}

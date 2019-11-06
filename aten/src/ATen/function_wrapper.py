@@ -153,8 +153,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op${method_actuals_with_comma_prefix});
+    return op.callUnboxedOnly<${formals_types_with_return}>(${method_actuals});
 #endif
 }
 """)
@@ -164,8 +163,7 @@ inline ${return_type} Tensor::${api_name}(${method_formals}) const {
     ${static_dispatch_method_body}
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op${method_actuals_with_comma_prefix});
+    return op.callUnboxed<${formals_types_with_return}>(${method_actuals});
 #endif
 }
 """)
@@ -185,8 +183,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op${native_actuals_with_comma_prefix});
+    return op.callUnboxedOnly<${formals_types_with_return}>(${native_actuals});
 #endif
 }
 """)
@@ -197,8 +194,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 #else
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op${native_actuals_with_comma_prefix});
+    return op.callUnboxed<${formals_types_with_return}>(${native_actuals});
 #endif
 }
 """)
@@ -242,8 +238,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxedOnly<${formals_types_with_return}>(
-        op${native_actuals_with_comma_prefix});
+    return op.callUnboxedOnly<${formals_types_with_return}>(${native_actuals});
 #endif
 }
 """)
@@ -255,8 +250,7 @@ static inline ${return_type} ${api_name}(${formals}) {
     globalLegacyTypeDispatch().initForTensorTypeSet(${inferred_type_set});
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchema({"aten::${operator_name}", "${overload_name}"}).value();
-    return c10::Dispatcher::singleton().callUnboxed<${formals_types_with_return}>(
-        op${native_actuals_with_comma_prefix});
+    return op.callUnboxed<${formals_types_with_return}>(${native_actuals});
 #endif
 }
 """)
@@ -609,7 +603,6 @@ FunctionOption = TypedDict('FunctionOption', {
     # TypeExtendedInterface
     'extended_method': bool,
     'method_actuals': List[str],
-    'method_actuals_with_comma_prefix': str,
     'method_formals_with_defaults': List[str],
     'method_formals': List[str],
     'method_prefix_derived': str,
@@ -620,7 +613,6 @@ FunctionOption = TypedDict('FunctionOption', {
     'operator_name': str,
     'overload_name': str,
     'native_actuals': List[str],
-    'native_actuals_with_comma_prefix': str,
     'native_type_method_dispatch': str,
     # options should be List[FunctionOption]
     'options': Any,
@@ -1133,10 +1125,6 @@ def create_generic(top_env, declarations):
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
         option['native_actuals'] = [f['name'] for f in option['formals_list']]
-        if len(option['native_actuals']) == 0:
-            option['native_actuals_with_comma_prefix'] = ''
-        else:
-            option['native_actuals_with_comma_prefix'] = ', ' + ', '.join(option['native_actuals'])
 
         option['formals_types_with_return'] = [option['return_type']]
         if len(option['formals_types']) > 0:
@@ -1150,10 +1138,6 @@ def create_generic(top_env, declarations):
         # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
-        if len(option['method_actuals']) == 0:
-            option['method_actuals_with_comma_prefix'] = ''
-        else:
-            option['method_actuals_with_comma_prefix'] = ', ' + ', '.join(option['method_actuals'])
 
         def find_formal(formal_name, formals):
             for formal in formals:
@@ -1285,10 +1269,6 @@ def create_generic(top_env, declarations):
         option['type_method_formals'] = [format_formal(f) for f in formals]
         option['type_method_actuals'] = [f['name'] for f in formals]
         option['native_actuals'] = [f['name'] for f in formals]
-        if len(option['native_actuals']) == 0:
-            option['native_actuals_with_comma_prefix'] = ''
-        else:
-            option['native_actuals_with_comma_prefix'] = ', ' + ', '.join(option['native_actuals'])
 
         is_method = 'method' in option['variants']
         is_namespace_function = 'function' in option['variants']
