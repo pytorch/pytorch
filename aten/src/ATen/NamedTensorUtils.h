@@ -45,7 +45,9 @@ namespace namedinference {
 
 // [NOTE] Writing name inference rules
 //
-// Operators that support named tensors generally look like the following:
+// Operators that support named tensors are either composed of operations that
+// support named tensors or implement some name inference rule. An op that
+// implements its own name inference rule generally looks like the following:
 //
 // Tensor op(...) {
 //   perform_shape_checks(...);
@@ -70,6 +72,7 @@ namespace namedinference {
 //
 // The {} case is an optimization; if the user does not use named tensors they
 // pay no perf cost for it.
+
 
 // Propagates `names` to `result` if `names` is not empty.
 // `names` can be empty; see [NOTE] Writing name inference rules

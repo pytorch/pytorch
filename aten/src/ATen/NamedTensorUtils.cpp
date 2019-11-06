@@ -149,7 +149,7 @@ Tensor& propagate_names(Tensor& result, DimnameList names, bool validate_names) 
 }
 
 TensorImpl* propagate_names(TensorImpl* result, DimnameList names, bool validate_names) {
-  if (result->sizes().size() > 0) {
+  if (result->dim() > 0) {
     TORCH_INTERNAL_ASSERT(
         !names.empty(),
         "propagate_names: passed in empty names to propagate to result with",
