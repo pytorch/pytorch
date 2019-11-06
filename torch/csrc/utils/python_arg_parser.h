@@ -564,7 +564,7 @@ inline PyObject* PythonArgs::pyobject(int i) {
  *
  * 'name' is the attribute to search for.
  *
- * Returns attribute value on success, NULL on failure.
+ * Returns a new reference to the value on success, NULL on failure.
  */
 
 static PyObject * PyObject_FastGetAttrString(PyObject *obj, char *name)
@@ -634,8 +634,11 @@ static bool _is_basic_python_type(PyTypeObject *tp)
  * Lookup a special method, following the python approach of looking up
  * on the type object, rather than on the instance itself.
  *
- * Assumes that the special method is a torch-specific one, so does not look
- * at builtin types, nor does it look at a base Tensor.
+ * Assumes that the special method is a torch-specific one, so does not
+ * look at builtin types, nor does it look at a base Tensor.
+ *
+ * If no special method is found, return NULL, otherwise returns a new
+ * reference to the function object
  *
  * In future, could be made more like _Py_LookupSpecial
  */
@@ -652,7 +655,12 @@ static PyObject* PyTorch_LookupSpecial(PyObject *obj, char* name)
   return PyObject_FastGetAttrString((PyObject *)tp, name);
 }
 
-// checks if obj has a __torch_function__ implementation
+/*
+ * Checks if obj has a __torch_function__ implementation
+ *
+ * Returns true if an implementation is found and false otherwise
+ *
+ */
 static auto check_has_torch_function(PyObject* obj) -> bool
 {
   PyObject* method = PyTorch_LookupSpecial(obj, "__torch_function__");
