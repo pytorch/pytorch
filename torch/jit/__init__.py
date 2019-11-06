@@ -251,8 +251,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     return torch.jit._recursive.wrap_cpp_module(cpp_module)
 
 
-def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
-                    return_inputs=False, _return_inputs_states=False):
+def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
+                     return_inputs=False, _return_inputs_states=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value. If return_inputs,
