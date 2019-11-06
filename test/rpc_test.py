@@ -223,16 +223,10 @@ class RpcTest(object):
     def test_self_add(self):
         self_worker_info = rpc.get_worker_info()
         self_worker_name = "worker{}".format(self.rank)
-
-        with self.assertRaisesRegex(
-            RuntimeError, "does not support making RPC calls to self"
-        ):
-            rpc.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
-
-        with self.assertRaisesRegex(
-            RuntimeError, "does not support making RPC calls to self"
-        ):
-            rpc.rpc_sync(self_worker_name, torch.add, args=(torch.ones(2, 2), 1))
+        fut = rpc.rpc_async(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
+        ret = rpc.rpc_sync(self_worker_info, torch.add, args=(torch.ones(2, 2), 1))
+        self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
+        self.assertEqual(ret, torch.ones(2, 2) + 1)
 
     @mock.patch.object(torch.distributed.autograd, "_init")
     @mock.patch.object(torch.distributed.rpc.api, "_start_rpc_agent")
