@@ -8,6 +8,14 @@ import torch
 from torch._C import parse_schema
 
 
+# The date specifies how long the whitelist exclusion should apply to.
+#
+#   - If we NEVER give BC guarantee for an operator, you can put the
+#     date arbitrarily far in the future.
+#   - Otherwise, pick a date that is far enough in the future that you
+#     believe you can land your diff before then.
+#
+# Whitelist entries can be removed after the date listed on them passes.
 white_list = [
     ('quantize', datetime.date(2019, 10, 1)),
     ('q_per_channel_axis', datetime.date(2019, 10, 1)),
@@ -22,8 +30,8 @@ white_list = [
     ('thnn_conv2d_backward', datetime.date(2019, 10, 30)),
     ('thnn_conv_depthwise2d_backward', datetime.date(2019, 10, 30)),
     ('thnn_conv3d_backward', datetime.date(2019, 10, 30)),
-    ('thnn_conv3d', datetime.date(2019, 11, 4)),
-    ('thnn_conv3d.out', datetime.date(2019, 11, 6)),
+    ('thnn_conv3d', datetime.date(9999, 1, 1)),
+    ('thnn_conv3d.out', datetime.date(9999, 1, 1)),
     ('empty_like', datetime.date(2019, 10, 30)),
     ('rand_like', datetime.date(2019, 11, 11)),
     ('ones_like', datetime.date(2019, 11, 11)),
