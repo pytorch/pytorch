@@ -615,9 +615,7 @@ auto FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         int arg_index = num_args_with_torch_function;
 
         for (int j = 0; j < num_args_with_torch_function; j++) {
-          PyObject *other_type;
-          other_type = (PyObject *)Py_TYPE(overloaded_args[j]);
-          if (PyObject_IsInstance(obj, other_type)) {
+          if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE(overloaded_args[j])))) {
             // obj is a subclass of another object we've seen already so its
             // __torch_function__ should be called first, therefore we insert it
             // into overloaded_args before the superclass
