@@ -113,6 +113,17 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
 bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   // to improve performance, this check can be cached
   if (auto iface = rhs->cast<InterfaceType>()) {
+    // ClassType is not a subtype of InterfaceType if the InterfaceType is a
+    // Module Interface Type but the Class Type is not a Module Class Type
+    if(!is_module() && iface->is_module()) {
+        if (why_not) {
+          *why_not << "Class '" << python_str() << "' is not a subtype of "
+                   << "the module interface '" << rhs->python_str()
+                   << "' , only ScriptModule class can be subtype of module"
+                   << " interface.\n";
+        }
+        return false;
+    }
     for (const FunctionSchema& schema : iface->methods()) {
       auto self_method = getMethod(schema.name());
       if (!self_method) {
@@ -131,8 +142,8 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
                    << rhs->python_str() << "' (2)\n"
                    << "  (1) " << self_method->getSchema() << "\n"
                    << "  (2) " << schema << "\n";
-          return false;
         }
+        return false;
       }
     }
     return true;
@@ -141,13 +152,7 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
 }
 #else
 bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
-  if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
-    return true;
-  }
-  if(auto rhs_ = rhs->cast<OptionalType>()) {
-    return this->isSubtypeOfExt(rhs_->getElementType(), why_not);
-  }
-  return false;
+  return Type::isSubtypeOfExt(rhs, why_not);
 }
 #endif
 } // namespace c10
