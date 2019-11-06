@@ -47,6 +47,7 @@
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <ATen/core/EnableNamedTensor.h>
+#include <torch/csrc/nested_tensor/python_nested_tensor.h>
 
 #ifdef USE_CUDNN
 #include <cudnn.h>
@@ -699,7 +700,6 @@ PyObject* initModule() {
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
-  ASSERT_TRUE(THPNestedTensor_initModule(module));
   // NOTE: We need to be able to access OperatorExportTypes from ONNX for use in
   // the export side of JIT, so this ONNX init needs to appear before the JIT
   // init.
