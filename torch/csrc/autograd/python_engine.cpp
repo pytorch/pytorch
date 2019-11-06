@@ -70,6 +70,20 @@ variable_list PythonEngine::execute(
   }
 }
 
+variable_list PythonEngine::execute_with_graph_task(
+    std::shared_ptr<GraphTask> graph_task,
+    std::shared_ptr<Node> graph_root) {
+  try {
+    return Engine::execute_with_graph_task(graph_task, graph_root);
+  } catch (python_error& e) {
+    AutoGIL gil;
+    if (!PyErr_Occurred()) {
+      // Set the error indicator only if it is not set already.
+      e.restore();
+    }
+    throw;
+  }
+}
 }}} // namespace torch::autograd::python
 
 PyObject *THPEngineClass = nullptr;
