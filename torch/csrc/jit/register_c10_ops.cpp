@@ -1,9 +1,9 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/OpsAlreadyMovedToC10.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/tracer.h>
-#include <ATen/core/ATenDispatch.h>
 #include <unordered_set>
 
 namespace torch {
