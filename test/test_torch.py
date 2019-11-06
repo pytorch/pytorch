@@ -13367,14 +13367,34 @@ class TestTorchDeviceType(TestCase):
         result = torch.cat(concat_list)
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
+    @onlyCUDA
     def test_atomic_add(self, device):
+        # todo: we should probably expose a dtype.is_signed()
+        def is_signed(dtype):
+            return torch.is_signed(torch.tensor(0, dtype=dtype))
         # https://github.com/pytorch/pytorch/issues/29153
         for dtype in torch.testing.get_all_math_dtypes(device):
-            indices = torch.tensor([[0, 0], [1, 1]])
-            values = torch.tensor([5, 6], dtype=dtype)
-            sparse = torch.sparse_coo_tensor(indices=indices, values=values, size=(2, 2), device=device, dtype=dtype)
-            value = sparse.to_dense()[0, 1].item()
-            self.assertEqual(value, 11)
+            size = [5, 5]
+            if dtype.is_floating_point:
+                tensor = torch.rand(size, dtype=dtype, device=device)
+            if is_signed(dtype):
+                tensor = torch.randint(-5, 15, size, dtype=dtype, device=device)
+            else:
+                tensor = torch.randint(0, 10, size, dtype=dtype, device=device)
+
+            # index_add calls atomicAdd on cuda.
+            empty = torch.zeros(size, dtype=dtype, device=device)
+            added = empty.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor)
+            self.assertEqual(added.sum(), tensor.sum())
+
+            # sparse.to_dense() on non-coalesced tensors calls index_add, which was where
+            # this issue was first noticed.
+            s = tensor.to_sparse()
+            indices = torch.cat((s.indices(), s.indices()), 1)
+            values = torch.cat((s.values(), s.values()), 0)
+            sparse = torch.sparse_coo_tensor(indices=indices, values=values, size=tuple(size), dtype=dtype, device=device)
+
+            self.assertEqual(sparse.to_dense().to(torch.double), sparse.to(torch.double).to_dense())
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.

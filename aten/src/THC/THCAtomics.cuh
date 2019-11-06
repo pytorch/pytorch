@@ -21,7 +21,9 @@ struct AtomicAddIntegerImpl<T, 1> {
 
     do {
       assumed = old;
-      sum = val + T((old >> shift) & 0xff);
+      T tmp = THCNumerics<T>::add(val, T((old >> shift) & 0xff));
+      // reinterpret raw bytes to avoid miss-interpretation of sign
+      sum = *reinterpret_cast<uint16_t*>(&tmp);
       old = (old & ~(0x000000ff << shift)) | (sum << shift);
       old = atomicCAS(address_as_ui, assumed, old);
     } while (assumed != old);
@@ -41,7 +43,9 @@ struct AtomicAddIntegerImpl<T, 2> {
     do {
       assumed = old;
       sum = (size_t)address & 2 ? old >> 16 : old & 0xffff;
-      sum = THCNumerics<T>::add(sum, val);
+      T tmp = THCNumerics<T>::add(sum, val);
+      // reinterpret raw bytes to avoid miss-interpretation of sign
+      sum = *reinterpret_cast<uint16_t*>(&tmp);
       newval = (size_t)address & 2 ? (old & 0xffff) | (sum << 16) : (old & 0xffff0000) | sum;
       old = atomicCAS(address_as_ui, assumed, newval);
     } while (assumed != old);
