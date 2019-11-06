@@ -529,6 +529,15 @@ class TestNamedTensor(TestCase):
             unnamed.resize_as_(named)
             self.assertEqual(unnamed.names, ['N'])
 
+    def test_cdist(self):
+        for device in torch.testing.get_all_device_types():
+            tensor = torch.randn(3, 1, 2, 7, names=('M', 'N', 'first_group', 'features'),
+                                 device=device)
+            other = torch.randn(5, 11, 7, names=('N', 'second_group', 'features'),
+                                device=device)
+            result = torch.cdist(tensor, other)
+            self.assertEqual(result.names, ['M', 'N', 'first_group', 'second_group'])
+
     def test_info_smoke(self):
         # Smoke test for info functions / methods / attributes on named tensors.
         tensor = torch.empty(1, 1, names=('N', 'D'))
