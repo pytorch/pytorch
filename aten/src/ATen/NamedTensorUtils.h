@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/EnableNamedTensor.h>
 #include <ATen/NamedTensor.h>
+#include <ATen/TensorNames.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/DimVector.h>
@@ -97,6 +98,8 @@ optional<std::vector<Dimname>> compute_baddbmm_outnames(
     TensorImpl* bias);
 
 optional<std::vector<Dimname>> compute_matmul_outnames(const Tensor& self, const Tensor& other);
+
+optional<std::vector<Dimname>> compute_cdist_outnames(const Tensor& self, const Tensor& other);
 
 optional<std::vector<Dimname>> compute_bmm_outnames(
     Tensor& result,

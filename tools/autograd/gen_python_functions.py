@@ -178,6 +178,8 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor,int64_t>',
     'std::tuple<Tensor,Tensor,double,int64_t>',
+    'std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>',
+    'std::tuple<Tensor,Tensor,double,Tensor,int64_t>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*', 'void',
     'QScheme', 'double',

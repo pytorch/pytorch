@@ -9,7 +9,7 @@ class Dataset(object):
     r"""An abstract class representing a :class:`Dataset`.
 
     All datasets that represent a map from keys to data samples should subclass
-    it. All subclasses should overrite :meth:`__getitem__`, supporting fetching a
+    it. All subclasses should overwrite :meth:`__getitem__`, supporting fetching a
     data sample for a given key. Subclasses could also optionally overwrite
     :meth:`__len__`, which is expected to return the size of the dataset by many
     :class:`~torch.utils.data.Sampler` implementations and the default options
@@ -38,7 +38,7 @@ class IterableDataset(Dataset):
     All datasets that represent an iterable of data samples should subclass it.
     Such form of datasets is particularly useful when data come from a stream.
 
-    All subclasses should overrite :meth:`__iter__`, which would return an
+    All subclasses should overwrite :meth:`__iter__`, which would return an
     iterator of samples in this dataset.
 
     When a subclass is used with :class:`~torch.utils.data.DataLoader`, each

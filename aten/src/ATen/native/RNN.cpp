@@ -1068,7 +1068,7 @@ _thnn_differentiable_lstm_cell_backward(
       gcx = gcx + grad_cy;
     }
   } else if (grad_cy.defined()) {
-    gog = at::zeros_like(cx);
+    gog = at::zeros_like(cx, at::MemoryFormat::Contiguous);
     gcx = grad_cy;
   }
   Tensor gig = gcx * c;
