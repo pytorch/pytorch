@@ -15,12 +15,9 @@
  */
 
 #include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/instruction.h>
-#include <torch/script.h>
 #include <c10/util/Flags.h>
 
 #include <fstream>
