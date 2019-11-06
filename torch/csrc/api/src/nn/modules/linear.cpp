@@ -61,6 +61,20 @@ Tensor LinearImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
+FlattenImpl::FlattenImpl(const FlattenOptions& options_) : options(options_) {}
+
+void FlattenImpl::reset() {}
+
+void FlattenImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::Flatten()";
+}
+
+Tensor FlattenImpl::forward(const Tensor& input) {
+  return input.flatten(options.start_dim(), options.end_dim());
+}
+
+// ============================================================================
+
 BilinearImpl::BilinearImpl(const BilinearOptions& options_) : options(options_) {
   reset();
 }
@@ -90,5 +104,6 @@ void BilinearImpl::pretty_print(std::ostream& stream) const {
 Tensor BilinearImpl::forward(const Tensor& input1, const Tensor& input2) {
   return F::bilinear(input1, input2, weight, bias);
 }
+
 } // namespace nn
 } // namespace torch
