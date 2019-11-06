@@ -60,7 +60,7 @@ static std::shared_ptr<::gloo::transport::Device> makeUVDevice(
     const std::string& interface, const std::string& hostname) {
   TORCH_CHECK(
       !interface.empty() || !hostname.empty(),
-      "GlooDeviceFactory::makeTCPDevice(): interface and hostname "
+      "GlooDeviceFactory::makeTCPDevice(): interface or hostname "
       "can't be empty");
 
   ::gloo::transport::uv::attr attr;
