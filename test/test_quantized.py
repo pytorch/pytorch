@@ -12,7 +12,7 @@ from hypothesis import strategies as st
 import hypothesis_utils as hu
 from hypothesis_utils import no_deadline
 
-from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC
+from common_utils import TEST_WITH_UBSAN, TestCase, run_tests, IS_PPC, IS_MACOS
 from common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine
 
@@ -519,9 +519,9 @@ class TestQuantizedOps(TestCase):
 
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
         iH, iW = X.shape[-2:]
-        oH = pool_output_shape(iH, kernel, padding, stride, 0)
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation=1)
         assume(oH > 0)
-        oW = pool_output_shape(iW, kernel, padding, stride, 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation=1)
         assume(oW > 0)
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
@@ -570,8 +570,16 @@ class TestQuantizedOps(TestCase):
         X, (scale, zero_point, torch_type) = X
         H, W = X.shape[-2:]
 
+
         if X.shape[1] < 176:
             X = np.repeat(X, 176 / X.shape[1], 1)
+
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+        iH, iW = X.shape[-2:]
+        oH = pool_output_shape(iH, kernel, padding, stride, dilation=1)
+        assume(oH > 0)
+        oW = pool_output_shape(iW, kernel, padding, stride, dilation=1)
+        assume(oW > 0)
 
         X_nchw = np.ascontiguousarray(X.transpose([0, 2, 3, 1]))
 
@@ -1113,7 +1121,8 @@ class TestQuantizedLinear(unittest.TestCase):
             return
         decimal_val = 4
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            # QNNPACK qlinear is flaky on MACOS. Issue #27326
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
             use_multi_dim_input = False
@@ -1480,7 +1489,8 @@ class TestQuantizedConv(unittest.TestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN:
+            # QNNPACK qconv is flaky on MACOS. Issue #27326
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
                 return
             use_channelwise = False
 
