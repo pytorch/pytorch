@@ -4695,6 +4695,14 @@ a")
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
 
+    def test_trace_optioanl_dtype(self):
+        class Test(torch.nn.Module):
+            def forward(self):
+                return torch.arange(5)
+
+        traced = torch.jit.trace(Test(), ())
+        torch.allclose(traced(), Test()())
+
     def test_mul(self):
         def func(a, b):
             return a * b
