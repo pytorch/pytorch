@@ -1,6 +1,8 @@
 #include <c10/util/Optional.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/autograd/utils/error_messages.h>
 
 using namespace at;
 using namespace torch::autograd::generated;
@@ -111,6 +113,15 @@ int64_t _version(const Tensor & self) {
   return as_variable_ref(self).current_version();
 }
 
+Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
+  if (!self.is_leaf() && !_requires_grad) {
+    throw std::runtime_error(
+      autograd::utils::requires_grad_leaf_error(_requires_grad)
+    );
+  }
+  return self.set_requires_grad(_requires_grad);
+}
+
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
@@ -139,7 +150,9 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  requires_grad &= isFloatingPoint(self.scalar_type());
+  // currently, isFloatingType will return false for (floating) complex types,
+  // so this might have to be amended when they should be differentiable
+  requires_grad &= isFloatingType(self.scalar_type());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
