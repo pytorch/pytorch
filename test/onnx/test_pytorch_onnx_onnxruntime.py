@@ -15,7 +15,7 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion, skipIfNoLapack
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfNoLapack
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -321,29 +321,21 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool(self):
         model = torch.nn.AvgPool1d(2, stride=1)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_1d_ceil(self):
         model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
         x = torch.randn(1, 1, 7)
         self.run_test(model, x)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_2d_ceil(self):
         model = torch.nn.AvgPool2d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
@@ -556,6 +548,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = MyModel(mode, use_size, is_upsample)
         self.run_test(model, x)
 
+    # TODO: Enable bicubic, linear1d and linear3d when implemented in ORT
     def _interpolate_tests(self, is_upsample):
         # - cubic mode is not supported for opsets below 11;
         # - linear mode does not match for opsets below 11;
@@ -566,7 +559,7 @@ class TestONNXRuntime(unittest.TestCase):
         # in round_prefer_floor ONNX). (The below tests
         # do not  show this error for nearest mode for
         # all opsets)
-        modes = ["nearest", "linear", "cubic"]
+        modes = ["nearest", "linear"]  # TODO : add "bicubic" when enabled in ORT
         if self.opset_version < 11:
             modes = ["nearest"]
         x = [torch.randn(1, 2, 4, requires_grad=True),
@@ -576,13 +569,18 @@ class TestONNXRuntime(unittest.TestCase):
         for mode in modes:
             for xi in x:
                 mode_i = mode
-                if mode == "cubic" and xi.dim() != 4:
+                if mode == "bicubic" and xi.dim() != 4:
                     continue
                 elif mode == "linear":
-                    if xi.dim() == 4:
+                    if xi.dim() == 3:
+                        # TODO : enable when linear mode is implemented for 1d inputs in ORT
+                        continue
+                    elif xi.dim() == 4:
                         mode_i = "bilinear"
                     elif xi.dim() == 5:
+                        # TODO : enable when linear mode is implemented for 3d inputs in ORT
                         mode_i = "trilinear"
+                        continue
                 self._interpolate(xi, mode_i, True, is_upsample)
                 # the following cases, require dynamic sizes/scales,
                 # which which is not supported for opset_version < 9
@@ -591,14 +589,10 @@ class TestONNXRuntime(unittest.TestCase):
                     self._interpolate(xi, mode_i, False, is_upsample)
                     self._interpolate_script(xi, mode_i, False, is_upsample)
 
-    # enable when supported in ORT for opset 11
-    @skipIfUnsupportedOpsetVersion([11])
     def test_interpolate_upsample(self):
         self._interpolate_tests(True)
 
-    # enable when supported in ORT for opset 11
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
 
@@ -728,8 +722,6 @@ class TestONNXRuntime(unittest.TestCase):
         base = 1
         self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
 
-    # TODO: enable for opset 11 when ONNXRuntime version will be updated
-    @skipIfUnsupportedOpsetVersion([11])
     def test_topk(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -738,8 +730,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         self.run_test(MyModule(), x)
 
-    # TODO: enable for opset 11 when ONNXRuntime version will be updated
-    @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_topk_smallest_unsorted(self):
         class MyModule(torch.nn.Module):
@@ -750,9 +740,7 @@ class TestONNXRuntime(unittest.TestCase):
         k = torch.tensor(3)
         self.run_test(MyModule(), (x, k))
 
-    # TODO: enable for opset 11 when ONNXRuntime version will be updated
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedOpsetVersion([11])
     def test_topk_script(self):
         class MyModuleDynamic(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1200,7 +1188,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
 
-    @skipIfUnsupportedOpsetVersion([11])
     def test_sort(self):
         class SortModel(torch.nn.Module):
             def __init__(self, dim):
@@ -1214,8 +1201,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(SortModel(dim), x)
 
-    # TODO: enable for opset 11 when ONNXRuntime version will be updated
-    @skipIfUnsupportedOpsetVersion([11])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_sort_ascending(self):
         class SortModel(torch.nn.Module):
@@ -1440,6 +1425,28 @@ class TestONNXRuntime(unittest.TestCase):
         model = CumSum()
         self.run_test(model, x)
 
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid(self):
+        class Meshgrid(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.meshgrid(x, y, z)
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.randn(5, requires_grad=True)
+        self.run_test(Meshgrid(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid_scalar(self):
+        class Meshgrid(torch.nn.Module):
+            def forward(self, x, y, z):
+                return torch.meshgrid(x, y, z)
+
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.tensor(2.0)
+        self.run_test(Meshgrid(), (x, y, z))
+
     def test_baddbmm(self):
         class MyModule(torch.nn.Module):
             def forward(self, input, batch1, batch2):
@@ -1486,6 +1493,49 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
+
+    def test_constant_pad(self):
+        model = torch.nn.ConstantPad1d(2, 3.5)
+        x = torch.randn(2, 4, 4)
+        self.run_test(model, x)
+
+        model = torch.nn.ConstantPad2d((3, 0, 2, 1), 3.5)
+        x = torch.randn(2, 2, 4, 4)
+        self.run_test(model, x)
+
+    # Dynamic padding is added in opset 11
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pad_types(self):
+        # Test for different pad integer types
+        class Pad(torch.nn.Module):
+            def forward(self, x, pad):
+                return torch.nn.functional.pad(x, pad)
+
+        x = torch.randn(2, 2, 4, 4)
+        y = pad = (torch.tensor(2, dtype=torch.int32), torch.tensor(4, dtype=torch.int32))
+        self.run_test(Pad(), (x, y))
+
+        y = pad = (torch.tensor(2, dtype=torch.int64), torch.tensor(4, dtype=torch.int64))
+        self.run_test(Pad(), (x, y))
+
+
+    def test_reflection_pad(self):
+        model = torch.nn.ReflectionPad1d(2)
+        x = torch.randn(2, 4, 4)
+        self.run_test(model, x)
+
+        model = torch.nn.ReflectionPad2d((3, 0, 2, 1))
+        x = torch.randn(2, 2, 4, 4)
+        self.run_test(model, x)
+
+    def test_replication_pad(self):
+        model = torch.nn.ReplicationPad1d(2)
+        x = torch.randn(2, 4, 4)
+        self.run_test(model, x)
+
+        model = torch.nn.ReplicationPad2d((3, 0, 2, 1))
+        x = torch.randn(2, 2, 4, 4)
+        self.run_test(model, x)
 
     @skipIfNoLapack
     @skipIfUnsupportedMinOpsetVersion(11)

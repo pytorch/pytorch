@@ -21,23 +21,33 @@ struct ztype<std::complex<float>> {
   using value_t = float;
 };
 
-template <typename SCALAR_TYPE, typename VALUE_TYPE>
+template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
 inline VALUE_TYPE zabs (SCALAR_TYPE z) {
   return z;
 }
 
 template<>
-inline float zabs <std::complex<float>> (std::complex<float> z) {
+inline std::complex<float> zabs <std::complex<float>> (std::complex<float> z) {
+  return std::complex<float>(std::abs(z));
+}
+
+template<>
+inline float zabs <std::complex<float>, float> (std::complex<float> z) {
   return std::abs(z);
 }
 
 template<>
-inline double zabs <std::complex<double>> (std::complex<double> z) {
+inline std::complex<double> zabs <std::complex<double>> (std::complex<double> z) {
+  return std::complex<double>(std::abs(z));
+}
+
+template<>
+inline double zabs <std::complex<double>, double> (std::complex<double> z) {
   return std::abs(z);
 }
 
-template <typename TYPE>
-inline TYPE angle_impl (TYPE z) {
+template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
+inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
   return 0;
 }
 
@@ -47,12 +57,22 @@ inline std::complex<float> angle_impl <std::complex<float>> (std::complex<float>
 }
 
 template<>
+inline float angle_impl <std::complex<float>, float> (std::complex<float> z) {
+  return std::arg(z);
+}
+
+template<>
 inline std::complex<double> angle_impl <std::complex<double>> (std::complex<double> z) {
   return std::complex<double>(std::arg(z), 0.0);
 }
 
-template <typename TYPE>
-inline TYPE real_impl (TYPE z) {
+template<>
+inline double angle_impl <std::complex<double>, double> (std::complex<double> z) {
+  return std::arg(z);
+}
+
+template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
+inline VALUE_TYPE real_impl (SCALAR_TYPE z) {
   return z; //No-Op
 }
 
@@ -62,12 +82,22 @@ inline std::complex<float> real_impl <std::complex<float>> (std::complex<float> 
 }
 
 template<>
+inline float real_impl <std::complex<float>, float> (std::complex<float> z) {
+  return std::real(z);
+}
+
+template<>
 inline std::complex<double> real_impl <std::complex<double>> (std::complex<double> z) {
   return std::complex<double>(std::real(z), 0.0);
 }
 
-template <typename TYPE>
-inline TYPE imag_impl (TYPE z) {
+template<>
+inline double real_impl <std::complex<double>, double> (std::complex<double> z) {
+  return std::real(z);
+}
+
+template <typename SCALAR_TYPE, typename VALUE_TYPE=SCALAR_TYPE>
+inline VALUE_TYPE imag_impl (SCALAR_TYPE z) {
   return 0;
 }
 
@@ -77,8 +107,18 @@ inline std::complex<float> imag_impl <std::complex<float>> (std::complex<float> 
 }
 
 template<>
+inline float imag_impl <std::complex<float>, float> (std::complex<float> z) {
+  return std::imag(z);
+}
+
+template<>
 inline std::complex<double> imag_impl <std::complex<double>> (std::complex<double> z) {
   return std::complex<double>(std::imag(z), 0.0);
+}
+
+template<>
+inline double imag_impl <std::complex<double>, double> (std::complex<double> z) {
+  return std::imag(z);
 }
 
 template <typename TYPE>
@@ -154,6 +194,36 @@ inline std::complex<float> trunc_impl (std::complex<float> z) {
 template <>
 inline std::complex<double> trunc_impl (std::complex<double> z) {
   return std::complex<double>(std::trunc(std::real(z)), std::trunc(std::imag(z)));
+}
+
+template <typename TYPE>
+inline TYPE max_impl (TYPE a, TYPE b) {
+  return std::max(a, b);
+}
+
+template <>
+inline std::complex<float> max_impl (std::complex<float> a, std::complex<float> b) {
+  return std::complex<float>(std::abs(a) > std::abs(b) ? a : b);
+}
+
+template <>
+inline std::complex<double> max_impl (std::complex<double> a, std::complex<double> b) {
+  return std::complex<double>(std::abs(a) > std::abs(b) ? a : b);
+}
+
+template <typename TYPE>
+inline TYPE min_impl (TYPE a, TYPE b) {
+  return std::min(a, b);
+}
+
+template <>
+inline std::complex<float> min_impl (std::complex<float> a, std::complex<float> b) {
+  return std::complex<float>(std::abs(a) < std::abs(b) ? a : b);
+}
+
+template <>
+inline std::complex<double> min_impl (std::complex<double> a, std::complex<double> b) {
+  return std::complex<double>(std::abs(a) < std::abs(b) ? a : b);
 }
 
 } // end namespace

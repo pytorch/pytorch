@@ -352,10 +352,8 @@ struct TORCH_API Module {
       return EntityType::PARAMETER;
     }
     at::TypePtr t = type()->getAttribute(offset_);
-    if (auto cls = t->cast<at::ClassType>()) {
-      if (cls->is_module()) {
-        return EntityType::MODULE;
-      }
+    if (t->is_module()) {
+      return EntityType::MODULE;
     }
     return EntityType::ATTRIBUTE;
   }

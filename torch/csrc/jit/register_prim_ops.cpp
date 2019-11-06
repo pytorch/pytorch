@@ -131,7 +131,7 @@ void checkDoubleInRange(double a) {
       a > double(std::numeric_limits<int64_t>::max()) ||
       a < double(std::numeric_limits<int64_t>::min())) {
     throw c10::Error(
-        "Cannot convert float " + std::to_string(a) + " to integer", "");
+        "Cannot convert float " + c10::to_string(a) + " to integer", "");
     return;
   }
 }
@@ -735,6 +735,15 @@ RegisterOperators reg(
          },
          aliasAnalysisConservative()),
      Operator(
+         "aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)",
+         [](Stack& stack) {
+           bool _requires_grad = pop(stack).toBool();
+           at::Tensor self = pop(stack).toTensor();
+           self.requires_grad_(_requires_grad);
+           return 0;
+         },
+         aliasAnalysisConservative()),
+     Operator(
          "prim::AutogradZero() -> Tensor",
          [](Stack& stack) {
            stack.emplace_back(at::Tensor());
@@ -922,15 +931,26 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::AutogradAnyNonZero,
+         "prim::AutogradAnyNonZero(...) -> int",
          [](const Node* node) -> Operation {
            size_t num_inputs = node->inputs().size();
-           return [=](Stack& stack) {
+           return [num_inputs](Stack& stack) {
              bool result = false;
-             for (const IValue& t : last(stack, num_inputs)) {
-               if (t.toTensor().defined()) {
-                 result = true;
-                 break;
+             for (const IValue& v : last(stack, num_inputs)) {
+               if (v.isTensor()) {
+                 if (v.toTensor().defined()) {
+                   result = true;
+                   break;
+                 }
+               } else if (v.isTensorList()) {
+                 for (const at::Tensor& t : v.toTensorListRef()) {
+                   result = true;
+                 }
+                 if (result) {
+                   break;
+                 }
+               } else {
+                 TORCH_INTERNAL_ASSERT(false);
                }
              }
              drop(stack, num_inputs);
@@ -938,18 +958,25 @@ RegisterOperators reg(
              return 0;
            };
          },
-         aliasAnalysisSpecialCase()),
+         aliasAnalysisFromSchema()),
      Operator(
          prim::AutogradAdd,
          [](Stack& stack) {
            at::Tensor a, b;
            pop(stack, a, b);
-           if (!a.defined())
-             stack.emplace_back(b);
-           else if (!b.defined())
+           if (!a.defined() && !b.defined()) {
+             // undef + undef == undef
              stack.emplace_back(a);
-           else
+           }
+           else if (!a.defined()) {
+             stack.emplace_back(b);
+           }
+           else if (!b.defined()) {
+             stack.emplace_back(a);
+           }
+           else {
              stack.emplace_back(a + b);
+           }
            return 0;
          },
          aliasAnalysisSpecialCase()),

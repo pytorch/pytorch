@@ -41,5 +41,25 @@ void LayerNormImpl::pretty_print(std::ostream& stream) const {
 torch::Tensor LayerNormImpl::forward(const Tensor& input) {
   return F::layer_norm(input, options, weight, bias);
 }
+
+// ============================================================================
+
+LocalResponseNormImpl::LocalResponseNormImpl(const LocalResponseNormOptions& options_)
+    : options(options_) {}
+
+Tensor LocalResponseNormImpl::forward(const Tensor& input) {
+  return F::local_response_norm(input, options);
+}
+
+void LocalResponseNormImpl::reset() {}
+
+void LocalResponseNormImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::LocalResponseNorm(" <<  options.size()
+         << ", alpha=" << options.alpha()
+         << ", beta=" << options.beta()
+         << ", k=" << options.k()
+         << ")";
+}
 } // namespace nn
 } // namespace torch

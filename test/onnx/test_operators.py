@@ -806,6 +806,12 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.unique(x, dim=0, sorted=True, return_inverse=False, return_counts=True), x,
                         opset_version=11)
 
+    def test_meshgrid(self):
+        x = torch.ones(3, requires_grad=True)
+        y = torch.zeros(4, requires_grad=True)
+        z = torch.ones(5, requires_grad=True)
+        self.assertONNX(lambda x, y, z: torch.meshgrid(x, y, z), (x, y, z))
+
     def test_topk(self):
         x = torch.arange(1., 6., requires_grad=True)
         k = torch.tensor(3)

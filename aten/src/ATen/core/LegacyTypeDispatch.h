@@ -14,7 +14,6 @@
 #include <ATen/core/LegacyDeviceTypeInit.h>
 #include <c10/core/impl/LocalTensorTypeSet.h>
 #include <c10/core/TensorImpl.h>
-#include <ATen/core/ATenDispatch.h>
 #include <ATen/core/TensorBody.h>
 
 namespace at {
