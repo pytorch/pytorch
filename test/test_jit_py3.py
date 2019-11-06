@@ -243,6 +243,7 @@ class TestScriptPy3(JitTestCase):
 
         class Bar(nn.Module):
             foo: Foo
+
             def __init__(self):
                 super(Bar, self).__init__()
                 self.foo = Foo()
