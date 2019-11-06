@@ -629,8 +629,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_set_attribute",
           [](Module& self, const std::string& name, py::object value) {
-            slot_dict_impl<LegacyAttributePolicy>(self.module_object())
-                .setattr(name, std::move(value));
+            auto ivalue =
+                toIValue(std::move(value), self.type()->getAttribute(name));
+            self.setattr(name, ivalue);
           })
       .def("_set_parameter", &set_generic<detail::ParameterPolicy>)
       .def("_get_parameter", &get_generic)
