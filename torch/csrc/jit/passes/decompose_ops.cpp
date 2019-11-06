@@ -218,6 +218,8 @@ void DecomposeOps(std::shared_ptr<Graph>& graph) {
           n = 1
           for i in range(input_ndim - normalized_ndim):
               n *= input.size(i)
+          if n == 0:
+              return input.clone()
           input_reshape = input.contiguous().view(1, n, -1)
           mean, invstd = torch.batch_norm_stats(input_reshape, eps)
           input_shape = input.size()
