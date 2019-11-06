@@ -32,6 +32,7 @@ from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
+from fake_operators import fake_empty_like, fake_rand_like, fake_randint_like, fake_randn_like, fake_ones_like, fake_zeros_like, fake_full_like
 from common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, download_file, PY3, to_gpu, \
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES
@@ -3223,7 +3224,7 @@ class TestNN(NNTestCase):
                 for size in sizes:
                     x = torch.randn(size, device="cuda", dtype=dtype)
                     out = conv(x.detach().clone().requires_grad_())
-                    out.backward(torch.ones_like(out))
+                    out.backward(fake_ones_like(out))
 
         run_test(benchmark=False)
         run_test(benchmark=True)
@@ -3574,7 +3575,7 @@ class TestNN(NNTestCase):
 
         res_cpu = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
                                                reduction='sum', zero_infinity=True)
-        grad_out = torch.randn_like(res_cpu)
+        grad_out = fake_randn_like(res_cpu)
         grad_cpu, = torch.autograd.grad(res_cpu, log_probs, grad_out)
 
         with torch.backends.cudnn.flags(enabled=False):
@@ -5545,7 +5546,7 @@ class TestNN(NNTestCase):
         for N in range(1, 50, 10):
             input = torch.rand(N, 3, 1024, 1024)
             self.assertEqual(
-                torch.nn.L1Loss()(input, torch.zeros_like(input)),
+                torch.nn.L1Loss()(input, fake_zeros_like(input)),
                 input.abs().mean())
 
     def test_cosine_similarity(self):
@@ -5578,9 +5579,9 @@ class TestNN(NNTestCase):
 
         # Check dividing by 0.
         input1 = torch.randn(10).requires_grad_()
-        input2 = torch.zeros_like(input1).requires_grad_()
+        input2 = fake_zeros_like(input1).requires_grad_()
         torch.cosine_similarity(input1, input2, 0).sum().backward()
-        self.assertEqual(input1.grad, torch.zeros_like(input1))
+        self.assertEqual(input1.grad, fake_zeros_like(input1))
         self.assertEqual(input2.grad, input1 * 1e8)
 
     def test_grid_sample_error_checking(self):
@@ -5724,7 +5725,7 @@ class TestNN(NNTestCase):
                                             align_corners=align_corners)
                     self.assertTrue(out_cpu.size() == torch.Size([N, C, H, W]))
 
-                    gradients = torch.randn_like(out_cpu)
+                    gradients = fake_randn_like(out_cpu)
                     out_cpu.backward(gradients)
 
                     if TEST_CUDA:
@@ -5905,7 +5906,7 @@ class TestNN(NNTestCase):
                                         align_corners=align_corners)
                 self.assertTrue(out_cpu.size() == torch.Size([N, C, D, H, W]))
 
-                gradients = torch.randn_like(out_cpu)
+                gradients = fake_randn_like(out_cpu)
                 out_cpu.backward(gradients)
 
                 if TEST_CUDA:
@@ -6641,7 +6642,7 @@ class TestNN(NNTestCase):
             inputs = x, weight
 
         dummy_out = func(*inputs)
-        grad_y = torch.randn_like(dummy_out, device=device, dtype=dtype, requires_grad=True)
+        grad_y = fake_randn_like(dummy_out, device=device, dtype=dtype, requires_grad=True)
 
         # Issue #15353: test mkldnn double backward, don't run gradgradcheck due
         # to imprecision issues
@@ -7871,7 +7872,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
 
         # check that eval mode doesn't change behavior
-        grad_out = torch.randn_like(output)
+        grad_out = fake_randn_like(output)
         res1 = output.data.clone()
         output.backward(grad_out)
         grad1 = input_var.grad.data.clone()
@@ -8416,7 +8417,7 @@ class TestNNDeviceType(NNTestCase):
         logits = logits.to(dtype).requires_grad_()
         probs = logits.softmax(dim=-1)
 
-        counts = torch.zeros_like(logits)
+        counts = fake_zeros_like(logits)
         for _ in range(num_draws):
             y_draw = F.gumbel_softmax(logits, hard=True)
             counts = counts + y_draw
@@ -8641,7 +8642,7 @@ class TestNNDeviceType(NNTestCase):
         outf = F.softmax(inputf, dim=-1)
         # should be bitwise equal
         self.assertEqual(out, outf, prec=0)
-        gO = torch.empty_like(outf).uniform_()
+        gO = fake_empty_like(outf).uniform_()
         out.backward(gO)
         outf.backward(gO)
         # should be bitwise equal
@@ -8690,17 +8691,17 @@ class TestNNDeviceType(NNTestCase):
             Embed.to(device)
 
             output = Embed(input=x, offsets=torch.tensor([0], device=device, dtype=torch.long))
-            self.assertEqual(output, torch.zeros_like(output))
+            self.assertEqual(output, fake_zeros_like(output))
 
             output = Embed(input=x, offsets=torch.tensor([0, 0], device=device, dtype=torch.long))
-            self.assertEqual(output, torch.zeros_like(output))
+            self.assertEqual(output, fake_zeros_like(output))
 
     def test_EmbeddingBag_per_sample_weights_failures(self, device):
         # Failure 1: mismatched embeddings / per_sample_weights dtype
         es = nn.EmbeddingBag(5, 2, mode='sum').to(dtype=torch.float, device=device)
         input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=torch.long, device=device)
         offsets = torch.tensor([0, 0, 3, 3, 6], dtype=torch.long, device=device)
-        per_sample_weights = torch.randn_like(input, dtype=torch.double, device=device)
+        per_sample_weights = fake_randn_like(input, dtype=torch.double, device=device)
         if device == 'cpu':
             with self.assertRaisesRegex(RuntimeError, 'have the same type as'):
                 es(input, offsets, per_sample_weights)
@@ -8759,7 +8760,7 @@ class TestNNDeviceType(NNTestCase):
                 torch.arange(1, 11, device=device, dtype=dtype).view_as(es.weight))
             input = torch.tensor([3, 1, 1, 1, 4, 0], device=device, dtype=torch.long)
             offsets = torch.tensor([0, 0, 3, 3, 6], device=device, dtype=torch.long)
-            per_sample_weights = torch.randn_like(input, dtype=dtype) \
+            per_sample_weights = fake_randn_like(input, dtype=dtype) \
                                       .requires_grad_(trainable_scale)
             ref_per_sample_weights = \
                 per_sample_weights.detach().requires_grad_(trainable_scale)
@@ -8770,7 +8771,7 @@ class TestNNDeviceType(NNTestCase):
             result = es(input, offsets, per_sample_weights)
             self.assertEqual(result, expected, prec=dtype2prec[dtype])
 
-            grad = torch.randn_like(expected)
+            grad = fake_randn_like(expected)
             result.backward(grad)
             expected.backward(grad)
             self.assertEqual(es.weight.grad, reference_weights.grad,
@@ -8973,7 +8974,7 @@ class TestNNDeviceType(NNTestCase):
         dense_grad = es.weight.grad
         if dense_grad.is_sparse:
             dense_grad = dense_grad.to_dense()
-        self.assertEqual(dense_grad, torch.zeros_like(es.weight))
+        self.assertEqual(dense_grad, fake_zeros_like(es.weight))
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
