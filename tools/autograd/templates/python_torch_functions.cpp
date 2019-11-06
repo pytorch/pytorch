@@ -182,7 +182,6 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 
   ParsedArgs<8> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-
   if (r.idx == 0) {
     PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
         "and will be removed in 0.5. Note that arange generates values in [start; end), "
@@ -254,7 +253,6 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 
   ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-
   if (r.idx == 0) {
     if (r.isNone(3)) {
       auto high = r.toInt64(0);
