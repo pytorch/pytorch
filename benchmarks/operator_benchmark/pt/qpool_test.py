@@ -33,7 +33,7 @@ qmaxpool2d_configs = op_bench.config_list(
 )
 
 qmaxpool2d_short_configs = op_bench.config_list(
-    attrs=((1, 3, 3, (3, 3), (1, 1), (0, 0), (1, 1)),),  # dummy  # noqa
+    attrs=((1, 3, 3, (3, 3), (1, 1), (0, 0)),),  # dummy  # noqa
     attr_names=('C', 'H', 'W',        # Input layout
                 'k', 's', 'p'),  # Pooling parameters
     cross_product_configs={
