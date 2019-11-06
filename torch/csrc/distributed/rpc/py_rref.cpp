@@ -92,8 +92,8 @@ bool PyRRef::isOwner() const {
   return rref_->isOwner();
 }
 
-worker_id_t PyRRef::owner() const {
-  return rref_->owner();
+WorkerInfo PyRRef::owner() const {
+  return RRefContext::getInstance().agent()->getWorkerInfo(rref_->owner());
 }
 
 std::shared_ptr<PyFuture> PyRRef::toHere() {

@@ -117,13 +117,13 @@ c10::optional<at::Tensor> runTorchSlice_opset9(const Node* node,
 c10::optional<at::Tensor> runTorchSlice_opset10(const Node* node, 
                      std::vector<at::Tensor>& inputTensorValues) {
   if (inputTensorValues.size() < 3 || inputTensorValues.size() > 5) {
-    std::cerr << "Warning: Constant folding - Invalid number of inputs found for opset 10 onnx::Slice op. "
+    std::cerr << "Warning: Constant folding - Invalid number of inputs found for opset 10 or 11 onnx::Slice op. "
               << "Constant folding not applied." << std::endl;
     return c10::nullopt;
   }
   // Checking validity of 'starts' and 'ends' input
   if (inputTensorValues[1].sizes().size() != 1 || inputTensorValues[2].sizes().size() != 1) {
-    std::cerr << "Warning: Constant folding - Invalid 'starts' or 'ends' inputs found for opset 10 onnx::Slice op. "
+    std::cerr << "Warning: Constant folding - Invalid 'starts' or 'ends' inputs found for opset 10 or 11 onnx::Slice op. "
               << "Constant folding not applied." << std::endl;
     return c10::nullopt;
   }            
@@ -198,10 +198,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     int opset_version) {
   at::Tensor updated_val;
   if (node->kind() == onnx::Slice) {
-    if (opset_version == 9) {
+    if (opset_version == ONNX_OPSET_9) {
       return runTorchSlice_opset9(node, inputTensorValues);
     }
-    else if (opset_version == 10) {
+    else if (opset_version == ONNX_OPSET_10 || opset_version == ONNX_OPSET_11) {
       return runTorchSlice_opset10(node, inputTensorValues);
     }
     else {
@@ -322,10 +322,17 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 
 // This method updates the block in-place to fold all the one-time
 // constant-based computations/ops into an initializer node.
+//
+// NB: This is not constant folding in the traditional sense, as we
+// don't try particularly hard to evaluate operations on constant nodes.
+// This is more of a partial evaluation  analysis, where operations on constant
+// nodes can be lifted so we run them earlier, before the usual parameters are
+// known.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
-  if (opset_version != 9 && opset_version != 10) {
+  if (opset_version != ONNX_OPSET_9 && opset_version != ONNX_OPSET_10 &&
+      opset_version != ONNX_OPSET_11) {
     // Number of elements of 'axes' and 'ends' 1-D input tensors should be the same
-    std::cerr << "Warning: Constant folding supported for only opsets 9 and 10. "
+    std::cerr << "Warning: Constant folding supported for only opsets 9, 10, and 11. "
               << "Constant folding not applied." << std::endl;
     return;
   }
