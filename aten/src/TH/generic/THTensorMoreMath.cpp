@@ -19,7 +19,7 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
 
 int THTensor_(equal)(THTensor *ta, THTensor* tb)
 {
-  std::atomic<int> equal = 1;
+  std::atomic<int> equal{1};
   if(!THTensor_(isSameSizeAs)(ta, tb))
     return 0;
 
@@ -51,7 +51,7 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
                         TH_TENSOR_APPLY_hasFinished = 1; break;
                      })
   }
-  return equal;
+  return equal.load();
 }
 
 // Helper function to be used in a reduction operation.
