@@ -1,7 +1,7 @@
 import importlib
-import torch.onnx.symbolic_registry as sym_registry
 from inspect import getmembers, isfunction
 from torch.onnx.symbolic_helper import parse_args
+import torch.onnx.symbolic_registry as sym_registry
 
 def register_quantized_ops(domain, version):
     # Register all the non-quantized ops
