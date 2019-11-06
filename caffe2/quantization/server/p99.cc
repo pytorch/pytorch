@@ -14,8 +14,8 @@ TensorQuantizationParams P99::ChooseQuantizationParams(
   std::vector<float> bins_f(
       dnnlowp::adjust_hist_to_include_zero(hist, &min, &max));
   int nbins = bins_f.size();
-  assert(min <= 0.f);
-  assert(max >= 0.f);
+  CAFFE_ENFORCE(min <= 0.f);
+  CAFFE_ENFORCE(max >= 0.f);
   float org_max = max;
   float org_min = min;
   float bin_width = (max - min) / nbins;
@@ -32,7 +32,7 @@ TensorQuantizationParams P99::ChooseQuantizationParams(
     sum += bins_f[i];
     CDF[i] = (double)sum / total_sum;
   }
-  assert(threshold_ > 0.5 && threshold_ < 1);
+  CAFFE_ENFORCE(threshold_ > 0.5 && threshold_ < 1);
   double left_quantile = (1.0f - threshold_) / 2.0f;
   double right_quantile = 1.0f - left_quantile;
   int i_begin = 0;

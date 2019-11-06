@@ -73,3 +73,12 @@ using std::to_string;
 #endif // defined(__ANDROID__) || defined(CAFFE2_FORCE_STD_STRING_FALLBACK_TEST)
 
 } // namespace c10
+
+#if defined(__ANDROID__) && __ANDROID_API__ < 21 && defined(__GLIBCXX__)
+#include <cstdlib>
+// std::strtoll isn't available on Android NDK platform < 21 when building
+// with libstdc++, so bring the global version into std.
+namespace std {
+  using ::strtoll;
+}
+#endif
