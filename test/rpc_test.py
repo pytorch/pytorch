@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import concurrent.futures
+from datetime import timedelta
 import sys
 import unittest
 from collections import namedtuple
@@ -9,7 +10,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-from torch.distributed import RRef
+from torch.distributed.rpc import RRef
 from common_utils import load_tests
 from dist_utils import INIT_METHOD_TEMPLATE, TEST_CONFIG, dist_init
 from torch.distributed.rpc.internal import PythonUDF, _internal_rpc_pickler
@@ -1009,6 +1010,28 @@ class RpcTest(object):
             MyClass.get_value, rref))
 
         self.assertEqual(result, sum(vals))
+
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    @dist_init
+    def test_get_default_rpc_timeout(self):
+        timeout = rpc.get_rpc_timeout()
+        self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
+
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    @dist_init(setup_model_parallel=False)
+    def test_set_rpc_timeout(self):
+        timeout = timedelta(seconds=1)
+        rpc.init_model_parallel(
+            self_name="worker{}".format(self.rank),
+            backend=rpc.backend_registry.BackendType[TEST_CONFIG.rpc_backend_name],
+            init_method=self.init_method,
+            self_rank=self.rank,
+            worker_name_to_id=self.worker_name_to_id,
+            rpc_timeout=timeout
+        )
+        set_timeout = rpc.get_rpc_timeout()
+        self.assertEqual(timeout, set_timeout)
+        rpc.join_rpc()
 
 
     def test_requires_process_group_agent_decorator(self):
