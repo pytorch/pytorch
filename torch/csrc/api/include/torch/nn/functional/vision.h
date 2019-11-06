@@ -50,7 +50,7 @@ inline Tensor affine_grid(
 inline Tensor grid_sample(
     const Tensor& input,
     const Tensor& grid,
-    GridSampleOptions options = {}) {
+    GridSampleFuncOptions options = {}) {
 
   if ((options.mode().compare("bilinear") != 0) && (options.mode().compare("nearest") != 0)) {
     TORCH_CHECK(false, "nn::functional::grid_sample(): expected mode to be ",

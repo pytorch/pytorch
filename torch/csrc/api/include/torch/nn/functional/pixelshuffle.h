@@ -8,7 +8,7 @@ namespace functional {
 
 inline Tensor pixel_shuffle(
     const Tensor& input,
-    const PixelShuffleOptions& options) {
+    const PixelShuffleFuncOptions& options) {
   return torch::pixel_shuffle(
     input,
     options.upscale_factor()

@@ -3,12 +3,14 @@
 #include <torch/nn/options/batchnorm.h>
 #include <torch/types.h>
 
+namespace F = torch::nn::functional;
+
 namespace torch {
 namespace nn {
 namespace functional {
 
 inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
-                         const Tensor& running_var, const BatchNormOptions& options = {}, bool training = false) {
+                         const Tensor& running_var, const BatchNormFuncOptions& options = {}, bool training = false) {
   if (training) {
     auto size = input.sizes();
     int64_t size_prods = size[0];
