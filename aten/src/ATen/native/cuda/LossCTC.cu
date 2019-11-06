@@ -605,7 +605,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   auto input_lengths_t = at::tensor(input_lengths, targets.options().dtype(kLong));
   tg_batch_offsets = tg_batch_offsets.cuda();
 
-  Tensor log_beta = at::empty_like(log_alpha);
+  Tensor log_beta = at::empty_like(log_alpha, at::MemoryFormat::Contiguous);
   log_beta.fill_(neginf);
 
   Tensor grad = at::full_like(log_probs, neginf); // initialization for log(sum (alpha beta))
