@@ -7,7 +7,7 @@ namespace torch {
 namespace nn{
 namespace functional {
 
-inline Tensor elu(Tensor& input, const ELUOptions& options = {}) {
+inline Tensor elu(Tensor& input, const ELUFuncOptions& options = {}) {
   if (options.inplace()) {
     return torch::elu_(input, options.alpha());
   } else {
@@ -15,7 +15,7 @@ inline Tensor elu(Tensor& input, const ELUOptions& options = {}) {
   }
 }
 
-inline Tensor selu(Tensor& input, const SELUOptions& options = {}) {
+inline Tensor selu(Tensor& input, const SELUFuncOptions& options = {}) {
   if (options.inplace()) {
     return torch::selu_(input);
   } else {
@@ -24,11 +24,11 @@ inline Tensor selu(Tensor& input, const SELUOptions& options = {}) {
 }
 
 inline Tensor hardshrink(const Tensor& input,
-                         const HardshrinkOptions& options = {}) {
+                         const HardshrinkFuncOptions& options = {}) {
   return torch::hardshrink(input, options.lambda());
 }
 
-inline Tensor hardtanh(Tensor& input, const HardtanhOptions& options = {}) {
+inline Tensor hardtanh(Tensor& input, const HardtanhFuncOptions& options = {}) {
   if (options.inplace()) {
     return torch::hardtanh_(input, options.min_val(), options.max_val());
   } else {
@@ -36,7 +36,7 @@ inline Tensor hardtanh(Tensor& input, const HardtanhOptions& options = {}) {
   }
 }
 
-inline Tensor leaky_relu(Tensor& input, const LeakyReLUOptions& options = {}) {
+inline Tensor leaky_relu(Tensor& input, const LeakyReLUFuncOptions& options = {}) {
   if (options.inplace()) {
     return torch::leaky_relu_(input, options.negative_slope());
   } else {
@@ -48,7 +48,7 @@ inline Tensor logsigmoid(const Tensor& input) {
   return torch::log_sigmoid(input);
 }
 
-inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxOptions& options = {}) {
+inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxFuncOptions& options = {}) {
   auto gumbels = -torch::empty_like(logits).exponential_().log();  // ~Gumbel(0,1)
   gumbels = (logits + gumbels) / options.tau();  // ~Gumbel(logits, tau)
   auto y_soft = gumbels.softmax(options.dim());
@@ -65,7 +65,7 @@ inline Tensor gumbel_softmax(const Tensor& logits, const GumbelSoftmaxOptions& o
   return ret;
 }
 
-inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
+inline Tensor softmax(const Tensor& input, const SoftmaxFuncOptions& options,
                       c10::optional<torch::Dtype> dtype = c10::nullopt) {
   int64_t dim = options.dim();
   Tensor ret;
@@ -79,7 +79,7 @@ inline Tensor softmax(const Tensor& input, const SoftmaxOptions& options,
   return ret;
 }
 
-inline Tensor softmin(const Tensor& input, const SoftminOptions& options,
+inline Tensor softmin(const Tensor& input, const SoftminFuncOptions& options,
                       c10::optional<torch::Dtype> dtype = c10::nullopt) {
   int64_t dim = options.dim();
   Tensor ret;
@@ -93,7 +93,7 @@ inline Tensor softmin(const Tensor& input, const SoftminOptions& options,
   return ret;
 }
 
-inline Tensor log_softmax(const Tensor& input, const LogSoftmaxOptions& options,
+inline Tensor log_softmax(const Tensor& input, const LogSoftmaxFuncOptions& options,
                           c10::optional<torch::Dtype> dtype = c10::nullopt) {
   int64_t dim = options.dim();
   Tensor ret;
@@ -115,7 +115,7 @@ inline Tensor prelu(const Tensor& input, const Tensor& weight) {
   return torch::prelu(input, weight);
 }
 
-inline Tensor relu(Tensor& input, const ReLUOptions& options = {}) {
+inline Tensor relu(Tensor& input, const ReLUFuncOptions& options = {}) {
   if (options.inplace()) {
     return torch::relu_(input);
   } else {
@@ -123,12 +123,12 @@ inline Tensor relu(Tensor& input, const ReLUOptions& options = {}) {
   }
 }
 
-inline Tensor relu6(Tensor& input, const ReLU6Options& options = {}) {
+inline Tensor relu6(Tensor& input, const ReLU6FuncOptions& options = {}) {
   return hardtanh(input,
     HardtanhOptions().min_val(0).max_val(6).inplace(options.inplace()));
 }
 
-inline Tensor rrelu(Tensor& input, const RReLUOptions& options = {},
+inline Tensor rrelu(Tensor& input, const RReLUFuncOptions& options = {},
                     bool training = false) {
   if (options.inplace()) {
     return torch::rrelu_(input, options.lower(), options.upper(), training);
@@ -137,7 +137,7 @@ inline Tensor rrelu(Tensor& input, const RReLUOptions& options = {},
   }
 }
 
-inline Tensor celu(Tensor& input, const CELUOptions& options = {}) {
+inline Tensor celu(Tensor& input, const CELUFuncOptions& options = {}) {
   if (options.inplace()) {
     return torch::celu_(input, options.alpha());
   } else {
@@ -146,12 +146,12 @@ inline Tensor celu(Tensor& input, const CELUOptions& options = {}) {
 }
 
 inline Tensor softplus(const Tensor& input,
-                       const SoftplusOptions& options = {}) {
+                       const SoftplusFuncOptions& options = {}) {
   return torch::softplus(input, options.beta(), options.threshold());
 }
 
 inline Tensor softshrink(const Tensor& input,
-                         const SoftshrinkOptions& options = {}) {
+                         const SoftshrinkFuncOptions& options = {}) {
   return torch::softshrink(input, options.lambda());
 }
 
@@ -163,7 +163,7 @@ inline Tensor tanhshrink(const Tensor& input) {
   return input - input.tanh();
 }
 
-inline Tensor threshold(Tensor& input, const ThresholdOptions& options) {
+inline Tensor threshold(Tensor& input, const ThresholdFuncOptions& options) {
   if (options.inplace()) {
     return torch::threshold_(input, options.threshold(), options.value());
   } else {

@@ -9,7 +9,7 @@ namespace functional {
 inline Tensor cosine_similarity(
     const Tensor& x1,
     const Tensor& x2,
-    const CosineSimilarityOptions& options) {
+    const CosineSimilarityFuncOptions& options) {
   return torch::cosine_similarity(
       x1,
       x2,
@@ -22,7 +22,7 @@ inline Tensor cosine_similarity(
 inline Tensor pairwise_distance(
     const Tensor& x1,
     const Tensor& x2,
-    const PairwiseDistanceOptions& options) {
+    const PairwiseDistanceFuncOptions& options) {
   return torch::pairwise_distance(
       x1,
       x2,
