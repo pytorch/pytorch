@@ -35,7 +35,7 @@ qmaxpool2d_configs = op_bench.config_list(
 
 qmaxpool2d_short_configs = op_bench.config_list(
     attrs=(
-       (64, 224, 224, (2, 2), (2, 2), (0, 0), (1, 1)),  # MaxPool2d-4  # noqa
+       (1, 3, 3, (3, 3), (1, 1), (0, 0), (1, 1)),  # dummy
     ),
     attr_names=('C', 'H', 'W',        # Input layout
                 'k', 's', 'p', 'd'),  # Pooling parameters
