@@ -196,10 +196,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = test()
         self.run_test(model, x, test_with_inputs=[y],
                       input_names=['input_1'],
-                      output_names=['output_1', 'output_2'],
-                      dynamic_axes={'input_1': [0, 1, 2],
-                                    'output_1': [0],
-                                    'output_2': [0]})
+                      dynamic_axes={'input_1': [0, 1, 2]})
 
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
