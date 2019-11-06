@@ -235,7 +235,11 @@ class _open_zipfile_reader(_open_file_like):
             return len(the_bytes)
 
         def seeker(pos):
-            return self.buffer.seek(pos)
+            result = self.buffer.seek(pos)
+            if result is not None:
+                return result
+            # Python 2's seek() methods return None
+            return pos
 
         current = self.buffer.tell()
         self.buffer.seek(current, os.SEEK_END)
