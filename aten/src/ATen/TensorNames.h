@@ -29,10 +29,14 @@ namespace at { namespace namedinference {
 // to A, `tensor` would have duplicate names [A, A]. Therefore we need to check
 // tensor.names [A, None] for the existence of A.
 struct CAFFE2_API TensorName {
+  TensorName()
+    : name_(Dimname::wildcard()),
+      initialized_(false) {};
   explicit TensorName(ArrayRef<Dimname> origin, int origin_idx)
     : origin_(origin),
+      name_(origin[maybe_wrap_dim(origin_idx, origin.size())]),
       origin_idx_(origin_idx),
-      name_(origin[maybe_wrap_dim(origin_idx, origin.size())]) {}
+      initialized_(true) {}
 
   // op_name is only used for error reporting.
   const TensorName& unify(const TensorName& other, const char* op_name) const;
@@ -40,8 +44,10 @@ struct CAFFE2_API TensorName {
 
  private:
   ArrayRef<Dimname> origin_;
-  int origin_idx_;
   Dimname name_;
+  uint8_t origin_idx_; // A named tensor can have at most 64 dims.
+  bool initialized_;
+
   CAFFE2_API friend std::ostream& operator<<(
       std::ostream& out,
       const TensorName& tensorname);
@@ -57,7 +63,9 @@ struct CAFFE2_API TensorNames {
   explicit TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end);
 
   // op_name is only used for error reporting.
-  TensorNames unifyFromRight(const TensorNames& other, const char* op_name) const;
+  TensorNames& unifyFromRightInplace(
+      const TensorNames& other,
+      const char* op_name = "unify");
   void checkUnique(const char* op_name) const;
 
   void append(TensorName&& name);
