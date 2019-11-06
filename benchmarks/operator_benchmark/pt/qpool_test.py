@@ -8,7 +8,7 @@ import torch
 import operator_benchmark as op_bench
 
 # 2D pooling will have input matrix of rank 3 or 4
-qmaxpool2d_configs = op_bench.config_list(
+qpool2d_long_configs = op_bench.config_list(
     attrs=(
        #  C    H    W   k       s       p
        (  1,   3,   3, (3, 3), (1, 1), (0, 0)),  # dummy        # noqa
@@ -32,7 +32,7 @@ qmaxpool2d_configs = op_bench.config_list(
     tags=('long',)
 )
 
-qmaxpool2d_short_configs = op_bench.config_list(
+qpool2d_short_configs = op_bench.config_list(
     attrs=((1, 3, 3, (3, 3), (1, 1), (0, 0)),),  # dummy
     attr_names=('C', 'H', 'W',        # Input layout
                 'k', 's', 'p'),  # Pooling parameters
@@ -42,6 +42,51 @@ qmaxpool2d_short_configs = op_bench.config_list(
         'contig': (True,),
         'dtype': (torch.qint32, torch.qint8, torch.quint8),
     },
+    tags=('short',)
+)
+
+# We will use the same dimensions as maxpool
+qadaptive_long_configs = op_bench.cross_product_configs(
+    N=range(1, 16),
+    input_dim=(
+        (  1,   3,   3),  # dummy        # noqa
+        (  3,  64,  64),  # dummy        # noqa
+        (  3,  64,  64),  # dummy        # noqa
+        # VGG16 pools with original input shape: (-1, 3, 224, 224)
+        ( 64, 224, 224),  # MaxPool2d-4  # noqa
+        (128, 112, 112),  # MaxPool2d-9  # noqa
+        (256,  56,  56),  # MaxPool2d-16 # noqa
+        (512,  28,  28),  # MaxPool2d-23 # noqa
+        (512,  14,  14),  # MaxPool2d-30 # noqa
+    ),
+    output_dim=(
+        (  1,   3,   3),  # dummy        # noqa
+        (  3,  64,  64),  # dummy        # noqa
+        (  3,  64,  64),  # dummy        # noqa
+        # VGG16 pools with original input shape: (-1, 3, 224, 224)
+        ( 64, 224, 224),  # MaxPool2d-4  # noqa
+        (128, 112, 112),  # MaxPool2d-9  # noqa
+        (256,  56,  56),  # MaxPool2d-16 # noqa
+        (512,  28,  28),  # MaxPool2d-23 # noqa
+        (512,  14,  14),  # MaxPool2d-30 # noqa
+    ),
+    contig=(False, True),
+    dtype=(torch.qint32, torch.qint8, torch.quint8),
+    tags=('long',)
+)
+
+qadaptive_short_configs = op_bench.cross_product_configs(
+    N=2,
+    input_dim=(
+        (1,  3,  3),  # dummy        # noqa
+        (3, 64, 64),  # dummy        # noqa
+    ),
+    output_dim=(
+        (1,  3,  3),  # dummy        # noqa
+        (3, 64, 64),  # dummy        # noqa
+    ),
+    contig=(True,),
+    dtype=(torch.qint32, torch.qint8, torch.quint8),
     tags=('short',)
 )
 
@@ -89,10 +134,22 @@ class QAvgPool2dBenchmark(_QPool2dBenchmarkBase):
         super(QAvgPool2dBenchmark, self).setup(N, C, H, W, dtype, contig)
 
 
-op_bench.generate_pt_test(qmaxpool2d_short_configs, QAvgPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_short_configs, QMaxPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_configs, QAvgPool2dBenchmark)
-op_bench.generate_pt_test(qmaxpool2d_configs, QMaxPool2dBenchmark)
+class QAdaptiveAvgPool2dBenchmark(_QPool2dBenchmarkBase):
+    def init(self, N, input_dim, output_dim, dtype, contig):
+        input_dim = (N,) + input_dim
+        output_dim = (N,) + output_dim
+        self.pool_op = torch.nn.AdaptiveAvgPool2d(output_dim)
+        super(QAdaptiveAvgPool2dBenchmark, self).setup(*input_dim, dtype,
+                                                       contig)
+
+
+op_bench.generate_pt_test(qadaptive_short_configs, QAdaptiveAvgPool2dBenchmark)
+op_bench.generate_pt_test(qpool2d_short_configs, QAvgPool2dBenchmark)
+op_bench.generate_pt_test(qpool2d_short_configs, QMaxPool2dBenchmark)
+
+op_bench.generate_pt_test(qadaptive_long_configs, QAdaptiveAvgPool2dBenchmark)
+op_bench.generate_pt_test(qpool2d_long_configs, QAvgPool2dBenchmark)
+op_bench.generate_pt_test(qpool2d_long_configs, QMaxPool2dBenchmark)
 
 
 if __name__ == "__main__":
