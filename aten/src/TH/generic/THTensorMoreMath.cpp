@@ -19,7 +19,7 @@ ptrdiff_t THTensor_(numel)(THTensor *t)
 
 int THTensor_(equal)(THTensor *ta, THTensor* tb)
 {
-  int equal = 1;
+  std::atomic<int> equal = 1;
   if(!THTensor_(isSameSizeAs)(ta, tb))
     return 0;
 
