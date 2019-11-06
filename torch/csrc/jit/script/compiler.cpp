@@ -439,6 +439,7 @@ struct Environment {
                "__str__",
                std::make_shared<CastValue>(StringType::get(), aten::str))},
           {"getattr", SpecialFormValue::create(prim::GetAttr)},
+          {"hasattr", SpecialFormValue::create(prim::HasAttr)},
           {"isinstance", SpecialFormValue::create(prim::isinstance)},
           // todo(zach): remove when we can correctly export torch.full via ONNX
           // or we have implicit conversion that can convert numbers to tensors
@@ -2379,6 +2380,25 @@ struct to_ir {
         const std::string& name = StringLiteral(selector).text();
         return obj->attr(apply.range(), method, name);
       }
+      case prim::HasAttr: {
+        checkApplyNumInputs(apply, 2);
+        auto obj = emitSugaredExpr(apply.inputs()[0], 1);
+        auto selector = apply.inputs()[1];
+        if (selector.kind() != TK_STRINGLITERAL) {
+          throw ErrorReport(apply)
+              << "hasattr's second argument must be a string literal";
+        }
+        const auto type = obj->asValue(apply.range(), method)->type();
+        if (auto cls = type->cast<ClassType>()) {
+          const std::string& name = StringLiteral(selector).text();
+          const bool hasAttr = cls->hasAttribute(name);
+          return std::make_shared<SimpleValue>(graph->insertConstant(hasAttr));
+        } else {
+          throw ErrorReport(apply)
+              << "hasattr's first argument must be a class type, got "
+              << type->python_str() << " instead";
+        }
+      } break;
       case prim::Uninitialized: {
         checkApplyNumInputs(apply, 1);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
