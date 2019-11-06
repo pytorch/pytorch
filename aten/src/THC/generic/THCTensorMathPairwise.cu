@@ -2,7 +2,9 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathPairwise.cu"
 #else
 
-int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
+#include <ATen/NamedTensorUtils.h>
+
+static int THCTensor_(equalImpl)(THCState *state, THCTensor *self_, THCTensor *src_)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   if (!THCTensor_(isSameSizeAs(state, self_, src_))) {
@@ -27,6 +29,16 @@ int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_)
   THCudaByteTensor_free(state, buf);
 
   return min != 0;
+}
+
+int THCTensor_(equal)(THCState *state, THCTensor *self_, THCTensor *src_) {
+#ifdef BUILD_NAMEDTENSOR
+  if (!at::namedinference::are_names_equal(self_, src_)) {
+    return 0;
+  }
+  at::NoNamesGuard guard;
+#endif
+  return THCTensor_(equalImpl)(state, self_, src_);
 }
 
 void THCTensor_(bitand)(THCState* state, THCTensor *self_, THCTensor *src_, scalar_t value)
