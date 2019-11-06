@@ -67,7 +67,7 @@ def _init_rpc(
     self_rank=-1,
     worker_name_to_id=None,
     num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
-    rpc_timeout=DEFAULT_RPC_TIMEOUT,
+    global_process_timeout=DEFAULT_RPC_TIMEOUT,
 ):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
@@ -85,7 +85,7 @@ def _init_rpc(
         self_rank=self_rank,
         worker_name_to_id=worker_name_to_id,
         num_send_recv_threads=num_send_recv_threads,
-        rpc_timeout=rpc_timeout,
+        global_process_timeout=global_process_timeout,
     )
     _start_rpc_agent(_agent)
 
@@ -111,14 +111,14 @@ def get_worker_info(worker_name=None):
         return _agent.get_worker_info()
 
 @_require_initialized
-def get_rpc_timeout():
+def get_global_process_timeout():
     """
     Retrieve the timeout for all RPCs that was set during RPC initialization.
 
     Returns:
         `datetime.timedelta` instance indicating the RPC timeout.
     """
-    return _agent._get_rpc_timeout()
+    return _agent._get_global_process_timeout()
 
 
 def _to_worker_info(name_or_info):

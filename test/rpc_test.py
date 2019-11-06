@@ -261,7 +261,6 @@ class RpcTest(object):
             worker_name_to_id=self.worker_name_to_id,
         )
 
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     @dist_init(setup_model_parallel=False)
     def test_duplicate_name(self):
         with self.assertRaisesRegex(RuntimeError, "is not unique"):
@@ -962,15 +961,13 @@ class RpcTest(object):
 
         self.assertEqual(result, sum(vals))
 
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     @dist_init
-    def test_get_default_rpc_timeout(self):
-        timeout = rpc.get_rpc_timeout()
+    def test_get_global_process_timeout(self):
+        timeout = rpc.get_global_process_timeout()
         self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
 
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     @dist_init(setup_model_parallel=False)
-    def test_set_rpc_timeout(self):
+    def test_set_global_process_timeout(self):
         timeout = timedelta(seconds=1)
         rpc.init_model_parallel(
             self_name="worker{}".format(self.rank),
@@ -978,9 +975,9 @@ class RpcTest(object):
             init_method=self.init_method,
             self_rank=self.rank,
             worker_name_to_id=self.worker_name_to_id,
-            rpc_timeout=timeout
+            global_process_timeout=timeout
         )
-        set_timeout = rpc.get_rpc_timeout()
+        set_timeout = rpc.get_global_process_timeout()
         self.assertEqual(timeout, set_timeout)
         rpc.join_rpc()
 
