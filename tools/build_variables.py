@@ -357,7 +357,6 @@ def add_torch_libs():
     ]
 
     compiler_flags_cpu = [
-        "-D_THP_CORE",
         "-DUSE_C10D",
         "-DUSE_DISTRIBUTED",
         "-DUSE_NUMPY",
