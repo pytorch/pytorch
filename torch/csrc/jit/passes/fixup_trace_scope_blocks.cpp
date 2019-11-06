@@ -18,14 +18,82 @@ bool isEligibleNode(Node* n) {
       n->kind() == prim::TracedFork;
 }
 
-} // namespace
-
+// This pass does several things:
+// 1) It looks at TracedModuleForward nodes and resolves the type of `self`
+//    for that (to-be) method call. It adds an input of that type to the
+//    block, and adds the TracedAttr value corresponding to that `self`
+//    value as a Node input. This ensures `self` is an explicit Use on
+//    the node, a property we take advantage of downstream. Example:
+// 2) Convert all references to prim::TracedAttr values to prim::GetAttr
+//    calls in the tightest scope possible. Concretely, for each use of
+//    a prim::TracedAttr value, we compare the scope of that attribute
+//    to the scope of the Use. We emit GetAttr nodes for all atoms
+//    that are not shared between the two. For example, if an
+//    attribute `f.param` is referenced in scope `f`, we emit a
+//    GetAttr[name="param"](%self) node in the `f` block, where
+//    `self` is the previously-added `self` argument to the block.
+// 3) Destroy all the prim::TracedAttr nodes, as they should have
+//    no more uses.
+//
+// A quick example:
+//
+//
+// Input graph:
+//
+//     graph(%self : ClassType<Module>,
+//           %x : Float(3, 4)):
+//       %1 : bool = prim::TracedAttr[scope="__module.training"]()
+//       %2 : ClassType<Module> = prim::TracedAttr[scope="__module.f"]()
+//       %3 : Float(4, 4) = prim::TracedAttr[scope="__module.f.param"]()
+//       %4 : bool = prim::TracedAttr[scope="__module.f.training"]()
+//       = prim::TracedModuleForward[scope="__module.f"](),
+//         block0():
+//           %6 : Float(3, 4) = aten::mm(%x, %3),
+//           -> ()
+//       return (%6)
+//
+// The diff after step (1)
+//
+//     -   = prim::TracedModuleForward[scope="__module.f"](),
+//     -    block0():
+//     +   = prim::TracedModuleForward[scope="__module.f"](%2),
+//     +    block0(%self : ClassType<Module>):
+//
+// The diff after step (2)
+//
+//       graph(%self.1 : ClassType<Module>,
+//             %x : Float(3, 4)):
+//       +  %9 : ClassType<Module> = prim::GetAttr[name="f"](%self.1)
+//         %1 : bool = prim::TracedAttr[scope="__module.training"]()
+//           <....>
+//         %4 : bool = prim::TracedAttr[scope="__module.f.training"]()
+//       -   = prim::TracedModuleForward[scope="__module.f"](%2),
+//       +   = prim::TracedModuleForward[scope="__module.f"](%9),
+//           block0(%self : ClassType<Module>):
+//       -      %6 : Float(3, 4) = aten::mm(%x, %3),
+//       +      %8 : Tensor = prim::GetAttr[name="param"](%self)
+//       +      %6 : Float(3, 4) = aten::mm(%x, %8),
+//             -> ()
+//         return (%6)
+//
+// The diff after step (3)
+//
+//       -  %1 : bool = prim::TracedAttr[scope="__module.training"]()
+//       -  %2 : ClassType<Module> = prim::TracedAttr[scope="__module.f"]()
+//       -  %3 : Float(4, 4) = prim::TracedAttr[scope="__module.f.param"]()
+//       -  %4 : bool = prim::TracedAttr[scope="__module.f.training"]()
 struct ConvertTracedAttrReferences {
   void run(const std::shared_ptr<Graph>& graph) {
+    // Build a table mapping--for each TracedAttr node--the
+    // qualified name of the attribute to the Value* output
+    // of the Node.
     buildAttrMap(graph);
+    // Step 1
     addSelfArgToTracedForwardNodes(graph->block());
+    // Step 2
     convertAttrReferencesToLocalGetAttrs(
         graph->block(), "__module", graph->inputs()[0]);
+    // Step 3
     destroyTracedAttrNodes(graph);
   }
 
@@ -52,15 +120,35 @@ struct ConvertTracedAttrReferences {
     }
   }
 
+  // This is a recursive function that descends down all blocks in the Graph
+  // (NB: not just TracedModuleForward blocks). Each descension has a
+  // corresponding `prefix`, i.e. the qualified name of the scope this
+  // Block represents (or the scope in which this block resides for
+  // non-TracedModuleForward nodes). We use this prefix to make decisions
+  // about whether to emit a GetAttr node for an attribute reference, or
+  // to defer that emission to the caller (in the case where an attribute
+  // reference does not reside in the `prefix` scope).
   std::vector<Value*> convertAttrReferencesToLocalGetAttrs(
       Block* b,
       const c10::QualifiedName& prefix,
       Value* self) {
+    // Store away Value*'s which are references to TracedAttr's which are
+    // not in the `prefix` scope. We pass this back to the caller, who
+    // should add these Values as explicit inputs as well as inductively
+    // make the same decision on those Values.
     std::vector<Value*> unresolved_tracedattrs;
+    // To ensure we don't emit redundant GetAttr Nodes in a given scope,
+    // we maintain this map of original TracedAttr Value* to the Value*
+    // corresponding to the GetAttr for that attribute.
+    // We don't rely on CSE here because we currently can't reason about
+    // the correctness of CSE over GetAttr Nodes (i think)
     std::unordered_map<Value*, Value*> local_remaps;
 
     auto prefix_atoms = prefix.atoms();
     for (Node* n : b->nodes()) {
+      // The only difference between these two branches is for
+      // TracedModuleForward we advance the scope, but for other
+      // Nodes with Blocks we don't
       if (n->kind() == prim::TracedModuleForward) {
         auto sub_unresolved = convertAttrReferencesToLocalGetAttrs(
             n->blocks()[0], n->s(attr::scope), n->blocks()[0]->inputs()[0]);
@@ -80,6 +168,8 @@ struct ConvertTracedAttrReferences {
       for (size_t inp_idx = 0; inp_idx < n->inputs().size(); ++inp_idx) {
         Value* inp = n->input(inp_idx);
 
+        // Short circuit: if we've already emitted a new Value for this
+        // attribute, just use that.
         if (local_remaps.count(inp)) {
           n->replaceInput(inp_idx, local_remaps[inp]);
           continue;
@@ -90,6 +180,9 @@ struct ConvertTracedAttrReferences {
         if (inp_node->kind() == prim::TracedAttr) {
           auto attr_qualname = c10::QualifiedName(inp_node->s(attr::scope));
           if (prefix.isPrefixOf(attr_qualname)) {
+            // Prefix case: the attribute resides in this scope or a
+            // sub-scope. Continually emit GetAttr nodes until we've reached
+            // the proper attribute.
             auto attr_atoms = attr_qualname.atoms();
             Value* replaced_value = self;
             for (size_t i = 0; i < attr_atoms.size(); i++) {
@@ -103,6 +196,10 @@ struct ConvertTracedAttrReferences {
             n->replaceInput(inp_idx, replaced_value);
             local_remaps[inp] = replaced_value;
           } else {
+            // Non-prefix case: this is a use of an attribute somewhere
+            // higher in the Module hierarchy. Add a captured input to
+            // the block for this attribute and add to the vector of
+            // Value*'s for the caller to handle.
             Value* remapped = b->addInput()->copyMetadata(inp);
             n->replaceInput(inp_idx, remapped);
             unresolved_tracedattrs.push_back(inp);
@@ -114,6 +211,8 @@ struct ConvertTracedAttrReferences {
     return unresolved_tracedattrs;
   }
 
+  // The previous pass should have deleted all uses of TracedAttr
+  // nodes. Let's explicitly delete them here.
   void destroyTracedAttrNodes(const std::shared_ptr<Graph>& graph) {
     for (auto node_itr = graph->nodes().begin();
          node_itr != graph->nodes().end();) {
@@ -269,8 +368,6 @@ void lambdaLiftBlocksAndConvertToGraph(Block* b) {
   }
 }
 
-namespace {
-
 // Find a unique name to add this method as
 // We try {method_name}, {method_name}1, {method_name}2, ...
 std::string mangleMethodName(
@@ -294,8 +391,6 @@ std::string mangleMethodName(
   }
   TORCH_INTERNAL_ASSERT(false);
 }
-
-} // namespace
 
 // Register the attr::Subgraph Graph values as Functions in the
 // class compilation unit and register that Function as a method
@@ -406,6 +501,8 @@ void runCleanupPasses(script::Module* m) {
     runCleanupPasses(method.graph());
   }
 }
+
+} // namespace
 
 void FixupTraceScopeBlocks(
     std::shared_ptr<Graph>& graph,
