@@ -31,8 +31,8 @@ qactivation_configs = op_bench.cross_product_configs(
 qactivation_short_configs = op_bench.cross_product_configs(
     dims=((3, 4, 5),      # Rank=3
           (2, 3, 4, 5)),  # Rank=4,
-    permute_dims=False,
-    inplace=False,
+    permute_dims=(False,),
+    inplace=(False,),
     dtype=(torch.quint8, torch.qint8, torch.qint32),
     tags=('short',)
 )
