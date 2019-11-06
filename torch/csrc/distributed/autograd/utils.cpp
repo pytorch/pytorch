@@ -42,37 +42,45 @@ DistAutogradContext* addRecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     rpc::worker_id_t fromWorkerId) {
-  TORCH_INTERNAL_ASSERT(
-      torch::autograd::compute_requires_grad(tensors),
-      "Received tensors do not require grad, addRecvRpcBackward should not be called");
   // Initialize autograd context if necessary.
   auto& autogradContainer = DistAutogradContainer::getInstance();
   DistAutogradContext& autogradContext =
       autogradContainer.getOrCreateContext(autogradMetadata.autogradContextId);
 
-  // Attach the tensors as inputs to the autograd function.
-  auto grad_fn = std::make_shared<RecvRpcBackward>(
-      autogradMetadata, autogradContext, fromWorkerId);
-  for (auto& tensor : tensors) {
-    torch::autograd::set_history(tensor, grad_fn);
+  if (!tensors.empty()) {
+    TORCH_INTERNAL_ASSERT(
+        torch::autograd::compute_requires_grad(tensors),
+        "Received tensors do not require grad, addRecvRpcBackward should not be called");
+
+    // Attach the tensors as inputs to the autograd function.
+    auto grad_fn = std::make_shared<RecvRpcBackward>(
+        autogradMetadata, autogradContext, fromWorkerId);
+    for (auto& tensor : tensors) {
+      torch::autograd::set_history(tensor, grad_fn);
+    }
+
+    // Now update the autograd context with the necessary information.
+    autogradContext.addRecvFunction(
+        grad_fn, autogradMetadata.autogradMessageId);
   }
 
-  // Now update the autograd context with the necessary information.
-  autogradContext.addRecvFunction(grad_fn, autogradMetadata.autogradMessageId);
   return &autogradContext;
 }
 
 Message getMessageWithAutograd(
     const rpc::worker_id_t dstId,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
-    MessageType msgType) {
+    MessageType msgType,
+    bool forceGradRecording) {
   auto& autogradContainer = DistAutogradContainer::getInstance();
 
   // If there is no valid context and no tensor requires grads, send original
   // rpc message. otherwise, attach grad info and grad functions and send
   // rpcWithAutograd message.
+  auto tensorsRequireGrad =
+      torch::autograd::compute_requires_grad(wrappedRpcMsg.tensors());
   if (!autogradContainer.hasValidContext() ||
-      !torch::autograd::compute_requires_grad(wrappedRpcMsg.tensors())) {
+      (!forceGradRecording && !tensorsRequireGrad)) {
     return std::move(wrappedRpcMsg);
   }
 
@@ -88,9 +96,11 @@ Message getMessageWithAutograd(
       autogradMetadata,
       std::move(wrappedRpcMsg));
 
-  // Record autograd information for 'send'.
-  addSendRpcBackward(
-      autogradContext, autogradMetadata, rpcWithAutograd->tensors(), dstId);
+  if (tensorsRequireGrad) {
+    // Record autograd information for 'send'.
+    addSendRpcBackward(
+        autogradContext, autogradMetadata, rpcWithAutograd->tensors(), dstId);
+  }
 
   return std::move(*rpcWithAutograd).toMessage();
 }
@@ -98,9 +108,13 @@ Message getMessageWithAutograd(
 std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    torch::distributed::rpc::Message&& wrappedRpcMsg) {
+    torch::distributed::rpc::Message&& wrappedRpcMsg,
+    bool forceGradRecording) {
   auto msg = getMessageWithAutograd(
-      dst.id_, std::move(wrappedRpcMsg), MessageType::FORWARD_AUTOGRAD_REQ);
+      dst.id_,
+      std::move(wrappedRpcMsg),
+      MessageType::FORWARD_AUTOGRAD_REQ,
+      forceGradRecording);
 
   return agent.send(dst, std::move(msg));
 }

@@ -280,11 +280,15 @@ class GroupWiseDNNLowPOpConvAcc16OpTest(hu.HypothesisTestCase):
                     "Int8ConvPackWeight",
                     inputs,
                     ["W_packed"],
+                    stride=stride,
+                    kernel=kernel,
+                    dilation=dilation,
+                    pad=pad,
+                    nbits_in_non_outlier=nbits_in_non_outlier,
+                    engine=engine,
                     group=group,
                     quantize_groupwise=1,
-                    nbits_in_non_outlier=nbits_in_non_outlier,
                     in_scale=x_q_param.scale,
-                    engine=engine,
                 )
                 init_net.Proto().op.extend([pack])
 
