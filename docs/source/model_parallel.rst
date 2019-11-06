@@ -9,5 +9,3 @@ Distributed RPC Framework - torch.distributed.autograd and torch.distributed.rpc
 
 .. autofunction:: rpc_sync
 
-Test test test
-
