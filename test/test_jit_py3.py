@@ -233,6 +233,26 @@ class TestScriptPy3(JitTestCase):
                 if True:
                     x : Optional[int] = 7
 
+    def test_module_annotation(self):
+        class Foo(nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+
+            def forward(self, x):
+                return x + 2
+
+        class Bar(nn.Module):
+            foo: Foo
+            def __init__(self):
+                super(Bar, self).__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        scripted_mod = torch.jit.script(Bar())
+        input = torch.randn(3, 4)
+        self.assertEqual(scripted_mod(input), input + 2)
 
     def test_any_in_class_fails(self):
         class MyCoolNamedTuple(NamedTuple):

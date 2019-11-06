@@ -114,10 +114,11 @@ def infer_raw_concrete_type(nn_module):
         added_names.add(name)
 
     for name, item in nn_module._modules.items():
-        attr_type = infer_type(name, item)
-        if attr_type is not None:
-            # if the type can be inferred, it should be a module interface type
-            concrete_type.add_module_interface(name, attr_type)
+        module_ann = class_annotations.get(name)
+        if module_ann is not None and hasattr(module_ann, "__torch_script_interface__"):
+            # if we could infer module interface type from annotation, add it as module interface
+            module_interface_type = torch._C.InterfaceType(_jit_internal._qualified_name(module_ann))
+            concrete_type.add_module_interface(name, module_interface_type)
         else:
             # otherwise we get the concrete module type for item and add it to concrete_type
             sub_concrete_type = concrete_type_store.get_or_create_concrete_type(item)
