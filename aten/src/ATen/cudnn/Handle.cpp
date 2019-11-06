@@ -23,7 +23,10 @@ void destroyCuDNNHandle(cudnnHandle_t handle) {
 
 at::cuda::DeviceThreadHandlePool<cudnnHandle_t, createCuDNNHandle, destroyCuDNNHandle> pool;
 
-// This will be destroyed when the thread terminates,
+// Thread local PoolWindows are wrapped by unique_ptrs and lazily-initialized
+// to avoid initialization issues that caused hangs on Windows.
+// See: https://github.com/pytorch/pytorch/pull/22405
+// This thread local unique_ptrs will be destroyed when the thread terminates,
 // releasing its reserved handles back to the pool.
 thread_local std::unique_ptr<decltype(pool)::PoolWindow> myPoolWindow;
 

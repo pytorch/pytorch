@@ -118,28 +118,18 @@ struct DeviceThreadHandlePool {
     std::unordered_map<int, Handle_t> my_handles;
 
     // Called by the destructor.  Releases this thread's handles back into the pool.
-    void release()
-    {
-        // The conditional check below is certainly worthwhile for efficiency.
-        // However, it also serves another purpose:  Without the conditional,
-        // as of cuda V9.0.176 and torch.backends.cudnn.version() = 7005,
-        // we observe weird nondeterministic hangs on Windows when the process first
-        // attempts to create a cudnn handle.  Example with added debug print statements:
-        // https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-test2/19238/console
-        // The print statements reveal that when these hangs occur, the thread that is attempting
-        // to create a cudnn handle for the first time hangs on the call to cudnnCreate itself.
-        // These hangs have never manifested on anything but that particular Windows build.
-        // All other builds seem fine.
-        if(my_handles.size() > 0)
-        {
-        std::lock_guard<std::mutex> guard(parent.mutex);
-        for(auto d_h : my_handles)
-            parent.available_handles[d_h.first].push_back(d_h.second);
+    void release() {
+        if(my_handles.size() > 0) {
+            std::lock_guard<std::mutex> guard(parent.mutex);
+            for(auto d_h : my_handles)
+                parent.available_handles[d_h.first].push_back(d_h.second);
         }
     }
     };
 
     PoolWindow *newPoolWindow() {
+        // The returned pointer has to be owned by a thread local variable
+        // so that different threads does not share the same PoolWindow.
         return new PoolWindow(*this);
     }
 };
