@@ -11051,7 +11051,7 @@ class TestTorchDeviceType(TestCase):
         ints = torch.randint(-100, 100, (2 * sz,), device=device)
         unary_mem_overlap_cases = [
             ("abs", doubles, True, True, 'cpu'),
-            ("abs", doubles, False, True, 'cuda'),
+            ("abs", doubles, True, True, 'cuda'),
             ("acos", doubles, True, True, 'cpu'),
             ("acos", doubles, False, True, 'cuda'),
             ("asin", doubles, True, True, 'cpu'),
