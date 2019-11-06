@@ -10,8 +10,8 @@ namespace nn {
 namespace functional {
 
 inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
-                         const Tensor& running_var, const BatchNormFuncOptions& options = {}, bool training = false) {
-  if (training) {
+                         const Tensor& running_var, const BatchNormFuncOptions& options = {}) {
+  if (options.training()) {
     auto size = input.sizes();
     int64_t size_prods = size[0];
     for (size_t i = 0; i < size.size() - 2; i++) {
@@ -27,7 +27,7 @@ inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
     options.bias(),
     running_mean,
     running_var,
-    training,
+    options.training(),
     options.momentum().value(),
     options.eps(),
     at::globalContext().userEnabledCuDNN());
