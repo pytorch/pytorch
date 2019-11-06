@@ -246,5 +246,11 @@ TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
                                dict(TestUtilityFuns.__dict__, opset_version=10))
 
 
+# opset 11 tests
+TestUtilityFuns_opset11 = type(str("TestUtilityFuns_opset11"),
+                               (TestCase,),
+                               dict(TestUtilityFuns.__dict__, opset_version=11))
+
+
 if __name__ == '__main__':
     run_tests()
