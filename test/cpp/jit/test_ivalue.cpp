@@ -72,7 +72,8 @@ void testIValue() {
   auto obj = c10::ivalue::Object::create(
       c10::StrongTypePtr(cu, cls), cls->numAttributes());
   obj->unsafeRemoveAttr("attr1");
-  ASSERT_FALSE(cls->hasAttribute("attr1"));
+  // attr1 is not removed in the type
+  ASSERT_TRUE(cls->hasAttribute("attr1"));
   ASSERT_TRUE(cls->hasAttribute("attr2"));
   ASSERT_TRUE(obj->slots().size() == 1);
 }
