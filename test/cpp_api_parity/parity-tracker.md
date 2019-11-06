@@ -80,6 +80,7 @@ torch.nn.InstanceNorm2d|No|No
 torch.nn.InstanceNorm3d|No|No
 torch.nn.LayerNorm|Yes|No
 torch.nn.LocalResponseNorm|Yes|No
+torch.nn.CrossMapLRN2d|Yes|No
 torch.nn.RNN|No|No
 torch.nn.LSTM|No|No
 torch.nn.GRU|No|No
@@ -138,6 +139,5 @@ torch.nn.utils.rnn.pack_padded_sequence|No|No
 torch.nn.utils.rnn.pad_packed_sequence|No|No
 torch.nn.utils.rnn.pad_sequence|No|No
 torch.nn.utils.rnn.pack_sequence|No|No
-torch.nn.CrossMapLRN2d|No|No
 torch.nn.FractionalMaxPool3d|No|No
 torch.nn.SampleModule|Yes|Yes
