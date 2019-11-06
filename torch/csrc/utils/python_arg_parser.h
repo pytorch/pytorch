@@ -647,10 +647,4 @@ static PyObject* PyTorch_LookupSpecial(PyObject *obj, char* name)
   return PyObject_FastGetAttrString((PyObject *)tp, name);
 }
 
-static PyObject* get_torch_function(PyObject* obj)
-{
-  const char* torch_function_name = "__torch_function__";
-  return PyTorch_LookupSpecial(obj, const_cast<char*>(torch_function_name));
-}
-
 } // namespace torch
