@@ -92,21 +92,29 @@ def main():
 
     parser.add_argument(
         "--ai_pep_format",
-        help="Print result when running on AI-PEP",
+        type=benchmark_utils.str2bool,
+        nargs='?',
+        const=True,
         default=False,
-        type=bool
+        help="Print result when running on AI-PEP"
     )
 
     parser.add_argument(
         "--use_jit",
-        help="Run operators with PyTorch JIT mode",
-        action='store_true'
+        type=benchmark_utils.str2bool,
+        nargs='?',
+        const=True,
+        default=False,
+        help="Run operators with PyTorch JIT mode"
     )
 
     parser.add_argument(
         "--forward_only",
-        help="Only run the forward path of operators",
-        action='store_true'
+        type=benchmark_utils.str2bool,
+        nargs='?',
+        const=True,
+        default=False,
+        help="Only run the forward path of operators"
     )
 
     parser.add_argument(
