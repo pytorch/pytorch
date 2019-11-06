@@ -31,7 +31,7 @@ qmaxpool2d_configs = op_bench.config_list(
         'contig': (False, True),
         'dtype': (torch.qint32, torch.qint8, torch.quint8),
     },
-    tags=('short',)
+    tags=('long',)
 )
 
 
