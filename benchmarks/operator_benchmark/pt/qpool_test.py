@@ -4,7 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import torch
-import torch.quantization as tq
 
 import operator_benchmark as op_bench
 
