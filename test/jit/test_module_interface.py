@@ -5,6 +5,11 @@ import torch
 import torch.nn as nn
 from jit_utils import JitTestCase
 
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
+
 class OrigModule(nn.Module):
     def __init__(self):
         super(OrigModule, self).__init__()
