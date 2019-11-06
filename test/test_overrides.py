@@ -104,10 +104,6 @@ class DiagonalTensor(object):
         else:
             return False
 
-@implements_diagonal(torch.unique)
-def unique(mat):
-    return torch.Tensor([0, mat._i])
-
 @implements_diagonal(torch.mean)
 def mean(mat):
     return float(mat._i) / mat._N
