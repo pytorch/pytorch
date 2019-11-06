@@ -408,14 +408,14 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
 
 } // namespace
 
-#ifdef __linux__ || __APPLE__
+#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForInterface(const std::string& interface) {
   return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface);
 }
 #endif
 
-#ifdef __linux__ || __APPLE__
+#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForHostname(const std::string& hostname) {
   TORCH_CHECK(
