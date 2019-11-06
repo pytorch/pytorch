@@ -10,11 +10,12 @@ from common_utils import run_tests, TestCase
 from torch.quantization import FakeQuantize
 from torch.quantization import default_observer, default_per_channel_weight_observer
 import io
+import unittest
+
 # Reference method for fake quantize
 def _fake_quantize_per_tensor_affine_reference(X, scale, zero_point, quant_min, quant_max):
     res = (torch.clamp(torch.round(X.cpu() * (1.0 / scale) + zero_point), quant_min, quant_max) - zero_point) * scale
     return res
-
 
 # Reference method for the gradient of the fake quantize operator
 def _fake_quantize_per_tensor_affine_grad_reference(dY, X, scale, zero_point, quant_min, quant_max):
@@ -256,6 +257,7 @@ class TestFakeQuantizePerChannel(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
            qparams=hu.qparams(dtypes=torch.quint8)))
+    @unittest.skip("temporarily disable the test")
     def test_numerical_consistency_per_channel(self, device, X):
         r"""Comparing numerical consistency between CPU quantize/dequantize op and the CPU fake quantize op
         """

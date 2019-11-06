@@ -36,7 +36,7 @@ inline Tensor pad(const Tensor& input, const PadOptions& options) {
     TORCH_CHECK(
       options.value() == 0,
       "Padding mode \"",
-      c10::visit(torch::enumtype::enum_name{}, options.mode()),
+      torch::enumtype::get_enum_name(options.mode()),
       "\" doesn't take in value argument");
     if (input.dim() == 3) {
       TORCH_CHECK(options.pad().size() == 2, "3D tensors expect 2 values for padding");

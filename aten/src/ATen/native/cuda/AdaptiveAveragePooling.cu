@@ -735,7 +735,7 @@ namespace {
     const Tensor& gradOutput,
     const Tensor& input)
   {
-    auto gradInput = at::zeros_like(input);
+    auto gradInput = at::zeros_like(input, at::MemoryFormat::Contiguous);
     adaptive_avg_pool2d_backward_out_cuda_template(
       gradInput, gradOutput, input);
     return gradInput;
