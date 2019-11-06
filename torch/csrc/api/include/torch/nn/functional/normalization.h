@@ -11,23 +11,20 @@ namespace functional {
 
 inline Tensor normalize(
     const Tensor& input,
-    const NormalizeFuncOptions& options = {},
-    c10::optional<Tensor> out = c10::nullopt) {
-    if (out == c10::nullopt) {
+    const NormalizeFuncOptions& options = {}) {
+    if (options.out() == c10::nullopt) {
       auto denom = input.norm(options.p(), options.dim(), true).clamp_min(options.eps()).expand_as(input);
       return input / denom;
     } else {
       auto denom = input.norm(options.p(), options.dim(), true).clamp_min(options.eps()).expand_as(input);
-      return torch::div_out(*out, input, denom);
+      return torch::div_out(*options.out(), input, denom);
     }
 }
 
 inline Tensor layer_norm(const Tensor& input,
-    const LayerNormFuncOptions& options,
-    const Tensor& weight = Tensor(),
-    const Tensor& bias = Tensor()) {
+    const LayerNormFuncOptions& options) {
 
-    return torch::layer_norm(input, options.normalized_shape(), weight, bias, options.eps());
+    return torch::layer_norm(input, options.normalized_shape(), options.weight(), options.bias(), options.eps());
 }
 
 inline Tensor local_response_norm(
