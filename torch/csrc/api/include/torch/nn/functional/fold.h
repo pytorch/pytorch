@@ -6,7 +6,7 @@ namespace torch {
 namespace nn {
 namespace functional {
 
-inline Tensor fold(const Tensor& input, const FoldOptions& options) {
+inline Tensor fold(const Tensor& input, const FoldFuncOptions& options) {
   if (input.dim() == 3) {
     return torch::col2im(
         input,
@@ -23,7 +23,7 @@ inline Tensor fold(const Tensor& input, const FoldOptions& options) {
   }
 }
 
-inline Tensor unfold(const Tensor& input, const UnfoldOptions& options) {
+inline Tensor unfold(const Tensor& input, const UnfoldFuncOptions& options) {
   if (input.dim() == 4) {
     return torch::im2col(
         input,

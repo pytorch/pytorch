@@ -6,9 +6,10 @@
 
 namespace torch {
 namespace nn {
+namespace functional {
 
 /// Options for a Grid Sample module.
-struct TORCH_API GridSampleOptions {
+struct TORCH_API GridSampleFuncOptions {
   /// interpolation mode to calculate output values. Default: Bilinear
   TORCH_ARG(std::string, mode) = "bilinear";
   /// padding mode for outside grid values. Default: Zeros
@@ -17,5 +18,6 @@ struct TORCH_API GridSampleOptions {
   TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
 };
 
+} // namespace functional
 } // namespace nn
 } // namespace torch

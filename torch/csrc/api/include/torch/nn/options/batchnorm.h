@@ -2,6 +2,7 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -34,17 +35,30 @@ struct TORCH_API BatchNormOptions {
   /// module.
   /// Changing this parameter after construction __has no effect__.
   TORCH_ARG(bool, track_running_stats) = true;
-
-  /// This parameter is only used in `F::batch_norm`.
-  TORCH_ARG(Tensor, weight) = Tensor();
-
-  /// This parameter is only used in `F::batch_norm`.
-  TORCH_ARG(Tensor, bias) = Tensor();
 };
 
 using BatchNorm1dOptions = BatchNormOptions;
 using BatchNorm2dOptions = BatchNormOptions;
 using BatchNorm3dOptions = BatchNormOptions;
+
+namespace functional {
+
+/// Options for the `BatchNorm` module.
+struct TORCH_API BatchNormFuncOptions {
+  TORCH_ARG(Tensor, weight) = Tensor();
+
+  TORCH_ARG(Tensor, bias) = Tensor();
+
+  /// A momentum multiplier for the mean and variance.
+  /// Changing this parameter after construction __is effective__.
+  TORCH_ARG(c10::optional<double>, momentum) = 0.1;
+
+  /// The epsilon value added for numerical stability.
+  /// Changing this parameter after construction __is effective__.
+  TORCH_ARG(double, eps) = 1e-5;
+};
+
+} // namespace functional
 
 } // namespace nn
 } // namespace torch

@@ -2,6 +2,7 @@
 
 #include <torch/arg.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/nn/options/common.h>
 #include <torch/types.h>
 
 namespace torch {
@@ -16,6 +17,8 @@ struct TORCH_API ELUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ELU);
+
 // ============================================================================
 
 /// Options for SELU functional and module.
@@ -26,6 +29,8 @@ struct TORCH_API SELUOptions {
   TORCH_ARG(bool, inplace);
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(SELU);
+
 // ============================================================================
 
 /// Options for Hardshrink functional and module.
@@ -35,6 +40,8 @@ struct TORCH_API HardshrinkOptions {
   /// the `lambda` value for the Hardshrink formulation. Default: 0.5
   TORCH_ARG(double, lambda);
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Hardshrink);
 
 // ============================================================================
 
@@ -50,6 +57,8 @@ struct TORCH_API HardtanhOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Hardtanh);
+
 // ============================================================================
 
 /// Options for LeakyReLU functional and module.
@@ -61,20 +70,7 @@ struct TORCH_API LeakyReLUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
-// ============================================================================
-
-/// Options for Gumbel Softmax functional and module.
-struct GumbelSoftmaxOptions {
-  /// non-negative scalar temperature
-  TORCH_ARG(double, tau) = 1.0;
-
-  /// returned samples will be discretized as one-hot vectors,
-  /// but will be differentiated as if it is the soft sample in autograd. Default: False
-  TORCH_ARG(bool, hard) = false;
-
-  /// dimension along which softmax will be computed. Default: -1
-  TORCH_ARG(int, dim) = -1;
-};
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LeakyReLU);
 
 // ============================================================================
 
@@ -86,6 +82,8 @@ struct TORCH_API SoftmaxOptions {
   TORCH_ARG(int64_t, dim);
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softmax);
+
 // ============================================================================
 
 /// Options for the Softmin functional and module.
@@ -96,6 +94,8 @@ struct TORCH_API SoftminOptions {
   TORCH_ARG(int64_t, dim);
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softmin);
+
 // ============================================================================
 
 /// Options for the LogSoftmax functional and module.
@@ -105,6 +105,8 @@ struct TORCH_API LogSoftmaxOptions {
   /// Dimension along which LogSoftmax will be computed.
   TORCH_ARG(int64_t, dim);
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LogSoftmax);
 
 // ============================================================================
 
@@ -118,6 +120,8 @@ struct TORCH_API PReLUOptions {
   TORCH_ARG(double, init) = 0.25;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(PReLU);
+
 // ============================================================================
 
 /// Options for ReLU functional and module.
@@ -128,6 +132,8 @@ struct TORCH_API ReLUOptions {
   TORCH_ARG(bool, inplace);
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ReLU);
+
 // ============================================================================
 
 /// Options for ReLU6 functional and module.
@@ -137,6 +143,8 @@ struct TORCH_API ReLU6Options {
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace);
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(ReLU6);
 
 // ============================================================================
 
@@ -152,6 +160,8 @@ struct TORCH_API RReLUOptions {
   TORCH_ARG(bool, inplace) = false;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(RReLU);
+
 // ============================================================================
 
 /// Options for CELU functional and module.
@@ -162,6 +172,8 @@ struct TORCH_API CELUOptions {
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace) = false;
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(CELU);
 
 // ============================================================================
 
@@ -174,6 +186,8 @@ struct TORCH_API SoftplusOptions {
   TORCH_ARG(double, threshold) = 20.0;
 };
 
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softplus);
+
 // ============================================================================
 
 /// Options for Softshrink functional and module.
@@ -183,6 +197,8 @@ struct TORCH_API SoftshrinkOptions {
   /// the `lambda` value for the Softshrink formulation. Default: 0.5
   TORCH_ARG(double, lambda);
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Softshrink);
 
 // ============================================================================
 
@@ -200,6 +216,27 @@ struct ThresholdOptions {
   /// can optionally do the operation in-place. Default: False
   TORCH_ARG(bool, inplace) = false;
 };
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(Threshold);
+
+// ============================================================================
+
+namespace functional {
+
+/// Options for Gumbel Softmax functional.
+struct GumbelSoftmaxFuncOptions {
+  /// non-negative scalar temperature
+  TORCH_ARG(double, tau) = 1.0;
+
+  /// returned samples will be discretized as one-hot vectors,
+  /// but will be differentiated as if it is the soft sample in autograd. Default: False
+  TORCH_ARG(bool, hard) = false;
+
+  /// dimension along which softmax will be computed. Default: -1
+  TORCH_ARG(int, dim) = -1;
+};
+
+} // namespace functional
 
 } // namespace nn
 } // namespace torch
