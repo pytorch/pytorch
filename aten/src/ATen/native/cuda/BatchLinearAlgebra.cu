@@ -917,7 +917,7 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info_cuda(const Tensor& self, bool p
 
   Tensor self_working_copy;
   if (self.numel() == 0) {
-    self_working_copy = at::empty_like(self);
+    self_working_copy = at::empty_like(self, at::MemoryFormat::Contiguous);
   } else {
     self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "lu_cuda", [&]{
@@ -1211,7 +1211,7 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
                               : at::empty(self_sizes, self.options().device(at::kCPU));
 
   if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self));
+    return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self, at::MemoryFormat::Contiguous));
   }
 
   auto self_working_copy = cloneBatchedColumnMajor(self);
