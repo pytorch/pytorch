@@ -288,6 +288,7 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
       auto ownerIter = owners_.find(rrefId);
       if (ownerIter != owners_.end()) {
         deletedRRef = ownerIter->second;
+        std::cout << agent_->getWorkerInfo().id_ << " ==== deleting owner " << rrefId << std::endl << std::flush;
         owners_.erase(ownerIter);
       }
       forks_.erase(rrefIter);

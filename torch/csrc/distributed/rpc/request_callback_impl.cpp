@@ -117,7 +117,7 @@ Message RequestCallbackImpl::processRpc(
       // TODO: make this asynchronous
       std::shared_ptr<OwnerRRef<IValue>> rref =
           ctx.getOrCreateOwnerRRef<IValue>(srf.rrefId());
-      std::cout << agent->getWorkerInfo().id_ << " ++ before getting value \n" << std::flush;
+      std::cout << agent->getWorkerInfo().id_ << " ++ before getting value of " << rref->rrefId() << std::endl << std::flush;
       auto ret = {rref->getValue()};
       std::cout << agent->getWorkerInfo().id_ << " ++ got value \n" << std::flush;
       return ScriptRRefFetchRet(ret).toMessage();
