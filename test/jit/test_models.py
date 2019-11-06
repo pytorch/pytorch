@@ -686,7 +686,7 @@ class TestModels(JitTestCase):
         x = torch.ones(1, 3, 224, 224)
         model = torchvision.models.AlexNet()
         with torch.random.fork_rng(devices=[]):
-            g, outputs, inputs = torch.jit.get_trace_graph(model, x, return_inputs=True)
+            g, outputs, inputs = torch.jit._get_trace_graph(model, x, return_inputs=True)
         self.run_pass('cse', g)
         m = self.createFunctionFromGraph(g)
         with torch.random.fork_rng(devices=[]):
