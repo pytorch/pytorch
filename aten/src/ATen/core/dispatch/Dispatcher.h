@@ -194,12 +194,11 @@ inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) co
 
 template<class Return, class... Args>
 inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
 
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
     return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
-      c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
       const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
       return kernel.template callUnboxedOnly<Return, Args...>(op, std::forward<Args>(args)...);
     });
@@ -207,10 +206,11 @@ inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
+  c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
+
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) {
     return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) {
-      c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
       const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
       kernel.callBoxed(op, stack);
     });
