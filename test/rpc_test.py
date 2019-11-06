@@ -669,6 +669,7 @@ class RpcTest(object):
             )
         )
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29150")
     @dist_init
     def test_stress_light_rpc(self):
         self._stress_test_rpc(light_rpc)
@@ -696,7 +697,7 @@ class RpcTest(object):
         if self.rank == 0:
             assert self.world_size >= 3
 
-            num_repeat = 200
+            num_repeat = 100
             futs = []
 
             # Phase 1: Only worker1 has workload.
@@ -760,6 +761,7 @@ class RpcTest(object):
         )
         self.assertEqual(rref.to_here().wait(), my_function(n, n + 1, n + 2))
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29156")
     @dist_init
     def test_multi_py_udf_remote(self):
         def kwargs_fn(n):
@@ -782,6 +784,7 @@ class RpcTest(object):
         )
         self.assertEqual(rref_c.to_here().wait(), torch.ones(n, n) + 4)
 
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/29212")
     @dist_init
     def test_py_rref_args_user_share(self):
         n = self.rank + 1
@@ -931,6 +934,7 @@ class RpcTest(object):
         )
         self.assertEqual(rref_c.to_here().wait(), torch.ones(n, n) + 4)
 
+    @unittest.skip("Test is flaky on ASAN, see https://github.com/pytorch/pytorch/issues/29117")
     @dist_init(setup_model_parallel=True)
     def test_call_method_on_rref(self):
         """
