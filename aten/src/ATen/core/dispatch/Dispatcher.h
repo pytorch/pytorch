@@ -197,7 +197,7 @@ inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   return op.operatorIterator_->op.readDispatchTable([&] (const DispatchTable& dispatchTable) -> Return {
     return backendFallbackKernels_.read([&] (const ska::flat_hash_map<TensorTypeId, KernelFunction>& backendFallbackKernels) -> Return {
-      c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed(args...);
+      c10::optional<TensorTypeId> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(args...);
       const KernelFunction& kernel = dispatch_(dispatchTable, backendFallbackKernels, dispatchKey);
       return kernel.template callUnboxedOnly<Return, Args...>(op, std::forward<Args>(args)...);
     });
