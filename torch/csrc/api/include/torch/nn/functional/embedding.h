@@ -38,27 +38,31 @@ inline Tensor embedding(Tensor input, Tensor weight, EmbeddingOptions options = 
 inline Tensor embedding_bag(
     Tensor input,
     Tensor weight,
-    EmbeddingBagOptions options = {}) {
+    EmbeddingBagOptions options = {},
+    const Tensor& offsets = {},
+    const Tensor& per_sample_weights = {}) {
 
-  TORCH_CHECK(!options.per_sample_weights().defined() || input.sizes() == options.per_sample_weights().sizes(),
-    "embedding_bag: If per_sample_weights (", options.per_sample_weights().sizes(), ") is not null, then it must have the same shape as the input (", input.sizes(), ")");
+  auto offsets_ = offsets;
+  auto per_sample_weights_ = per_sample_weights;
+  TORCH_CHECK(!per_sample_weights_.defined() || input.sizes() == per_sample_weights_.sizes(),
+    "embedding_bag: If per_sample_weights (", per_sample_weights_.sizes(), ") is not null, then it must have the same shape as the input (", input.sizes(), ")");
   if (input.dim() == 2) {
-    TORCH_CHECK(!options.offsets().defined(),
+    TORCH_CHECK(!offsets_.defined(),
       "If input is 2D, then offsets has to be null, as input is treated is a mini-batch of fixed length sequences. However, found offsets of type Tensor");
-    options.offsets(torch::arange(0, input.numel(), input.size(1), torch::TensorOptions().dtype(torch::kLong).device(input.device())));
+    offsets_ = torch::arange(0, input.numel(), input.size(1), torch::TensorOptions().dtype(torch::kLong).device(input.device()));
     input = input.reshape(-1);
-    if (options.per_sample_weights().defined()) {
-      options.per_sample_weights(options.per_sample_weights().reshape(-1));
+    if (per_sample_weights_.defined()) {
+      per_sample_weights_ = per_sample_weights_.reshape(-1);
     }
   } else if (input.dim() == 1) {
-    TORCH_CHECK(options.offsets().defined(), "offsets has to be a 1D Tensor but got null");
-    TORCH_CHECK(options.offsets().dim() == 1, "offsets has to be a 1D Tensor");
-    TORCH_CHECK(options.offsets()[0].item<int64_t>() == 0, "offsets[0] has to be 0, i.e., the first sequence in the mini-batch has to start from position 0. However, got ",
-     options.offsets()[0].item<int64_t>());
-    TORCH_CHECK(options.offsets()[-1].item<int64_t>() <= input.size(0), "offsets[-1] can not be greater than input's length({)",
-              input.size(0), "}), but got offsets[-1] of {", options.offsets()[-1].item<int64_t>(), "}");
+    TORCH_CHECK(offsets_.defined(), "offsets has to be a 1D Tensor but got null");
+    TORCH_CHECK(offsets_.dim() == 1, "offsets has to be a 1D Tensor");
+    TORCH_CHECK(offsets_[0].item<int64_t>() == 0, "offsets[0] has to be 0, i.e., the first sequence in the mini-batch has to start from position 0. However, got ",
+     offsets_[0].item<int64_t>());
+    TORCH_CHECK(offsets_[-1].item<int64_t>() <= input.size(0), "offsets[-1] can not be greater than input's length({",
+              input.size(0), "}), but got offsets[-1] of {", offsets_[-1].item<int64_t>(), "}");
   } else {
-    TORCH_CHECK(false, "input has to be 1D or 2D Tensor,but got Tensor of dimension ", input.dim());
+    TORCH_CHECK(false, "input has to be 1D or 2D Tensor, but got Tensor of dimension ", input.dim());
   }
 
   int mode_enum;
@@ -79,7 +83,7 @@ inline Tensor embedding_bag(
   }
 
   TORCH_CHECK(
-    !options.per_sample_weights().defined() || c10::get_if<enumtype::kSum>(&options.mode()),
+    !per_sample_weights_.defined() || c10::get_if<enumtype::kSum>(&options.mode()),
     "embedding_bag: per_sample_weights was not null. ",
     "per_sample_weights is only supported for mode='kSum' (got mode='",
     torch::enumtype::get_enum_name(options.mode()), "').Please open a feature request on GitHub.");
@@ -88,11 +92,11 @@ inline Tensor embedding_bag(
     torch::embedding_bag(
       weight,
       input,
-      options.offsets(),
+      offsets_,
       options.scale_grad_by_freq(),
       mode_enum,
       options.sparse(),
-      options.per_sample_weights()));
+      per_sample_weights_));
 }
 } // namespace functional
 } // namespace nn
