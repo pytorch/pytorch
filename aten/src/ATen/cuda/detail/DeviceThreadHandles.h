@@ -128,7 +128,7 @@ struct DeviceThreadHandlePool {
     };
 
     // Warning:
-    // If you want to change this function, be aware that this fucntion will be called
+    // If you want to change this function, be aware that this function will be called
     // by multiple threads and there is no mutex guarding the call of this function, so
     // make sure your implementation is thread-safe.
     PoolWindow *newPoolWindow() {
