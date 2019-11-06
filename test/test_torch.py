@@ -12160,30 +12160,56 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_lu(self, device):
-        from common_utils import random_fullrank_matrix_distinct_singular_value as fullrank
+        from common_utils import random_matrix
 
         def run_test(device, pivot):
-            def run_subtest(matrix_size, batches, device, pivot):
-                a = fullrank(matrix_size, *batches).to(device)
+            def run_subtest(matrix_size, batches, device, pivot, singular=False, a=None):
+                if isinstance(matrix_size, int):
+                    rows = columns = matrix_size
+                else:
+                    rows, columns = matrix_size
+                if a is None:
+                    a = random_matrix(rows, columns, *batches, **dict(singular=singular)).to(device)
                 a_LU_info, pivots_info, info_ = a.lu(pivot=pivot, get_infos=True)
-                self.assertEqual(a_LU_info.size(), torch.Size(batches + (matrix_size, matrix_size)))
-                self.assertEqual(pivots_info.size(), torch.Size(batches + (matrix_size,)))
+                self.assertEqual(a_LU_info.size(), torch.Size(batches + (rows, columns)))
+                self.assertEqual(pivots_info.size(), torch.Size(batches + (min(rows, columns),)))
                 self.assertEqual(info_.size(), torch.Size(batches))
-                self.assertEqual(info_.abs().sum(), 0)
+                # If a randomly generated input matrix is singular,
+                # then info_ contains indices i such that U[i, i] ==
+                # 0. This however conveys that the factorization was
+                # successful albeit with a singular input. Therefore,
+                # we require info.min() >= 0
+                self.assertGreaterEqual(info_.min(), 0)
                 a_LU, pivots = a.lu(pivot=pivot)
                 self.assertEqual(a_LU, a_LU_info)
                 self.assertEqual(pivots_info, pivots)
 
-                if self.device_type == 'cuda':
-                    a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
-                    self.assertEqual(nopiv, torch.arange(1, 1 + a.size(-1), device=device, dtype=torch.int32).expand(a.shape[:-1]))
-                    self.assertEqual(info_, info_nopiv)
-
                 P, L, U = torch.lu_unpack(a_LU, pivots)
                 self.assertEqual(P.matmul(L.matmul(U)), a)
 
-            for ms, batch in product([3, 5, 7], [(), (2,), (3,), (3, 5)]):
+                if self.device_type == 'cuda':
+                    # lu without pivoting is implemented only for cuda device
+                    a_LU_info_nopiv, nopiv, info_nopiv = a.lu(pivot=False, get_infos=True)
+                    P_nopiv, L_nopiv, U_nopiv = torch.lu_unpack(a_LU_info_nopiv, nopiv)
+                    self.assertEqual(P_nopiv.matmul(L_nopiv.matmul(U_nopiv)), a)
+                    k = min(rows, columns)
+                    self.assertEqual(nopiv, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(a.shape[:-2] + (k, )))
+                    if not singular:
+                        # It is not guaranteed that LU factorization
+                        # without pivoting is able to determine if a
+                        # matrix is singular while LU factorization
+                        # with pivoting is. Therefore, we require the
+                        # equality of info-s only for non-singular
+                        # matrices.
+                        self.assertEqual(info_, info_nopiv)
+
+            for ms, batch in product([3, 5, 7, (4, 2), (3, 4)], [(), (2,), (3,), (3, 5)]):
                 run_subtest(ms, batch, device, pivot)
+                run_subtest(ms, batch, device, pivot, singular=True)
+
+                # Reproducer of a magma bug, see https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
+                a = torch.ones(batch + (ms if isinstance(ms, tuple) else (ms, ms)), dtype=torch.double, device=device)
+                run_subtest(ms, batch, device, pivot, singular=True, a=a)
 
             # Info should be positive for rank deficient matrices
             a = torch.ones(5, 3, 3, device=device)
