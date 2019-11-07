@@ -62,4 +62,4 @@ inline Tensor pdist(const Tensor& input, double p = 2.0) {
 
 } // namespace functional
 } // namespace nn
-} // namesp
+} // namespace torch
