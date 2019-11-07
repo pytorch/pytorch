@@ -353,7 +353,7 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
   Tensor result;
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
+  auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
 #endif
@@ -363,7 +363,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
     result.masked_fill_(mask, source);
 #ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
@@ -371,7 +371,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
 Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & source) {
   Tensor result;
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
+  auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
 #endif
@@ -381,7 +381,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   result.masked_fill_(mask, source);
 #ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
