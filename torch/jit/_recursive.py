@@ -475,12 +475,10 @@ def infer_methods_to_compile(nn_module):
     check_module_initialized(nn_module)
 
     methods = []
-    if hasattr(nn_module, 'forward'):
-        if getattr(nn_module.forward, "__func__", None) == torch.nn.Module.forward:
-            # TODO, we deleted a check that forward is actually defined, instead skipping it
-            pass
-        elif not _jit_internal.is_ignored_fn(nn_module.forward):
-            methods = ['forward']
+    if hasattr(nn_module, 'forward') and \
+       getattr(type(nn_module), 'forward', None) != torch.nn.Module.forward and \
+       not _jit_internal.is_ignored_fn(nn_module.forward):
+        methods = ['forward']
 
     exported = []
     for name in dir(nn_module):

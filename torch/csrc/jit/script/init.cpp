@@ -433,6 +433,128 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
   return true;
 }
 
+// used to temporarily implement _has_attribute in the python wrapper
+// we should replace these individual functions with direct bindings to the
+// _parameters, _modules, and _buffers dictionaries
+struct LegacyAttributePolicy {
+  static bool valid(const ClassTypePtr& typ, size_t i) {
+    return !detail::ModulePolicy::valid(typ, i) &&
+        !detail::ParameterPolicy::valid(typ, i);
+  }
+};
+
+// helper used to implement ._parameters, ._buffers, ._modules dicts
+// inside of script nn.Module
+template <typename Policy>
+struct slot_dict_impl {
+  slot_dict_impl(script::ModulePtr module) : module_(std::move(module)) {}
+  bool contains(const std::string& name) const {
+    if (auto slot = module_->type()->findAttributeSlot(name)) {
+      if (Policy::valid(module_->type(), *slot)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  std::vector<std::pair<std::string, py::object>> items() const {
+    std::vector<std::pair<std::string, py::object>> result;
+    for (size_t i = 0, N = module_->type()->numAttributes(); i < N; ++i) {
+      if (Policy::valid(module_->type(), i)) {
+        result.emplace_back(
+            module_->type()->getAttributeName(i),
+            toPyObject(module_->getSlot(i)));
+      }
+    }
+    return result;
+  }
+
+  void setattr(const std::string& name, py::object value) {
+    size_t N = module_->type()->getAttributeSlot(name);
+    const TypePtr& type = module_->type()->getAttribute(N);
+    module_->setSlot(N, toIValue(std::move(value), type));
+  }
+
+ private:
+  script::ModulePtr module_;
+};
+
+// helpers to implement _set_parameter, _get_parameter, _has_parameter, etc.
+// these can be removed once everything works directly from bound slot_dict
+// objects
+template <typename Policy>
+static void set_generic(
+    Module& self,
+    const std::string& name,
+    py::object value) {
+  slot_dict_impl<Policy>(self.module_object()).setattr(name, std::move(value));
+}
+
+static py::object get_generic(Module& self, const std::string& name) {
+  return toPyObject(self.attr(name));
+}
+
+template <typename Policy>
+static py::tuple get_generic_list(Module& self) {
+  auto the_list = script::slot_list_impl<script::detail::NamedPolicy<Policy>>(
+      self.module_object(), false, false);
+  py::tuple result(the_list.size());
+  auto i = 0;
+  for (const auto& e : the_list) {
+    py::tuple r(2);
+    result[i++] = std::make_tuple(e.name, toPyObject(e.value));
+  }
+  return result;
+}
+
+template <typename Policy>
+static bool has_generic(Module& self, const std::string& name) {
+  return slot_dict_impl<Policy>(self.module_object()).contains(name);
+}
+
+template <typename T>
+py::list debugMakeList(const T& list) {
+  py::list result;
+  for (auto elem : list) {
+    result.append(py::cast(elem));
+  }
+  return result;
+}
+template <typename T>
+py::list debugMakeNamedList(const T& list) {
+  py::list result;
+  for (auto elem : list) {
+    result.append(py::cast(std::make_pair(elem.name, elem.value)));
+  }
+  return result;
+}
+
+static py::dict _jit_debug_module_iterators(Module& module) {
+  py::dict result;
+  result["children"] = debugMakeList(module.children());
+  result["named_children"] = debugMakeNamedList(module.named_children());
+  result["modules"] = debugMakeList(module.modules());
+  result["named_modules"] = debugMakeNamedList(module.named_modules());
+
+  result["parameters"] = debugMakeList(module.parameters(false));
+  result["named_parameters"] =
+      debugMakeNamedList(module.named_parameters(false));
+  result["parameters_r"] = debugMakeList(module.parameters(true));
+  result["named_parameters_r"] =
+      debugMakeNamedList(module.named_parameters(true));
+
+  result["buffers"] = debugMakeList(module.buffers(false));
+  result["named_buffers"] = debugMakeNamedList(module.named_buffers(false));
+  result["buffers_r"] = debugMakeList(module.buffers(true));
+  result["named_buffers_r"] = debugMakeNamedList(module.named_buffers(true));
+
+  result["named_attributes"] =
+      debugMakeNamedList(module.named_attributes(false));
+  result["named_attributes_r"] =
+      debugMakeNamedList(module.named_attributes(true));
+  return result;
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -509,69 +631,47 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self, const std::string& name, py::object value) {
             auto ivalue =
                 toIValue(std::move(value), self.type()->getAttribute(name));
-            self.set_attribute(name, ivalue);
+            self.setattr(name, ivalue);
           })
-      .def("_set_parameter", &Module::set_parameter)
-      .def("_get_parameter", &Module::get_parameter)
-      .def("_get_buffer", &Module::get_buffer)
-      .def("_get_attribute", &Module::get_attribute)
-      .def("_get_module", &Module::get_module)
+      .def("_set_parameter", &set_generic<detail::ParameterPolicy>)
+      .def("_get_parameter", &get_generic)
+      .def("_get_buffer", &get_generic)
+      .def("_get_attribute", &get_generic)
+      .def("_get_module", &get_generic)
       .def(
           "_get_modules",
           [](Module& self) {
             std::vector<std::pair<std::string, Module>> modules;
-            for (const NameModule& s : self.get_modules()) {
-              modules.emplace_back(std::make_pair(s.name, s.module));
+            for (const NameModule& s : self.named_children()) {
+              modules.emplace_back(std::make_pair(s.name, s.value));
             }
             return modules;
           })
+      .def("_get_parameters", get_generic_list<script::detail::ParameterPolicy>)
+      .def("_get_buffers", get_generic_list<script::detail::BufferPolicy>)
       .def(
-          "_get_parameters",
-          [](Module& self) -> py::tuple {
-            auto parameters = self.get_parameters();
-            py::tuple result(parameters.size());
-            auto i = 0;
-            for (const NameValue& p : parameters) {
-              py::tuple r(2);
-              result[i++] = std::make_tuple(
-                  p.name, autograd::as_variable_ref(p.value.toTensor()));
+          "_replicate_for_data_parallel",
+          [](Module& module) {
+            Module replica(
+                *module.module_object()->type()->name(),
+                module.module_object()->compilation_unit(),
+                /*should_mangle*/ true);
+            ClassTypePtr module_cls = module.module_object()->type();
+            for (size_t i = 0, N = module_cls->numAttributes(); i < N; ++i) {
+              if (LegacyAttributePolicy::valid(module_cls, i) &&
+                  !detail::BufferPolicy::valid(module_cls, i)) {
+                replica.register_attribute(
+                    module_cls->getAttributeName(i),
+                    module_cls->getAttribute(i),
+                    module.module_object()->getSlot(i));
+              }
             }
-            return result;
+            return replica;
           })
-      .def(
-          "_get_attributes",
-          [](Module& self) -> py::tuple {
-            auto attributes = self.get_attributes();
-            py::tuple result(attributes.size());
-            size_t i = 0;
-            for (const NameValue& attr : attributes) {
-              py::tuple r(3);
-              IValue v = attr.value;
-              result[i++] = std::make_tuple(
-                  attr.name, attr.value.type(), toPyObject(std::move(v)));
-            }
-            return result;
-          })
-      .def(
-          "_has_attribute",
-          [](Module& self, const std::string& name) -> bool {
-            return self.find_attribute(name).has_value();
-          })
-      .def(
-          "_has_parameter",
-          [](Module& self, const std::string& name) -> bool {
-            return self.find_parameter(name).has_value();
-          })
-      .def(
-          "_has_buffer",
-          [](Module& self, const std::string& name) -> bool {
-            return self.find_buffer(name).has_value();
-          })
-      .def(
-          "_has_module",
-          [](Module& self, const std::string& name) {
-            return bool(self.find_module(name));
-          })
+      .def("_has_attribute", has_generic<LegacyAttributePolicy>)
+      .def("_has_parameter", has_generic<script::detail::ParameterPolicy>)
+      .def("_has_buffer", has_generic<script::detail::BufferPolicy>)
+      .def("_has_module", has_generic<script::detail::ModulePolicy>)
       .def(
           "_has_method",
           [](Module& self, const std::string& name) {
@@ -909,6 +1009,7 @@ void initJitScriptBindings(PyObject* module) {
         return StrongFunctionPtr(std::move(cu), fn);
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);
+  m.def("_jit_debug_module_iterators", _jit_debug_module_iterators);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
       .def(py::init<>())

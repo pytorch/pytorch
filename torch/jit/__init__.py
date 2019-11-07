@@ -1425,8 +1425,7 @@ class OrderedBufferDict(OrderedDictWrapper):
         super(OrderedBufferDict, self).__init__(module)
 
     def items(self):
-        return [(name, param) for name, _, param in
-                self.module._get_attributes() if isinstance(param, torch.Tensor)]
+        return [(name, param) for name, param in self.module._get_buffers()]
 
     def __setitem__(self, k, v):
         if not self.module._has_buffer(k):
