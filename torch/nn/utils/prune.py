@@ -396,7 +396,7 @@ class IdentityPruningMethod(BasePruningMethod):
 
 
 class RandomPruningMethod(BasePruningMethod):
-    r"""Prune units in a tensor at random.
+    r"""Prune (currently unpruned) units in a tensor at random.
 
     Args:
         name (str): parameter name within ``module`` on which pruning
@@ -455,7 +455,8 @@ class RandomPruningMethod(BasePruningMethod):
 
 
 class L1PruningMethod(BasePruningMethod):
-    r"""Prune units in a tensor by zeroing out the ones with the lowest L1-norm.
+    r"""Prune (currently unpruned) units in a tensor by zeroing out the ones 
+    with the lowest L1-norm.
 
     Args:
         amount (int or float): quantity of parameters to prune.
@@ -514,7 +515,7 @@ class L1PruningMethod(BasePruningMethod):
 
 
 class RandomStructuredPruningMethod(BasePruningMethod):
-    r"""Prune entire channels in a tensor at random.
+    r"""Prune entire (currently unpruned) channels in a tensor at random.
 
     Args:
         amount (int or float): quantity of parameters to prune.
@@ -619,7 +620,8 @@ class RandomStructuredPruningMethod(BasePruningMethod):
 
 
 class LnStructuredPruningMethod(BasePruningMethod):
-    r"""Prune entire channels in a tensor based on their Ln-norm.
+    r"""Prune entire (currently unpruned) channels in a tensor based on their
+    Ln-norm.
 
     Args:
         amount (int or float): quantity of channels to prune.
@@ -799,7 +801,8 @@ def identity(module, name):
 
 def random_unstructured(module, name, amount):
     r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
-    by removing the specified ``amount`` of units selected at random.
+    by removing the specified ``amount`` of (currently unpruned) units
+    selected at random.
     Modifies module in place (and also return the modified module) by:
     1) adding a named buffer called ``name+'_mask'`` corresponding to the 
     binary mask applied to the parameter `name` by the pruning method.
@@ -831,7 +834,8 @@ def random_unstructured(module, name, amount):
 
 def l1_unstructured(module, name, amount):
     r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
-    by removing the specified `amount` of units with the lowest L1-norm.
+    by removing the specified `amount` of (currently unpruned) units with the
+    lowest L1-norm.
     Modifies module in place (and also return the modified module) 
     by:
     1) adding a named buffer called ``name+'_mask'`` corresponding to the 
@@ -863,8 +867,8 @@ def l1_unstructured(module, name, amount):
 
 def random_structured(module, name, amount, dim):
     r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
-    by removing the specified ``amount`` of channels along the specified 
-    ``dim`` selected at random.
+    by removing the specified ``amount`` of (currently unpruned) channels
+    along the specified ``dim`` selected at random.
     Modifies module in place (and also return the modified module) 
     by:
     1) adding a named buffer called ``name+'_mask'`` corresponding to the 
@@ -900,8 +904,8 @@ def random_structured(module, name, amount, dim):
 
 def ln_structured(module, name, amount, n, dim):
     r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
-    by removing the specified ``amount`` of channels along the specified 
-    ``dim`` with the lowest L``n``-norm.
+    by removing the specified ``amount`` of (currently unpruned) channels
+    along the specified ``dim`` with the lowest L``n``-norm.
     Modifies module in place (and also return the modified module) 
     by:
     1) adding a named buffer called ``name+'_mask'`` corresponding to the 
