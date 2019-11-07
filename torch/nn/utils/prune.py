@@ -305,7 +305,7 @@ class PruningContainer(BasePruningMethod):
             channels in the tensor;
 
             * for 'global', the mask will be computed across all entries.
-        
+
         Args:
             t (torch.Tensor): tensor representing the parameter to prune
                 (of same dimensions as ``default_mask``).
