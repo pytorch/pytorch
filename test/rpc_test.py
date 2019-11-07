@@ -963,7 +963,7 @@ class RpcTest(object):
 
     @dist_init
     def test_get_global_rpc_server_processing_timeout(self):
-        timeout = rpc.get_global_process_timeout()
+        timeout = rpc.get_global_rpc_server_processing_timeout()
         self.assertEqual(timeout, rpc.constants.DEFAULT_RPC_TIMEOUT)
 
     @dist_init(setup_model_parallel=False)
