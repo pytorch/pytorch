@@ -847,9 +847,9 @@ class FunctionalModuleTest(QuantizationTestCase):
 
         def checkQuantized(model):
             self.checkNoPrepModules(model)
-            self.assertEquals(type(model.myadd), torch.nn.quantized.QFunctional)
-            self.assertEquals(type(model.mycat), torch.nn.quantized.QFunctional)
-            self.assertEquals(type(model.myadd_relu), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
+            self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
 
         checkQuantized(model)
         self.checkScriptable(model, [(xq, xq)], check_save_load=True)

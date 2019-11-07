@@ -24,7 +24,7 @@ conv_1d_configs_short = op_bench.config_list(
         [256, 256, 3, 2, 16, 128],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=['short']
 )
@@ -36,7 +36,7 @@ conv_1d_configs_long = op_bench.cross_product_configs(
     stride=[1, 2],
     N=[4, 8],
     L=[64, 128],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=["long"]
 )
 
@@ -81,7 +81,7 @@ conv_2d_configs_short = op_bench.config_list(
         [256, 256, 3, 1, 1, 16, 16],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=['short']
 )
@@ -94,7 +94,7 @@ conv_2d_configs_long = op_bench.cross_product_configs(
     N=[4, 8],
     H=[32, 64],
     W=[32, 64],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=["long"]
 )
 
@@ -138,7 +138,7 @@ conv_3d_configs_short = op_bench.config_list(
         [256, 256, 3, 1, 8, 4, 16, 16],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=['short']
 )
@@ -153,7 +153,7 @@ conv_3d_configs_long = op_bench.cross_product_configs(
     D=[4, 8],
     H=[32, 64],
     W=[32, 64],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=["long"]
 )
 
