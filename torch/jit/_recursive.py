@@ -418,7 +418,7 @@ def add_sequential_forward(script_module, nn_module):
     forward_func = getattr(nn_module.forward, "__func__", None)
     # we aren't currently able to support compiling Sequential.forward
     # so if we encounter it, use this forward instead. support for self._modules.values() is blocking
-    if forward_func == Sequential.forward:
+    if forward_func == get_function_from_type(Sequential.forward, "forward"):
         script_module.define("""
         def forward(self, input):
             for m in self:
@@ -477,6 +477,9 @@ def check_module_initialized(mod):
         raise RuntimeError("'{}' has not been initialized, did you forget to call 'super()'?"
                            .format(type(mod).__name__))
 
+def get_unbound_method_func(unbound_method):
+    return getattr(unbound_method, "__func__", unbound_method)
+
 def infer_methods_to_compile(nn_module):
     """
     Implements the default rules for which methods should act as starting
@@ -487,7 +490,9 @@ def infer_methods_to_compile(nn_module):
     methods = []
     if hasattr(nn_module, 'forward'):
         forward_func = getattr(nn_module.forward, "__func__", None)
-        if forward_func == torch.nn.Module.forward or forward_func == Sequential.forward:
+        module_forward = get_function_from_type(torch.nn.Module, "forward")
+        sequential_forward = get_function_from_type(Sequential.forward, "forward")
+        if forward_func == module_forward or forward_func == sequential_forward:
             # TODO, we deleted a check that forward is actually defined, instead skipping it
             pass
         elif not _jit_internal.is_ignored_fn(nn_module.forward):
