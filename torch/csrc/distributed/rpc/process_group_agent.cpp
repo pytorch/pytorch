@@ -119,11 +119,11 @@ ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
     std::shared_ptr<c10d::ProcessGroup> pg,
     int numSendRecvThreads,
-    std::chrono::milliseconds globalRpcServerProcessingTimeout)
+    std::chrono::milliseconds rpcTimeout)
     : RpcAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
           c10::guts::make_unique<RequestCallbackImpl>(),
-          globalRpcServerProcessingTimeout),
+          rpcTimeout),
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
       recvCounts_(pg_->getSize()),

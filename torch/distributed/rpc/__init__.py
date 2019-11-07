@@ -28,7 +28,7 @@ if is_available():
         self_rank=-1,
         worker_name_to_id=None,
         num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
-        global_rpc_server_processing_timeout=DEFAULT_RPC_TIMEOUT,
+        rpc_timeout=DEFAULT_RPC_TIMEOUT,
     ):
         r"""
         Initializes model parallel primitives such as the local rpc agent
@@ -53,8 +53,8 @@ if is_available():
             self_rank (int): a globally unique id/rank of this node.
             init_method(str): backend specific init arguments.
             num_send_recv_threads(int): Number of threads for send/recv work.
-            global_rpc_server_processing_timeout (datetime.timedelta):
-                Fallback timeout for server to process an RPC request.
+            rpc_timeout (datetime.timedelta):
+                Global timeout for server to process an RPC request.
                 Defaults to 10 seconds.
                 0 means infinity.
         """
@@ -73,7 +73,7 @@ if is_available():
             self_rank,
             worker_name_to_id,
             num_send_recv_threads,
-            global_rpc_server_processing_timeout,
+            rpc_timeout,
         )
 
         # Initialize Autograd.

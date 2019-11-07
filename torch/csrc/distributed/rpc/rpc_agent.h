@@ -69,7 +69,7 @@ class TORCH_API RpcAgent {
   RpcAgent(
       WorkerInfo id,
       std::unique_ptr<RequestCallback> cb,
-      std::chrono::milliseconds globalRpcServerProcessingTimeout);
+      std::chrono::milliseconds rpcTimeout);
 
   virtual ~RpcAgent();
 
@@ -96,10 +96,9 @@ class TORCH_API RpcAgent {
 
   virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
 
-  // Retrieves the process timeout for all RPCs.
-  virtual const std::chrono::milliseconds& getGlobalRpcServerProcessingTimeout()
-      const {
-    return globalRpcServerProcessingTimeout_;
+  // Retrieve the timeout for all RPCs.
+  virtual const std::chrono::milliseconds& getRpcTimeout() const {
+    return rpcTimeout_;
   }
 
   // Call sync and join all internal threads. This method should be called
@@ -123,7 +122,7 @@ class TORCH_API RpcAgent {
   const WorkerInfo workerInfo_;
   const std::string workerName_;
   const std::unique_ptr<RequestCallback> cb_;
-  const std::chrono::milliseconds globalRpcServerProcessingTimeout_;
+  const std::chrono::milliseconds rpcTimeout_;
 
  private:
   static std::shared_ptr<RpcAgent> defaultRpcAgent_;

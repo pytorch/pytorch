@@ -44,8 +44,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
           .def(
-              "_get_global_rpc_server_processiong_timeout",
-              &RpcAgent::getGlobalRpcServerProcessingTimeout,
+              "_get_rpc_timeout",
+              &RpcAgent::getRpcTimeout,
               py::call_guard<py::gil_scoped_release>());
 
   auto pyFuture = shared_ptr_class_<PyFuture>(module, "Future")
@@ -102,7 +102,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           py::arg("name"),
           py::arg("process_group"),
           py::arg("num_send_recv_threads"),
-          py::arg("global_rpc_server_processiong_timeout"))
+          py::arg("rpc_timeout"))
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
@@ -122,8 +122,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_get_global_rpc_server_processiong_timeout",
-          &ProcessGroupAgent::getGlobalRpcServerProcessingTimeout,
+          "_get_rpc_timeout",
+          &ProcessGroupAgent::getRpcTimeout,
           py::call_guard<py::gil_scoped_release>());
 
   module.def("_start_rpc_agent", [](const std::shared_ptr<RpcAgent>& agent) {

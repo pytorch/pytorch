@@ -9,10 +9,10 @@ constexpr size_t WorkerInfo::MAX_NAME_LEN;
 RpcAgent::RpcAgent(
     WorkerInfo workerId,
     std::unique_ptr<RequestCallback> cb,
-    std::chrono::milliseconds globalRpcServerProcessingTimeout)
+    std::chrono::milliseconds rpcTimeout)
     : workerInfo_(std::move(workerId)),
       cb_(std::move(cb)),
-      globalRpcServerProcessingTimeout_(globalRpcServerProcessingTimeout) {}
+      rpcTimeout_(rpcTimeout) {}
 
 RpcAgent::~RpcAgent() = default;
 
