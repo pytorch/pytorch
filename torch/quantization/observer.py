@@ -421,6 +421,11 @@ class PerChannelMinMaxObserver(_ObserverBase):
     .. note:: If the running minimum equals to the running maximum, the scales
               and zero_points are set to 1.0 and 0.
     """
+    __annotations__ = {
+        "min_vals": Optional[torch.Tensor],
+        "max_vals": Optional[torch.Tensor],
+    }
+
 
     def __init__(self, ch_axis=0, dtype=torch.quint8,
                  qscheme=torch.per_tensor_affine, reduce_range=False):
@@ -428,8 +433,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
                                                        qscheme=qscheme,
                                                        reduce_range=reduce_range)
         self.ch_axis = ch_axis
-        self.register_buffer('min_vals', None)
-        self.register_buffer('max_vals', None)
+        self.min_vals = None
+        self.max_vals = None
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -440,6 +445,10 @@ class PerChannelMinMaxObserver(_ObserverBase):
             )
 
     def forward(self, x_orig):
+        return self._forward(x_orig)
+
+    @torch.jit.ignore
+    def _forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
         min_vals = self.min_vals
         max_vals = self.max_vals
@@ -460,6 +469,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
         self.max_vals = max_vals
         return x_orig
 
+    @torch.jit.export
     def calculate_qparams(self):
         return self._calculate_per_channel_qparams(self.min_vals, self.max_vals)
 

@@ -16,6 +16,8 @@ from torch.quantization import \
 
 from torch.quantization import QConfig
 from torch.quantization import default_histogram_observer
+from torch.quantization import default_observer
+from torch.quantization import default_per_channel_weight_observer
 from torch.quantization._quantize_script import quantize_script
 
 from common_utils import run_tests
@@ -707,30 +709,38 @@ class GraphModePostTrainingQuantTest(QuantizationTestCase):
         """
         # eager mode
         annotated_linear_model = AnnotatedSingleLayerLinearModel().eval()
-        qconfig = QConfig(
-            activation=default_histogram_observer,
-            weight=default_weight_observer)
-        annotated_linear_model.qconfig = qconfig
-        linear_model = SingleLayerLinearModel().eval()
-        # copy the weight from eager mode so that we can
-        # compare the result of the two quantized models later
-        linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
-        linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
-        model_eager = quantize(annotated_linear_model, test_only_eval_fn,
-                               self.calib_data)
+        for qconfig in [
+                QConfig(
+                    activation=default_observer,
+                    weight=default_weight_observer),
+                QConfig(
+                    activation=default_histogram_observer,
+                    weight=default_weight_observer),
+                QConfig(
+                    activation=default_observer,
+                    weight=default_per_channel_weight_observer),
+        ]:
+            annotated_linear_model.qconfig = qconfig
+            linear_model = SingleLayerLinearModel().eval()
+            # copy the weight from eager mode so that we can
+            # compare the result of the two quantized models later
+            linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
+            linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
+            model_eager = quantize(annotated_linear_model, test_only_eval_fn,
+                                   self.calib_data)
 
-        qconfig_dict = {
-            '': qconfig
-        }
-        model_script = quantize_script(
-            torch.jit.script(linear_model),
-            qconfig_dict,
-            test_only_eval_fn,
-            [self.calib_data],
-            inplace=False)
-        result_eager = model_eager(self.calib_data[0][0])
-        result_script = get_forward(model_script._c)(self.calib_data[0][0])
-        self.assertEqual(result_eager, result_script)
+            qconfig_dict = {
+                '': qconfig
+            }
+            model_script = quantize_script(
+                torch.jit.script(linear_model),
+                qconfig_dict,
+                test_only_eval_fn,
+                [self.calib_data],
+                inplace=False)
+            result_eager = model_eager(self.calib_data[0][0])
+            result_script = get_forward(model_script._c)(self.calib_data[0][0])
+            self.assertEqual(result_eager, result_script)
 
     @_tmp_donotuse_dont_inline_everything
     def test_conv(self):
