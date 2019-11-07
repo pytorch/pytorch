@@ -7,4 +7,4 @@ namespace at { namespace native {
 
 TORCH_CUDA_API cudnnHandle_t getCudnnHandle();
 
-}} // namespace
+}} // namespace at::native
