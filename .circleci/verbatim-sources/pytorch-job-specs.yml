@@ -182,5 +182,10 @@ jobs:
           name: Test
           no_output_timeout: "30m"
           command: |
+            set -e
+            set +x
+            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
+            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
+            set -x
             choco install -y 7zip curl
             .jenkins/pytorch/win-test.sh
