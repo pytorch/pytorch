@@ -5680,7 +5680,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(e1, e2)
 
     def test_batch_norm_cpu_inference(self):
-        # input nchw in (2,1,1,1), (2,2,2,2) 
+        # input nchw in (2,1,1,1), (2,2,2,2)
         inputs = [
             torch.tensor([[[[-0.5000]]], [[[0.5000]]]]),
             torch.tensor([
@@ -5692,7 +5692,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                     [[0.1000, 1.0000], [1.0000, 0.1000]],
                     [[1.0000, 0.5000], [1.5000, -1.5000]]
                 ]])]
-        # output nchw in (2,1,1,1), (2,2,2,2) 
+        # output nchw in (2,1,1,1), (2,2,2,2)
         outputs = [
             torch.tensor([
                 [[[-0.499997496604919433593750000]]],
@@ -5718,9 +5718,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             output2 = m(input2).permute(0, 1, 3, 2)
             # channels last case
             input3 = input1.contiguous(memory_format=torch.channels_last)
-            for name, param in m.named_parameters():    
-                if param.requires_grad:    
-                    if param.data.dim() == 4:    
+            for name, param in m.named_parameters():
+                if param.requires_grad:
+                    if param.data.dim() == 4:
                         param.data = param.data.contiguous(memory_format=torch.channels_last)
             output3 = m(input3)
             self.assertEqual(output3, outputs[i])
@@ -14291,7 +14291,6 @@ def generate_not_implemented_tests(cls):
 
 class TestTensorDeviceOps(TestCase):
     pass
-
 
 class TestTorch(TestCase, _TestTorchMixin):
     pass
