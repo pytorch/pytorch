@@ -148,8 +148,8 @@ constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;
 constexpr int MZ_ZIP_LDH_FILENAME_LEN_OFS = 26;
 constexpr int MZ_ZIP_LDH_EXTRA_LEN_OFS = 28;
 
-static std::string getPadding(size_t cursor, const std::string& filename, size_t size) {
-  size_t start = cursor + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename.size() + sizeof(mz_uint16) * 2;
+static std::string getPadding(size_t cursor, size_t filename_size, size_t size) {
+  size_t start = cursor + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_size + sizeof(mz_uint16) * 2;
   if (size >= MZ_UINT32_MAX || cursor >= MZ_UINT32_MAX) {
     start += sizeof(mz_uint16) * 2;
     if (size >= MZ_UINT32_MAX) {
@@ -284,9 +284,9 @@ void PyTorchStreamWriter::setup(const string& file_name) {
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());
 
-  std::ostringstream version;
-  version << kProducedFileFormatVersion << "\n";
-  writeRecord("version", version.str().c_str(), version.str().size());
+  std::string version = std::to_string(kProducedFileFormatVersion);
+  version.push_back('\n');
+  writeRecord("version", version.c_str(), version.size());
 }
 
 void PyTorchStreamWriter::writeRecord(
@@ -297,7 +297,7 @@ void PyTorchStreamWriter::writeRecord(
   AT_ASSERT(!finalized_);
   AT_ASSERT(!archive_name_plus_slash_.empty());
   std::string full_name = archive_name_plus_slash_ + name;
-  std::string padding = getPadding(ar_->m_archive_size, full_name, size);
+  std::string padding = getPadding(ar_->m_archive_size, full_name.size(), size);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   mz_zip_writer_add_mem_ex_v2(
       ar_.get(),
