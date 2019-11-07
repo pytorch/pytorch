@@ -9387,6 +9387,7 @@ a")
             __annotations__ = {
                 "val": Optional[torch.Tensor]
             }
+
             def __init__(self):
                 super(M, self).__init__()
                 self.val = None
