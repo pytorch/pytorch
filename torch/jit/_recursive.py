@@ -157,13 +157,8 @@ def infer_raw_concrete_type(nn_module):
     for name, overloaded_names in overloads.items():
         concrete_type.add_overload(name, overloaded_names)
 
-    # TODO: [switch to __dict__]
-    # we should use __dict__ here because we only want to pick up attributes on
-    # this module instance, not the class itself. We can't do it right now
-    # because there is code that relies on properties being turned into attributes.
-    # This is wrong (the property function is only evaluated once then "saved"
-    # as an attribute), so we should fix that and then switch this to using __dict__
-    for name in dir(nn_module):
+
+    for name, value in nn_module.__dict__.items():
         if name in blacklist or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
@@ -173,30 +168,14 @@ def infer_raw_concrete_type(nn_module):
             # Don't re-add anything we already added
             continue
 
-        if not hasattr(nn_module, name):
-            # TODO: delete this when [switch to __dict__]
-            continue
-
-        item = getattr(nn_module, name)
-        if name not in nn_module.__dict__ and not isinstance(getattr(type(nn_module), name, None), property):
-            # Skip class attributes that aren't properties
-            # TODO: delete this when [switch to __dict__]
-            continue
-
         # Handle Python function attributes
-        if inspect.isfunction(item) and not inspect.ismethod(item):
-            cls_attr = getattr(type(nn_module), name, None)
-            if inspect.isfunction(cls_attr):
-                # Skip function attributes that exist on the nn_module class.
-                # TODO: delete this when [switch to __dict__]
-                continue
-
+        if inspect.isfunction(value):
             try:
-                scripted_fn = torch.jit.script(item)
+                scripted_fn = torch.jit.script(value)
                 concrete_type.add_function_attribute(
                     name,
                     torch._C._jit_try_infer_type(scripted_fn),
-                    item)
+                    value)
             except Exception as e:
                 # If we fail to script the function, it isn't a hard error.
                 # Instead, we will add it to the list of attributes we failed
@@ -210,15 +189,15 @@ def infer_raw_concrete_type(nn_module):
             continue
 
         # Handle Script function attributes
-        if isinstance(item, torch.jit.ScriptFunction):
+        if isinstance(value, torch.jit.ScriptFunction):
             concrete_type.add_function_attribute(
                 name,
-                torch._C._jit_try_infer_type(item),
-                item)
+                torch._C._jit_try_infer_type(value),
+                value)
             continue
 
         # If we got here, this is a regular "data" attribute, Add it to the concrete type
-        attr_type = infer_type(name, item)
+        attr_type = infer_type(name, value)
         if attr_type is not None:
             concrete_type.add_attribute(name, attr_type, False)
         else:
@@ -226,7 +205,15 @@ def infer_raw_concrete_type(nn_module):
             # when the pytype is `list` or `NoneType`
             hint = ("(This attribute exists on the Python module, "
                     "but we failed to convert Python type: '{}' "
-                    "to a TorchScript type.)").format(type(item).__name__)
+                    "to a TorchScript type.)").format(type(value).__name__)
+            concrete_type.add_failed_attribute(name, hint)
+
+    # Add @property methods as failed attributes, to give a better error message.
+    for name, value in type(nn_module).__dict__.items():
+        if isinstance(value, property):
+            hint = ("\n(This attribute exists on the Python module, but it's an @property "
+                    "method. @property methods are not yet supported in TorchScript. "
+                    "Please file a feature request on Github)")
             concrete_type.add_failed_attribute(name, hint)
 
     return concrete_type
@@ -420,7 +407,8 @@ def create_script_module_impl(nn_module, concrete_type, cpp_module, stubs):
 def get_overload_annotations(mod):
     # original function => [(mangled overload name, overload function)]
     overloads = {}
-    for name in dir(mod):
+
+    for name in dir(type(mod)):
         item = getattr(mod, name, None)
         if not callable(item):
             continue
