@@ -175,7 +175,3 @@ class DistOptimizerTest(object):
             # ensure local equals remote
             self.assertEqual(new_w1, module1.get_w())
             self.assertEqual(new_w2, module2.get_w())
-
-
-if __name__ == '__main__':
-    unittest.main()

@@ -47,8 +47,16 @@ class DistributedOptimizer:
     This class uses distributed autograd in order to retrieve the gradients for
     specific parameters.
 
+    Concurrent calls to step(), either from the same or different clients, will
+    be serialized on each worker -- as each worker's optimizer can only work
+    on one set of gradients at a time. However, there is no guarantee that
+    the full forward-backward-optimizer sequence will execute for one client
+    at a time. This means that the gradients being applied may not correspond
+    to the latest forward pass executed on a given worker. Also, there is no
+    guaranteed ordering across workers.
+
     Args:
-        optimizer_class (FunctionalOptimizer): the class of optimizer to
+        optimizer_class (optim.Optimizer): the class of optimizer to
             instantiate on each worker.
         params_rref (list[RRef]): list of RRefs to local or remote parameters
             to optimize.
@@ -56,7 +64,7 @@ class DistributedOptimizer:
         kwargs: arguments to pass to the optimizer constructor on each worker.
     """
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):
-        per_worker_params_rref = defaultdict(lambda: [])
+        per_worker_params_rref = defaultdict(list)
         for param in params_rref:
             per_worker_params_rref[param.owner()].append(param)
 
