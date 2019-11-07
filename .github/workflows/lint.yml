@@ -42,7 +42,7 @@ jobs:
           sudo apt-get install -y doxygen && pip install -r requirements.txt
           cd docs/cpp/source && ./check-doxygen.sh
 
-  flake8-py3:
+  flake8:
     runs-on: ubuntu-latest
     steps:
       - name: Setup Python
@@ -77,44 +77,6 @@ jobs:
           regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  flake8-py2:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Setup Python
-        uses: actions/setup-python@v1
-        with:
-          python-version: 2.x
-          architecture: x64
-      - name: Fetch PyTorch
-        uses: actions/checkout@master
-      - name: Checkout PR tip
-        run: |
-          set -eux
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # We are on a PR, so actions/checkout leaves us on a merge commit.
-            # Check out the actual tip of the branch.
-            git checkout ${{ github.event.pull_request.head.sha }}
-          fi
-          echo ::set-output name=commit_sha::$(git rev-parse HEAD)
-        id: get_pr_tip
-      - name: Run flake8
-        run: |
-          set -eux
-          pip install flake8
-          rm -rf .circleci
-          flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
-          cat ${GITHUB_WORKSPACE}/flake8-output.txt
-      - name: Add annotations
-        uses: pytorch/add-annotations-github-action@master
-        with:
-          check_name: 'flake8-py2'
-          linter_output_path: 'flake8-output.txt'
-          commit_sha: ${{ steps.get_pr_tip.outputs.commit_sha }}
-          regex: '^(?<filename>.*?):(?<lineNumber>\d+):(?<columnNumber>\d+): (?<errorCode>\w\d+) (?<errorDesc>.*)'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 
   clang-tidy:
     if: github.event_name == 'pull_request'
