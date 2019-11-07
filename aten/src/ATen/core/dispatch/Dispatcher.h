@@ -91,10 +91,10 @@ public:
   RegistrationHandleRAII registerCatchallKernel(const OperatorHandle& op, KernelFunction kernel);
 
   template<class Return, class... Args>
-  Return callUnboxed(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const;
+  Return callUnboxed(const OperatorHandle& op, Args... args) const;
 
   template<class Return, class... Args>
-  Return callUnboxedOnly(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const;
+  Return callUnboxedOnly(const OperatorHandle& op, Args... args) const;
 
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
@@ -163,17 +163,15 @@ private:
 };
 
 template<class Return, class... Args>
-inline Return Dispatcher::callUnboxed(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const {
+inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
-  return op.operatorIterator_->op.callUnboxed<Return, Args...>(std::move(dispatchKey), std::forward<Args>(args)...);
+  return op.operatorIterator_->op.callUnboxed<Return, Args...>(std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, TensorTypeId dispatchKey, Args... args) const {
+inline Return Dispatcher::callUnboxedOnly(const OperatorHandle& op, Args... args) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
-  // TODO Remove dispatchKey argument and instead infer dispatchKey from args...
-  return op.operatorIterator_->op.callUnboxedOnly<Return, Args...>(std::move(dispatchKey), std::forward<Args>(args)...);
+  return op.operatorIterator_->op.callUnboxedOnly<Return, Args...>(std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
