@@ -302,15 +302,20 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
         [this](const Message& message) {
           sendCounts_.increment(pg_->getRank());
           // Unlike the other cases, need to add a tensor deleter, since the
-          // data outlives the scope of this function.
-          auto serializedPayload = new std::string(serialize(message));
+          // data outlives the scope of this function. It's shared_ptr<> due
+          // to c++11 lambda capture limitations with unique_ptr<>.
+          auto payload = std::make_shared<std::string>(serialize(message));
+          const char* data = payload->data();
+          size_t len = payload->length();
           enqueueRecv(RecvWork(
-              allWorkerInfo_[pg_->getRank()],
+              getWorkerInfo(pg_->getRank()),
               message.type(),
               torch::from_blob(
-                  (void*)serializedPayload->data(),
-                  serializedPayload->length(),
-                  [serializedPayload](void*) { delete serializedPayload; },
+                  (void*)data,
+                  len,
+                  [payload = std::move(payload)](void*) {
+                    const_cast<std::shared_ptr<std::string>&>(payload).reset();
+                  },
                   {torch::kChar})));
         },
         std::move(message)));
