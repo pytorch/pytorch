@@ -1,12 +1,14 @@
 #include <ATen/ATen.h>
 #include "ATen/core/ivalue.h"
-#include "test/cpp/jit/test_base.h"
-#include "test/cpp/jit/test_utils.h"
+#include <test/cpp/jit/test_base.h>
+#include <test/cpp/jit/test_utils.h>
+#include <torch/torch.h>
 
 namespace torch {
 namespace jit {
 
 using namespace torch::autograd;
+using namespace torch::jit::script;
 
 void testIValue() {
   c10::List<int64_t> foo({3, 4, 5});
@@ -61,6 +63,19 @@ void testIValue() {
     ASSERT_EQ(
         std::get<1>(t_).item().to<float>(), std::get<1>(t).item().to<float>());
   }
+
+  // unsafeRemoveAttr in ivalue::Object
+  auto cu = std::make_shared<CompilationUnit>();
+  auto cls = ClassType::create("foo.bar", cu);
+  cls->addAttribute("attr1", TensorType::get());
+  cls->addAttribute("attr2", TensorType::get());
+  auto obj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(cu, cls), cls->numAttributes());
+  obj->unsafeRemoveAttr("attr1");
+  // attr1 is not removed in the type
+  ASSERT_TRUE(cls->hasAttribute("attr1"));
+  ASSERT_TRUE(cls->hasAttribute("attr2"));
+  ASSERT_TRUE(obj->slots().size() == 1);
 }
 
 } // namespace jit

@@ -127,8 +127,6 @@ THP_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...);
 
-#ifdef _THP_CORE
-
 bool THPUtils_checkIntTuple(PyObject *arg);
 std::vector<int> THPUtils_unpackIntTuple(PyObject *arg);
 
@@ -192,7 +190,5 @@ bool maybeThrowBackCompatKeepdimWarn(char *func);
 #ifdef USE_CUDA
 std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
-
-#endif /* _THP_CORE */
 
 #endif
