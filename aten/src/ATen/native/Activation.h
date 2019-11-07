@@ -10,10 +10,9 @@ struct TensorIterator;
 
 namespace native {
 
+using activation_fn = void (*)(TensorIterator&);
+using activation_backward_fn = void (*)(TensorIterator&);
 using threshold_fn = void (*)(TensorIterator&, Scalar, Scalar);
-using activation_fn = void (*)(const Tensor& /* X */, Tensor* /* Y */);
-using activation_backward_fn =
-    void (*)(const Tensor& /* dY */, const Tensor& /* X */, Tensor* /* dX */);
 using hardshrink_cpu_fn = void (*)(TensorIterator&, Scalar);
 using hardshrink_backward_cpu_fn = void (*)(TensorIterator&, Scalar);
 

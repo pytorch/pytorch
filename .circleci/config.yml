@@ -331,7 +331,7 @@ jobs:
             git config --global user.name "CircleCI"
             git config remote.origin.url https://github.com/pytorch/pytorch.git
             git config --add remote.origin.fetch +refs/heads/master:refs/remotes/origin/master
-            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=50 --quiet
+            git fetch --tags --progress https://github.com/pytorch/pytorch.git +refs/heads/master:refs/remotes/origin/master --depth=100 --quiet
             export GIT_MERGE_TARGET=`git log -n 1 --pretty=format:"%H" origin/master`
             echo "GIT_MERGE_TARGET: " ${GIT_MERGE_TARGET}
             export GIT_COMMIT=${CIRCLE_SHA1}
@@ -2297,7 +2297,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda100"
       - smoke_linux_test:
           name: smoke_linux_manywheel_2_7mu_cpu_devtoolset7
@@ -2306,7 +2306,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda100"
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_5m_cpu_devtoolset7
@@ -2315,7 +2315,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda100"
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_6m_cpu_devtoolset7
@@ -2324,7 +2324,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda100"
       - smoke_linux_test:
           name: smoke_linux_manywheel_3_7m_cpu_devtoolset7
@@ -2333,7 +2333,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda100"
       - smoke_linux_test:
           name: smoke_linux_manywheel_2_7m_cu92_devtoolset7
@@ -2342,7 +2342,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2353,7 +2353,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2364,7 +2364,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2375,7 +2375,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2386,7 +2386,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2397,7 +2397,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2408,7 +2408,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2419,7 +2419,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2430,7 +2430,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2441,7 +2441,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2452,7 +2452,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2463,7 +2463,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2474,7 +2474,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2485,7 +2485,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2496,7 +2496,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2507,7 +2507,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
       - smoke_linux_test:
           name: smoke_linux_conda_3_5_cpu_devtoolset7
@@ -2516,7 +2516,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
       - smoke_linux_test:
           name: smoke_linux_conda_3_6_cpu_devtoolset7
@@ -2525,7 +2525,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
       - smoke_linux_test:
           name: smoke_linux_conda_3_7_cpu_devtoolset7
@@ -2534,7 +2534,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
       - smoke_linux_test:
           name: smoke_linux_conda_2_7_cu92_devtoolset7
@@ -2543,7 +2543,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2554,7 +2554,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2565,7 +2565,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2576,7 +2576,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2587,7 +2587,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2598,7 +2598,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2609,7 +2609,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2620,7 +2620,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2631,7 +2631,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2642,7 +2642,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2653,7 +2653,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2664,7 +2664,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           docker_image: "soumith/conda-cuda"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
@@ -2675,7 +2675,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-with-deps"
           docker_image: "soumith/manylinux-cuda100"
       - smoke_linux_test:
@@ -2685,7 +2685,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-without-deps"
           docker_image: "soumith/manylinux-cuda100"
       - smoke_linux_test:
@@ -2695,7 +2695,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-with-deps"
           docker_image: "soumith/manylinux-cuda100"
       - smoke_linux_test:
@@ -2705,7 +2705,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-without-deps"
           docker_image: "soumith/manylinux-cuda100"
       - smoke_linux_test:
@@ -2715,7 +2715,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-with-deps"
           docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
@@ -2727,7 +2727,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-without-deps"
           docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
@@ -2739,7 +2739,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-with-deps"
           docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
@@ -2751,7 +2751,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-without-deps"
           docker_image: "soumith/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
@@ -2763,7 +2763,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-with-deps"
           docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
@@ -2775,7 +2775,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-without-deps"
           docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
@@ -2787,7 +2787,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-with-deps"
           docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
@@ -2799,7 +2799,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-without-deps"
           docker_image: "soumith/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
@@ -2811,7 +2811,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-with-deps"
           docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
@@ -2823,7 +2823,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-without-deps"
           docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
@@ -2835,7 +2835,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-with-deps"
           docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
@@ -2847,7 +2847,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-without-deps"
           docker_image: "soumith/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
@@ -2859,7 +2859,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-with-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
       - smoke_linux_test:
@@ -2869,7 +2869,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-without-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
       - smoke_linux_test:
@@ -2879,7 +2879,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-with-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
       - smoke_linux_test:
@@ -2889,7 +2889,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-without-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
       - smoke_linux_test:
@@ -2899,7 +2899,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-with-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -2911,7 +2911,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-without-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -2923,7 +2923,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-with-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -2935,7 +2935,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-without-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -2947,7 +2947,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-with-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -2959,7 +2959,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-without-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -2971,7 +2971,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-with-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -2983,7 +2983,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-without-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -2995,7 +2995,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-with-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -3007,7 +3007,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "shared-without-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -3019,7 +3019,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-with-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -3031,7 +3031,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
           libtorch_variant: "static-without-deps"
           docker_image: "soumith/conda-cuda-cxx11-ubuntu1604:latest"
           use_cuda_docker_runtime: "1"
@@ -3043,7 +3043,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
       - smoke_mac_test:
           name: smoke_macos_wheel_3_5_cpu
           build_environment: "wheel 3.5 cpu"
@@ -3051,7 +3051,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
       - smoke_mac_test:
           name: smoke_macos_wheel_3_6_cpu
           build_environment: "wheel 3.6 cpu"
@@ -3059,7 +3059,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
       - smoke_mac_test:
           name: smoke_macos_wheel_3_7_cpu
           build_environment: "wheel 3.7 cpu"
@@ -3067,7 +3067,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
       - smoke_mac_test:
           name: smoke_macos_conda_2_7_cpu
           build_environment: "conda 2.7 cpu"
@@ -3075,7 +3075,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
       - smoke_mac_test:
           name: smoke_macos_conda_3_5_cpu
           build_environment: "conda 3.5 cpu"
@@ -3083,7 +3083,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
       - smoke_mac_test:
           name: smoke_macos_conda_3_6_cpu
           build_environment: "conda 3.6 cpu"
@@ -3091,7 +3091,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
       - smoke_mac_test:
           name: smoke_macos_conda_3_7_cpu
           build_environment: "conda 3.7 cpu"
@@ -3099,7 +3099,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
       - smoke_mac_test:
           name: smoke_macos_libtorch_2_7_cpu
           build_environment: "libtorch 2.7 cpu"
@@ -3107,7 +3107,7 @@ workflows:
             - setup
           filters:
             branches:
-              only: nightly
+              only: postnightly
 ##############################################################################
 # Daily binary build trigger
 ##############################################################################
