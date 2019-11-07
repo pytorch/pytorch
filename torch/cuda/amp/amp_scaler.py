@@ -132,21 +132,15 @@ class AmpScaler(object):
         per_device_found_inf = _MultiDeviceReplicator(found_inf)
 
         for group in optimizer.param_groups:
-            torch.cuda.synchronize()
             for param in group["params"]:
                 if param.grad is not None:
                     if (not allow_fp16) and param.grad.dtype == torch.float16:
                         raise ValueError("Attempting to unscale FP16 gradients.  If you want to check for "
                                          "infs/nans without unscaling, use optimizer.check_infs() instead.")
                     else:
-                        invscale = per_device_inv_scale.get(param.grad.device)
-                        torch.cuda.synchronize()
-                        foundinf = per_device_found_inf.get(param.grad.device)
-                        torch.cuda.synchronize()
                         torch._amp_unscale_inf_check_(param.grad,
-                                                      invscale,
-                                                      foundinf)
-                        torch.cuda.synchronize()
+                                                      per_device_inv_scale.get(param.grad.device),
+                                                      per_device_found_inf.get(param.grad.device))
 
         return per_device_found_inf._per_device_tensors
 
@@ -192,13 +186,9 @@ class AmpScaler(object):
         if "unscaled" in optimizer_state:
             raise RuntimeError("unscale() has already been called on this optimizer this iteration.")
 
-        torch.cuda.synchronize()
-
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
         inv_scale = self._scale.double().reciprocal().float()
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)
-
-        torch.cuda.synchronize()
 
         optimizer_state["found_inf_per_device"] = self._unscale_grads(optimizer, inv_scale, found_inf)
         optimizer_state["unscaled"] = True
