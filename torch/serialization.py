@@ -416,9 +416,6 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
         # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            # Offset is always 0, but we keep it for backwards compatibility
-            # with the old serialization format (which supported storage views)
-            offset = 0
             obj_key = str(obj._cdata)
             location = location_tag(obj)
             serialized_storages[obj_key] = obj
