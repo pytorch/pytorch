@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorTypeId.h>
+#include <torch/csrc/Device.h>
 #include <exception>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -33,9 +34,10 @@ static int64_t get_nested_dim(std::vector<py::object> tensors) {
     return 1 + get_nested_dim(tensors[0].cast<std::vector<py::object>>());
   }
 }
-
+// TODO: Operate on _ListNestedTensor using nested_dim instead.
+template <class F>
 static std::vector<py::object> map_method(std::vector<py::object> tensors,
-                                          py::object (*method)(at::Tensor)) {
+        F method){
   try {
     std::vector<py::object> result_tensors;
     for (py::object item : tensors) {
@@ -59,6 +61,12 @@ struct TORCH_API _ListNestedTensor {
         _nested_dim(get_nested_dim(_tensors)) {}
   size_t element_size() { return _first_tensor.element_size(); }
   std::vector<py::object> unbind() { return _tensors; }
+  _ListNestedTensor requires_grad_(bool requires_grad) {
+    return _ListNestedTensor(map_method(_tensors, [requires_grad](at::Tensor tensor) -> py::object {
+      return py::reinterpret_borrow<py::object>(
+          torch::autograd::utils::wrap(tensor.requires_grad_(requires_grad)));
+    }));
+  }
   std::vector<py::object> nested_size() {
     return map_method(_tensors, [](at::Tensor tensor) -> py::object {
       return py::reinterpret_borrow<py::object>(
@@ -66,6 +74,18 @@ struct TORCH_API _ListNestedTensor {
     });
   }
   int64_t nested_dim() { return _nested_dim; }
+  py::object get_dtype() {
+    return py::reinterpret_borrow<py::object>(torch::autograd::utils::wrap(torch::getDtype(_first_tensor.scalar_type())));
+  }
+  py::object get_layout() {
+    return py::reinterpret_borrow<py::object>(torch::autograd::utils::wrap(torch::getLayout(_first_tensor.type().backend())));
+  }
+  py::object get_device() {
+    return py::reinterpret_borrow<py::object>(THPDevice_New(_first_tensor.device()));
+  }
+  bool requires_grad() {
+    return _first_tensor.requires_grad();
+  }
 
 private:
   std::vector<py::object> _tensors;

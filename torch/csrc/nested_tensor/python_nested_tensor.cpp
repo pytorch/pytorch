@@ -38,6 +38,11 @@ void initialize_python_bindings() {
 
   py::class_<_ListNestedTensor>(m, "_ListNestedTensor")
       .def(py::init<std::vector<py::object>>())
+      .def_property_readonly("dtype", &_ListNestedTensor::get_dtype)
+      .def_property_readonly("layout", &_ListNestedTensor::get_layout)
+      .def_property_readonly("device", &_ListNestedTensor::get_device)
+      .def("requires_grad", &_ListNestedTensor::requires_grad)
+      .def("requires_grad_", &_ListNestedTensor::requires_grad_)
       .def("element_size", &_ListNestedTensor::element_size)
       .def("unbind", &_ListNestedTensor::unbind)
       .def("nested_size", &_ListNestedTensor::nested_size)
