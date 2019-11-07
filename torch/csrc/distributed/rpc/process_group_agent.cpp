@@ -314,7 +314,9 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
                   (void*)data,
                   len,
                   [payload = std::move(payload)](void*) {
-                    const_cast<std::shared_ptr<std::string>&>(payload).reset();
+                    const_cast<std::shared_ptr<std::string>&>( // NOLINT
+                        payload)
+                        .reset();
                   },
                   {torch::kChar})));
         },
