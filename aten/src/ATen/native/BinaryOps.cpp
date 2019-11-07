@@ -22,17 +22,10 @@ DEFINE_DISPATCH(ge_stub);
 DEFINE_DISPATCH(eq_stub);
 DEFINE_DISPATCH(ne_stub);
 
-static inline void alpha_check(const TensorIterator& iter, Scalar alpha) {
-  TORCH_CHECK(! alpha.isBoolean() || iter.dtype() == ScalarType::Bool,
-              "Boolean alpha only supported for Boolean results.");
-  TORCH_CHECK(isFloatingType(iter.dtype()) || alpha.isIntegral(true),
-              "For integral input tensors, argument alpha must not be a floating point number.");
-}
-
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   add_stub(iter.device_type(), iter, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
@@ -41,7 +34,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
 Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   add_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }
@@ -86,21 +79,11 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
   return native::mul_out(self, self, other);
 }
 
-// Basic checking for all sub functions.
-static inline void sub_check(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.scalar_type() != kBool || other.scalar_type() != kBool,
-              "Subtraction, the `-` operator, with two bool tensors is not supported. "
-              "Use the `^` or `logical_xor()` operator instead.")
-  TORCH_CHECK(self.scalar_type() != kBool && other.scalar_type() != kBool,
-              "Subtraction, the `-` operator, with a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
-}
-
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   sub_check(self, other);
   auto iter = TensorIterator::binary_op(result, self, other,
     /*check_mem_overlap=*/true);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   sub_stub(iter.device_type(), iter, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
   return result;
@@ -110,7 +93,7 @@ Tensor sub(const Tensor& self, const Tensor& other, Scalar alpha) {
   sub_check(self, other);
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
-  alpha_check(iter, alpha);
+  alpha_check(iter.dtype(), alpha);
   sub_stub(iter.device_type(), iter, alpha);
   return iter.output();
 }

@@ -58,6 +58,19 @@ inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz) {
   return at::empty(size, values.options());
 }
 
+inline Tensor new_values_with_size_of(const Tensor& values, int64_t nnz, ScalarType dtype) {
+  std::vector<int64_t> size = values.sizes().vec();
+  size[0] = nnz;
+  return at::empty(size, values.options().dtype(dtype));
+}
+
+inline std::tuple<const Tensor, const Tensor> 
+promoted_tensors(const Tensor & first, const Tensor & second, ScalarType commonDtype) {
+  const Tensor& first_promoted = first.scalar_type() != commonDtype? first.to(commonDtype) : first;
+  const Tensor& second_promoted = second.scalar_type() != commonDtype? second.to(commonDtype) : second;
+  return std::tie(first_promoted, second_promoted);
+}
+
 // NOTE [ Flatten Sparse Indices ]
 // This helper function flattens a sparse indices tensor (a LongTensor) into a 1D
 // indices tensor. E.g.,

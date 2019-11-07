@@ -2,6 +2,7 @@ import torch
 import unittest
 
 from common_utils import TestCase, run_tests, load_tests
+import itertools
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -373,6 +374,122 @@ class TestTypePromotion(TestCase):
         # https://github.com/pytorch/pytorch/issues/28502
         a = torch.tensor([[True, True], [False, True]])
         self.assertEqual(a.t() == 0, a.t() == False)  # noqa: E712
+
+    def get_sparse_tensors(self, dtype1=torch.int, value=5, zeros=True):
+        t = torch.full([5, 5], value, dtype=dtype1, device=self.device)
+        if zeros:
+            t[0, 0] = 0
+            t[1, 1] = 0
+            t[2, 2] = 0
+        s = t.to_sparse()
+        return (t, s)
+
+    def _test_sparse_op(self, op_name, dtype1, dtype2):
+        # print("testing ", op_name, " with ", dtype1, " and ", dtype2)
+
+        def op(t1, t2):
+            return getattr(t1, op_name)(t2)
+
+        inplace = op_name[-1] == '_'
+        common_dtype = torch.promote_types(dtype1, dtype2)
+        div = op_name.find('div') == 0
+        sub = op_name.find('sub') == 0
+        mul = op_name.find('mul') == 0
+        add = op_name.find('add') == 0
+        # Subtraction, the `-` operator, with a bool tensor is not supported.
+        sub_bool = sub and (dtype1 == torch.bool or dtype2 == torch.bool)
+        # "add_cpu/sub_cpu" not implemented for 'Half'
+        cpu = self.device == 'cpu'
+        half = common_dtype == torch.half
+
+        # skip non-promoting case
+        if dtype1 == dtype2:
+            return
+
+        (d1, s1) = self.get_sparse_tensors(dtype1, 5)
+        (d2, s2) = self.get_sparse_tensors(dtype2, 6, not div)
+
+        if inplace and not torch.can_cast(common_dtype, dtype1):
+            self.assertRaises(RuntimeError, lambda: op(d1, s2))
+            self.assertRaises(RuntimeError, lambda: op(s1, s2))
+            self.assertRaises(RuntimeError, lambda: op(s1, d2))
+            return
+
+        # expected value (using dense op)
+        if not sub_bool and not (cpu and half):
+            expected = d1
+            expected = op(expected, d2)
+
+        # Test op(sparse, sparse)
+        if not div and (not mul or common_dtype != torch.bool) and not sub_bool and not (cpu and half):
+            if inplace:
+                (d1, s1) = self.get_sparse_tensors(dtype1, 5)
+                (d2, s2) = self.get_sparse_tensors(dtype2, 6, not div)
+            sparse = op(s1, s2)
+            if not inplace:
+                self.assertEqual(sparse.dtype, expected.dtype)
+            if sparse.dtype == torch.half and cpu:
+                # only dtype1 is half, can't to_dense on cpu half.
+                sparse = sparse.to(torch.float)
+            std = sparse.to_dense()
+            self.assertEqual(expected, sparse.to_dense())
+        else:
+            # sparse division only supports division by a scalar
+            # "mul_out_sparse" not implemented for 'Bool'
+            self.assertRaises(RuntimeError, lambda: op(s1, s2).to_dense())
+
+        # Test op(dense, sparse)
+        if (add or sub) and not sub_bool and not (cpu and half):
+            if inplace:
+                (d1, s1) = self.get_sparse_tensors(dtype1, 5)
+                (d2, s2) = self.get_sparse_tensors(dtype2, 6, not div)
+            dense_sparse = op(d1, s2)
+            self.assertEqual(expected, dense_sparse, "{}\n{}\n{}\n{}".format(d1, s2, expected, dense_sparse))
+        else:
+            # sparse division only supports division by a scalar
+            # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
+            self.assertRaises(RuntimeError, lambda: op(d1, s2))
+
+        # Test op(sparse, dense)
+        # op( sparse, dense) not supported for any ops:
+        # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
+        # sparse division only supports division by a scalar
+        # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'.
+        self.assertRaises(RuntimeError, lambda: op(s1, d2))
+
+        # Test op(sparse, scalar)
+        scalar = torch.tensor(2, dtype=dtype2).item()
+        if not add and not sub and not (cpu and dtype1 == torch.half):
+            if inplace:
+                (d1, s1) = self.get_sparse_tensors(dtype1, 5)
+                (d2, s2) = self.get_sparse_tensors(dtype2, 6, not div)
+
+            sparse = op(s1, scalar)
+            dense_scalar = op(d1, scalar)
+            if not inplace:
+                self.assertEqual(sparse.dtype, dense_scalar.dtype)
+            # not sure why this combination gives:
+            # "add_dense_sparse" not implemented for 'Bool'
+            if op != torch.mul or common_dtype != torch.bool:
+                self.assertEqual(dense_scalar, sparse.to_dense())
+            else:
+                self.assertRaises(RuntimeError, lambda: sparse.to_dense())
+        else:
+            # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
+            # "div_cpu" not implemented for 'Bool'
+            # "mul_cpu" / "div_cpu" not implemented for 'Half'
+            self.assertRaises(RuntimeError, lambda: op(s1, scalar))
+
+    def test_sparse_ops(self):
+        dtypes = torch.testing.get_all_dtypes()
+        ops = ['add', 'sub', 'mul', 'div']
+        inplace = [x + '_' for x in ops]
+        for dtype1, dtype2 in itertools.product(dtypes, dtypes):
+            for op_name in ops + inplace:
+                # can't to_sparse in bfloat16
+                if dtype1 != torch.bfloat16 and dtype2 != torch.bfloat16:
+                    self._test_sparse_op(op_name, dtype1, dtype2)
+
 
 @unittest.skipIf(not torch.cuda.is_available(), "no cuda")
 class TestTypePromotionCuda(TestTypePromotion):

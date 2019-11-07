@@ -294,23 +294,33 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     return r_;
   }
 
+  auto commonDtype = promoteTypes(dense.scalar_type(), sparse.scalar_type());
+  TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
+
   Tensor r = r_;
-  if (!is_same_tensor(r, dense)) {
-    r_.resize_as_(dense);
-    r_.copy_(dense);
-  } else {
+  if (r_.scalar_type() != commonDtype) {
+    r = at::empty_like(dense, r_.options().dtype(commonDtype));
+  }
+
+  Tensor dense_buffer, values;
+  std::tie(dense_buffer, values) = promoted_tensors(dense, sparse._values(), commonDtype);
+
+  if (is_same_tensor(r, dense_buffer)) {
     TORCH_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
-    r = r_.contiguous();
+    //r = r_.contiguous();
+  } else {
+    r.resize_as_(dense);
+    r.copy_(dense_buffer);
   }
 
   LongTensor indices = sparse._indices();
-  Tensor values = sparse._values();
   int64_t nDim = dense.dim();
   int64_t nDimI = sparse.sparse_dim();
 
-  if (sparse._values().numel() == 0) {
-    return r_;
+  if (values.numel() == 0) {
+    return r_.copy_(dense_buffer);
   }
+
 
   if (sparse.is_coalesced()) {
     // TODO benchmark to decide whether to remove this special case
@@ -323,11 +333,11 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
       TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
       AT_DISPATCH_ALL_TYPES_AND(
-        at::ScalarType::Half, values.scalar_type(), "add_out_dense_sparse_cuda", [&] {
+        at::ScalarType::Half, commonDtype, "add_out_dense_sparse_cuda", [&] {
             apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
                 TensorCAddOp<scalar_t>(value.to<scalar_t>()),
-                V_INFO(r_), I_INFO(indices), V_INFO(values),
+                V_INFO(r), I_INFO(indices), V_INFO(values),
                 static_cast<uint64_t>(nnz));
           });
     } else {
@@ -337,21 +347,22 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
       values = values.contiguous();
 
       AT_DISPATCH_ALL_TYPES_AND(
-        at::ScalarType::Half, values.scalar_type(), "add_out_dense_sparse_cuda", [&] {
+        at::ScalarType::Half, commonDtype, "add_out_dense_sparse_cuda", [&] {
             apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
                 TensorCAddOp<scalar_t>(value.to<scalar_t>()),
-                V_INFO(r_), I_INFO(indices), V_INFO(values),
+                V_INFO(r), I_INFO(indices), V_INFO(values),
                 static_cast<uint64_t>(nnz));
           });
     }
   } else {
+
     LongTensor indices1D = flatten_indices(indices, sparse.sizes(), 0);
 
     // FIXME: at some point we can wrap the scale into indexAdd
     // NB: Purposely not inplace!
     AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::Half, values.scalar_type(), "add_out_dense_sparse_cuda", [&] {
+      at::ScalarType::Half, commonDtype, "add_out_dense_sparse_cuda", [&] {
           if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             values = values.mul(value);
           }
@@ -372,6 +383,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
   }
   THCudaCheck(cudaGetLastError());
 
+  r_.copy_(r);
   return r_;
 }
 
@@ -394,6 +406,10 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   TORCH_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
 
   TORCH_CHECK(cuda::check_device({r_, t, src}));
+
+  auto commonDtype = promoteTypes(t.scalar_type(), src.scalar_type());
+  TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
+
   TORCH_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
 
   if (src._nnz() == 0) {
@@ -410,20 +426,31 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   // at the end of the operation, at the cost of having a non-coalesced result.
   // This trade-off is preferable for the common use-case of gradient accumulation.
   LongTensor t_indices_ = t._indices();
-  Tensor t_values_ = t._values();
   LongTensor s_indices_ = src._indices();
-  Tensor s_values_ = src._values();
+
+  Tensor t_values_, s_values_;
+  std::tie(t_values_, s_values_) = promoted_tensors(t._values(), src._values(), commonDtype);
 
   AT_DISPATCH_ALL_TYPES_AND(
-    at::ScalarType::Half, s_values_.scalar_type(), "add_out_sparse_cuda", [&] {
+    at::ScalarType::Half, commonDtype, "add_out_sparse_cuda", [&] {
         if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
           s_values_ = s_values_.mul(value);
         }
       });
-
   LongTensor r_indices_ = at::cat({t_indices_, s_indices_}, 1);
+  
   Tensor r_values_ = at::cat({t_values_, s_values_}, 0);
-  r_.resize_as_(src);
+  if (r_.scalar_type() != commonDtype) {
+    SparseTensor promoted = at::empty({0}, r_.options().dtype(commonDtype));
+    promoted.resize_as_(src);
+    alias_into_sparse(promoted, r_indices_, r_values_);
+    promoted = promoted.coalesce().to(r_.scalar_type());
+    r_values_ = promoted._values();
+    r_indices_ = promoted._indices();
+  } else {
+    r_.resize_as_(src);
+  }
+
   alias_into_sparse(r_, r_indices_, r_values_);
 
   // FIXME: add some heuristic about when to call coalesce() here, so that
@@ -471,9 +498,19 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   LongTensor s_indices_ = src._indices();
   Tensor s_values_ = src._values();
   LongTensor r_indices_ = at::empty({sparse_dim, max_nnz}, t_indices_.options());
-  Tensor r_values_ = new_values_with_size_of(t_values_, max_nnz).zero_();
   r_.resize_as_(src);
-  get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);
+
+  auto commonDtype = promoteTypes(t.scalar_type(), src.scalar_type());
+  TORCH_CHECK(canCast(commonDtype, r_.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
+
+  if (s_values_.scalar_type() != commonDtype) {
+    s_values_ = s_values_.to(commonDtype);
+  }
+  if (t_values_.scalar_type() != commonDtype) {
+    t_values_ = t_values_.to(commonDtype);
+  }
+
+  Tensor r_values_ = new_values_with_size_of(t_values_, max_nnz).zero_();
 
   int64_t valueSize = t_values_.stride(0);
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
@@ -485,7 +522,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
 
   LongTensor resultNnz = at::empty({1}, CUDA(kLong));
   AT_DISPATCH_ALL_TYPES_AND(
-    at::ScalarType::Half, t_values_.scalar_type(), "mul_out_sparse_cuda", [&] {
+    at::ScalarType::Half, commonDtype, "mul_out_sparse_cuda", [&] {
         apply::valueSparseIntersectionKernel<TensorMulOp<scalar_t>, uint64_t, scalar_t>
           <<<grid, block, 0, stream>>>(
             TensorMulOp<scalar_t>(),
@@ -502,6 +539,10 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
             static_cast<uint64_t>(t_nnz), static_cast<uint64_t>(s_nnz), reinterpret_cast<uint64_t*>(resultNnz.data_ptr()));
         THCudaCheck(cudaGetLastError());
       });
+  if (r_.scalar_type() != commonDtype) {
+    r_values_ = r_values_.to(r_.scalar_type());
+  }
+  get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);
 
   // sync!  (surely there is a more idiomatic way to do this...)
   LongTensor cpu_resultNnz = at::empty({1}, CPU(kLong));
