@@ -55,7 +55,7 @@ static void std_var_kernel_cuda(TensorIterator& iter, bool unbiased, bool take_s
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void mean_kernel_impl(TensorIterator& iter) {
   float factor = float(iter.num_output_elements()) / iter.numel();
-  gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, float> {factor});
+  gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, scalar_t, out_t, float> {factor});
 }
 
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
@@ -70,15 +70,15 @@ void norm_kernel_cuda_impl(TensorIterator& iter, Scalar val) {
   }
 
   if (p == static_cast<float>(0)) {
-    gpu_reduce_kernel<scalar_t, out_t>(iter, NormZeroOps<acc_t>(), 0);
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormZeroOps<acc_t, scalar_t, out_t>(), 0);
   } else if (p == static_cast<float>(1)) {
-    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOneOps<acc_t>(), 0);
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOneOps<acc_t, scalar_t, out_t>(), 0);
   } else if (p == static_cast<float>(INFINITY)) {
     gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMaxOps<acc_t>(), std::numeric_limits<acc_t>::min());
   } else if (p == static_cast<float>(-INFINITY)) {
     gpu_reduce_kernel<scalar_t, out_t>(iter, AbsMinOps<acc_t>(), std::numeric_limits<acc_t>::max());
   } else {
-    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOps<acc_t>{ acc_t(p) }, 0);
+    gpu_reduce_kernel<scalar_t, out_t>(iter, NormOps<acc_t, scalar_t, out_t>{ acc_t(p) }, 0);
   }
 }
 
