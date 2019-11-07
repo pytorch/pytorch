@@ -65,7 +65,11 @@ if (ANDROID_ABI)
       -Wl,-dead_strip
       libtorch
       libc10
+      libnnpack
+      libpytorch_qnnpack
       libeigen_blas
+      libcpuinfo
+      libclog
   )
 
 else()
@@ -76,6 +80,10 @@ else()
       -Wl,-dead_strip
       torch
       c10
+      nnpack
+      pytorch_qnnpack
+      cpuinfo
+      clog
   )
 
 endif()
