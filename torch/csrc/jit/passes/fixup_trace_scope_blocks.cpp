@@ -503,8 +503,8 @@ void runCleanupPasses(const std::shared_ptr<Graph>& g) {
 
 void runCleanupPasses(script::Module* m) {
   auto methods = m->get_methods();
-  for (auto module : m->get_modules()) {
-    runCleanupPasses(&module.module);
+  for (auto module : m->children()) {
+    runCleanupPasses(&module);
   }
   for (auto& method : methods) {
     runCleanupPasses(method.graph());
