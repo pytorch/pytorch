@@ -28,7 +28,7 @@ inline Tensor normalize(
 
 inline Tensor normalize(
     const Tensor& input,
-    const NormalizeFuncOptions& options = {},
+    NormalizeFuncOptions options = {},
     c10::optional<Tensor> out = c10::nullopt) {
   return detail::normalize(input, options.p(), options.dim(), options.eps(), out);
 }
@@ -46,7 +46,7 @@ inline Tensor layer_norm(const Tensor& input,
 } // namespace detail
 
 inline Tensor layer_norm(const Tensor& input,
-    const LayerNormFuncOptions& options,
+    LayerNormFuncOptions options,
     const Tensor& weight = Tensor(),
     const Tensor& bias = Tensor()) {
   return detail::layer_norm(input, options.normalized_shape(), weight, bias, options.eps());
@@ -81,7 +81,7 @@ inline Tensor local_response_norm(
 
 inline Tensor local_response_norm(
     const Tensor& input,
-    const LocalResponseNormFuncOptions& options) {
+    LocalResponseNormFuncOptions options) {
   return detail::local_response_norm(input, options.size(), options.alpha(), options.beta(), options.k());
 }
 
