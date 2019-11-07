@@ -27,6 +27,8 @@ white_list = [
     ('ones_like', datetime.date(2019, 11, 11)),
     ('full_like', datetime.date(2019, 11, 11)),
     ('AutogradAnyNonZero', datetime.date(2019, 11, 11)),
+    ('_batch_norm_impl_index', datetime.date(2019, 11, 11)),
+    ('_batch_norm_impl_index_backward', datetime.date(2019, 11, 11)),
 ]
 
 
