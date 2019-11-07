@@ -83,6 +83,19 @@ class TORCH_API Message final {
       MessageType type,
       int64_t id);
 
+  Message(
+      std::vector<char>&& payload,
+      std::vector<torch::Tensor>&& tensors,
+      MessageType type,
+      std::chrono::milliseconds processTimeout);
+
+  Message(
+      std::vector<char>&& payload,
+      std::vector<torch::Tensor>&& tensors,
+      MessageType type,
+      std::chrono::milliseconds processTimeout,
+      int64_t id);
+
   Message(const Message& other);
   Message(Message&& other) noexcept;
   Message& operator=(Message const& rhs) &;
@@ -97,6 +110,7 @@ class TORCH_API Message final {
   std::vector<torch::Tensor>& tensors();
   const std::vector<torch::Tensor>& tensors() const;
   MessageType type() const;
+  c10::optional<std::chrono::milliseconds> processTimeout() const;
 
   bool isRequest() const;
   bool isResponse() const;
@@ -112,6 +126,9 @@ class TORCH_API Message final {
   std::vector<char> payload_;
   std::vector<torch::Tensor> tensors_;
   MessageType type_ = MessageType::UNKNOWN;
+  /* For client side to dictate the timeout constraint on server side.
+         Only useful when the Message is a request. */
+  c10::optional<std::chrono::milliseconds> processTimeout_;
   int64_t id_ = -1;
 };
 

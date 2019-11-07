@@ -19,6 +19,28 @@ Message::Message(
     int64_t id)
     : payload_(payload), tensors_(tensors), type_(type), id_(id) {}
 
+Message::Message(
+    std::vector<char>&& payload,
+    std::vector<torch::Tensor>&& tensors,
+    MessageType type,
+    std::chrono::milliseconds processTimeout)
+    : payload_(payload),
+      tensors_(tensors),
+      type_(type),
+      processTimeout_(processTimeout) {}
+
+Message::Message(
+    std::vector<char>&& payload,
+    std::vector<torch::Tensor>&& tensors,
+    MessageType type,
+    std::chrono::milliseconds processTimeout,
+    int64_t id)
+    : payload_(payload),
+      tensors_(tensors),
+      type_(type),
+      processTimeout_(processTimeout),
+      id_(id) {}
+
 Message::Message(const Message& other) = default;
 
 Message::Message(Message&& other) noexcept = default;
@@ -66,6 +88,10 @@ const std::vector<torch::Tensor>& Message::tensors() const {
 
 MessageType Message::type() const {
   return type_;
+}
+
+c10::optional<std::chrono::milliseconds> Message::processTimeout() const {
+  return processTimeout_;
 }
 
 bool Message::isRequest() const {
