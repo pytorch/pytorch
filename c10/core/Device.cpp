@@ -95,10 +95,7 @@ std::string Device::str() const {
 }
 
 std::ostream& operator<<(std::ostream& stream, const Device& device) {
-  stream << device.type();
-  if (device.has_index()) {
-    stream << ":" << device.index();
-  }
+  stream << device.str();
   return stream;
 }
 

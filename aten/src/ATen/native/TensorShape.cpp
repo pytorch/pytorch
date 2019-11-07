@@ -62,14 +62,14 @@ Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_cat_outnames(tensors);
+  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
   {
     NoNamesGuard guard;
 #endif
     at::_cat_out(result, tensors, dim);
 #ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
@@ -214,7 +214,7 @@ Tensor cat(TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_cat_outnames(tensors);
+  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
 #endif
   Tensor result;
   {
@@ -224,7 +224,7 @@ Tensor cat(TensorList tensors, int64_t dim) {
     result = at::_cat(tensors, dim);
   }
 #ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
@@ -818,7 +818,7 @@ static Tensor& propagate_transposed_names(
   if (other.has_names()) {
     auto names = other.names().vec();
     std::swap(names[dim0], names[dim1]);
-    namedinference::propagate_names(result, names);
+    namedinference::propagate_names_if_nonempty(result, names);
   }
   return result;
 }
@@ -948,8 +948,8 @@ Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
   auto result = self.as_strided(std::get<0>(g), std::get<1>(g));
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_squeeze_outnames(self);
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  auto maybe_outnames = namedinference::compute_squeeze_outnames(self);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
