@@ -73,7 +73,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   // TODO: We clone grad_slice because we modify it below and "fn" might save
   // it for the backward of res. We might be able to avoid the clone() if
   // double-backprop is disabled.
-  auto res = (*fn)({ grad_slice.clone() });
+  auto res = (*fn)({ grad_slice.clone(at::MemoryFormat::Contiguous) });
 
   variable_list grad_inputs(num_outputs());
   for (size_t i = 0; i < res.size(); i++) {

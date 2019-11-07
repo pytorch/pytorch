@@ -331,9 +331,7 @@ void TensorIterator::propagate_names_to_outputs() {
     auto& op = operands_[i];
     // must call propagate_names_to_outputs after outputs have been allocated.
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
-    if (names_.empty()) {
-      namedinference::propagate_names(op.tensor, nullopt);
-    } else {
+    if (!names_.empty()) {
       namedinference::propagate_names(op.tensor, names_);
     }
   }
