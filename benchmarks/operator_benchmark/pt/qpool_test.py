@@ -12,22 +12,17 @@ qmaxpool2d_long_configs = op_bench.config_list(
     attrs=(
        #  C    H    W   k       s       p
        (  1,   3,   3, (3, 3), (1, 1), (0, 0)),  # dummy        # noqa
-       (  3,  64,  64, (3, 3), (1, 1), (0, 0)),  # dummy        # noqa
        (  3,  64,  64, (3, 3), (2, 2), (1, 1)),  # dummy        # noqa
        # VGG16 pools with original input shape: (-1, 3, 224, 224)
        ( 64, 224, 224, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-4  # noqa
-       (128, 112, 112, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-9  # noqa
        (256,  56,  56, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-16 # noqa
-       (512,  28,  28, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-23 # noqa
-       (512,  14,  14, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-30 # noqa
     ),
     attr_names=('C', 'H', 'W',   # Input layout
                 'k', 's', 'p'),  # Pooling parameters
     cross_product_configs={
-        'N': range(5),  # if N==0, use rank=3
-        'ceil': (False, True),
+        'N': (1, 4)
         'contig': (False, True),
-        'dtype': (torch.qint32, torch.qint8, torch.quint8),
+        'dtype': (torch.quint32,),
     },
     tags=('long',)
 )
@@ -38,7 +33,6 @@ qmaxpool2d_short_configs = op_bench.config_list(
                 'k', 's', 'p'),  # Pooling parameters
     cross_product_configs={
         'N': (2,),
-        'ceil': (False,),
         'contig': (True,),
         'dtype': (torch.qint32, torch.qint8, torch.quint8),
     },
@@ -47,23 +41,21 @@ qmaxpool2d_short_configs = op_bench.config_list(
 
 qadaptive_avgpool2d_long_configs = op_bench.cross_product_configs(
     input_size=(
-       # VGG16 pools with original input shape: (-1, 3, 224, 224)
-       (224, 224),  # MaxPool2d-4  # noqa
-       (112, 112),  # MaxPool2d-9  # noqa
-       ( 56,  56),  # MaxPool2d-16 # noqa
-       ( 14,  14),  # MaxPool2d-30 # noqa
+        # VGG16 pools with original input shape: (-1, 3, 224, 224)
+        (112, 112),  # MaxPool2d-9  # noqa
     ),
     output_size=(
-       # VGG16 pools with original input shape: (-1, 3, 224, 224)
-       (224, 224),  # MaxPool2d-4  # noqa
-       (112, 112),  # MaxPool2d-9  # noqa
-       ( 56,  56),  # MaxPool2d-16 # noqa
-       ( 14,  14),  # MaxPool2d-30 # noqa
+        (448, 448)
+        # VGG16 pools with original input shape: (-1, 3, 224, 224)
+        (224, 224),  # MaxPool2d-4  # noqa
+        (112, 112),  # MaxPool2d-9  # noqa
+        ( 56,  56),  # MaxPool2d-16 # noqa
+        ( 14,  14),  # MaxPool2d-30 # noqa
     ),
-    N=range(6),
+    N=(1, 4),
     C=(1, 3, 64, 128),
     contig=(False, True),
-    dtype=(torch.qint32, torch.qint8, torch.quint8),
+    dtype=(torch.quint32,),
     tags=('long',)
 )
 
@@ -105,17 +97,17 @@ class _QPool2dBenchmarkBase(op_bench.TorchBenchmarkBase):
 
 
 class QMaxPool2dBenchmark(_QPool2dBenchmarkBase):
-    def init(self, N, C, H, W, k, s, p, ceil, contig, dtype):
+    def init(self, N, C, H, W, k, s, p, contig, dtype):
         self.pool_op = torch.nn.MaxPool2d(kernel_size=k, stride=s, padding=p,
-                                          dilation=(1, 1), ceil_mode=ceil,
+                                          dilation=(1, 1), ceil_mode=False,
                                           return_indices=False)
         super(QMaxPool2dBenchmark, self).setup(N, C, H, W, dtype, contig)
 
 
 class QAvgPool2dBenchmark(_QPool2dBenchmarkBase):
-    def init(self, N, C, H, W, k, s, p, ceil, contig, dtype):
+    def init(self, N, C, H, W, k, s, p, contig, dtype):
         self.pool_op = torch.nn.MaxPool2d(kernel_size=k, stride=s, padding=p,
-                                          ceil_mode=ceil)
+                                          ceil_mode=False)
         super(QAvgPool2dBenchmark, self).setup(N, C, H, W, dtype, contig)
 
 
@@ -124,6 +116,7 @@ class QAdaptiveAvgPool2dBenchmark(_QPool2dBenchmarkBase):
         self.pool_op = torch.nn.AdaptiveAvgPool2d(output_size=output_size)
         super(QAdaptiveAvgPool2dBenchmark, self).setup(N, C, *input_size, dtype,
                                                        contig)
+
 
 op_bench.generate_pt_test(qadaptive_avgpool2d_short_configs + qadaptive_avgpool2d_long_configs,
                           QAdaptiveAvgPool2dBenchmark)
