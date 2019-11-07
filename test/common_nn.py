@@ -21,6 +21,7 @@ from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 from torch.autograd import Variable
 import torch.backends.cudnn
+from fake_operators import fake_empty_like, fake_rand_like, fake_randint_like, fake_randn_like, fake_ones_like, fake_zeros_like, fake_full_like
 
 
 # tarfile module tries to obtain a file object name in python 3.3
@@ -3364,9 +3365,9 @@ class NNTestCase(TestCase):
         for i in range(output_size):
             param, d_param = self._get_parameters(module)
             # make non grad zeros
-            d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param)]
+            d_param = [fake_zeros_like(p) if d is None else d for (p, d) in zip(param, d_param)]
 
-            d_out = torch.zeros_like(output)
+            d_out = fake_zeros_like(output)
             flat_d_out = d_out.view(-1)
             flat_d_out[i] = 1
 
@@ -3578,7 +3579,7 @@ class ModuleTest(TestBase):
             if tensor.size(d) > 1:
                 dim = d + 1
                 break
-        noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
+        noncontig = torch.stack([fake_empty_like(tensor), tensor], dim).select(dim, 1).detach()
         assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
@@ -3654,7 +3655,7 @@ class ModuleTest(TestBase):
                 cpu_output = cpu_module(cpu_input)
                 gpu_output = gpu_module(gpu_input)
 
-                cpu_gradOutput = torch.randn_like(cpu_output, requires_grad=True)
+                cpu_gradOutput = fake_randn_like(cpu_output, requires_grad=True)
                 gpu_gradOutput = cpu_gradOutput.type_as(gpu_output).detach()
                 gpu_gradOutput.requires_grad = True
 
