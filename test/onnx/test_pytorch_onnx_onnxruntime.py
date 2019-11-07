@@ -502,6 +502,51 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(np.arange(6.0).reshape(2, 3))
         self.run_test(MyModule(), x)
 
+    def test_random(self):
+        class RandN(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, (torch.rand(2, 3, 4) + x).size(0))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandN(), x)
+
+        class Rand(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, (torch.rand(2, 3, 4) + x).size(0))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Rand(), x)
+
+    def test_random_like(self):
+        class RandNLike(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.randn_like(x).size(0))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandNLike(), x)
+
+        class RandLike(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.rand_like(x).size(0))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandLike(), x)
+
+    def test_random_like_dtype(self):
+        class RandNLike(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x.to(torch.double), torch.randn_like(x, dtype=torch.double).size(0))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandNLike(), x)
+
+        class RandLike(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x.to(torch.double), torch.rand_like(x, dtype=torch.double).size(0))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandLike(), x)
+
     def _interpolate(self, x, mode, use_size, is_upsample):
         class MyModel(torch.nn.Module):
             def forward(self, x):
@@ -1760,7 +1805,7 @@ TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
                                dict(TestONNXRuntime.__dict__, opset_version=11))
 
 
-# opset 10 tests, with keep_initializers_as_inputs=False for 
+# opset 9 tests, with keep_initializers_as_inputs=False for 
 # IR version 4 style export.
 TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
                                    (unittest.TestCase,),
@@ -1773,6 +1818,14 @@ TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
 TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=10,
+                                    keep_initializers_as_inputs=False))
+
+
+# opset 11 tests, with keep_initializers_as_inputs=False for 
+# IR version 4 style export.
+TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
+                                    (unittest.TestCase,),
+                                    dict(TestONNXRuntime.__dict__, opset_version=11,
                                     keep_initializers_as_inputs=False))
 
 
