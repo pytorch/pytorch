@@ -60,10 +60,10 @@ class Conf(object):
         job_def["name"] = self.gen_build_name(phase)
         job_def["build_environment"] = miniutils.quote(" ".join(self.gen_build_env_parms()))
         job_def["requires"] = ["setup"]
-        if self.smoke:
-            job_def["filters"] = {"branches": {"only": "postnightly"}}
-        else:
-            job_def["filters"] = {"branches": {"only": "nightly"}}
+        # if self.smoke:
+        #     job_def["filters"] = {"branches": {"only": "postnightly"}}
+        # else:
+        #     job_def["filters"] = {"branches": {"only": "nightly"}}
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
