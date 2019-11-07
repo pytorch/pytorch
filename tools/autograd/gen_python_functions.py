@@ -36,7 +36,7 @@ SKIP_PYTHON_BINDINGS = [
     'set_quantizer_',  # return types not supported yet
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version'
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -46,6 +46,28 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
     'sub(Tensor, Scalar, Scalar)', 'sub_(Tensor, Scalar, Scalar)',
     'mul(Tensor, Scalar)', 'mul_(Tensor, Scalar)',
     'div(Tensor, Scalar)', 'div_(Tensor, Scalar)',
+]
+
+# Python binary operator dunder methods
+BINARY_OP_NAMES = [
+    '__lt__', '__le__',
+    '__gt__', '__ge__',
+    '__eq__', '__ne__',
+
+    '__add__', '__radd__', '__iadd__',
+    '__sub__', '__rsub__', '__isub__',
+    '__mul__', '__rmul__', '__imul__',
+    '__matmul__', '__rmatmul__', '__imatmul__',
+    '__truediv__', '__rtruediv__', '__itruediv__',
+    '__floordiv__', '__rfloordiv__', '__ifloordiv__',
+    '__mod__', '__rmod__', '__imod__',
+    '__divmod__', '__rdivmod__', '__idivmod__',
+    '__pow__', '__rpow__', '__ipow__',
+    '__lshift__', '__rlshift__', '__ilshift__',
+    '__rshift__', '__rrshift__', '__irshift__',
+    '__and__', '__rand__', '__iand__',
+    '__xor__', '__rxor__', '__ixor__',
+    '__or__', '__ror__', '__ior__',
 ]
 
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
@@ -119,6 +141,9 @@ inline ${simple_return_type} ${dispatch_name}(${formal_args}) {
 
 PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
 {"${name}", (PyCFunction)${pycfunc_voidcast}${pycname}, ${flags}, NULL},""")
+
+PY_VARIABLE_METHOD_BINOP_DEF = CodeTemplate("""\
+{"${name}", (PyCFunction)${pycfunc_voidcast}TypeError_to_NotImplemented_<${pycname}>, ${flags}, NULL},""")
 
 PY_RETURN_NAMEDTUPLE_DEF = CodeTemplate("""\
 static PyStructSequence_Field fields${namedtuple_type_index}[] = {
@@ -745,7 +770,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['flags'] += ' | METH_STATIC'
 
         py_methods.append(tmpl.substitute(env))
-        py_method_defs.append(PY_VARIABLE_METHOD_DEF.substitute(env))
+        if name in BINARY_OP_NAMES:
+            py_method_defs.append(PY_VARIABLE_METHOD_BINOP_DEF.substitute(env))
+        else:
+            py_method_defs.append(PY_VARIABLE_METHOD_DEF.substitute(env))
 
     for name in sorted(python_functions.keys()):
         process_function(name, python_functions[name])

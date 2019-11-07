@@ -20,7 +20,15 @@ LBFGSOptions::LBFGSOptions(double learning_rate)
 Tensor LBFGS::gather_flat_grad() {
   std::vector<Tensor> views;
   for (auto& parameter : parameters_) {
-    views.push_back(parameter.grad().view(-1));
+    if (!parameter.grad().defined()) {
+      views.push_back(parameter.new_empty({parameter.numel()}).zero_());
+    }
+    else if (parameter.grad().is_sparse()) {
+      views.push_back(parameter.grad().to_dense().view(-1));
+    }
+    else {
+      views.push_back(parameter.grad().view(-1));
+    }
   }
   return torch::cat(views);
 }
@@ -39,7 +47,7 @@ void LBFGS::add_grad(const torch::Tensor& step_size, const Tensor& update) {
 
 torch::Tensor LBFGS::step(LossClosure closure) {
   torch::Tensor orig_loss = closure();
-  torch::Tensor loss = orig_loss.clone();
+  torch::Tensor loss = orig_loss.clone(at::MemoryFormat::Contiguous);
   int64_t current_evals = 1;
   func_evals += 1;
 
@@ -60,7 +68,7 @@ torch::Tensor LBFGS::step(LossClosure closure) {
     if (state_n_iter == 1) {
       d = flat_grad.neg();
       H_diag = ONE;
-      prev_flat_grad = flat_grad.clone();
+      prev_flat_grad = flat_grad.clone(at::MemoryFormat::Contiguous);
     } else {
       Tensor y = flat_grad.sub(prev_flat_grad);
       Tensor s = d.mul(t);

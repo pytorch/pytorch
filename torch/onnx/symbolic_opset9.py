@@ -257,14 +257,14 @@ def cumsum(g, input, dim, dtype):
 
 
 def _sample_dirichlet(g, self, generator):
-    if not generator.node().mustBeNone():
+    if not sym_help._is_none(generator):
         return _unimplemented('_sample_dirichlet',
                               'We are not able to export generator')
     return g.op("ATen", self, operator_s="_sample_dirichlet")
 
 
 def _standard_gamma(g, self, generator):
-    if not generator.node().mustBeNone():
+    if not sym_help._is_none(generator):
         return _unimplemented('_standard_gamma',
                               'We are not able to export generator')
     return g.op("ATen", self, operator_s="_standard_gamma")
@@ -299,7 +299,7 @@ def embedding_bag(g,
                   mode,
                   sparse,
                   per_sample_weights):
-    if not per_sample_weights.node().mustBeNone():
+    if not sym_help._is_none(per_sample_weights):
         raise RuntimeError('Unsupported: ONNX export of embedding_bag '
                            'with per_sample_weights')
     return g.op("ATen",
@@ -319,8 +319,7 @@ def size(g, self, dim):
         if rank:
             dim = sym_help._maybe_get_const(dim, 'i') + rank
             dim = g.op("Constant", value_t=torch.tensor(dim))
-    full_shape = g.op("Shape", self)
-    return select(g, full_shape, g.op("Constant", value_t=torch.tensor([0])), dim)
+    return sym_help._size_helper(g, self, dim)
 
 
 @parse_args('v', 'i', 'i')
@@ -392,15 +391,22 @@ def split_with_sizes(g, self, split_sizes, dim):
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
 
 
+@parse_args('v', 'i')
+def unbind(g, self, dim=0):
+    # NOTE: This conversion of this node is handled in onnx peephole pass.
+    # Due to that an additional Squeeze node needs to be inserted for each output from unbind.
+    return g.op("aten::unbind", self, axis_i=dim)
+
+
 @parse_args('v', 'i', 'v')
 def select(g, self, dim, index):
-    if dim > 1:
-        # TODO: this is a temporary hack because of the implementation details
-        # of Gather in caffe2. We need to change this as soon as possible.
-        # TODO: this breaks if index == -1
-        index_val = _parse_arg(index, 'i')
-        slice_node = sym_help._slice_helper(g, self, axes=[dim],
-                                            starts=[index_val], ends=[index_val + 1])
+    index = sym_help._maybe_get_scalar(index)
+    if (not sym_help._is_value(index)) and (index < 0):
+        if index == -1:
+            end_index = 9223372036854775807
+        else:
+            end_index = index + 1
+        slice_node = sym_help._slice_helper(g, self, axes=[dim], starts=[index], ends=[end_index])
         return g.op("Squeeze", slice_node, axes_i=[dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
@@ -499,6 +505,7 @@ def softmax(g, input, dim, dtype=None):
     # otherwise compute softmax using a subgraph with other operators
     input_dim = input.type().dim()
     if input_dim:
+        # TODO: remove this as onnx opset 11 spec allows negative axes
         if dim < 0:
             dim = input_dim + dim
         if input_dim == dim + 1:
@@ -609,11 +616,7 @@ def _avg_pool(name, tuple_fn):
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
-        if divisor_override and divisor_override.node().kind() != 'prim::Constant':
-            return _unimplemented(name, "divisor_override")
-        if not stride:
-            stride = kernel_size
-        padding = tuple(tuple_fn(padding))
+        padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
         if count_include_pad:
@@ -684,27 +687,41 @@ adaptive_max_pool2d = _adaptive_pool('adaptive_max_pool2d', "MaxPool", _pair, ma
 adaptive_max_pool3d = _adaptive_pool('adaptive_max_pool3d', "MaxPool", _triple, max_pool3d_with_indices)
 
 
+# Generate paddings in ONNX order based on pad in pytorch.
+# Arguments:
+#     dim: the dimension of the tensor.
+#     pad: the paddings in pytorch.
+#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
+def _prepare_onnx_paddings(dim, pad):
+    assert isinstance(dim, int)
+    # The desired order of paddings is
+    # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
+    # n is the dimension of input.
+    # assume zero-dimensions in the beginning
+    paddings = list(pad[:]) + [0] * (dim * 2 - len(pad))
+    # reverse order and collate first beginnings and then ends
+    paddings = paddings[-2::-2] + paddings[-1::-2]
+    return paddings
+
+
 @parse_args('v', 'is', 'f')
 def constant_pad_nd(g, input, padding, value):
-    from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "constant"
-    paddings = prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode, value_f=value)
 
 
 @parse_args('v', 'is')
 def reflection_pad(g, input, padding):
-    from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "reflect"
-    paddings = prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
 @parse_args('v', 'is')
 def replication_pad(g, input, padding):
-    from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "edge"
-    paddings = prepare_onnx_paddings(input.type().dim(), padding)
+    paddings = _prepare_onnx_paddings(input.type().dim(), padding)
     return g.op("Pad", input, pads_i=paddings, mode_s=mode)
 
 
@@ -733,6 +750,12 @@ upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
 upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
 upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
+
+
+def __interpolate(g, input, size, scale_factor, mode , align_corners):
+    scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
+                                                             mode , align_corners)
+    return g.op("Upsample", input, scales, mode_s=mode)
 
 
 def wrap_logical_op_with_cast_to(to_type):
@@ -812,6 +835,7 @@ def where(g, condition, self, other):
 def log_softmax(g, input, dim, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
+    # TODO: remove this as onnx opset 11 spec allows negative axes
     if dim < 0:
         dim = input.type().dim() + dim
     if input.type().dim() != dim + 1:
@@ -829,7 +853,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     args = [input, weight]
     # ONNX only supports 1D bias
-    if not bias.node().mustBeNone() and bias.type().dim() == 1:
+    if not sym_help._is_none(bias) and bias.type().dim() == 1:
         args.append(bias)
 
     kwargs = {"kernel_shape_i": weight_size[2:],
@@ -850,7 +874,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
-    if not bias.node().mustBeNone() and bias.type().dim() != 1:
+    if not sym_help._is_none(bias) and bias.type().dim() != 1:
         return g.op("Add", n, bias)
     else:
         return n
@@ -863,12 +887,12 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
         input = g.op("Unsqueeze", input, axes_i=[2])
 
-    if weight is None or weight.node().mustBeNone():
+    if weight is None or sym_help._is_none(weight):
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().mustBeNone():
+    if bias is None or sym_help._is_none(bias):
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -911,9 +935,9 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 
     layer_norm = div(g, numerator, denominator)
 
-    if not (weight is None or weight.node().mustBeNone()):
+    if not (weight is None or sym_help._is_none(weight)):
         layer_norm = mul(g, layer_norm, weight)
-    if not (bias is None or bias.node().mustBeNone()):
+    if not (bias is None or sym_help._is_none(bias)):
         layer_norm = add(g, layer_norm, bias)
 
     return layer_norm
@@ -922,12 +946,12 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
     input_sizes = input.type().sizes()
-    if weight is None or weight.node().mustBeNone():
+    if weight is None or sym_help._is_none(weight):
         assert len(input_sizes) > 1
         weight_value = torch.tensor([1.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
         weight = g.op("Constant", value_t=weight_value)
-    if bias is None or bias.node().mustBeNone():
+    if bias is None or sym_help._is_none(bias):
         assert len(input_sizes) > 1
         bias_value = torch.tensor([0.] * input_sizes[1]).type(
             'torch.' + input.type().scalarType() + 'Tensor')
@@ -937,7 +961,21 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
 
 @parse_args('v', 'i', 'i', 'i')
 def unfold(g, input, dimension, size, step):
-    return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+    if input.isCompleteTensor():
+        sizedim = input.type().sizes()[dimension]
+        low_indices = range(0, sizedim, step)
+        hi_indices = range(size, sizedim + 1, step)
+        stack = [sym_help._slice_helper(g, input, axes=[dimension], starts=[low], ends=[hi])
+                 for low, hi in zip(low_indices, hi_indices)]
+        ndim = input.type().dim()
+        perm = list(range(0, ndim))
+        perm.append(perm.pop(dimension))
+        unsqueeze = [g.op("Unsqueeze", g.op("Transpose", t, perm_i=perm), axes_i=[dimension]) for t in stack]
+        return g.op("Concat", *unsqueeze, axis_i=dimension)
+    else:
+        return _unimplemented("Unfold", "input size not accessible")
 
 
 @parse_args('v', 'v', 'i')
@@ -987,19 +1025,7 @@ def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, 'i')
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, index, value, dim_i=dim_value, operator_s="index_fill")
-    # 1. reshape index => [1, ..., 1, dim, 1, ..., 1]
-    # 2. expand index => [..., dim, ...], same shape as self except for dim.
-    # 3. expand value as well.
-    # 4. apply onnx::scatter.
-
-    if self.type().dim() is None:
-        return _unimplemented("index_fill", "input rank not accesible")
-    self_dim = self.type().dim()
-    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
-    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
-                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
-    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
-
+    expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, self)
     expanded_value = expand(g, value, expanded_index_shape, None)
@@ -1011,16 +1037,7 @@ def index_copy(g, self, dim, index, source):
     dim_value = sym_help._parse_arg(dim, 'i')
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, index, source, dim_i=dim_value, operator_s="index_copy")
-    # Similar to index_fill, apply reshape + expand to index.
-
-    if self.type().dim() is None:
-        return _unimplemented("index_copy", "input rank not accesible")
-    self_dim = self.type().dim()
-    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
-    expanded_index_shape = g.op("Scatter", g.op("Shape", self),
-                                g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index), axis_i=0)
-    expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
-
+    expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     return scatter(g, self, dim, expanded_index, source)
 
 
@@ -1065,9 +1082,9 @@ def pow(g, self, exponent):
 def clamp(g, self, min, max):
     # min or max may be None that we need to dispatch to
     # Clip separately, as ONNX does not have None syntax
-    if min.node().mustBeNone():
+    if sym_help._is_none(min):
         return clamp_max(g, self, max)
-    elif max.node().mustBeNone():
+    elif sym_help._is_none(max):
         return clamp_min(g, self, min)
     else:
         min = _parse_arg(min, 'f')
@@ -1201,31 +1218,41 @@ def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def zeros_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 @parse_args('v', 'i', 'v', 'v', 'v')
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", sizes,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'i', 'v', 'v', 'v')
-def ones_like(g, input, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'i', 'v', 'v', 'v', 'v')
+def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([1], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+    if dtype is None:
+        dtype = 6  # float
     const_value = sym_help._maybe_get_const(value, 't')
     if sym_help._is_value(const_value):
         tmp = zeros(g, sizes, dtype, layout, device)
@@ -1236,9 +1263,11 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
                     value_t=torch.tensor([const_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'f', 'i', 'v', 'v', 'v')
-def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False):
+@parse_args('v', 'f', 'i', 'v', 'v', 'v', 'v')
+def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
+    if dtype is None:
+        dtype = 6  # float
     return g.op("ConstantOfShape", shape,
                 value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
@@ -1249,10 +1278,15 @@ def slice(g, self, dim, start, end, step):
         _unimplemented("slice", "step!=1 is currently not supported")
     if start.node().kind() != 'onnx::Constant' or \
             end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
-        start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
-        end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
-        dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
-        return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
+        if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+            raise RuntimeError('Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice '
+                               'is a deprecated experimental op. Please use statically allocated '
+                               'variables or export to a higher opset version.')
+        else:
+            start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
+            end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
+            dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
+            return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
     else:
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
@@ -1308,27 +1342,29 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 
 def to(g, self, *args):
     # ONNX doesn't have a concept of a device, so we ignore device casts
-    if len(args) == 3:
+    if len(args) == 4:
         if args[0].type().isSubtypeOf(ListType.ofInts()):
-            # aten::to(Tensor, Device, bool, bool)
+            # aten::to(Tensor, Device, bool, bool, memory_format)
             return self
         else:
-            # aten::to(Tensor, ScalarType, bool, bool)
+            # aten::to(Tensor, ScalarType, bool, bool, memory_format)
             dtype = sym_help._get_const(args[0], 'i', 'dtype')
+            # memory_format is ignored
             return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
-    elif len(args) == 4:
-        # aten::to(Tensor, Device, ScalarType, bool, bool)
-        dtype = sym_help._get_const(args[1], 'i', 'dtype')
-        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 5:
-        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool) -> Tensor
-        dtype = sym_help._get_const(args[0], 'i', 'dtype')
-        # Layout and device are ignored
+        # aten::to(Tensor, Device, ScalarType, bool, bool, memory_format)
+        dtype = sym_help._get_const(args[1], 'i', 'dtype')
+        # memory_format is ignored
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 6:
-        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool) -> Tensor
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, memory_format) -> Tensor
         dtype = sym_help._get_const(args[0], 'i', 'dtype')
-        # Layout and device are ignored
+        # Layout, device and memory_format are ignored
+        return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 7:
+        # aten::to(Tensor, ScalarType, Layout, Device, bool, bool, bool, memory_format) -> Tensor
+        dtype = sym_help._get_const(args[0], 'i', 'dtype')
+        # Layout, device and memory_format are ignored
         return g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[dtype])
     else:
         raise NotImplementedError("Unknown aten::to signature")
@@ -1359,12 +1395,6 @@ def pixel_shuffle(g, self, upscale_factor):
     return view(g, after_transpose,
                 [-1, output_channel, dims[2] * upscale_factor, dims[3] *
                  upscale_factor])
-
-
-@parse_args('v', 'i', 'v', 'v', 'f', 'i')
-def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
-    return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
-                eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
@@ -1637,6 +1667,7 @@ def erf(g, input):
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
+    # TODO: remove this as onnx opset 11 spec allows negative axes
     if end_dim < 0 :
         end_dim = dim + end_dim
     # use ONNX's Flatten operator for cases where the output shape is 2D
@@ -1676,7 +1707,7 @@ def narrow(g, input, dim, start, length):
 
 
 def argmax(g, input, dim, keepdim):
-    if dim.node().mustBeNone():
+    if sym_help._is_none(dim):
         flattened = reshape(g, input, (-1,))
         return g.op('ArgMax', flattened, axis_i=0, keepdims_i=False)
     else:
@@ -1686,7 +1717,7 @@ def argmax(g, input, dim, keepdim):
 
 
 def argmin(g, input, dim, keepdim):
-    if dim.node().mustBeNone():
+    if sym_help._is_none(dim):
         flattened = reshape(g, input, (-1,))
         return g.op('ArgMin', flattened, axis_i=0, keepdims_i=False)
     else:
@@ -1831,7 +1862,7 @@ def index(g, self, index):
         indices = [index]
 
     def try_mask_to_index(index):
-        if not index.node().mustBeNone() and index.type().scalarType() == "Byte":
+        if not sym_help._is_none(index) and index.type().scalarType() == "Byte":
             warnings.warn("Exporting aten::index operator with indices of type Byte. "
                           "Only 1-D indices are supported. In any other case, "
                           "this will produce an incorrect ONNX graph.")
@@ -1860,7 +1891,7 @@ def index(g, self, index):
         #       t: [x_1 * x_2 * ... * x_m, y_1 * y_2 * ... * y_n]
         #       tensor index = \sum_{i=1}^m (ind_i * \prod_{j=i+1}^m (x_j))
         # After gather, reshape and transpose back.
-        adv_idx_indices = [i for i, idx in enumerate(indices) if not idx.node().mustBeNone()]
+        adv_idx_indices = [i for i, idx in enumerate(indices) if not sym_help._is_none(idx)]
 
         if len(adv_idx_indices) == 0:
             return self
@@ -1940,7 +1971,7 @@ def frobenius_norm(g, self, dim=None, keepdim=False):
 
 @parse_args('v', 'i', 'b', 'v')
 def multinomial(g, input, num_samples, replacement=False, generator=None):
-    if generator is not None and not generator.node().mustBeNone():
+    if generator is not None and not sym_help._is_none(generator):
         _unimplemented("Multinomial", "generator is not supported for multinomial")
     if not replacement and num_samples > 1:
         _unimplemented("Multinomial", "replacement=False when num_samples > 1 is not supported for multinomial")
@@ -1950,12 +1981,27 @@ def multinomial(g, input, num_samples, replacement=False, generator=None):
                 dtype_i=sym_help.cast_pytorch_to_onnx['Long'],
                 sample_size_i=num_samples)
 
+
 def baddbmm(g, self, batch1, batch2, beta, alpha):
     dtype = self.type().scalarType()
     batch_mul = matmul(g, batch1, batch2)
     mul_a = mul(g, batch_mul, g.op("Cast", alpha, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     mul_b = mul(g, self, g.op("Cast", beta, to_i=sym_help.cast_pytorch_to_onnx[dtype]))
     return add(g, mul_a, mul_b)
+
+
+def meshgrid(g, tensor_list):
+    tensors = [view(g, t, torch.LongTensor([-1])) for t in sym_help._unpack_list(tensor_list)]
+    tensors_shape = [g.op("Shape", t) for t in tensors]
+    out_shape = g.op("Concat", *tensors_shape, axis_i=0)
+    out = []
+    for i, t in enumerate(tensors):
+        shape_i = [g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))] * len(tensors)
+        shape_i[i] = tensors_shape[i]
+        t_reshaped = _reshape_from_tensor(g, t, g.op("Concat", *shape_i, axis_i=0))
+        out.append(g.op("Expand", t_reshaped, out_shape))
+    return g.op("prim::ListConstruct", *out)
+
 
 def remainder(g, input, other):
     div = g.op("Div", input, other)
@@ -1964,9 +2010,45 @@ def remainder(g, input, other):
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
 
-
 def gelu(g, self):
     _sqrt2 = 1.4142135623730951
     erf = g.op('Erf', div(g, self, torch.tensor(_sqrt2)))
     erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
     return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
+
+
+@parse_args('v', 'i', 'v', 'v', 'f', 'i')
+def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        return g.op("ATen", input, weight, bias, num_groups_i=num_groups,
+                    eps_f=eps, cudnn_enabled_i=cudnn_enabled, operator_s="group_norm")
+
+    input_sizes = input.type().sizes()
+    assert input_sizes[1] % num_groups == 0
+    # 0 in the shape list keeps dimension value unchanged.
+    shape = [0, num_groups, -1]
+    input_reshaped = g.op('Reshape', input, g.op('Constant', value_t=torch.LongTensor(shape)))
+
+    # C is always divisible by num_groups
+    # Due to shape difference. we need to apply weight and bias after
+    # instance norm computation and reshape
+    weight_ = g.op("Constant", value_t=torch.tensor([1.] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
+    bias_ = g.op("Constant", value_t=torch.tensor([0.] * num_groups).type(
+        'torch.' + input.type().scalarType() + 'Tensor'))
+
+    norm_reshaped = g.op("InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps)
+    norm = g.op('Reshape', norm_reshaped, g.op("Shape", input))
+
+    if weight is None or weight.node().mustBeNone():
+        weight_value = torch.tensor([1.]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        weight = g.op("Constant", value_t=weight_value)
+    if bias is None or bias.node().mustBeNone():
+        bias_value = torch.tensor([0.]).type(
+            'torch.' + input.type().scalarType() + 'Tensor')
+        bias = g.op("Constant", value_t=bias_value)
+
+    # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
+    axes = [i for i in range(1, len(input_sizes) - 1)]
+    return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))

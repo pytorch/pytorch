@@ -155,7 +155,7 @@ static PyObject *THPModule_setWorkerPIDs(PyObject *module, PyObject *args) {
   }
   int64_t key = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
   if (worker_pids.find(key) != worker_pids.end()) {
-    throw ValueError("_set_worker_pids should be called only once for each _DataLoaderIter.");
+    throw ValueError("_set_worker_pids should be called only once for each _BaseDataLoaderIter.");
   }
   PyObject *child_pids = PyTuple_GET_ITEM(args, 1);
   if (!PyTuple_Check(child_pids)) {
@@ -182,7 +182,7 @@ static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_i
   int64_t key = THPUtils_unpackLong(loader_id);
   auto it = worker_pids.find(key);
   if (it == worker_pids.end()) {
-    throw ValueError("Cannot find worker information for _DataLoaderIter with id %ld.", key);
+    throw ValueError("Cannot find worker information for _BaseDataLoaderIter with id %ld.", key);
   }
   worker_pids.erase(it);
 

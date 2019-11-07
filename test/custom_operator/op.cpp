@@ -23,7 +23,7 @@ int64_t custom_op2(std::string s1, std::string s2) {
 }
 
 static auto registry =
-    torch::jit::RegisterOperators()
+    torch::RegisterOperators()
         // We parse the schema for the user.
         .op("custom::op", &custom_op)
         .op("custom::op2", &custom_op2)

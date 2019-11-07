@@ -14,6 +14,10 @@ using ::c10::IValue;
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
 
+Pickler::~Pickler() {
+  flush();
+}
+
 const char* getClassName(PicklerClass cls) {
   switch (cls) {
     case PicklerClass::TENSOR:
@@ -48,6 +52,7 @@ void Pickler::endTuple() {
 
 void Pickler::stop() {
   push<PickleOpCode>(PickleOpCode::STOP);
+  flush();
 }
 
 // unmemoized version called by pushIValue
@@ -61,11 +66,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isInt()) {
     pushInt(ivalue.toInt());
   } else if (ivalue.isBool()) {
-    if (ivalue.toBool()) {
-      push<PickleOpCode>(PickleOpCode::NEWTRUE);
-    } else {
-      push<PickleOpCode>(PickleOpCode::NEWFALSE);
-    }
+    pushBool(ivalue.toBool());
   } else if (ivalue.isString()) {
     pushString(ivalue.toStringRef());
   } else if (ivalue.isGenericList()) {
@@ -78,7 +79,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushSpecializedList(
         ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
           for (const int64_t item : ivalue.toIntListRef()) {
-            pushIValue(item);
+            pushInt(item);
           }
         });
   } else if (ivalue.isTensorList()) {
@@ -92,19 +93,25 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushSpecializedList(
         ivalue, PicklerClass::DOUBLELIST, [=](const IValue& ivalue) {
           for (double item : ivalue.toDoubleListRef()) {
-            pushIValue(item);
+            pushDouble(item);
           }
         });
   } else if (ivalue.isBoolList()) {
     pushSpecializedList(
         ivalue, PicklerClass::BOOLLIST, [=](const IValue& ivalue) {
           for (bool item : ivalue.toBoolList()) {
-            pushIValue(item);
+            pushBool(item);
           }
         });
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
+    if (memorized_class_types_ != nullptr) {
+      // Memorize every class type the Pickler encountered
+      // This is used to make sure we capture all the run-time types
+      // and serialize them properly for class/interface polymorphism
+      memorized_class_types_->emplace_back(type);
+    }
     pushGlobal(type->name()->prefix(), type->name()->name());
     push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
@@ -180,6 +187,10 @@ void Pickler::pushInt(int64_t n) {
   }
 }
 
+void Pickler::pushBool(bool value) {
+  push<PickleOpCode>(value ? PickleOpCode::NEWTRUE : PickleOpCode::NEWFALSE);
+}
+
 void Pickler::pushBinGet(uint32_t memo_id) {
   if (memo_id <= std::numeric_limits<uint8_t>::max()) {
     push<PickleOpCode>(PickleOpCode::BINGET);
@@ -222,13 +233,13 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
   // typename
   pushString("storage");
   // data_type
-  std::stringstream data_type;
-  data_type << toString(tensor.scalar_type()) << "Storage";
-  pushGlobal("torch", data_type.str());
+  std::string data_type =
+    std::string(toString(tensor.scalar_type())).append("Storage");
+  pushGlobal("torch", data_type);
   // root_key
-  pushString(std::to_string(tensor_data_.size()));
+  pushString(c10::to_string(tensor_data_.size()));
   // location
-  std::stringstream ss;
+  std::ostringstream ss;
   ss << tensor.device();
   pushString(ss.str());
   // size
@@ -244,15 +255,25 @@ void Pickler::pushStorageOfTensor(const at::Tensor& tensor) {
 }
 
 void Pickler::pushBytes(const std::string& string) {
-  writer_(string.data(), string.size());
+  static const size_t kSmallStr = 32;
+  if (string.size() <= kSmallStr &&
+      bufferPos_ + string.size() <= buffer_.size()) {
+    // Small string that fits: buffer the data.
+    memcpy(buffer_.data() + bufferPos_, string.data(), string.size());
+    bufferPos_ += string.size();
+  } else {
+    // Otherwise, first flush, then write directly.
+    flush();
+    writer_(string.data(), string.size());
+  }
 }
 
 void Pickler::pushGlobal(
     const std::string& module_name,
     const std::string& class_name) {
-  std::stringstream ss;
-  ss << module_name << "\n" << class_name << "\n";
-  std::string key = ss.str();
+  std::string key;
+  key.reserve(module_name.size() + class_name.size() + 2);
+  key.append(module_name).append("\n").append(class_name).append("\n");
   auto memo_entry = memoized_globals_map_.find(key);
   if (memo_entry == memoized_globals_map_.end()) {
     push<PickleOpCode>(PickleOpCode::GLOBAL);
@@ -381,29 +402,30 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-void Pickler::pushDouble(double value) {
-  AT_ASSERT(sizeof(double) == 8);
-  char* bytes = reinterpret_cast<char*>(&value);
-
-  push<PickleOpCode>(PickleOpCode::BINFLOAT);
-  for (size_t i = 0; i < 8; ++i) {
-    push<uint8_t>(bytes[8 - i - 1]);
+static inline double swapDouble(double value) {
+  const char* bytes = reinterpret_cast<const char*>(&value);
+  double flipped;
+  char* out_bytes = reinterpret_cast<char*>(&flipped);
+  for (size_t i = 0; i < sizeof(double); ++i) {
+    out_bytes[i] = bytes[sizeof(double) - i - 1];
   }
+  return *reinterpret_cast<double*>(out_bytes);
+}
+
+void Pickler::pushDouble(double value) {
+  push<PickleOpCode>(PickleOpCode::BINFLOAT);
+  // Python pickle format is big endian, swap.
+  push<double>(swapDouble(value));
 }
 
 void Pickler::pushLong(const std::string& data) {
   uint64_t size = data.size();
 
-  if (size <= std::numeric_limits<uint8_t>::max()) {
-    push<PickleOpCode>(PickleOpCode::LONG1);
-    push<uint8_t>(size);
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        data.size() > std::numeric_limits<uint32_t>::max(),
-        "Cannot pickle a long with a size larger than 4 bytes")
-    push<PickleOpCode>(PickleOpCode::LONG4);
-    push<uint64_t>(size);
-  }
+  TORCH_INTERNAL_ASSERT(
+    size <= std::numeric_limits<uint8_t>::max(),
+    "Cannot pickle a long larger than 255 bytes");
+  push<PickleOpCode>(PickleOpCode::LONG1);
+  push<uint8_t>(size);
   pushBytes(data);
 }
 
@@ -576,7 +598,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   auto set_type = set_schema.arguments().at(1).type();
 
   TORCH_CHECK(
-      set_type->isSubtypeOf(get_type),
+      get_type->isSubtypeOf(set_type),
       "'__getstate__'s return type (",
       get_type->python_str(),
       ") does not match '__setstate__'s argument type (",

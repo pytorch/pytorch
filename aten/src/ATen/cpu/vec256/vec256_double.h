@@ -91,6 +91,18 @@ public:
     auto mask = _mm256_set1_pd(-0.f);
     return _mm256_andnot_pd(mask, values);
   }
+  Vec256<double> angle() const {
+    return _mm256_set1_pd(0);
+  }
+  Vec256<double> real() const {
+    return *this;
+  }
+  Vec256<double> imag() const {
+    return _mm256_set1_pd(0);
+  }
+  Vec256<double> conj() const {
+    return *this;
+  }
   Vec256<double> acos() const {
     return Vec256<double>(Sleef_acosd4_u10(values));
   }

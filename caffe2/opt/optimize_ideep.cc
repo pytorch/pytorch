@@ -459,14 +459,14 @@ bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
     auto newOutputName = repr::nn::get<repr::Tensor>(sumInputX)->getName() +
         "_fusion_fix_" + std::to_string(i);
 
-    auto newInputTensor = util::make_unique<repr::Tensor>(newOutputName);
+    auto newInputTensor = c10::guts::make_unique<repr::Tensor>(newOutputName);
     auto newInput = nn->dataFlow.createNode(
         unique_dyn_cast<repr::NeuralNetData>(newInputTensor));
 
     nn->dataFlow.replaceNode(sumInputX, newInput);
     nn->dataFlow.deleteNode(sumInputX);
 
-    auto newOutputTensor = util::make_unique<repr::Tensor>(newOutputName);
+    auto newOutputTensor = c10::guts::make_unique<repr::Tensor>(newOutputName);
     auto newOutput = nn->dataFlow.createNode(
         unique_dyn_cast<repr::NeuralNetData>(newOutputTensor));
 
@@ -627,7 +627,7 @@ bool enforceFusionInplace(repr::NNModule* nn, caffe2::Workspace* ws) {
       return false;
     }
 
-    auto newOutputTensor = util::make_unique<repr::Tensor>(inputName);
+    auto newOutputTensor = c10::guts::make_unique<repr::Tensor>(inputName);
     auto newOutput = nn->dataFlow.createNode(
         unique_dyn_cast<repr::NeuralNetData>(newOutputTensor));
     nn->dataFlow.replaceNode(convOutput, newOutput);

@@ -37,14 +37,14 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> void
+- func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()
   variants: method
 
-- func: set_data(Tensor(a!) self, Tensor new_data) -> void
+- func: set_data(Tensor(a!) self, Tensor new_data) -> ()
+  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: data(Tensor self) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: is_leaf(Tensor self) -> bool
@@ -57,6 +57,9 @@
 - func: _version(Tensor self) -> int
   variants: method
 
+- func: requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)
+  variants: method
+
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
@@ -65,38 +68,43 @@
   variants: method
   supports_named_tensor: True
 
-- func: align_to(Tensor(a) self, DimnameList names) -> Tensor(a)
+- func: align_to(Tensor(a) self, Dimname[] names) -> Tensor(a)
+  variants: method
+  supports_named_tensor: True
+
+- func: align_to.ellipsis_idx(Tensor(a) self, Dimname[] order, int ellipsis_idx) -> Tensor(a)
   variants: method
   supports_named_tensor: True
 
 - func: align_as(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: method
   supports_named_tensor: True
 
 - func: align_tensors(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
 
-- func: refine_names(Tensor(a) self, DimnameList names) -> Tensor(a)
+- func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
   supports_named_tensor: True
 
-- func: unflatten(Tensor self, Dimname dim, int[] sizes, DimnameList names) -> Tensor
+- func: unflatten.Dimname(Tensor self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor
   variants: method
   supports_named_tensor: True
 
-- func: unflatten(Tensor self, int dim, int[] sizes, DimnameList names) -> Tensor
+- func: unflatten.int(Tensor self, int dim, int[] sizes, Dimname[] names) -> Tensor
   variants: method
   supports_named_tensor: True
+
+
+- func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
+  dispatch:
+    CUDA: _use_cudnn_ctc_loss
 
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: _cudnn_ctc_loss
 
 - func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: _cudnn_rnn_flatten_weight
 
@@ -117,7 +125,6 @@
   variants: function
 
 - func: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
-  use_c10_dispatcher: 'unboxed_only'
   variants: function
   dispatch:
      CUDA: fused_dropout_cuda
@@ -132,15 +139,12 @@
 - func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
 
 - func: _sobol_engine_ff_(Tensor(a!) self, int n, Tensor sobolstate, int dimension, int num_generated) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
 
 
 - func: _sobol_engine_scramble_(Tensor(a!) self, Tensor ltm, int dimension) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
 
 
 - func: _sobol_engine_initialize_state_(Tensor(a!) self, int dimension) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
 
 
 - func: _reshape_from_tensor(Tensor self, Tensor shape) -> Tensor
@@ -154,27 +158,23 @@
   supports_named_tensor: True
 
 - func: dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
 
 - func: feature_dropout(Tensor input, float p, bool train) -> Tensor
   use_c10_dispatcher: full
 
 - func: feature_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
 
 - func: alpha_dropout(Tensor input, float p, bool train) -> Tensor
   use_c10_dispatcher: full
 
 - func: alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
 
 
 - func: feature_alpha_dropout(Tensor input, float p, bool train) -> Tensor
   use_c10_dispatcher: full
 
 - func: feature_alpha_dropout_(Tensor(a!) self, float p, bool train) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
 
 
 - func: abs(Tensor self) -> Tensor
@@ -183,18 +183,55 @@
   supports_named_tensor: True
 
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   supports_named_tensor: True
-  dispatch:
-    CPU: _abs__cpu
-    CUDA: _abs__cuda
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
+
+- func: angle(Tensor self) -> Tensor
+  variants: function, method
+  supports_named_tensor: True
+  named_guard: False
+
+- func: angle.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  supports_named_tensor: True
   dispatch:
-    CPU: _abs_out_cpu
-    CUDA: _abs_out_cuda
+    CPU: _angle_out_cpu
+
+- func: real(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+  supports_named_tensor: True
+
+- func: real.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  supports_named_tensor: True
+  dispatch:
+    CPU: _real_out_cpu
+
+- func: imag(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+  supports_named_tensor: True
+
+- func: imag.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  supports_named_tensor: True
+  dispatch:
+    CPU: _imag_out_cpu
+
+- func: conj(Tensor self) -> Tensor
+  variants: function, method
+  named_guard: False
+  supports_named_tensor: True
+
+- func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  named_guard: False
+  supports_named_tensor: True
+  dispatch:
+    CPU: _conj_out_cpu
 
 - func: acos(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -202,7 +239,6 @@
   variants: function, method
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -216,14 +252,11 @@
     CUDA: _acos_out_cuda
 
 - func: avg_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: adaptive_avg_pool1d(Tensor self, int[1] output_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool1d(Tensor self, int[1] output_size) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
@@ -237,7 +270,6 @@
   supports_named_tensor: True
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: add_
@@ -263,7 +295,6 @@
   supports_named_tensor: True
 
 - func: add_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   supports_named_tensor: True
 
@@ -276,7 +307,6 @@
   supports_named_tensor: True
 
 - func: addmv_(Tensor(a!) self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   dispatch:
     CPU: legacy::cpu::_th_addmv_
@@ -294,17 +324,14 @@
   variants: function, method
 
 - func: addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: addr.out(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
 
 - func: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: affine_grid_generator_backward(Tensor grad, int[] size, bool align_corners) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: all.dim(Tensor self, int dim, bool keepdim=False) -> Tensor
@@ -363,7 +390,6 @@
   variants: function, method
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   dispatch:
     CPU: as_strided_tensorimpl
@@ -373,7 +399,6 @@
   supports_named_tensor: True
 
 - func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   device_guard: False
 
@@ -383,18 +408,11 @@
   variants: function, method
 
 - func: asin_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _asin__cpu
-    CUDA: _asin__cuda
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _asin_out_cpu
-    CUDA: _asin_out_cuda
 
 - func: atan(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -402,7 +420,6 @@
   variants: function, method
 
 - func: atan_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -423,14 +440,12 @@
     CUDA: baddbmm_cuda
 
 - func: baddbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: baddbmm__cpu
     CUDA: baddbmm__cuda
 
 - func: _baddbmm_mkl_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -451,7 +466,6 @@
 
 # Sample bernoulli with values in `self` as probability.
 - func: bernoulli(Tensor self, *, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   variants: function, method
   supports_named_tensor: True
 
@@ -460,7 +474,6 @@
   supports_named_tensor: True
 
 - func: bernoulli_.Tensor(Tensor(a!) self, Tensor p, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: bernoulli_tensor_cpu_
@@ -468,7 +481,6 @@
   supports_named_tensor: True
 
 - func: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: bernoulli_scalar_cpu_
@@ -479,7 +491,6 @@
 # There is no default valid on `p` here because it would introduce ambiguity
 # with `bernoulli(Tensor self, *, Generator? generator=None)` declaration.
 - func: bernoulli.p(Tensor self, float p, *, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   variants: function, method
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
@@ -502,7 +513,6 @@
   variants: function, method
 
 - func: bitwise_not_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
 
@@ -513,12 +523,10 @@
     CUDA: bitwise_not_out
 
 - func: logical_not(Tensor self) -> Tensor
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
 - func: logical_not_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
 
@@ -529,12 +537,10 @@
     CUDA: logical_not_out
 
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   supports_named_tensor: True
 
 - func: logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   supports_named_tensor: True
 
@@ -564,11 +570,9 @@
   supports_named_tensor: True
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: unboxed_only
   device_guard: False
 
 - func: cat(Tensor[] tensors, int dim=0) -> Tensor
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
@@ -586,7 +590,6 @@
   variants: function, method
 
 - func: ceil_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -597,11 +600,9 @@
     CUDA: ceil_out
 
 - func: chain_matmul(Tensor[] matrices) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   device_guard: False
   supports_named_tensor: True
@@ -612,7 +613,6 @@
   variants: function, method
 
 - func: clamp_(Tensor(a!) self, Scalar? min=None, Scalar? max=None) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -631,7 +631,6 @@
   variants: function, method
 
 - func: clamp_max_(Tensor(a!) self, Scalar max) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -650,7 +649,6 @@
   variants: function, method
 
 - func: clamp_min_(Tensor(a!) self, Scalar min) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -668,7 +666,6 @@
   device_guard: False
 
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: contiguous(Tensor self, *, MemoryFormat memory_format=contiguous_format) -> Tensor
@@ -697,7 +694,6 @@
   use_c10_dispatcher: full
 
 - func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int pad) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 # NB: we inherit the goofy argument order from PyTorch torch.nn.functional
 - func: conv_transpose1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] output_padding=0, int groups=1, int[1] dilation=1) -> Tensor
@@ -707,7 +703,6 @@
 - func: conv_transpose3d.input(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] output_padding=0, int groups=1, int[3] dilation=1) -> Tensor
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   device_guard: False
   supports_named_tensor: True
@@ -722,7 +717,6 @@
   variants: function, method
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -741,7 +735,6 @@
   variants: function, method
 
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -782,12 +775,10 @@
     CUDA: cudnn_convolution
 
 - func: cudnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: cudnn_convolution_backward_input
 
 - func: cudnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: cudnn_convolution_backward
 
@@ -797,7 +788,6 @@
     CUDA: cudnn_convolution_backward_bias
 
 - func: cudnn_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: cudnn_convolution_backward_weight
 
@@ -808,7 +798,6 @@
 # NB: output_padding not strictly needed here, but it's helpful for the float
 # backwards
 - func: cudnn_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: cudnn_convolution_transpose_backward
 
@@ -818,12 +807,10 @@
     CUDA: cudnn_convolution_backward_bias
 
 - func: cudnn_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: cudnn_convolution_transpose_backward_input
 
 - func: cudnn_convolution_transpose_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: cudnn_convolution_transpose_backward_weight
 
@@ -834,7 +821,6 @@
     CUDA: cudnn_grid_sampler_forward
 
 - func: cudnn_grid_sampler_backward(Tensor self, Tensor grid, Tensor grad_output) -> (Tensor grad_self, Tensor grad_grid)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: cudnn_grid_sampler_backward
 
@@ -867,20 +853,17 @@
   supports_named_tensor: True
 
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 # convenience function that converts to intlists for you
 - func: ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
   use_c10_dispatcher: full
 
 - func: _ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU:  ctc_loss_cpu
     CUDA: ctc_loss_gpu
 
 - func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: ctc_loss_backward_cpu
     CUDA: ctc_loss_backward_gpu
@@ -898,11 +881,9 @@
   variants: function, method
 
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
 
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
@@ -916,7 +897,6 @@
   supports_named_tensor: True
 
 - func: div_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: div_
@@ -940,7 +920,6 @@
   supports_named_tensor: True
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   supports_named_tensor: True
 
@@ -956,7 +935,6 @@
   supports_named_tensor: True
 
 - func: einsum(str equation, Tensor[] tensors) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   use_c10_dispatcher: full
@@ -971,7 +949,6 @@
     CUDA: embedding_dense_backward_cuda
 
 - func: embedding_renorm_(Tensor(a!) self, Tensor indices, float max_norm, float norm_type) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: embedding_renorm_cpu_
     CUDA: embedding_renorm_cuda_
@@ -1045,7 +1022,6 @@
     QuantizedCPU: empty_per_channel_affine_quantized_cpu
 
 - func: resize_(Tensor(a!) self, int[] size) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
   device_guard: False
@@ -1057,12 +1033,11 @@
 - func: empty.out(int[] size, *, MemoryFormat? memory_format=None, Tensor(a!) out) -> Tensor(a!)
   device_guard: False
 
-- func: empty_like(Tensor self) -> Tensor
-  use_c10_dispatcher: full
+- func: empty_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   device_guard: False
   supports_named_tensor: True
 
-- func: empty_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=contiguous_format) -> Tensor
+- func: empty_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
   device_guard: False
   supports_named_tensor: True
 
@@ -1077,7 +1052,6 @@
   variants: function, method
 
 - func: erf_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -1096,7 +1070,6 @@
   variants: function, method
 
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -1115,7 +1088,6 @@
   variants: function, method
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -1134,7 +1106,6 @@
   variants: function, method
 
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -1145,7 +1116,6 @@
     CUDA: expm1_out
 
 - func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_guard: False
   supports_named_tensor: True
@@ -1182,17 +1152,15 @@
   variants: function, method
   supports_named_tensor: True
 
-- func: flatten.DimnameList(Tensor self, DimnameList dims, Dimname out_dim) -> Tensor
+- func: flatten.DimnameList(Tensor self, Dimname[] dims, Dimname out_dim) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
 - func: fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
 - func: fill_.Tensor(Tensor(a!) self, Tensor value) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -1202,7 +1170,6 @@
   variants: function, method
 
 - func: floor_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -1218,7 +1185,6 @@
   variants: function, method
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -1238,10 +1204,11 @@
 
 - func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: full_like(Tensor self, Scalar fill_value) -> Tensor
-  use_c10_dispatcher: full
+- func: full_like(Tensor self, Scalar fill_value, *, MemoryFormat? memory_format=None) -> Tensor
+  supports_named_tensor: True
 
-- func: full_like.dtype(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: full_like.dtype(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+  supports_named_tensor: True
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -1268,7 +1235,6 @@
     CUDA: grid_sampler_2d_cuda
 
 - func: grid_sampler_2d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: grid_sampler_2d_backward_cpu
     CUDA: grid_sampler_2d_backward_cuda
@@ -1280,7 +1246,6 @@
     CUDA: grid_sampler_3d_cuda
 
 - func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: grid_sampler_3d_backward_cpu
     CUDA: grid_sampler_3d_backward_cuda
@@ -1329,11 +1294,9 @@
   variants: function, method
 
 - func: irfft(Tensor self, int signal_ndim, bool normalized=False, bool onesided=True, int[] signal_sizes=[]) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
 
 - func: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: _fft_mkl
@@ -1345,16 +1308,17 @@
 - func: _cufft_get_plan_cache_max_size(int device_index) -> int
   use_c10_dispatcher: full
 
-- func: _cufft_set_plan_cache_max_size(int device_index, int max_size) -> void
+- func: _cufft_set_plan_cache_max_size(int device_index, int max_size) -> ()
+  use_c10_dispatcher: unboxed_only
 
-- func: _cufft_clear_plan_cache(int device_index) -> void
+- func: _cufft_clear_plan_cache(int device_index) -> ()
+  use_c10_dispatcher: unboxed_only
 
 - func: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   variants: function, method
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
 - func: index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: index_copy(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
@@ -1401,7 +1365,7 @@
   variants: function
   device_guard: False
   supports_named_tensor: True
-  
+
 - func: is_distributed(Tensor self) -> bool
   use_c10_dispatcher: full
   variants: function, method
@@ -1447,7 +1411,6 @@
     CUDA: kl_div_backward_cuda
 
 - func: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -1469,14 +1432,12 @@
 - func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_cpu
+    CUDA: layer_norm_cuda
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: layer_norm_backward_cpu
-
-- func: native_layer_norm_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor input, Tensor mean, Tensor rstd, Tensor? weight, int M, int N, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  dispatch:
-    CPU: layer_norm_double_backward_cpu
+    CUDA: layer_norm_backward_cuda
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
@@ -1487,19 +1448,16 @@
     MkldnnCPU: mkldnn_linear
 
 - func: fbgemm_linear_int8_weight_fp32_activation(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: fbgemm_linear_int8_weight(Tensor input, Tensor weight, Tensor packed, Tensor col_offsets, Scalar weight_scale, Scalar weight_zero_point, Tensor bias) -> Tensor
   use_c10_dispatcher: full
 
 - func: fbgemm_linear_quantize_weight(Tensor input) -> (Tensor, Tensor, float, int)
-  use_c10_dispatcher: unboxed_only
 
 - func: fbgemm_pack_gemm_matrix_fp16(Tensor input) -> Tensor
   use_c10_dispatcher: full
 
 - func: fbgemm_linear_fp16_weight_fp32_activation(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: fbgemm_linear_fp16_weight(Tensor input, Tensor packed_weight, Tensor bias) -> Tensor
   use_c10_dispatcher: full
@@ -1523,7 +1481,6 @@
   variants: function, method
 
 - func: log_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -1539,7 +1496,6 @@
   variants: function, method
 
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -1555,20 +1511,19 @@
   variants: function, method
 
 - func: log1p_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
-    CPU: _log1p__cpu
-    CUDA: _log1p__cuda
+    CPU: log1p_
+    CUDA: log1p_
     SparseCPU: log1p_sparse_
     SparseCUDA: log1p_sparse_
 
 - func: log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log1p_out_cpu
-    CUDA: _log1p_out_cuda
+    CPU: log1p_out
+    CUDA: log1p_out
     SparseCPU: log1p_out_sparse
     SparseCUDA: log1p_out_sparse
 
@@ -1578,18 +1533,14 @@
   variants: function, method
 
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _log2__cpu
-    CUDA: _log2__cuda
 
 - func: log2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _log2_out_cpu
-    CUDA: _log2_out_cuda
+    CPU: log2_out
+    CUDA: log2_out
 
 - func: logdet(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -1603,11 +1554,11 @@
     CUDA: logspace_cuda_out
 
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
-- func: log_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+- func: log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
-- func: log_softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+- func: log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
@@ -1624,7 +1575,6 @@
     CUDA: log_softmax_backward_cuda
 
 - func: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -1660,7 +1610,6 @@
   variants: function, method
 
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   supports_named_tensor: True
 
@@ -1668,7 +1617,6 @@
   supports_named_tensor: True
 
 - func: max_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
 
 - func: max.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
@@ -1683,28 +1631,22 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool1d_with_indices(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   requires_tensor: True
   dispatch:
     MkldnnCPU: mkldnn_max_pool2d
 
 - func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   requires_tensor: True
   dispatch:
     QuantizedCPU: quantized_max_pool2d
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 # The CPU and GPU dispatch variants are named weirdly here because otherwise there
 # are namespacing issues in C++
@@ -1734,18 +1676,11 @@
 - func: mean.names_dim(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
-  dispatch:
-    CPU: mean_cpu_gpu
-    CUDA: mean_cpu_gpu
 
 - func: mean.names_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: mean_out_cpu_gpu
-    CUDA: mean_out_cpu_gpu
 
 - func: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -1760,7 +1695,6 @@
   supports_named_tensor: True
 
 - func: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   supports_named_tensor: True
 
@@ -1768,7 +1702,6 @@
   supports_named_tensor: True
 
 - func: min_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
 
 - func: min.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
@@ -1784,13 +1717,10 @@
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
 
 - func: mkldnn_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: mkldnn_convolution_backward_weights(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool bias_defined) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -1805,12 +1735,10 @@
     CUDA: miopen_convolution
 
 - func: miopen_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: miopen_convolution_backward_input
 
 - func: miopen_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: miopen_convolution_backward
 
@@ -1820,7 +1748,6 @@
     CUDA: miopen_convolution_backward_bias
 
 - func: miopen_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: miopen_convolution_backward_weight
 
@@ -1831,17 +1758,14 @@
 # NB: output_padding not strictly needed here, but it's helpful for the float
 # backwards
 - func: miopen_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: miopen_convolution_transpose_backward
 
 - func: miopen_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: miopen_convolution_transpose_backward_input
 
 - func: miopen_convolution_transpose_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: miopen_convolution_transpose_backward_weight
 
@@ -1850,17 +1774,14 @@
     CUDA: miopen_depthwise_convolution
 
 - func: miopen_depthwise_convolution_backward_input(int[] self_size, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: miopen_depthwise_convolution_backward_input
 
 - func: miopen_depthwise_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: miopen_depthwise_convolution_backward
 
 - func: miopen_depthwise_convolution_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: miopen_depthwise_convolution_backward_weight
 
@@ -1894,7 +1815,6 @@
   use_c10_dispatcher: full
 
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -1920,7 +1840,6 @@
   supports_named_tensor: True
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: mul_
@@ -1945,7 +1864,6 @@
   variants: function, method
 
 - func: mul_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: mv(Tensor self, Tensor vec) -> Tensor
@@ -1967,7 +1885,6 @@
   variants: function, method
 
 - func: mvlgamma_(Tensor(a!) self, int p) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: narrow_copy(Tensor self, int dim, int start, int length) -> Tensor
@@ -1980,7 +1897,6 @@
     SparseCUDA: narrow_copy_sparse
 
 - func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   device_guard: False
   supports_named_tensor: True
@@ -1992,13 +1908,16 @@
     MkldnnCPU: mkldnn_batch_norm
 
 - func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: batch_norm_stats_cuda
 
 - func: batch_norm_elemt(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps) -> Tensor
   dispatch:
     CUDA: batch_norm_elemt_cuda
+
+- func: batch_norm_elemt.out(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor invstd, float eps, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CUDA: batch_norm_elemt_cuda_out
 
 # for backward compatibility
 - func: batch_norm_gather_stats(Tensor input, Tensor mean, Tensor invstd, Tensor? running_mean, Tensor? running_var, float momentum, float eps, int count) -> (Tensor, Tensor)
@@ -2034,15 +1953,12 @@
   variants: function
 
 - func: _nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int[2] padding, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: _nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, int[2] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: _nnpack_spatial_convolution_backward_weight(Tensor input, int[] weightsize, Tensor grad_output, int[2] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: ones.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2052,16 +1968,18 @@
 
 - func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: ones_like(Tensor self) -> Tensor
-  use_c10_dispatcher: full
+- func: ones_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+  supports_named_tensor: True
 
-- func: ones_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: ones_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+  supports_named_tensor: True
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
 
-- func: cdist(Tensor x1, Tensor x2, float p=2) -> Tensor
+- func: cdist(Tensor x1, Tensor x2, float p=2, int? compute_mode=None) -> Tensor
   use_c10_dispatcher: full
+  supports_named_tensor: True
 
 - func: _cdist_backward(Tensor grad, Tensor x1, Tensor x2, float p, Tensor cdist) -> Tensor
   use_c10_dispatcher: full
@@ -2080,7 +1998,6 @@
   variants: function
 
 - func: permute(Tensor(a) self, int[] dims) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 # Only exposed from C++ -- in Python,
@@ -2091,7 +2008,6 @@
 # behavior on Windows, for reasons I don't understand
 # (maybe related to capital letter collation somehow...)
 - func: numpy_T(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
@@ -2130,10 +2046,11 @@
 
 - func: rand.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
-- func: rand_like(Tensor self) -> Tensor
-  use_c10_dispatcher: full
+- func: rand_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+  supports_named_tensor: True
 
-- func: rand_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: rand_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+  supports_named_tensor: True
 
 - func: randint(int high, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2151,15 +2068,13 @@
 
 - func: randint.low_generator_out(int low, int high, int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
-- func: randint_like(Tensor self, int high) -> Tensor
-  use_c10_dispatcher: full
+- func: randint_like(Tensor self, int high, *, MemoryFormat? memory_format=None) -> Tensor
 
-- func: randint_like.low(Tensor self, int low, int high) -> Tensor
-  use_c10_dispatcher: full
+- func: randint_like.low(Tensor self, int low, int high, *, MemoryFormat? memory_format=None) -> Tensor
 
-- func: randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
 
-- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2175,10 +2090,11 @@
 
 - func: randn.generator_out(int[] size, *, Generator? generator, Tensor(a!) out) -> Tensor(a!)
 
-- func: randn_like(Tensor self) -> Tensor
-  use_c10_dispatcher: full
+- func: randn_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+  supports_named_tensor: True
 
-- func: randn_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: randn_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+  supports_named_tensor: True
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2206,7 +2122,6 @@
   variants: function, method
 
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -2225,7 +2140,6 @@
   variants: function, method
 
 - func: neg_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -2236,7 +2150,6 @@
     CUDA: neg_out
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: repeat_interleave.Tensor(Tensor repeats) -> Tensor
@@ -2255,13 +2168,11 @@
   variants: function, method
 
 - func: reshape(Tensor self, int[] shape) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   device_guard: False
   supports_named_tensor: True
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
-  use_c10_dispatcher: unboxed_only
   device_guard: False
   requires_tensor: True
   dispatch:
@@ -2278,7 +2189,6 @@
   variants: function, method
 
 - func: round_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -2289,10 +2199,8 @@
     CUDA: round_out
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
 
 - func: relu(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2305,7 +2213,6 @@
   supports_named_tensor: True
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -2322,7 +2229,6 @@
     CUDA: prelu_cuda
 
 - func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   dispatch:
     CPU: prelu_backward_cpu
@@ -2362,7 +2268,6 @@
   variants: function, method
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -2378,7 +2283,6 @@
   supports_named_tensor: True
 
 - func: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   device_guard: False
   supports_named_tensor: True
@@ -2387,13 +2291,11 @@
   use_c10_dispatcher: full
 
 - func: selu_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
 
 - func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
   use_c10_dispatcher: full
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
 
 
 - func: sigmoid(Tensor self) -> Tensor
@@ -2406,19 +2308,15 @@
     MkldnnCPU: mkldnn_sigmoid
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
-    CPU: _sigmoid__cpu
-    CUDA: _sigmoid__cuda
+    CPU: sigmoid_
+    CUDA: sigmoid_
     MkldnnCPU: mkldnn_sigmoid_
 
 - func: sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _sigmoid_out_cpu
-    CUDA: _sigmoid_out_cuda
 
 - func: sin(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2426,18 +2324,14 @@
   variants: function, method
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _sin__cpu
-    CUDA: _sin__cuda
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   dispatch:
-    CPU: _sin_out_cpu
-    CUDA: _sin_out_cuda
+    CPU: sin_out
+    CUDA: sin_out
 
 - func: sinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2445,18 +2339,11 @@
   variants: function, method
 
 - func: sinh_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _sinh__cpu
-    CUDA: _sinh__cuda
 
 - func: sinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _sinh_out_cpu
-    CUDA: _sinh_out_cuda
 
 - func: detach(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -2464,7 +2351,6 @@
   variants: function, method
 
 - func: detach_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -2480,13 +2366,11 @@
   supports_named_tensor: True
 
 - func: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   device_guard: False
   supports_named_tensor: True
 
 - func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor
@@ -2494,11 +2378,11 @@
   variants: function, method
 
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
-- func: softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+- func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
-- func: softmax(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+- func: softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
@@ -2516,25 +2400,21 @@
     CUDA: softmax_backward_cuda
 
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   device_guard: False
   supports_named_tensor: True
 
 - func: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   device_guard: False
   supports_named_tensor: True
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   device_guard: False
 
 - func: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   device_guard: False
@@ -2545,12 +2425,10 @@
   device_guard: False
 
 - func: squeeze_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   device_guard: False
 
 - func: squeeze_.dim(Tensor(a!) self, int dim) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   device_guard: False
 
@@ -2570,7 +2448,6 @@
     SparseCUDA: _sspaddmm_out_cuda
 
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -2611,7 +2488,6 @@
   supports_named_tensor: True
 
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: method
   device_guard: False
 
@@ -2621,18 +2497,11 @@
   variants: function, method
 
 - func: sqrt_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
-  dispatch:
-    CPU: _sqrt__cpu
-    CUDA: _sqrt__cuda
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
-  dispatch:
-    CPU: _sqrt_out_cpu
-    CUDA: _sqrt_out_cuda
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full
@@ -2640,17 +2509,14 @@
   supports_named_tensor: True
 
 - func: std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   supports_named_tensor: True
 
 - func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   supports_named_tensor: True
 
 - func: std_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   supports_named_tensor: True
 
@@ -2688,13 +2554,11 @@
 
 
 - func: t(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   device_guard: False
   variants: function, method
   supports_named_tensor: True
 
 - func: t_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   device_guard: False
   variants: method
 
@@ -2704,7 +2568,6 @@
   variants: function, method
 
 - func: tan_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -2723,7 +2586,6 @@
   variants: function, method
 
 - func: tanh_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
   dispatch:
@@ -2737,7 +2599,6 @@
     CUDA: _tanh_out_cuda
 
 - func: tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 # TODO: namespace threshold in 'nn'
@@ -2747,7 +2608,6 @@
   supports_named_tensor: True
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: function
   supports_named_tensor: True
 
@@ -2759,7 +2619,6 @@
   variants: function
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   device_guard: False
   supports_named_tensor: True
@@ -2777,12 +2636,10 @@
     MkldnnCPU: mkldnn_transpose
 
 - func: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   device_guard: False
 
 - func: _mkldnn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   device_guard: False
   requires_tensor: True
   dispatch:
@@ -2794,14 +2651,12 @@
   variants: function
 
 - func: flip(Tensor self, int[] dims) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   dispatch:
     CPU: flip_cpu
     CUDA: flip_cuda
 
 - func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   dispatch:
     CPU: roll_cpu
@@ -2810,7 +2665,6 @@
 # default int[] value [0,1] should not add space after comma, since native_parse.py uses ', ' to split args
 
 - func: rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
 
 - func: trapz.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
@@ -2820,7 +2674,6 @@
   use_c10_dispatcher: full
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
@@ -2831,7 +2684,6 @@
   variants: function, method
 
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -2850,28 +2702,24 @@
   variants: function
 
 - func: _unique(Tensor self, bool sorted=True, bool return_inverse=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: _unique_cpu
     CUDA: _unique_cuda
 
 - func: unique_dim(Tensor self, int dim, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: unique_dim_cpu
     CUDA: unique_dim_cuda
 
 - func: unique_consecutive(Tensor self, bool return_inverse=False, bool return_counts=False, int? dim=None) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: unique_consecutive_cpu
     CUDA: unique_consecutive_cuda
 
 - func: unique_dim_consecutive(Tensor self, int dim, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: unique_dim_consecutive_cpu
@@ -2882,22 +2730,18 @@
 # Please don't rely on these two operators, they will be removed soon
 
 - func: _unique2(Tensor self, bool sorted=True, bool return_inverse=False, bool return_counts=False) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: _unique2_cpu
     CUDA: _unique2_cuda
 
 - func: _unsafe_view(Tensor self, int[] size) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: unsqueeze(Tensor(a) self, int dim) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   device_guard: False
 
 - func: unsqueeze_(Tensor(a!) self, int dim) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   device_guard: False
 
@@ -2907,7 +2751,6 @@
   supports_named_tensor: True
 
 - func: var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   supports_named_tensor: True
 
@@ -2922,12 +2765,10 @@
   supports_named_tensor: True
 
 - func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   supports_named_tensor: True
 
 - func: var_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   supports_named_tensor: True
 
@@ -2948,7 +2789,6 @@
   variants: function, method
 
 - func: where(Tensor condition) -> Tensor[]
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
@@ -2959,7 +2799,6 @@
     CUDA: _s_where_cuda
 
 - func: norm_except_dim(Tensor v, int pow=2, int dim=0) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 # VariableType::_weight_norm does not want to be given a gap in the autograd graph,
@@ -2969,19 +2808,16 @@
   variants: function
 
 - func: _weight_norm_cuda_interface(Tensor v, Tensor g, int dim=0) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CUDA: weight_norm_cuda
 
 - func: _weight_norm_cuda_interface_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CUDA: weight_norm_cuda_backward
 
 - func: _weight_norm_differentiable_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: zeros.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2991,10 +2827,11 @@
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: zeros_like(Tensor self) -> Tensor
-  use_c10_dispatcher: full
+- func: zeros_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
+  supports_named_tensor: True
 
-- func: zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+  supports_named_tensor: True
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   use_c10_dispatcher: full
@@ -3004,7 +2841,6 @@
     CUDA: _standard_gamma_grad_cuda
 
 - func: _standard_gamma(Tensor self, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   variants: function
   dispatch:
     CPU: _s_gamma_cpu
@@ -3017,14 +2853,12 @@
     CUDA: _dirichlet_grad_cuda
 
 - func: _sample_dirichlet(Tensor self, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   variants: function
   dispatch:
     CPU: _s_dirichlet_cpu
     CUDA: _s_dirichlet_cuda
 
 - func: poisson(Tensor self, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
@@ -3045,12 +2879,10 @@
 - func: _sparse_sum.dtype(Tensor self, *, ScalarType dtype) -> Tensor
 
 - func: _sparse_sum.dim(Tensor self, int[1] dim) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: _sparse_sum.dim_dtype(Tensor self, int[1] dim, *, ScalarType dtype) -> Tensor
 
 - func: _sparse_sum_backward(Tensor grad, Tensor self, int[] dim) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
       SparseCPU: _sparse_sum_backward_cpu
       SparseCUDA: _sparse_sum_backward_cuda
@@ -3066,7 +2898,6 @@
   variants: function, method
 
 - func: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
 
 - func: norm.dtype_out(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
@@ -3088,7 +2919,6 @@
   variants: function
 
 - func: frobenius_norm.dim(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: frobenius_norm.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
@@ -3102,7 +2932,6 @@
   variants: function
 
 - func: nuclear_norm.dim(Tensor self, int[2] dim, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: nuclear_norm.dim_out(Tensor self, int[2] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
@@ -3120,7 +2949,6 @@
   supports_named_tensor: True
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: function, method
 
@@ -3143,12 +2971,11 @@
     SparseCUDA: pow_sparse_scalar
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_zero_
-    CUDA: legacy::cuda::_th_zero_
+    CPU: zero_
+    CUDA: zero_
     SparseCPU: zero_sparse_
     SparseCUDA: zero_sparse_
     MkldnnCPU: mkldnn_zero_
@@ -3172,7 +2999,6 @@
   supports_named_tensor: True
 
 - func: sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: sub_
@@ -3188,7 +3014,6 @@
   supports_named_tensor: True
 
 - func: sub_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   supports_named_tensor: True
 
@@ -3228,7 +3053,6 @@
   supports_named_tensor: True
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_addmm_
@@ -3379,7 +3203,6 @@
   requires_tensor: True
 
 - func: sparse_resize_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     SparseCPU: sparse_resize_
@@ -3387,7 +3210,6 @@
   requires_tensor: True
 
 - func: sparse_resize_and_clear_(Tensor(a!) self, int[] size, int sparse_dim, int dense_dim) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     SparseCPU: sparse_resize_and_clear_
@@ -3487,7 +3309,6 @@
 
 
 - func: _indices(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     SparseCPU: _indices_sparse
@@ -3496,7 +3317,6 @@
   device_guard: False
 
 - func: _values(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     SparseCPU: _values_sparse
@@ -3508,7 +3328,6 @@
 # a bit unsafe. Similar to _indices and _values, this is useful for implementing
 # custom sparse operations in Python/C++ extension.
 - func: _coalesced_(Tensor(a!) self, bool coalesced) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     SparseCPU: _coalesced_sparse_
@@ -3517,7 +3336,6 @@
   device_guard: False
 
 - func: indices(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     SparseCPU: indices_sparse
@@ -3526,7 +3344,6 @@
   device_guard: False
 
 - func: values(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     SparseCPU: values_sparse
@@ -3549,21 +3366,13 @@
   requires_tensor: True
 
 - func: copy_sparse_to_sparse_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     SparseCPU: copy_sparse_
     SparseCUDA: copy_sparse_
   requires_tensor: True
 
-- func: numel(Tensor self) -> int
-  use_c10_dispatcher: full
-  variants: function, method
-  device_guard: False
-  supports_named_tensor: True
-
 - func: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   supports_named_tensor: True
 
@@ -3592,7 +3401,6 @@
     CPU: dense_to_mkldnn
 
 - func: mkldnn_reorder_conv2d_weight(Tensor self, int[2] padding=0, int[2] stride=1, int[2] dilation=1, int groups=1) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
   python_module: nn
   dispatch:
@@ -3630,13 +3438,11 @@
     QuantizedCPU: q_zero_point_quant
 
 - func: q_per_channel_scales(Tensor self) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   dispatch:
     QuantizedCPU: q_per_channel_scales_quant
 
 - func: q_per_channel_zero_points(Tensor self) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   dispatch:
     QuantizedCPU: q_per_channel_zero_points_quant
@@ -3658,7 +3464,6 @@
     CPU: make_per_tensor_quantized_tensor_cpu
 
 - func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: make_per_channel_quantized_tensor_cpu
 
@@ -3695,31 +3500,28 @@
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
-- func: to.dtype_layout(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False) -> Tensor
+- func: to.dtype_layout(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
   device_guard: False
   supports_named_tensor: True
 
-- func: to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor
+- func: to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
   device_guard: False
   supports_named_tensor: True
 
-- func: to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False) -> Tensor
+- func: to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
   device_guard: False
   supports_named_tensor: True
 
-- func: to.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False) -> Tensor
-  use_c10_dispatcher: full
+- func: to.other(Tensor self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor
   variants: method
   device_guard: False
 
 - func: meshgrid(Tensor[] tensors) -> Tensor[]
-  use_c10_dispatcher: unboxed_only
 
 - func: cartesian_prod(Tensor[] tensors) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function
 
 - func: combinations(Tensor self, int r=2, bool with_replacement=False) -> Tensor
@@ -3773,7 +3575,6 @@
     CUDA: _thnn_fused_gru_cell_cuda
 
 - func: _thnn_fused_gru_cell_backward(Tensor grad_hy, Tensor workspace, bool has_bias) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CUDA: _thnn_fused_gru_cell_backward_cuda
 
@@ -3781,28 +3582,20 @@
 
 # RNN cells and layers
 - func: lstm.input(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: gru.input(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: gru.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: rnn_tanh.input(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: rnn_tanh.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: rnn_relu.input(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: rnn_relu.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor? b_ih=None, Tensor? b_hh=None) -> (Tensor, Tensor)
 
@@ -3818,14 +3611,11 @@
 # Quantized GRU layers
 
 - func: quantized_gru.input(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 # Quantized RNN cells
 - func: quantized_lstm_cell(Tensor input, Tensor[] hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: quantized_gru_cell(Tensor input, Tensor hx, Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh, Tensor packed_ih, Tensor packed_hh, Tensor col_offsets_ih, Tensor col_offsets_hh, Scalar scale_ih, Scalar scale_hh, Scalar zero_point_ih, Scalar zero_point_hh) -> Tensor
   use_c10_dispatcher: full
@@ -3838,13 +3628,10 @@
 
 # PackedSequence utilities
 - func: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 - func: _pack_padded_sequence_backward(Tensor grad, int[] input_size, Tensor batch_sizes, bool batch_first) -> Tensor
-  use_c10_dispatcher: unboxed_only
 
 - func: _pad_packed_sequence(Tensor data, Tensor batch_sizes, bool batch_first, Scalar padding_value, int total_length) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
 
 # wrappers for legacy TH methods
 
@@ -3852,8 +3639,8 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_set_
-    CUDA: legacy::cuda::_th_set_
+    CPU: set_
+    CUDA: set_
 
 - func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
   variants: method
@@ -3864,7 +3651,6 @@
     QuantizedCPU: set_storage
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   device_guard: False
   dispatch:
@@ -3872,11 +3658,10 @@
     CUDA: legacy::cuda::_th_set_
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_set_
-    CUDA: legacy::cuda::_th_set_
+    CPU: set_cpu_
+    CUDA: set_cuda_
 
 - func: set_quantizer_(Tensor(a!) self, ConstQuantizerPtr quantizer) -> Tensor(a!)
   variants: method
@@ -3888,11 +3673,10 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_is_set_to
-    CUDA: legacy::cuda::_th_is_set_to
+    CPU: is_set_to
+    CUDA: is_set_to
 
 - func: masked_fill_.Scalar(Tensor(a!) self, Tensor mask, Scalar value) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: masked_fill__cpu
@@ -3905,7 +3689,6 @@
   supports_named_tensor: True
 
 - func: masked_fill_.Tensor(Tensor(a!) self, Tensor mask, Tensor value) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: masked_fill__cpu
@@ -3918,7 +3701,6 @@
   supports_named_tensor: True
 
 - func: masked_scatter_(Tensor(a!) self, Tensor mask, Tensor source) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: masked_scatter__cpu
@@ -3929,7 +3711,6 @@
   variants: function, method
 
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: method
   device_guard: False
   dispatch:
@@ -3939,14 +3720,12 @@
     QuantizedCPU: view
 
 - func: put_(Tensor(a!) self, Tensor index, Tensor source, bool accumulate=False) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_put_
     CUDA: legacy::cuda::_th_put_
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_index_add_
@@ -3959,50 +3738,47 @@
 - func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source) -> Tensor
   variants: function, method
 
-- func: index_fill_.Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
+- func: index_fill_.int_Scalar(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
   dispatch:
     CPU: legacy::cpu::_th_index_fill_
     CUDA: legacy::cuda::_th_index_fill_
 
-- func: index_fill.Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
+- func: index_fill.int_Scalar(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
   variants: function, method
 
-- func: index_fill_.Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
+- func: index_fill_.int_Tensor(Tensor(a!) self, int dim, Tensor index, Tensor value) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_index_fill_
-    CUDA: legacy::cuda::_th_index_fill_
+    CPU: index_fill_
+    CUDA: index_fill_
   supports_named_tensor: True
 
-- func: index_fill.Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
+- func: index_fill.int_Tensor(Tensor self, int dim, Tensor index, Tensor value) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
   supports_named_tensor: True
 
-- func: index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
+- func: index_fill_.Dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
-- func: index_fill_.dimname_Scalar(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
+- func: index_fill_.Dimname_Tensor(Tensor(a!) self, Dimname dim, Tensor index, Tensor value) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
 
-- func: index_fill.dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
+- func: index_fill.Dimname_Scalar(Tensor self, Dimname dim, Tensor index, Scalar value) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
-- func: index_fill.dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
+- func: index_fill.Dimname_Tensor(Tensor self, Dimname dim, Tensor index, Tensor value) -> Tensor
   variants: function, method
   supports_named_tensor: True
 
 - func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_scatter_
@@ -4013,7 +3789,6 @@
   variants: function, method
 
 - func: scatter_.value(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_scatter_
@@ -4030,7 +3805,6 @@
   variants: function, method
 
 - func: scatter_add_(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_scatter_add_
@@ -4044,51 +3818,39 @@
   variants: function, method
 
 - func: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: lt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: gt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: le_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: ge_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: ge_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: eq_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: ne_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
 
 - func: __and__.Scalar(Tensor self, Scalar other) -> Tensor
@@ -4106,14 +3868,12 @@
     CUDA: legacy::cuda::_th_and
 
 - func: __iand__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_iand_
     CUDA: legacy::cuda::_th_iand_
 
 - func: __iand__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_iand_
@@ -4134,14 +3894,12 @@
     CUDA: legacy::cuda::_th_or
 
 - func: __ior__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_ior_
     CUDA: legacy::cuda::_th_ior_
 
 - func: __ior__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_ior_
@@ -4162,14 +3920,12 @@
     CUDA: legacy::cuda::_th_xor
 
 - func: __ixor__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_ixor_
     CUDA: legacy::cuda::_th_ixor_
 
 - func: __ixor__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_ixor_
@@ -4190,14 +3946,12 @@
     CUDA: legacy::cuda::_th_lshift
 
 - func: __ilshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_ilshift_
     CUDA: legacy::cuda::_th_ilshift_
 
 - func: __ilshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_ilshift_
@@ -4218,21 +3972,18 @@
     CUDA: legacy::cuda::_th_rshift
 
 - func: __irshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_irshift_
     CUDA: legacy::cuda::_th_irshift_
 
 - func: __irshift__.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_irshift_
     CUDA: legacy::cuda::_th_irshift_
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
   dispatch:
@@ -4240,43 +3991,36 @@
     CUDA: _lgamma__cuda
 
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: tril_cpu_
     CUDA: tril_cuda_
 
 - func: triu_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: triu_cpu_
     CUDA: triu_cuda_
 
 - func: digamma_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
 
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
 
 - func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_renorm_
     CUDA: legacy::cuda::_th_renorm_
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
   dispatch:
@@ -4284,7 +4028,6 @@
     CUDA: pow_
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
   dispatch:
@@ -4292,49 +4035,42 @@
     CUDA: pow_
 
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: lerp_cpu_scalar_
     CUDA: lerp_cuda_scalar_
 
 - func: lerp_.Tensor(Tensor(a!) self, Tensor end, Tensor weight) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: lerp_cpu_tensor_
     CUDA: lerp_cuda_tensor_
 
 - func: fmod_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_fmod_
     CUDA: legacy::cuda::_th_fmod_
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_fmod_
     CUDA: legacy::cuda::_th_fmod_
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_remainder_
     CUDA: legacy::cuda::_th_remainder_
 
 - func: remainder_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_remainder_
     CUDA: legacy::cuda::_th_remainder_
 
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_addbmm_
@@ -4353,11 +4089,10 @@
     CUDA: legacy::cuda::_th_addbmm
 
 - func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
+  supports_named_tensor: True
 
 - func: random_.from(Tensor(a!) self, int from, int to, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_random_
@@ -4365,7 +4100,6 @@
   supports_named_tensor: True
 
 - func: random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_random_
@@ -4373,7 +4107,6 @@
   supports_named_tensor: True
 
 - func: random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_random_
@@ -4381,7 +4114,6 @@
   supports_named_tensor: True
 
 - func: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_uniform_
@@ -4389,7 +4121,6 @@
   supports_named_tensor: True
 
 - func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_normal_
@@ -4397,7 +4128,6 @@
   supports_named_tensor: True
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_cauchy_
@@ -4405,7 +4135,6 @@
   supports_named_tensor: True
 
 - func: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_log_normal_
@@ -4413,7 +4142,6 @@
   supports_named_tensor: True
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_exponential_
@@ -4421,7 +4149,6 @@
   supports_named_tensor: True
 
 - func: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_geometric_
@@ -4733,7 +4460,6 @@
     CUDA: legacy::cuda::_th_nonzero
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
-  use_c10_dispatcher: unboxed_only
   variants: method, function
 
 - func: gather.out(Tensor self, int dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
@@ -4757,20 +4483,24 @@
   use_c10_dispatcher: full
 
 - func: addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  supports_named_tensor: True
 
 - func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
+  supports_named_tensor: True
 
 - func: addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
+  supports_named_tensor: True
 
 - func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
   dispatch:
@@ -4778,7 +4508,6 @@
     CUDA: legacy::cuda::_th_gels_out
 
 - func: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
-  use_c10_dispatcher: unboxed_only
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_gels
@@ -4787,11 +4516,9 @@
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
-  use_c10_dispatcher: unboxed_only
   variants: method, function
 
 - func: _triangular_solve_helper(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: _triangular_solve_helper_cpu
@@ -4800,11 +4527,9 @@
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
 
 - func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
-  use_c10_dispatcher: unboxed_only
   variants: method, function
 
 - func: _symeig_helper(Tensor self, bool eigenvectors, bool upper) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: _symeig_helper_cpu
@@ -4816,7 +4541,6 @@
     CUDA: legacy::cuda::_th_eig_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  use_c10_dispatcher: unboxed_only
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_eig
@@ -4825,11 +4549,9 @@
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
-  use_c10_dispatcher: unboxed_only
   variants: method, function
 
 - func: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: _svd_helper_cpu
@@ -4862,13 +4584,11 @@
     CUDA: _cholesky_solve_helper_cuda
 
 - func: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
-  use_c10_dispatcher: unboxed_only
   variants: function, method
 
 - func: solve.solution(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!) solution, Tensor(b!) LU)
 
 - func: _solve_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: _solve_helper_cpu
@@ -4889,11 +4609,9 @@
 - func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
 
 - func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
-  use_c10_dispatcher: unboxed_only
   variants: method, function
 
 - func: _qr_helper(Tensor self, bool some) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: _qr_helper_cpu
@@ -4905,7 +4623,6 @@
     CUDA: legacy::cuda::_th_geqrf_out
 
 - func: geqrf(Tensor self) -> (Tensor a, Tensor tau)
-  use_c10_dispatcher: unboxed_only
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_geqrf
@@ -4932,7 +4649,6 @@
     CPU: legacy::cpu::_th_ormqr
 
 - func: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor, Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: _lu_with_info_cpu
@@ -4958,21 +4674,18 @@
     CUDA: multinomial_out
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   variants: method, function
   dispatch:
     CPU: multinomial
     CUDA: multinomial
 
 - func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   variants: function
   dispatch:
     CPU: legacy::cpu::_th_multinomial_alias_setup
     CUDA: legacy::cuda::_th_multinomial_alias_setup
 
 - func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   variants: function
   dispatch:
     CPU: legacy::cpu::_th_multinomial_alias_draw
@@ -5017,7 +4730,6 @@
     CUDA: erfinv
 
 - func: erfinv_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   supports_named_tensor: True
   variants: method
   dispatch:
@@ -5031,12 +4743,10 @@
     CUDA: _erfinv_out_cuda
 
 - func: sign(Tensor self) -> Tensor
-  use_c10_dispatcher: unboxed_only
   variants: function, method
   supports_named_tensor: True
 
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   variants: method
   supports_named_tensor: True
 
@@ -5201,7 +4911,6 @@
     CUDA: legacy::cuda::_th_sort_out
 
 - func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
-  use_c10_dispatcher: unboxed_only
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_sort
@@ -5226,7 +4935,6 @@
     CUDA: legacy::cuda::_th_topk_out
 
 - func: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
-  use_c10_dispatcher: unboxed_only
   variants: method, function
   dispatch:
     CPU: topk
@@ -5256,11 +4964,11 @@
     CUDA: legacy::cuda::_th_renorm
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: method
+  device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_unfold
-    CUDA: legacy::cuda::_th_unfold
+    CPU: unfold
+    CUDA: unfold
 
 - func: equal(Tensor self, Tensor other) -> bool
   use_c10_dispatcher: full
@@ -5303,7 +5011,6 @@
     CUDA: normal_out_cuda
 
 - func: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CPU: legacy::cpu::_th_normal
     CUDA: normal_cuda
@@ -5314,7 +5021,6 @@
     CUDA: normal_out_cuda
 
 - func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CPU: legacy::cpu::_th_normal
     CUDA: normal_cuda
@@ -5325,7 +5031,6 @@
     CUDA: normal_out_cuda
 
 - func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   dispatch:
     CPU: legacy::cpu::_th_normal
     CUDA: normal_cuda
@@ -5335,7 +5040,6 @@
 - func: normal.float_float_out(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: alias(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: unboxed_only
   variants: method, function
   supports_named_tensor: True
 
@@ -5346,7 +5050,6 @@
     CUDA: legacy::cuda::_th_addr
 
 - func: _addr_(Tensor(a!) self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: legacy::cpu::_th_addr_
     CUDA: legacy::cuda::_th_addr_
@@ -5357,7 +5060,6 @@
     CUDA: legacy::cuda::_th_addr_out
 
 - func: _index_copy_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: legacy::cpu::_th_index_copy_
     CUDA: legacy::cuda::_th_index_copy_
@@ -5399,7 +5101,6 @@
   supports_named_tensor: True
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: legacy::cpu::_th_cat
     CUDA: legacy::cuda::_th_cat
@@ -5410,7 +5111,6 @@
     CUDA: legacy::cuda::_th_cat_out
 
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: legacy::cpu::_th_mode
     CUDA: legacy::cuda::_th_mode
@@ -5421,7 +5121,6 @@
     CUDA: legacy::cuda::_th_mode_out
 
 - func: _max(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: legacy::cpu::_th_max
     CUDA: legacy::cuda::_th_max
@@ -5432,7 +5131,6 @@
     CUDA: legacy::cuda::_th_max_out
 
 - func: _min(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: legacy::cpu::_th_min
     CUDA: legacy::cuda::_th_min
@@ -5470,78 +5168,63 @@
 
 - func: mse_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_mse_loss_forward_out
-    CUDA: legacy::cuda::_thnn_mse_loss_forward_out
 
 - func: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_mse_loss_forward
-    CUDA: legacy::cuda::_thnn_mse_loss_forward
 
 - func: mse_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_mse_loss_backward_out
-    CUDA: legacy::cuda::_thnn_mse_loss_backward_out
+    CPU: mse_loss_backward_out
+    CUDA: mse_loss_backward_out
 
 - func: mse_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_mse_loss_backward
-    CUDA: legacy::cuda::_thnn_mse_loss_backward
+    CPU: mse_loss_backward
+    CUDA: mse_loss_backward
 
 - func: l1_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_l1_loss_forward_out
-    CUDA: legacy::cuda::_thnn_l1_loss_forward_out
 
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_l1_loss_forward
-    CUDA: legacy::cuda::_thnn_l1_loss_forward
 
 - func: l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_l1_loss_backward_out
-    CUDA: legacy::cuda::_thnn_l1_loss_backward_out
+    CPU: l1_loss_backward_out
+    CUDA: l1_loss_backward_out
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_l1_loss_backward
-    CUDA: legacy::cuda::_thnn_l1_loss_backward
 
 - func: multi_margin_loss.out(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_multi_margin_loss_forward_out
+    CPU: multi_margin_loss_cpu_out
     CUDA: legacy::cuda::_thnn_multi_margin_loss_forward_out
 
 - func: multi_margin_loss(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_multi_margin_loss_forward
+    CPU: multi_margin_loss_cpu
     CUDA: legacy::cuda::_thnn_multi_margin_loss_forward
 
 - func: multi_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_multi_margin_loss_backward_out
+    CPU: multi_margin_loss_cpu_backward_out
     CUDA: legacy::cuda::_thnn_multi_margin_loss_backward_out
 
 - func: multi_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, Scalar p, Scalar margin, Tensor? weight=None, int reduction=Mean) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_multi_margin_loss_backward
+    CPU: multi_margin_loss_cpu_backward
     CUDA: legacy::cuda::_thnn_multi_margin_loss_backward
 
 - func: multilabel_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
@@ -5554,27 +5237,26 @@
 - func: multilabel_margin_loss_forward.output(Tensor self, Tensor target, int reduction, *, Tensor(a!) output, Tensor(b!) is_target) -> (Tensor(a!), Tensor(b!))
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_multilabel_margin_loss_forward_out
+    CPU: multilabel_margin_loss_forward_out_cpu
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_forward_out
 
 - func: multilabel_margin_loss_forward(Tensor self, Tensor target, int reduction) -> (Tensor output, Tensor is_target)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_multilabel_margin_loss_forward
+    CPU: multilabel_margin_loss_forward_cpu
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_forward
 
 - func: multilabel_margin_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_multilabel_margin_loss_backward_out
+    CPU: multilabel_margin_loss_backward_cpu_out
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_backward_out
 
 - func: multilabel_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, Tensor is_target) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_multilabel_margin_loss_backward
+    CPU: multilabel_margin_loss_backward_cpu
     CUDA: legacy::cuda::_thnn_multilabel_margin_loss_backward
 
 - func: nll_loss.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
@@ -5586,25 +5268,25 @@
 - func: nll_loss_forward.output(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, *, Tensor(a!) output, Tensor(b!) total_weight) -> (Tensor(a!), Tensor(b!))
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_nll_loss_forward_out
+    CPU: nll_loss_forward_out_cpu
     CUDA: legacy::cuda::_thnn_nll_loss_forward_out
 
 - func: nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_nll_loss_forward
+    CPU: nll_loss_forward_cpu
     CUDA: legacy::cuda::_thnn_nll_loss_forward
 
 - func: nll_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_nll_loss_backward_out
+    CPU: nll_loss_backward_out_cpu
     CUDA: legacy::cuda::_thnn_nll_loss_backward_out
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_nll_loss_backward
+    CPU: nll_loss_backward_cpu
     CUDA: legacy::cuda::_thnn_nll_loss_backward
 
 - func: nll_loss2d.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
@@ -5640,28 +5322,22 @@
 - func: smooth_l1_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_smooth_l1_loss_forward_out
-    CUDA: legacy::cuda::_thnn_smooth_l1_loss_forward_out
+    CPU: smooth_l1_loss_out
+    CUDA: smooth_l1_loss_out
 
 - func: smooth_l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_smooth_l1_loss_forward
-    CUDA: legacy::cuda::_thnn_smooth_l1_loss_forward
 
 - func: smooth_l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_smooth_l1_loss_backward_out
-    CUDA: legacy::cuda::_thnn_smooth_l1_loss_backward_out
+    CPU: smooth_l1_loss_backward_out
+    CUDA: smooth_l1_loss_backward_out
 
 - func: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  dispatch:
-    CPU: legacy::cpu::_thnn_smooth_l1_loss_backward
-    CUDA: legacy::cuda::_thnn_smooth_l1_loss_backward
 
 - func: soft_margin_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
@@ -5716,7 +5392,6 @@
     CUDA: legacy::cuda::_thnn_elu_backward
 
 - func: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_elu_forward_
@@ -5775,7 +5450,6 @@
     CUDA: legacy::cuda::_thnn_hardtanh_backward
 
 - func: hardtanh_(Tensor(a!) self, Scalar min_val=-1, Scalar max_val=1) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_hardtanh_forward_
@@ -5808,7 +5482,6 @@
     CUDA: legacy::cuda::_thnn_leaky_relu_backward
 
 - func: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_leaky_relu_forward_
@@ -5828,7 +5501,6 @@
     CUDA: legacy::cuda::_thnn_log_sigmoid_forward_out
 
 - func: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_log_sigmoid_forward
@@ -5854,7 +5526,6 @@
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward_out
 
 - func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
-  use_c10_dispatcher: 'unboxed_only'
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_rrelu_with_noise_forward
@@ -5874,7 +5545,6 @@
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_backward
 
 - func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
-  use_c10_dispatcher: 'unboxed_only'
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_rrelu_with_noise_forward_
@@ -5940,17 +5610,14 @@
     MkldnnCPU: mkldnn_adaptive_avg_pool2d_out
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
 
 - func: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     MkldnnCPU: mkldnn_adaptive_avg_pool2d
   requires_tensor: True
 
 - func: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   dispatch:
     CPU: adaptive_avg_pool2d_cpu
     CUDA: adaptive_avg_pool2d_cuda
@@ -5970,7 +5637,6 @@
     CUDA: adaptive_avg_pool3d_out_cuda
 
 - func: adaptive_avg_pool3d(Tensor self, int[3] output_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: adaptive_avg_pool3d_cpu
@@ -5998,7 +5664,6 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool2d(Tensor self, int[2] output_size) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: adaptive_max_pool2d_cpu
@@ -6026,7 +5691,6 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: adaptive_max_pool3d(Tensor self, int[3] output_size) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: adaptive_max_pool3d_cpu
@@ -6053,7 +5717,6 @@
     MkldnnCPU: mkldnn_avg_pool2d_out
 
 - func: avg_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: avg_pool2d_cpu
@@ -6068,7 +5731,6 @@
     CUDA: avg_pool2d_backward_out_cuda
 
 - func: avg_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: avg_pool2d_backward_cpu
@@ -6081,7 +5743,6 @@
     CUDA: avg_pool3d_out_cuda
 
 - func: avg_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, bool ceil_mode=False, bool count_include_pad=True, int? divisor_override=None) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: avg_pool3d_cpu
@@ -6094,7 +5755,6 @@
     CUDA: avg_pool3d_backward_out_cuda
 
 - func: avg_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, bool ceil_mode, bool count_include_pad, int? divisor_override) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: avg_pool3d_backward_cpu
@@ -6109,7 +5769,6 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool2d(Tensor self, int[2] kernel_size, int[2] output_size, Tensor random_samples) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_cpu
@@ -6122,7 +5781,6 @@
     CUDA: fractional_max_pool2d_backward_out_cuda
 
 - func: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: fractional_max_pool2d_backward_cpu
@@ -6137,7 +5795,6 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: fractional_max_pool3d(Tensor self, int[3] kernel_size, int[3] output_size, Tensor random_samples) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_cpu
@@ -6150,7 +5807,6 @@
     CUDA: fractional_max_pool3d_backward_out_cuda
 
 - func: fractional_max_pool3d_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] output_size, Tensor indices) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: fractional_max_pool3d_backward_cpu
@@ -6165,7 +5821,6 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool2d_with_indices(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: max_pool2d_with_indices_cpu
@@ -6178,7 +5833,6 @@
     CUDA: max_pool2d_with_indices_backward_out_cuda
 
 - func: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: max_pool2d_with_indices_backward_cpu
@@ -6193,7 +5847,6 @@
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool3d_with_indices(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: max_pool3d_with_indices_cpu
@@ -6206,7 +5859,6 @@
     CUDA: max_pool3d_with_indices_backward_out_cuda
 
 - func: max_pool3d_with_indices_backward(Tensor grad_output, Tensor self, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool ceil_mode, Tensor indices) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: max_pool3d_with_indices_backward_cpu
@@ -6219,7 +5871,6 @@
     CUDA: max_unpooling2d_forward_out_cuda
 
 - func: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: max_unpooling2d_forward_cpu
@@ -6232,7 +5883,6 @@
     CUDA: max_unpooling2d_backward_out_cuda
 
 - func: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: max_unpooling2d_backward_cpu
@@ -6245,7 +5895,6 @@
     CUDA: max_unpooling3d_forward_out_cuda
 
 - func: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_forward_cpu
@@ -6258,7 +5907,6 @@
     CUDA: max_unpooling3d_backward_out_cuda
 
 - func: max_unpool3d_backward(Tensor grad_output, Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: max_unpooling3d_backward_cpu
@@ -6271,7 +5919,6 @@
     CUDA: reflection_pad1d_out_cuda
 
 - func: reflection_pad1d(Tensor self, int[2] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: reflection_pad1d_cpu
@@ -6284,7 +5931,6 @@
     CUDA: reflection_pad1d_backward_out_cuda
 
 - func: reflection_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: reflection_pad1d_backward_cpu
@@ -6297,7 +5943,6 @@
     CUDA: reflection_pad2d_out_cuda
 
 - func: reflection_pad2d(Tensor self, int[4] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: reflection_pad2d_cpu
@@ -6310,7 +5955,6 @@
     CUDA: reflection_pad2d_backward_out_cuda
 
 - func: reflection_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: reflection_pad2d_backward_cpu
@@ -6323,7 +5967,6 @@
     CUDA: replication_pad1d_out_cuda
 
 - func: replication_pad1d(Tensor self, int[2] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: replication_pad1d_cpu
@@ -6336,7 +5979,6 @@
     CUDA: replication_pad1d_backward_out_cuda
 
 - func: replication_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: replication_pad1d_backward_cpu
@@ -6349,7 +5991,6 @@
     CUDA: replication_pad2d_out_cuda
 
 - func: replication_pad2d(Tensor self, int[4] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: replication_pad2d_cpu
@@ -6362,7 +6003,6 @@
     CUDA: replication_pad2d_backward_out_cuda
 
 - func: replication_pad2d_backward(Tensor grad_output, Tensor self, int[4] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: replication_pad2d_backward_cpu
@@ -6375,7 +6015,6 @@
     CUDA: replication_pad3d_out_cuda
 
 - func: replication_pad3d(Tensor self, int[6] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: replication_pad3d_cpu
@@ -6388,7 +6027,6 @@
     CUDA: replication_pad3d_backward_out_cuda
 
 - func: replication_pad3d_backward(Tensor grad_output, Tensor self, int[6] padding) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: replication_pad3d_backward_cpu
@@ -6401,7 +6039,6 @@
     CUDA: upsample_linear1d_out_cuda
 
 - func: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_cpu
@@ -6414,7 +6051,6 @@
     CUDA: upsample_linear1d_backward_out_cuda
 
 - func: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_linear1d_backward_cpu
@@ -6427,7 +6063,6 @@
     CUDA: upsample_bilinear2d_out_cuda
 
 - func: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_bilinear2d_cpu
@@ -6441,7 +6076,6 @@
     CUDA: upsample_bilinear2d_backward_out_cuda
 
 - func: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_bilinear2d_backward_cpu
@@ -6454,7 +6088,6 @@
     CUDA: upsample_bicubic2d_out_cuda
 
 - func: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_bicubic2d_cpu
@@ -6467,7 +6100,6 @@
     CUDA: upsample_bicubic2d_backward_out_cuda
 
 - func: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_bicubic2d_backward_cpu
@@ -6480,7 +6112,6 @@
     CUDA: upsample_trilinear3d_out_cuda
 
 - func: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_trilinear3d_cpu
@@ -6493,7 +6124,6 @@
     CUDA: upsample_trilinear3d_backward_out_cuda
 
 - func: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_trilinear3d_backward_cpu
@@ -6506,7 +6136,6 @@
     CUDA: upsample_nearest1d_out_cuda
 
 - func: upsample_nearest1d(Tensor self, int[1] output_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_nearest1d_cpu
@@ -6519,7 +6148,6 @@
     CUDA: upsample_nearest1d_backward_out_cuda
 
 - func: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_nearest1d_backward_cpu
@@ -6532,7 +6160,6 @@
     CUDA: upsample_nearest2d_out_cuda
 
 - func: upsample_nearest2d(Tensor self, int[2] output_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_nearest2d_cpu
@@ -6546,7 +6173,6 @@
     CUDA: upsample_nearest2d_backward_out_cuda
 
 - func: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_nearest2d_backward_cpu
@@ -6559,7 +6185,6 @@
     CUDA: upsample_nearest3d_out_cuda
 
 - func: upsample_nearest3d(Tensor self, int[3] output_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_nearest3d_cpu
@@ -6572,7 +6197,6 @@
     CUDA: upsample_nearest3d_backward_out_cuda
 
 - func: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: upsample_nearest3d_backward_cpu
@@ -6634,14 +6258,13 @@
     CPU: slow_conv_transpose2d_cpu
     CUDA: slow_conv_transpose2d_cuda
 
-- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose2d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose2d_backward_out_cpu
     CUDA: slow_conv_transpose2d_backward_out_cuda
 
 - func: slow_conv_transpose2d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] output_padding, int[2] dilation, Tensor columns, Tensor ones, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose2d_backward_cpu
@@ -6659,14 +6282,13 @@
     CPU: slow_conv_transpose3d_cpu
     CUDA: slow_conv_transpose3d_cuda
 
-- func: slow_conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: slow_conv_transpose3d_backward.grad_output(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose3d_backward_out_cpu
     CUDA: slow_conv_transpose3d_backward_out_cuda
 
 - func: slow_conv_transpose3d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] output_padding, int[3] dilation, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: slow_conv_transpose3d_backward_cpu
@@ -6681,26 +6303,25 @@
 - func: thnn_conv2d_forward.output(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding, *, Tensor(a!) output, Tensor(b!) finput, Tensor(c!) fgrad_input) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv2d_forward_out
+    CPU: slow_conv2d_forward_out_cpu
     CUDA: legacy::cuda::_thnn_conv2d_forward_out
 
 - func: thnn_conv2d_forward(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias, int[2] stride, int[2] padding) -> (Tensor output, Tensor finput, Tensor fgrad_input)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv2d_forward
+    CPU: slow_conv2d_forward_cpu
     CUDA: legacy::cuda::_thnn_conv2d_forward
 
-- func: thnn_conv2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: thnn_conv2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv2d_backward_out
+    CPU: slow_conv2d_backward_out_cpu
     CUDA: legacy::cuda::_thnn_conv2d_backward_out
 
 - func: thnn_conv2d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_conv2d_backward
+    CPU: slow_conv2d_backward_cpu
     CUDA: legacy::cuda::_thnn_conv2d_backward
 
 - func: thnn_conv_depthwise2d.out(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, *, Tensor(a!) out) -> Tensor(a!)
@@ -6719,13 +6340,12 @@
   dispatch:
     CUDA: legacy::cuda::_thnn_conv_depthwise2d_forward
 
-- func: thnn_conv_depthwise2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight) -> (Tensor(a!), Tensor(b!))
+- func: thnn_conv_depthwise2d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight) -> (Tensor(a!), Tensor(b!))
   python_module: nn
   dispatch:
     CUDA: legacy::cuda::_thnn_conv_depthwise2d_backward_out
 
 - func: thnn_conv_depthwise2d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool[2] output_mask) -> (Tensor grad_input, Tensor grad_weight)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CUDA: legacy::cuda::_thnn_conv_depthwise2d_backward
@@ -6746,13 +6366,12 @@
   dispatch:
     CPU: legacy::cpu::_thnn_conv3d_forward
 
-- func: thnn_conv3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor?(a!) grad_input, Tensor?(b!) grad_weight, Tensor?(c!) grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+- func: thnn_conv3d_backward.grad_input(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, *, Tensor(a!)? grad_input, Tensor(b!)? grad_weight, Tensor(c!)? grad_bias) -> (Tensor(a!), Tensor(b!), Tensor(c!))
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_conv3d_backward_out
 
 - func: thnn_conv3d_backward.output_mask(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, Tensor finput, Tensor fgrad_input, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: legacy::cpu::_thnn_conv3d_backward
@@ -6764,7 +6383,6 @@
     CUDA: slow_conv_dilated2d_cuda
 
 - func: slow_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: slow_conv_dilated2d_backward_cpu
@@ -6777,7 +6395,6 @@
     CUDA: slow_conv_dilated3d_cuda
 
 - func: slow_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, int[3] kernel_size, int[3] stride, int[3] padding, int[3] dilation, bool[3] output_mask) -> (Tensor grad_input, Tensor grad_weight, Tensor grad_bias)
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: slow_conv_dilated3d_backward_cpu
@@ -6790,7 +6407,6 @@
     CUDA: col2im_out_cuda
 
 - func: col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: col2im_cpu
@@ -6803,7 +6419,6 @@
     CUDA: col2im_backward_out_cuda
 
 - func: col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: col2im_backward_cpu
@@ -6816,7 +6431,6 @@
     CUDA: im2col_out_cuda
 
 - func: im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: im2col_cpu
@@ -6829,7 +6443,6 @@
     CUDA: im2col_backward_out_cuda
 
 - func: im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  use_c10_dispatcher: unboxed_only
   python_module: nn
   dispatch:
     CPU: im2col_backward_cpu

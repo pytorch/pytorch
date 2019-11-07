@@ -430,6 +430,36 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObje
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "numel(Tensor input)",
+  }, /*traceable=*/false);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  if (r.idx == 0) {
+    return wrap(r.tensor(0).numel());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+// Wrapper converts a raised TypeError into returning NotImplemented
+// Used to implement binary arithmetic operators
+template <PyObject* (*Func)(PyObject*, PyObject*, PyObject*)>
+static PyObject * TypeError_to_NotImplemented_(PyObject* self, PyObject* args, PyObject* kwargs) {
+  PyObject* ret = Func(self, args, kwargs);
+  if (!ret && PyErr_ExceptionMatches(PyExc_TypeError)) {
+    PyErr_Clear();
+    Py_INCREF(Py_NotImplemented);
+    ret = Py_NotImplemented;
+  }
+  return ret;
+}
+
 // generated methods start here
 
 ${py_methods}
@@ -448,6 +478,7 @@ static PyMethodDef torch_functions[] = {
   {"spmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"tensor", (PyCFunction)(void(*)(void))THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"get_device", (PyCFunction)(void(*)(void))THPVariable_get_device, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"numel", (PyCFunction)(void(*)(void))THPVariable_numel, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
   {NULL}
 };
@@ -458,7 +489,7 @@ static PyTypeObject THPVariableFunctions = {
   0,                                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
-  0,                                     /* tp_print */
+  0,                                     /* tp_vectorcall_offset */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
   0,                                     /* tp_reserved */

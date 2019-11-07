@@ -38,7 +38,8 @@ class ProcessGroupAgent : public RpcAgent {
   ProcessGroupAgent(
       std::string workerName,
       std::shared_ptr<c10d::ProcessGroup> pg,
-      int numSendRecvThreads = 4);
+      int numSendRecvThreads,
+      std::chrono::milliseconds rpcTimeout);
 
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
@@ -47,6 +48,11 @@ class ProcessGroupAgent : public RpcAgent {
   void join() override;
 
   void sync() override;
+
+  void start() override;
+
+  // retrieves the timeout for all RPCs
+  const std::chrono::milliseconds& getRpcTimeout() const;
 
  protected:
   // This method wraps the destination information and the message into a
@@ -128,9 +134,21 @@ class ProcessGroupAgent : public RpcAgent {
   //     NB: Ideally, this should be addressed by supporting asynchronous UDF.
   //         This is just a temporary solution for (2).
   ThreadPool threadPool_;
-  std::unordered_map<int64_t, std::shared_ptr<FutureMessage>> futures_;
+  // Mapping of request id to (future, future timeout) pair. We store the future
+  // timeout for efficient lookups into the futureTimeouts_ map.
+  std::unordered_map<
+      int64_t,
+      std::pair<std::shared_ptr<FutureMessage>, std::chrono::milliseconds>>
+      futures_;
+  // A map to keep track of when futures time out. The map is keyed by the time
+  // (millisecond level precision) the future started, and the values correspond
+  // to a vector of futures that started at that time. When futures time out,
+  // the entry in this map is cleared and the corresponding future in the
+  // futures_ map is deleted.
+  std::map<std::chrono::milliseconds, std::vector<int64_t>> futureTimeouts_;
   mutable std::mutex futureMutex_;
   mutable std::condition_variable futureCV_;
+  std::chrono::milliseconds rpcTimeout_;
 };
 
 } // namespace rpc

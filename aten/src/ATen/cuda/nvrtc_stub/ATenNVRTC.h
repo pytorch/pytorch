@@ -61,7 +61,6 @@ namespace at { namespace cuda {
 // list above.
 //
 // HIP doesn't have
-//   cuOccupancyMaxActiveBlocksPerMultiprocessor
 //   cuGetErrorString  (maps to non-functional hipGetErrorString___)
 
 #define AT_FORALL_NVRTC(_)                       \
@@ -72,6 +71,7 @@ namespace at { namespace cuda {
   _(nvrtcGetPTX)                                 \
   _(cuModuleLoadData)                            \
   _(cuModuleGetFunction)                         \
+  _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(nvrtcGetErrorString)                         \
   _(nvrtcGetProgramLogSize)                      \
   _(nvrtcGetProgramLog)                          \
@@ -89,6 +89,6 @@ extern "C" typedef struct NVRTC {
 #undef CREATE_MEMBER
 } NVRTC;
 
-extern "C" AT_CUDA_API NVRTC* load_nvrtc();
+extern "C" TORCH_CUDA_API NVRTC* load_nvrtc();
 
 }} // at::cuda

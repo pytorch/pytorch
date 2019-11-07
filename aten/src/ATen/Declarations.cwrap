@@ -15,58 +15,12 @@
         - THTensor* self
         - THTensor* source
     - cname: setStorage
-      scalar_check: False
-      arguments:
-        - THTensor* self
-        - CONSTANT NULL, 0, {0}, {}
-    - cname: setStorage
-      scalar_check: False
-      arguments:
-        - THTensor* self
-        - THStorage* source
-        - CONSTANT 0
-        - CONSTANT {static_cast<int64_t>(source.size())}
-        - CONSTANT {}
-    - cname: setStorage
       arguments:
         - THTensor* self
         - THStorage* source
         - long storage_offset
         - IntArrayRefSize size
         - IntArrayRef stride
-]]
-[[
-  name: _th_fill_
-  return: self
-  cname: fill
-  variants: function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  options:
-    - arguments:
-      - THTensor* self
-      - real value
-    - zero_dim_tensor_only: True
-      arguments:
-      - THTensor* self
-      - THTensor* value
-]]
-[[
-  name: _th_is_set_to
-  cname: isSetTo
-  variants:
-    - function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  device_guard: False
-  return: bool
-  arguments:
-    - THTensor* self
-    - THTensor* tensor
 ]]
 [[
   name: _th_masked_fill_
@@ -82,12 +36,6 @@
         broadcast: mask inplace fallback types:Byte
       - THByteTensor* mask
       - real value
-    - zero_dim_tensor_only: True
-      arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Byte
-      - THByteTensor* mask
-      - THTensor* value
 ]]
 [[
   name: _th_masked_fill_bool_
@@ -103,12 +51,6 @@
         broadcast: mask inplace fallback types:Bool
       - THBoolTensor* mask
       - real value
-    - zero_dim_tensor_only: True
-      arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Bool
-      - THBoolTensor* mask
-      - THTensor* value
 ]]
 [[
   name: _th_masked_scatter_
@@ -301,33 +243,6 @@
         wrap_dim: self
       - THIndexTensor* index
       - real value
-    - zero_dim_tensor_only: True
-      arguments:
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - THIndexTensor* index
-        - THTensor* value
-]]
-[[
-  name: _th_unfold
-  cname: unfold
-  variants:
-    - function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  device_guard: False
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - arg: long dimension
-      wrap_dim: self
-    - long size
-    - long step
 ]]
 [[
   name: _th_scatter_
@@ -737,60 +652,6 @@
     - bool sorted
 ]]
 [[
-  name: _th_abs
-  cname: abs
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sigmoid
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  cname: sigmoid
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_log1p
-  cname: log1p
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_log2
-  cname: log2
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
   name: _th_exp
   cname: exp
   types:
@@ -835,48 +696,6 @@
 [[
   name: _th_cosh
   cname: cosh
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sin
-  cname: sin
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_asin
-  cname: asin
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sinh
-  cname: sinh
   types:
     - floating_point
   backends:
@@ -947,20 +766,6 @@
 [[
   name: _th_erfc
   cname: erfc
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-]]
-[[
-  name: _th_sqrt
-  cname: sqrt
   types:
     - floating_point
   backends:
@@ -1143,19 +948,6 @@
     - long bins
     - real min
     - real max
-]]
-[[
-  name: _th_zero_
-  cname: zero
-  return: self
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  variants:
-    - function
-  arguments:
-    - THTensor* self
 ]]
 [[
   name: _th_cumsum

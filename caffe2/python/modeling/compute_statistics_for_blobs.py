@@ -30,9 +30,7 @@ class ComputeStatisticsForBlobs(NetModifier):
 
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
-            if not net.BlobIsDefined(blob):
-                raise Exception('blob {0} is not defined in net {1}'.format(
-                    blob, net.Name()))
+            assert net.BlobIsDefined(blob), 'blob {} is not defined in net {} whose proto is {}'.format(blob, net.Name(), net.Proto())
 
             cast_blob = net.Cast(blob, to=core.DataType.FLOAT)
             stats_name = net.NextScopedBlob(prefix=blob + self._field_name_suffix)

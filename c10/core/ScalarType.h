@@ -166,6 +166,10 @@ struct ScalarTypeToCPPType<c10::ScalarType::Long> {
   _(c10::quint8, QUInt8)         \
   _(c10::qint32, QInt32)
 
+#define AT_FORALL_COMPLEX_TYPES(_)             \
+  _(std::complex<float>, ComplexFloat)         \
+  _(std::complex<double>, ComplexDouble)
+
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #define DEFINE_CASE(ctype, name) \
   case ScalarType::name:         \
@@ -324,6 +328,17 @@ static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
 }
 
+static inline ScalarType toValueType(ScalarType t) {
+  switch (t) {
+    case ScalarType::ComplexFloat:
+      return ScalarType::Float;
+    case ScalarType::ComplexDouble:
+      return ScalarType::Double;
+    default:
+      return t;
+  }
+}
+
 // see tensor_attributes.rst for detailed explanation and examples
 // of casting rules.
 static inline bool canCast(const ScalarType from, const ScalarType to) {
@@ -357,6 +372,7 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto f2 = ScalarType::Half;
   constexpr auto f4 = ScalarType::Float;
   constexpr auto f8 = ScalarType::Double;
+  constexpr auto c2 = ScalarType::ComplexHalf;
   constexpr auto c4 = ScalarType::ComplexFloat;
   constexpr auto c8 = ScalarType::ComplexDouble;
   constexpr auto b1 = ScalarType::Bool;
@@ -364,10 +380,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto ud = ScalarType::Undefined;
   if (a == ud || b == ud) {
     return ScalarType::Undefined;
-  }
-  if (isComplexType(a) || isComplexType(b)) {
-    AT_ERROR(
-        "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be for ", toString(a), " and ", toString(b));
   }
 
   // For QInt types, we only allow exact match
@@ -397,13 +409,13 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
         /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, c4, c8, f2, ud, ud, ud, ud},
         /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, c4, c8, f4, ud, ud, ud, ud},
         /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, c8, c8, f8, ud, ud, ud, ud},
-        /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, c4, c8, ud, ud, ud, ud, ud},
+        /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, c2, c4, c8, ud, ud, ud, ud, ud},
         /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, ud, ud, ud, ud, ud},
         /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, ud, ud},
         /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1, ud, ud, ud, ud},
         /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+        /* q3 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* bf */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, bf},
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];

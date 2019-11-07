@@ -135,12 +135,16 @@ def _parse_repo_info(github):
 def _get_cache_or_reload(github, force_reload, verbose=True):
     # Parse github repo information
     repo_owner, repo_name, branch = _parse_repo_info(github)
-
+    # Github allows branch name with slash '/',
+    # this causes confusion with path on both Linux and Windows.
+    # Backslash is not allowed in Github branch name so no need to
+    # to worry about it.
+    normalized_br = branch.replace('/', '_')
     # Github renames folder repo-v1.x.x to repo-1.x.x
     # We don't know the repo name before downloading the zip file
     # and inspect name from it.
     # To check if cached repo exists, we need to normalize folder names.
-    repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, branch]))
+    repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, normalized_br]))
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
 
@@ -148,7 +152,7 @@ def _get_cache_or_reload(github, force_reload, verbose=True):
         if verbose:
             sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
     else:
-        cached_file = os.path.join(hub_dir, branch + '.zip')
+        cached_file = os.path.join(hub_dir, normalized_br + '.zip')
         _remove_if_exists(cached_file)
 
         url = _git_archive_link(repo_owner, repo_name, branch)

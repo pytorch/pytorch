@@ -50,17 +50,17 @@ bool check_ivalue_equality(const c10::IValue& ivalue_python, const c10::IValue& 
   }
 
   // For Python modules, we allow the use of "none" / "mean" / "sum" to represent the reduction type.
-  // The corresponding data type for C++ modules is `Reduction::Reduction` enum, and here we map the
+  // The corresponding data type for C++ modules is `torch::Reduction::Reduction` enum, and here we map the
   // reduction types between Python version and C++ version.
   if (ivalue_python.isString() && ivalue_cpp.isInt()) {
     auto& ivalue_python_str = ivalue_python.toStringRef();
     auto ivalue_cpp_int = ivalue_cpp.toInt();
     if (ivalue_python_str == "none") {
-      return ivalue_cpp_int == Reduction::None;
+      return ivalue_cpp_int == torch::Reduction::None;
     } else if (ivalue_python_str == "mean") {
-      return ivalue_cpp_int == Reduction::Mean;
+      return ivalue_cpp_int == torch::Reduction::Mean;
     } else if (ivalue_python_str == "sum") {
-      return ivalue_cpp_int == Reduction::Sum;
+      return ivalue_cpp_int == torch::Reduction::Sum;
     }
   }
 
@@ -218,15 +218,15 @@ class TestCppApiParity(common.TestCase):
         elif type(python_arg) == bool:
             return CppArg(type='bool', value=str(python_arg).lower())
         elif type(python_arg) == str:
-            # if `python_arg` is one of the reduction types, we use the corresponding `Reduction::Reduction` enum.
+            # if `python_arg` is one of the reduction types, we use the corresponding `torch::Reduction::Reduction` enum.
             if python_arg in ['none', 'mean', 'sum']:
                 if python_arg == 'none':
-                    cpp_arg = 'Reduction::None'
+                    cpp_arg = 'torch::Reduction::None'
                 elif python_arg == 'mean':
-                    cpp_arg = 'Reduction::Mean'
+                    cpp_arg = 'torch::Reduction::Mean'
                 elif python_arg == 'sum':
-                    cpp_arg = 'Reduction::Sum'
-                return CppArg(type='Reduction::Reduction', value='{}'.format(cpp_arg))
+                    cpp_arg = 'torch::Reduction::Sum'
+                return CppArg(type='torch::Reduction::Reduction', value='{}'.format(cpp_arg))
             else:
                 return CppArg(type='std::string', value='"{}"'.format(python_arg))
         elif type(python_arg) == torch.Tensor:

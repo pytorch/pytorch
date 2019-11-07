@@ -82,7 +82,7 @@ FILE(GLOB native_quantized_hip_hip "native/quantized/hip/*.hip")
 FILE(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
 
 add_subdirectory(quantized)
-set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
+set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
@@ -114,6 +114,7 @@ endif()
 
 filter_list(generated_h generated_cpp "\\.h$")
 filter_list(cuda_generated_h cuda_generated_cpp "\\.h$")
+filter_list(core_generated_h core_generated_cpp "\\.h$")
 # TODO: When we have hip_generated_cpp
 #filter_list(hip_generated_h hip_generated_cpp "\\.h$")
 
@@ -448,15 +449,22 @@ endif()
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
 FOREACH(HEADER  ${INSTALL_HEADERS})
-  string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
+  string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "ATen/" HEADER_SUB ${HEADER})
+  string(REPLACE "${Caffe2_SOURCE_DIR}/" "" HEADER_SUB ${HEADER_SUB})
   GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
-  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
+  INSTALL(FILES ${HEADER} DESTINATION "${AT_INSTALL_INCLUDE_DIR}/${DIR}")
 ENDFOREACH()
 
 # TODO: Install hip_generated_h when we have it
 FOREACH(HEADER ${generated_h} ${cuda_generated_h})
   # NB: Assumed to be flat
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
+ENDFOREACH()
+
+message("AT_INSTALL_INCLUDE_DIR ${AT_INSTALL_INCLUDE_DIR}/ATen/core")
+FOREACH(HEADER ${core_generated_h})
+  message("core header install: ${HEADER}")
+  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/core)
 ENDFOREACH()
 
 INSTALL(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml

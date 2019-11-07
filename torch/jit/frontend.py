@@ -141,12 +141,14 @@ def _uses_true_division(fn):
 
 
 def get_jit_class_def(cls, self_name):
-    # Get defs for each method independently
+    # Get defs for each method within the current class independently
+    # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
-        cls, predicate=lambda m: inspect.ismethod(m) or inspect.isfunction(m))
+        cls, predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m)) and m.__name__ in cls.__dict__)
     methods = list(map(lambda member: member[1], methods))
     method_defs = [get_jit_def(method, self_name=self_name) for method in methods]
     methods_to_defaults = {method.__name__ : get_default_args(method) for method in methods}
+
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
@@ -193,7 +195,8 @@ def build_class_def(ctx, py_def, methods, self_name):
 
 def build_def(ctx, py_def, type_line, self_name=None):
     body = py_def.body
-    r = ctx.make_range(py_def.lineno, py_def.col_offset,
+    r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
+                       py_def.col_offset,
                        py_def.col_offset + len("def"))
     param_list = build_param_list(ctx, py_def.args, self_name)
     return_type = None
@@ -245,6 +248,9 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
 
 
 def get_default_args(fn):
+    if fn is None:
+        return {}
+
     if PY2:
         argspec = inspect.getargspec(fn)
         if argspec.defaults is not None:

@@ -62,6 +62,10 @@ class TORCH_API OutputArchive final {
   /// `stream`.
   void save_to(std::ostream& stream);
 
+  /// Saves the `OutputArchive` into a serialized representation using the
+  /// given writer function.
+  void save_to(const std::function<size_t(const void*, size_t)>& func);
+
   /// Forwards all arguments to `write()`.
   /// Useful for generic code that can be re-used for both `OutputArchive` and
   /// `InputArchive` (where `operator()` forwards to `read()`).

@@ -75,6 +75,7 @@ struct CAFFE2_API NoNamesGuard {
 };
 
 void check_names_valid_for(const Tensor& tensor, DimnameList names);
+void check_names_valid_for(int64_t tensor_dim, DimnameList names);
 
 // Sets the names of `tensor` to be `names`.
 CAFFE2_API Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names);
@@ -88,7 +89,7 @@ namespace impl {
 
 // Some helper functions on TensorImpl. Useful for working with names in TH.
 // XXX: Ideally these would exist as methods on TensorImpl
-CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names);
+CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, optional<DimnameList> names, bool validate_names);
 CAFFE2_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
 
 void check_names_valid_for(TensorImpl* impl, DimnameList names);

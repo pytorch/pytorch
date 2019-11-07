@@ -3,8 +3,6 @@
 
 #include <TH/THGeneral.h>
 #include <TH/THAllocator.h>
-#undef log1p
-#undef log2
 
 #include <c10/cuda/CUDAStream.h>
 
@@ -19,8 +17,9 @@
 # define THC_EXTERNC extern "C"
 
 // TH & THC are now part of the same library as ATen and Caffe2
-#define THC_API THC_EXTERNC CAFFE2_API
-#define THC_CLASS CAFFE2_API
+// NB: However, we are planning to split it out to a torch_cuda library
+#define THC_API THC_EXTERNC TORCH_CUDA_API
+#define THC_CLASS TORCH_CUDA_API
 
 #ifndef THAssert
 #define THAssert(exp)                                                   \

@@ -13,7 +13,6 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Optional.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/core/ATenDispatch.h>
 #include <ATen/Context.h>
 #include <ATen/core/EnableNamedTensor.h>
 
@@ -67,6 +66,10 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     const TensorOptions& options = {}) {
   return from_blob(data, sizes, detail::defaultStrides(sizes), [](void*) {}, options);
+}
+
+inline int64_t numel(const Tensor& tensor) {
+  return tensor.numel();
 }
 
 // function definitions are all static inline because
