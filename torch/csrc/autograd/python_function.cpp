@@ -1063,11 +1063,11 @@ static struct PyMethodDef THPFunction_methods[] = {
 
 PyTypeObject THPFunctionType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch._C._FunctionBase",              /* tp_name */
-  sizeof(THPFunction),                   /* tp_basicsize */
-  0,                                     /* tp_itemsize */
-  (destructor)THPFunction_dealloc,       /* tp_dealloc */
-  nullptr,                                     /* tp_print */
+  "torch._C._FunctionBase",                    /* tp_name */
+  sizeof(THPFunction),                         /* tp_basicsize */
+  0,                                           /* tp_itemsize */
+  (destructor)THPFunction_dealloc,             /* tp_dealloc */
+  0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
   nullptr,                                     /* tp_reserved */
@@ -1082,24 +1082,24 @@ PyTypeObject THPFunctionType = {
   nullptr,                                     /* tp_setattro */
   nullptr,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
-  nullptr,                               /* tp_doc */
-  (traverseproc)THPFunction_traverse,    /* tp_traverse */
-  (inquiry)THPFunction_clear,            /* tp_clear */
+  nullptr,                                     /* tp_doc */
+  (traverseproc)THPFunction_traverse,          /* tp_traverse */
+  (inquiry)THPFunction_clear,                  /* tp_clear */
   nullptr,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
+  0,                                           /* tp_weaklistoffset */
   nullptr,                                     /* tp_iter */
   nullptr,                                     /* tp_iternext */
-  THPFunction_methods,                   /* tp_methods */
+  THPFunction_methods,                         /* tp_methods */
   nullptr,                                     /* tp_members */
-  THPFunction_properties,                /* tp_getset */
+  THPFunction_properties,                      /* tp_getset */
   nullptr,                                     /* tp_base */
   nullptr,                                     /* tp_dict */
   nullptr,                                     /* tp_descr_get */
   nullptr,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
+  0,                                           /* tp_dictoffset */
   nullptr,                                     /* tp_init */
   nullptr,                                     /* tp_alloc */
-  THPFunction_new                        /* tp_new */
+  THPFunction_new                              /* tp_new */
 };
 
 bool THPFunction_initModule(PyObject *module)

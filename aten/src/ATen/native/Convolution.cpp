@@ -565,6 +565,10 @@ at::Tensor _convolution(
   check_shape_forward(input, weight, bias, params, input_is_mkldnn);
 
   if (k == 3) {
+    // avoid accidentally going through NHWC for permuted 3d input.
+    if (!input_is_mkldnn) {
+      input = input.contiguous();
+    }
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);

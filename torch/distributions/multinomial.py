@@ -101,7 +101,7 @@ class Multinomial(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        logits, value = broadcast_all(self.logits.clone(), value)
+        logits, value = broadcast_all(self.logits.clone(memory_format=torch.contiguous_format), value)
         log_factorial_n = torch.lgamma(value.sum(-1) + 1)
         log_factorial_xs = torch.lgamma(value + 1).sum(-1)
         logits[(value == 0) & (logits == -inf)] = 0
