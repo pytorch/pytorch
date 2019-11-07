@@ -26,7 +26,6 @@ import os
 import pickle
 import sys
 import textwrap
-import types
 import warnings
 
 from collections import OrderedDict
