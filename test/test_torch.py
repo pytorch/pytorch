@@ -276,7 +276,7 @@ class _TestTorchMixin(object):
         self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
         self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
 
-    def _test_math(self, torchfn, mathfn, input=None, test_expand=False):
+    def _test_math(self, torchfn, mathfn, input=None, test_expand=False, rtol=None, atol=None):
         if input is None:
             input = []
             input.append(list(range(-5, 5)))
@@ -293,7 +293,7 @@ class _TestTorchMixin(object):
             input = torch.tensor(input, dtype=dtype)
             res1 = torchfn(input.clone())
             res2 = input.clone().apply_(mathfn)
-            torch.testing.assert_allclose(res1, res2)
+            torch.testing.assert_allclose(res1, res2, rtol=rtol, atol=atol)
 
         # compare against the reference math function
         compare_reference(input, torch.double)
