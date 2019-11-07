@@ -169,7 +169,7 @@ def infer_raw_concrete_type(nn_module):
             continue
 
         # Handle Python function attributes
-        if inspect.isfunction(value) and not inspect.ismethod(value):
+        if inspect.isfunction(value):
             try:
                 scripted_fn = torch.jit.script(value)
                 concrete_type.add_function_attribute(
