@@ -6,29 +6,50 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+namespace detail {
 inline Tensor cosine_similarity(
     const Tensor& x1,
     const Tensor& x2,
-    const CosineSimilarityOptions& options) {
+    int64_t dim = 1,
+    double eps = 1e-8) {
   return torch::cosine_similarity(
       x1,
       x2,
-      options.dim(),
-      options.eps());
+      dim,
+      eps);
+}
+} // namespace detail
+
+inline Tensor cosine_similarity(
+    const Tensor& x1,
+    const Tensor& x2,
+    const CosineSimilarityOptions& options = {}) {
+  return detail::cosine_similarity(x1, x2, options.dim(), options.eps());
 }
 
 // ============================================================================
 
+namespace detail {
 inline Tensor pairwise_distance(
     const Tensor& x1,
     const Tensor& x2,
-    const PairwiseDistanceOptions& options) {
+    double p,
+    double eps = 1e-6,
+    bool keepdim = false) {
   return torch::pairwise_distance(
       x1,
       x2,
-      options.p(),
-      options.eps(),
-      options.keepdim());
+      p,
+      eps,
+      keepdim);
+}
+} // namespace detail
+
+inline Tensor pairwise_distance(
+    const Tensor& x1,
+    const Tensor& x2,
+    const PairwiseDistanceOptions& options = {}) {
+  return detail::pairwise_distance(x1, x2, options.p(), options.eps(), options.keepdim());
 }
 
 // ============================================================================
@@ -41,4 +62,4 @@ inline Tensor pdist(const Tensor& input, double p = 2.0) {
 
 } // namespace functional
 } // namespace nn
-} // namespace torch
+} // namesp
