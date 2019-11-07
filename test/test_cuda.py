@@ -1904,14 +1904,16 @@ t2.start()
 
     @skipIfRocm
     def test_cublas_multiple_threads_same_device(self):
+        # Note, these parameters should be very carefully tuned
+        # Too small number makes it hard for the racing condition
+        # to happen, while too large number sometimes cause hang
         size = 1024
-        weight = torch.ones((size, size), device='cuda')
-
-        results = {}
-
         num_threads = 2
         trials = 3
         test_iters = 100
+
+        weight = torch.ones((size, size), device='cuda')
+        results = {}
         barrier = threading.Barrier(num_threads)
 
         def _worker(t):
