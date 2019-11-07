@@ -118,3 +118,6 @@
     ignore = dirty
     path = android/libs/fbjni
     url = https://github.com/facebookincubator/fbjni.git
+[submodule "third_party/cryptopp"]
+	path = third_party/cryptopp
+	url = git@github.com:weidai11/cryptopp.git
