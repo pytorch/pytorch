@@ -89,4 +89,3 @@ inline Tensor pad(const Tensor& input, const PadOptions& options) {
 } // namespace functional
 } // namespace nn
 } // namespace torch
-
