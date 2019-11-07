@@ -834,7 +834,7 @@ class RecordingObserver(_ObserverBase):
         self.tensor_val = []
 
     def forward(self, x):
-        self.tensor_val.append(x.clone(memory_format=torch.contiguous_format))
+        self.tensor_val.append(x.clone())
         return x
 
     @torch.jit.export
