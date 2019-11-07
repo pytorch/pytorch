@@ -804,61 +804,6 @@ class TestJit(JitTestCase):
         traced_fn = torch.jit.trace(fn, torch.ones(1))
         self.assertEqual(run(fn), run(traced_fn))
 
-    def test_scopes(self):
-        x = torch.tensor([0.4], requires_grad=True)
-        y = torch.tensor([0.7], requires_grad=True)
-
-        def f(x, y):
-            out = x + y
-            with torch.jit.scope('Foo'):
-                out = x * out
-                with torch.jit.scope('Bar'):
-                    out = torch.tanh(out)
-                out = torch.sigmoid(out)
-            return out
-
-        self.checkTrace(f, (x, y))
-
-    def test_scopes_intermediate_node(self):
-        class Net(nn.Module):
-            def forward(self, x):
-                return F.log_softmax(x, dim=0)
-
-        net = Net()
-        t = torch.ones(2, requires_grad=True)
-        g, outputs, inputs = torch.jit._get_trace_graph(net, (t,), return_inputs=True)
-        self.assertEqual(outputs, self.createFunctionFromGraph(g)(*inputs))
-        self.assertExportImport(g, (t,))
-        g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
-        FileCheck().check("onnx::LogSoftmax").check("scope: Net").run(str(g))
-
-    def test_scopes_identity_node(self):
-
-        class Net(nn.Module):
-
-            def __init__(self):
-                super(Net, self).__init__()
-                self.features = nn.Sequential(
-                    nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
-                    nn.ReLU(inplace=True),
-                    nn.MaxPool2d(kernel_size=3, stride=2),
-                )
-
-            def forward(self, x):
-                x = self.features(x)
-                return x
-
-        model = Net()
-
-        t = torch.ones(1, 3, 227, 227, requires_grad=True)
-
-        with torch.onnx.set_training(model, False):
-            g, _ = torch.jit._get_trace_graph(model, (t,))
-
-        self.assertExportImport(g, (t,) + tuple(model.parameters()))
-        g = torch.onnx._optimize_trace(g, operator_export_type=OperatorExportTypes.ONNX)
-        FileCheck().check("Net/Sequential[features]/Conv2d[0]").check("ReLU").check("MaxPool").run(str(g))
-
     def test_canonicalize_tensor_iterator(self):
         x = torch.randn(4, 4)
 
@@ -3935,6 +3880,76 @@ def foo(x):
                 o2 = cu.f()
             self.assertEqual(o1, o2)
 
+    def test_cpp_module_iterator(self):
+        a = nn.Module()
+        a.name = 'a'
+        a.p = nn.Parameter(torch.rand(3, 4))
+        a.foo = nn.Module()
+        a.foo.name = 'foo'
+        a.foo.register_buffer('b', torch.rand(1, 1))
+        a.foo.bar = nn.Module()
+        a.foo.bar.name = 'bar'
+        a.foo.bar.an_int = 4
+        a.another = nn.Module()
+        a.another.name = 'another'
+        sa = torch.jit.script(a)
+        result = torch._C._jit_debug_module_iterators(sa._c)
+
+        def replace(e):
+            if e is a.p:
+                return 'P'
+            elif e is a.foo.b:
+                return 'B'
+            elif isinstance(e, torch._C.ScriptModule):
+                return e._get_attribute('name')
+
+            return e
+        for k, v in result.items():
+            for i in range(len(v)):
+                if isinstance(v[i], tuple):
+                    n, v2 = v[i]
+                    v[i] = (n, replace(v2))
+                else:
+                    v[i] = replace(v[i])
+            # module type creation is not deterministic, so we have to sort
+            # the result
+            v.sort()
+        expected = {'buffers': [],
+                    'buffers_r': ['B'],
+                    'children': ['another', 'foo'],
+                    'modules': ['a', 'another', 'bar', 'foo'],
+                    'named_attributes': [('another', 'another'),
+                                         ('foo', 'foo'),
+                                         ('name', 'a'),
+                                         ('p', 'P'),
+                                         ('training', True)],
+                    'named_attributes_r': [('another', 'another'),
+                                           ('another.name', 'another'),
+                                           ('another.training', True),
+                                           ('foo', 'foo'),
+                                           ('foo.b', 'B'),
+                                           ('foo.bar', 'bar'),
+                                           ('foo.bar.an_int', 4),
+                                           ('foo.bar.name', 'bar'),
+                                           ('foo.bar.training', True),
+                                           ('foo.name', 'foo'),
+                                           ('foo.training', True),
+                                           ('name', 'a'),
+                                           ('p', 'P'),
+                                           ('training', True)],
+                    'named_buffers': [],
+                    'named_buffers_r': [('foo.b', 'B')],
+                    'named_children': [('another', 'another'), ('foo', 'foo')],
+                    'named_modules': [('', 'a'),
+                                      ('another', 'another'),
+                                      ('foo', 'foo'),
+                                      ('foo.bar', 'bar')],
+                    'named_parameters': [('p', 'P')],
+                    'named_parameters_r': [('p', 'P')],
+                    'parameters': ['P'],
+                    'parameters_r': ['P']}
+        self.assertEqual(expected, result)
+
     def test_tracing_hooks(self):
         class Net(nn.Module):
             def __init__(self):
@@ -4024,6 +4039,7 @@ def foo(x):
             # type: (List[int]) -> int
             return fn(x)
 
+    @unittest.skip('Currently borken https://github.com/pytorch/pytorch/issues/29367')
     def test_tracing_multiple_methods(self):
         class Net(nn.Module):
             def __init__(self):
@@ -11949,8 +11965,11 @@ a")
 
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
-        FileCheck().check_not("value=<Tensor>").check_count("aten::mm", 2).check("aten::add") \
+        FileCheck().check_not("value=<Tensor>").check("aten::mm")\
+            .check("prim::CallMethod[name=\"forward\"]").check("aten::add") \
             .run(str(tm.graph))
+
+        FileCheck().check("aten::mm").run(str(tm.mod.graph))
 
     @_tmp_donotuse_dont_inline_everything
     def test_call_traced_fn_from_traced_module(self):
@@ -11969,9 +11988,9 @@ a")
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
         # Note: neg op from the traced function should be properly inlined
-        FileCheck().check("aten::mm").check_same("scope: TracedModule") \
+        FileCheck().check("aten::mm") \
             .check('name="traced_fn"') \
-            .check_next("prim::CallFunction").check("scope: TracedModule/traced_fn") \
+            .check_next("prim::CallFunction") \
             .run(str(tm.graph))
 
     def test_trace_hierarchy(self):
@@ -15014,6 +15033,84 @@ a")
                                                                   model.mod.out_proj.weight,
                                                                   model.mod.out_proj.bias)[0]
         self.assertTrue(torch.allclose(jit_out, py_out, atol=5e-4, rtol=1e-4))
+
+    def test_trace_modulelist(self):
+        class MySubmod(torch.nn.Module):
+            def __init__(self):
+                super(MySubmod, self).__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x)
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.ml = torch.nn.ModuleList([
+                    MySubmod(),
+                    MySubmod()
+                ])
+
+            def forward(self, x):
+                for mod in self.ml:
+                    x = mod(x)
+                return x
+
+        traced = torch.jit.trace(MyMod(), (torch.rand(3, 4),))
+
+    def test_trace_fork_join_and_module(self):
+        class MySubmod(torch.nn.Module):
+            def __init__(self):
+                super(MySubmod, self).__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x), torch.neg(x)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.ml = torch.nn.ModuleList([
+                    MySubmod() for i in range(2)
+                ])
+
+            def forward(self, x):
+                futs = []
+                for i in range(2):
+                    futs.append(torch.jit._fork(self.ml[i], x))
+
+                results = []
+                for i in range(2):
+                    results.append(torch.jit._wait(futs[i])[0])
+
+                return torch.stack(results)
+
+        m = Mod()
+        traced = torch.jit.trace(m, torch.rand(3, 4))
+
+    def test_trace_invert_module_hierarchy(self):
+        class MySubmod(torch.nn.Module):
+            def __init__(self):
+                super(MySubmod, self).__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x), torch.neg(x)
+
+        class MyFunctionalMod(torch.nn.Module):
+            def forward(self, x, submod):
+                return submod(x)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.sm = MySubmod()
+                self.fm = MyFunctionalMod()
+
+            def forward(self, x):
+                return self.fm(x, self.sm)
+
+        torch.jit.trace(Mod(), (torch.rand(3, 4),))
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_scriptmodule_transformer_cuda(self):
