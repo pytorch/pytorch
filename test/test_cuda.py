@@ -2007,6 +2007,60 @@ t2.start()
                     self.assertEqual(results[t].sum().item(),
                                      (2048 - test_iters) * (2048 - test_iters))
 
+    @skipIfRocm
+    def test_cusparse_multiple_threads_same_device(self):
+        size = 1024
+        num_threads = 2
+        trials = 3
+        test_iters = 500
+
+        def ones_sparse(size):
+            a = torch.arange(size, device='cuda')
+            indices = torch.cartesian_prod(a, a).t()
+            values = torch.ones(size * size, device='cuda')
+            return torch.sparse_coo_tensor(indices, values)
+
+        weight = ones_sparse(size)
+        results = {}
+        barrier = threading.Barrier(num_threads)
+
+        def _worker(t):
+            my_stream = torch.cuda.Stream()
+            # Hard sync so we don't need to worry about creating and using tensors
+            # across streams or the fact that default streams are thread-local.
+            # Those issues are not the target of this test.
+            torch.cuda.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
+            with torch.cuda.stream(my_stream):
+                for i in range(test_iters):
+                    # If all threads are sharing the same cublas handle,
+                    # the following sequence may occur:
+                    # thread 0 calls cublasSetStream()
+                    # thread 1 calls cublasSetStream()
+                    # thread 0 launches its raw gemm, which it thinks is in
+                    #          its own stream, but is actually in thread 1's stream.
+                    # thread 0 enqueues its div_, which IS is its own stream,
+                    #          but actually now races with its gemm.
+                    results[t] = weight.mm(results[t])
+                    results[t].div_(float(size))
+            torch.cuda.synchronize()
+
+        for _ in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device='cuda')
+
+            threads = [threading.Thread(target=_worker,
+                                        args=(t,)) for t in range(num_threads)]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
+
 
 if __name__ == '__main__':
     run_tests()
