@@ -3629,7 +3629,7 @@ class _TestTorchMixin(object):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
-        inputValuesFP32 = torch.tensor([[ 1, 2, 3],[-1, 1, 4]] , dtype= torch.float)
+        inputValuesFP32 = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype= torch.float)
         inputValuesBF16 = inputValuesFP32.bfloat16()
         precision_3dps = 0.004
         for p in [0, 1, 2, 3, 4, inf, -inf]:
@@ -8473,8 +8473,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(torch.empty((2, 0), device=device, dtype=torch.bfloat16), fn(x, dim=2))
             self.assertEqual(torch.empty((2, 0, 1), device=device, dtype=torch.bfloat16), fn(x, dim=2, keepdim=True))
             # assertEqual doesn't work with inf, -inf, nan and two tensors.
-            check = (torch.testing.assert_allclose if math.isnan(identity) or math.isinf(identity) else
-                        self.assertEqual)
+            check = (torch.testing.assert_allclose if math.isnan(identity) or math.isinf(identity) else self.assertEqual)
             check(torch.full((2, 4), identity, device=device, dtype=torch.bfloat16), fn(x, dim=1))
             check(torch.full((2, 1, 4), identity, device=device, dtype=torch.bfloat16), fn(x, dim=1, keepdim=True))
             try:
