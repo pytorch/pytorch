@@ -120,10 +120,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
       .def(
           "sync",
           &ProcessGroupAgent::sync,
-          py::call_guard<py::gil_scoped_release>())
-      .def(
-          "_get_rpc_timeout",
-          &ProcessGroupAgent::getRpcTimeout,
           py::call_guard<py::gil_scoped_release>());
 
   module.def("_start_rpc_agent", [](const std::shared_ptr<RpcAgent>& agent) {

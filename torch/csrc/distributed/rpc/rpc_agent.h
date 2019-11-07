@@ -97,7 +97,7 @@ class TORCH_API RpcAgent {
   virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
 
   // Retrieve the timeout for all RPCs.
-  virtual const std::chrono::milliseconds& getRpcTimeout() const {
+  inline const std::chrono::milliseconds& getRpcTimeout() const {
     return rpcTimeout_;
   }
 
