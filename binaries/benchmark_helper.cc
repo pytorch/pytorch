@@ -47,11 +47,6 @@ defined(TARGET_IPHONE_SIMULATOR)
 #include <malloc.h>
 #endif
 
-using std::map;
-using std::shared_ptr;
-using std::string;
-using std::unique_ptr;
-using std::vector;
 
 void observerConfig() {
   caffe2::ClearGlobalNetObservers();

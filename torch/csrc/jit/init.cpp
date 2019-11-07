@@ -325,7 +325,18 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_set_profiling_mode",
-          [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
+          [](bool profiling_flag) {
+            bool oldState = getProfilingMode();
+            getProfilingMode() = profiling_flag;
+            return oldState;
+          })
+      .def(
+          "_jit_set_profiling_executor",
+          [](bool profiling_flag) {
+            bool oldState = getExecutorMode();
+            getExecutorMode() = profiling_flag;
+            return oldState;
+          })
       .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
@@ -524,7 +535,7 @@ void initJITBindings(PyObject* module) {
 
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
-      auto fork_node = graph->insertNode(graph->create(prim::fork, 1));
+      auto fork_node = graph->insertNode(graph->create(prim::TracedFork, 1));
       auto body_block = fork_node->addBlock();
 
       Value* node_output;
@@ -546,9 +557,6 @@ void initJITBindings(PyObject* module) {
         body_block->registerOutput(out_val);
         node_output =
             fork_node->output()->setType(FutureType::create(out_val->type()));
-
-        // Lambda lift into a Subgraph attribute
-        torch::jit::script::lambdaLiftFork(fork_node);
       }
 
       auto retval =
