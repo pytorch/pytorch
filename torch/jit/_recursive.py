@@ -1,7 +1,6 @@
 import inspect
 import torch
 import collections
-import types
 import textwrap
 import functools
 import warnings
