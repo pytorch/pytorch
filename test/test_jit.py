@@ -3304,9 +3304,7 @@ graph(%Ra, %Rb):
         with warnings.catch_warnings(record=True) as script_warns:
             scripted_fn(torch.ones(1))
 
-        # TODO(albanD) re-enable this test when warnings are propagated
-        # as python warnings in the jit
-        # self.assertEqual(str(warns[0]), str(script_warns[0]))
+        self.assertEqual(str(warns[0]), str(script_warns[0]))
 
     def test_no_erroneous_warnings(self):
         import warnings
