@@ -18,7 +18,6 @@ import multiprocessing
 import argparse
 import subprocess
 import tqdm
-import re
 import os
 import sys
 import cuda_memcheck_common as cmc
@@ -88,9 +87,12 @@ if not args.ci:
     progressbar = tqdm.tqdm(total=len(ALL_TESTS))
 else:
     logfile = sys.stdout
+
     # create a fake progress bar that does not display anything
-    progressbar = object()
-    progressbar.update = lambda _: None
+    class ProgressbarStub:
+        def update(*args):
+            return
+    progressbar = ProgressbarStub()
 
 async def run1(coroutine_id):
     global progress
