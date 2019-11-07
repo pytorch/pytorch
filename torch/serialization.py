@@ -430,27 +430,6 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
                     obj.size())
         return None
 
-    sys_info = {
-        "little_endian": sys.byteorder == 'little',
-        "type_sizes": {
-            "short": SHORT_SIZE,
-            "int": INT_SIZE,
-            "long": LONG_SIZE,
-        }
-    }
-
-    metadata = {
-        "magic_number": MAGIC_NUMBER,
-        "protocol_version": ZIPFILE_PROTOCOL_VERSION,
-        "sys_info": sys_info
-    }
-
-    # Write system metadata
-    metadata_buf = io.BytesIO()
-    pickle_module.dump(metadata, metadata_buf)
-    metadata_value = metadata_buf.getvalue()
-    zip_file.write_record('metadata.pkl', metadata_value, len(metadata_value))
-
     # Write the pickle data for `obj`
     data_buf = io.BytesIO()
     pickler = pickle_module.Pickler(data_buf, protocol=pickle_protocol)
@@ -796,16 +775,6 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
             load_tensor(data_type(size), size, key, _maybe_decode_ascii(location))
         storage = loaded_storages[key]
         return storage
-
-    # Load metadata and verify it is a torch.save'd file
-    metadata_file = io.BytesIO(zip_file.get_record('metadata.pkl'))
-    metadata = pickle_module.load(metadata_file, **pickle_load_args)
-
-    if metadata["magic_number"] != MAGIC_NUMBER:
-        raise RuntimeError("Invalid magic number; corrupt file?")
-    if metadata["protocol_version"] != ZIPFILE_PROTOCOL_VERSION:
-        msg = "Invalid protocol version: {}, expected {}".format(metadata["protocol_version"], ZIPFILE_PROTOCOL_VERSION)
-        raise RuntimeError(msg)
 
     # Load the data (which may in turn use `persistent_load` to load tensors)
     data_file = io.BytesIO(zip_file.get_record('data.pkl'))
