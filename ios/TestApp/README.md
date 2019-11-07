@@ -10,7 +10,7 @@ To quickly test our framework in Cocoapods, simply run
 pod install
 ```
 
-This will pull the latest version of `LibTorch` from Cocoapods.
+This will pull the latest version of `LibTorch` from Cocoapods. To run the app, you need to have your model copied to the project as well as a `config.json` file, which can be found in the benchmark folder.
 
 ### Circle CI and Fastlane
 

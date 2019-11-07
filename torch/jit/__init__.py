@@ -77,17 +77,6 @@ else:
         return value
 
 @contextlib.contextmanager
-def scope(scope_name):
-    tracing_state = torch._C._get_tracing_state()
-    if tracing_state:
-        tracing_state.push_scope(scope_name)
-    try:
-        yield
-    finally:
-        if tracing_state:
-            tracing_state.pop_scope()
-
-@contextlib.contextmanager
 def optimized_execution(should_optimize):
     """
     A context manager that controls whether the JIT's executor will run
@@ -251,8 +240,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     return torch.jit._recursive.wrap_cpp_module(cpp_module)
 
 
-def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
-                    return_inputs=False, _return_inputs_states=False):
+def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
+                     return_inputs=False, _return_inputs_states=False):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value. If return_inputs,
@@ -280,7 +269,8 @@ def get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    outs = ONNXTracedModule(f, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    return outs
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -874,6 +864,7 @@ def trace(func,
         warnings.warn('The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is.')
         return func
 
+
     if isinstance(func, torch.nn.Module):
         return trace_module(func, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
@@ -881,7 +872,6 @@ def trace(func,
 
     if (hasattr(func, '__self__') and isinstance(func.__self__, torch.nn.Module) and
             func.__name__ == 'forward'):
-
         return trace_module(func.__self__, {'forward': example_inputs}, None,
                             check_trace, wrap_check_inputs(check_inputs),
                             check_tolerance, _force_outplace, _module_class)
@@ -913,6 +903,7 @@ def trace(func,
 
     return traced
 
+_trace_module_map = None
 
 def trace_module(mod,
                  inputs,
@@ -1010,6 +1001,16 @@ def trace_module(mod,
     if not isinstance(inputs, dict):
         raise AttributeError("expected a dictionary of (method_name, input) pairs")
 
+    torch.jit._trace_module_map = {}
+
+    def register_submods(mod, prefix):
+        for name, child in mod.named_children():
+            submod_qualname = prefix + '.' + name
+            torch.jit._trace_module_map[child] = submod_qualname
+            register_submods(child, submod_qualname)
+
+    torch.jit._trace_module_map['__module'] = mod
+    register_submods(mod, '__module')
 
     module = make_module(mod, _module_class, _compilation_unit)
 
@@ -1028,6 +1029,8 @@ def trace_module(mod,
             else:
                 _check_trace([inputs], func, check_trace_method,
                              check_tolerance, _force_outplace, True, _module_class)
+
+    torch.jit._trace_module_map = None
 
     return module
 
@@ -1374,8 +1377,22 @@ class OrderedModuleDict(OrderedDictWrapper):
         return k in self._python_modules
 
     def __setitem__(self, k, v):
-        raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                           "tried to replace existing module '{}': {}".format(k, v))
+        # Cases where sub-module can be re-assigned after ScriptModule construction
+        # 1. If the attr is an module interface type, it's guranteed that the module is
+        #    not inlined in the graph, so it's safe to swap a new ScriptModule in.
+        # 2. if the new value if a ScriptModule with the same JIT type, IR won't change
+        #    and it's legit to swap a new module in.
+        # In these two cases we allow swapping a new scripted module and update the
+        # corresponding python module dict to keep sync.
+        # Note: the value to be swapped in has to be ScriptModule instead of nn.Module,
+        # otherwise it's illegal and we throw error.
+        if isinstance(v, ScriptModule):
+            self.module._set_attribute(k, v)
+            self._python_modules[k] = v
+        else:
+            raise RuntimeError("Cannot re-assign modules in a ScriptModule with non-scripted "
+                               "module, tried to replace existing module '{}': {}".format(k, v))
+
 
     def __getitem__(self, k):
         return self._python_modules[k]
@@ -1498,7 +1515,7 @@ class ScriptMeta(type):
                         # today, but it is wrong)
                         continue
                     delattr(self, name)
-                for name in concrete_type.get_module_names():
+                for name, _ in concrete_type.get_modules():
                     delattr(self, name)
                 for name in ("_parameters", "_buffers", "_modules"):
                     delattr(self, name)
@@ -1717,8 +1734,7 @@ if _enabled:
                 # XXX: buffers are implemented as attributes in the JIT
                 self._c._set_attribute(attr, value)
             elif self._c._has_module(attr):
-                raise RuntimeError("Cannot re-assign modules in a ScriptModule, "
-                                   "tried to replace existing module '{}': {}".format(attr, value))
+                self._modules[attr] = value
             elif self._c._has_parameter(attr):
                 self._c._set_parameter(attr, value)
             elif hasattr(self, "_concrete_type") and attr in self._concrete_type.get_constants().keys():
