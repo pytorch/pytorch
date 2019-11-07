@@ -646,7 +646,7 @@ TEST_F(ModulesTest, MaxPool1d_MaxUnpool1d) {
   input = torch::tensor({{{1, 2, 3, 4, 5, 6, 7, 8, 9}}}, torch::kFloat);
   std::tie(output, indices) = pool->forward_with_indices(input);
   ASSERT_TRUE(torch::allclose(
-    unpool(output, indices, input.sizes()),
+    unpool(output, indices, input.sizes().vec()),
     torch::tensor({{{0, 2, 0, 4, 0, 6, 0, 8, 0}}} , torch::kFloat)));
   ASSERT_TRUE(torch::allclose(
     unpool(output, indices),

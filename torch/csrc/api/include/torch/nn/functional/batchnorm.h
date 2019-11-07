@@ -40,14 +40,14 @@ inline Tensor batch_norm(const Tensor& input,
 } // namespace detail
 
 inline Tensor batch_norm(const Tensor& input, const Tensor& running_mean,
-                         const Tensor& running_var, BatchNormFuncOptions options = {}, bool training = false) {
+                         const Tensor& running_var, BatchNormFuncOptions options = {}) {
   return detail::batch_norm(
     input,
     running_mean,
     running_var,
     options.weight(),
     options.bias(),
-    training,
+    options.training(),
     options.momentum(),
     options.eps());
 }

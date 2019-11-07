@@ -377,7 +377,7 @@ inline Tensor adaptive_avg_pool3d(const Tensor& input,
 
 inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
   const IntArrayRef& kernel_size, const IntArrayRef& stride,
-  const IntArrayRef& padding, const c10::optional<IntArrayRef>& output_size) {
+  const IntArrayRef& padding, const c10::optional<std::vector<int64_t>>& output_size) {
   auto input_size = input.sizes();
   std::vector<int64_t> default_size;
   for (size_t d = 0; d < kernel_size.size(); d++) {
@@ -389,7 +389,7 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
   } else {
     std::vector<int64_t> output_size_;
     if (output_size->size() == kernel_size.size() + 2) {
-      output_size_ = output_size->slice(2).vec();
+      output_size_ = IntArrayRef(*output_size).slice(2).vec();
     }
     if (output_size_.size() != kernel_size.size()) {
       TORCH_CHECK(false, "output_size should be a sequence containing ",
@@ -416,7 +416,7 @@ inline Tensor max_unpool1d(
     ExpandingArray<1> kernel_size,
     ExpandingArray<1> stride,
     ExpandingArray<1> padding = 0,
-    const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+    const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt) {
   auto output_size_ = _unpool_output_size(input, kernel_size,
                                           stride, padding,
                                           output_size);
@@ -427,15 +427,14 @@ inline Tensor max_unpool1d(
 } // namespace detail
 
 inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
-    MaxUnpool1dFuncOptions options,
-    const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+    MaxUnpool1dFuncOptions options) {
   return detail::max_unpool1d(
     input,
     indices,
     options.kernel_size(),
     options.stride(),
     options.padding(),
-    output_size);
+    options.output_size());
 }
 
 namespace detail {
@@ -445,7 +444,7 @@ inline Tensor max_unpool2d(
   ExpandingArray<2> kernel_size,
   ExpandingArray<2> stride,
   ExpandingArray<2> padding = 0,
-  const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+  const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt) {
   auto output_size_ = _unpool_output_size(input, kernel_size,
                                           stride, padding,
                                           output_size);
@@ -455,15 +454,14 @@ inline Tensor max_unpool2d(
 } // namespace detail
 
 inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
-  MaxUnpool2dFuncOptions options,
-  const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+  MaxUnpool2dFuncOptions options) {
   return detail::max_unpool2d(
     input,
     indices,
     options.kernel_size(),
     options.stride(),
     options.padding(),
-    output_size);
+    options.output_size());
 }
 
 namespace detail {
@@ -473,7 +471,7 @@ inline Tensor max_unpool3d(
   ExpandingArray<3> kernel_size,
   ExpandingArray<3> stride,
   ExpandingArray<3> padding = 0,
-  const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+  const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt) {
   auto output_size_ = _unpool_output_size(input, kernel_size,
                                           stride, padding,
                                           output_size);
@@ -484,15 +482,14 @@ inline Tensor max_unpool3d(
 } // namespace detail
 
 inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
-  MaxUnpool3dFuncOptions options,
-  const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+  MaxUnpool3dFuncOptions options) {
   return detail::max_unpool3d(
     input,
     indices,
     options.kernel_size(),
     options.stride(),
     options.padding(),
-    output_size);
+    options.output_size());
 }
 
 // ============================================================================

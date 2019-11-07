@@ -139,9 +139,8 @@ inline Tensor softmax(const Tensor& input, int64_t dim,
 }
 } // namespace detail
 
-inline Tensor softmax(const Tensor& input, SoftmaxFuncOptions options,
-                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
-  return detail::softmax(input, options.dim(), dtype);
+inline Tensor softmax(const Tensor& input, SoftmaxFuncOptions options) {
+  return detail::softmax(input, options.dim(), options.dtype());
 }
 
 // ============================================================================
@@ -161,9 +160,8 @@ inline Tensor softmin(const Tensor& input, int64_t dim,
 }
 } // namespace detail
 
-inline Tensor softmin(const Tensor& input, SoftminFuncOptions options,
-                      c10::optional<torch::Dtype> dtype = c10::nullopt) {
-  return detail::softmin(input, options.dim(), dtype);
+inline Tensor softmin(const Tensor& input, SoftminFuncOptions options) {
+  return detail::softmin(input, options.dim(), options.dtype());
 }
 
 // ============================================================================
@@ -183,9 +181,8 @@ inline Tensor log_softmax(const Tensor& input, int64_t dim,
 }
 } // namespace detail
 
-inline Tensor log_softmax(const Tensor& input, LogSoftmaxFuncOptions options,
-                          c10::optional<torch::Dtype> dtype = c10::nullopt) {
-  return detail::log_softmax(input, options.dim(), dtype);
+inline Tensor log_softmax(const Tensor& input, LogSoftmaxFuncOptions options) {
+  return detail::log_softmax(input, options.dim(), options.dtype());
 }
 
 // ============================================================================
@@ -244,9 +241,8 @@ inline Tensor rrelu(Tensor& input,
 }
 } // namespace detail
 
-inline Tensor rrelu(Tensor& input, RReLUFuncOptions options = {},
-                    bool training = false) {
-  return detail::rrelu(input, options.lower(), options.upper(), options.inplace(), training);
+inline Tensor rrelu(Tensor& input, RReLUFuncOptions options = {}) {
+  return detail::rrelu(input, options.lower(), options.upper(), options.inplace(), options.training());
 }
 
 // ============================================================================

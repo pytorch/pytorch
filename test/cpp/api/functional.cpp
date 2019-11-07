@@ -550,7 +550,7 @@ TEST_F(FunctionalTest, MaxUnpool1d) {
   x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat).requires_grad(true));
   indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
   y = F::max_unpool1d(
-      x, indices, F::MaxUnpool1dFuncOptions(3), std::vector<int64_t>({1, 1, 9}));
+      x, indices, F::MaxUnpool1dFuncOptions(3).output_size(std::vector<int64_t>({1, 1, 9})));
 
   ASSERT_EQ(y.ndimension(), 3);
   ASSERT_TRUE(torch::allclose(
@@ -1011,7 +1011,7 @@ TEST_F(FunctionalTest, Normalize) {
     auto input = torch::tensor({{{0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}}}, torch::dtype(torch::kFloat));
     auto output = torch::randn({1,2,5}, torch::dtype(torch::kFloat));
     // non-null output argument
-    F::normalize(input, F::NormalizeFuncOptions().p(1).dim(-1), output);
+    F::normalize(input, F::NormalizeFuncOptions().p(1).dim(-1).out(output));
     // default options
     F::normalize(input);
 
@@ -1345,8 +1345,7 @@ TEST_F(FunctionalTest, BatchNorm1d) {
   auto bias = torch::zeros({num_features});
   auto output = F::batch_norm(
     input, mean, variance,
-    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
-    /*training=*/false);
+    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps).training(false));
   auto expected = (input - mean) / torch::sqrt(variance + eps);
   ASSERT_TRUE(output.allclose(expected));
 }
@@ -1372,8 +1371,7 @@ TEST_F(FunctionalTest, BatchNorm2d) {
   auto bias = torch::zeros({num_features});
   auto output = F::batch_norm(
     input, mean, variance,
-    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
-    /*training=*/false);
+    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps).training(false));
   auto expected = torch::transpose((torch::transpose(input, 1, 3) - mean) / torch::sqrt(variance + eps), 1, 3);
   ASSERT_TRUE(output.allclose(expected));
 }
@@ -1402,8 +1400,7 @@ TEST_F(FunctionalTest, BatchNorm3d) {
   auto bias = torch::zeros({num_features});
   auto output = F::batch_norm(
     input, mean, variance,
-    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps),
-    /*training=*/false);
+    F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(momentum).eps(eps).training(false));
   auto expected = torch::transpose((torch::transpose(input, 1, 4) - mean) / torch::sqrt(variance + eps), 1, 4);
   ASSERT_TRUE(output.allclose(expected));
 }
