@@ -8645,6 +8645,17 @@ a")
 
         self.checkModule(CustomModuleDict(), (torch.tensor(.5),))
 
+        class OverrideMagic(CustomSequential):
+            def __init__(self):
+                super(CustomSequential, self).__init__()
+
+            @torch.jit.export
+            def __len__(self):
+                return 10
+
+        mod = OverrideMagic()
+        self.assertEqual(len(mod), len(torch.jit.script(mod)))
+
     def test_script_module_for2(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):

@@ -1737,7 +1737,7 @@ if _enabled:
         # define magic methods here as a shim to the correct attribute.
         def forward_magic_method(self, method_name, *args, **kwargs):
             self_method = getattr(self, method_name)
-            if self_method.__func__ == getattr(RecursiveScriptModule, method_name):
+            if getattr(self_method, "__func__", None) == getattr(RecursiveScriptModule, method_name):
                 raise NotImplementedError()
             return self_method(*args, **kwargs)
 

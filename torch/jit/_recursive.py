@@ -405,7 +405,7 @@ def script_model_defines_attr(script_model, attr):
     script_attr = getattr(script_model, attr, None)
     if script_attr is None:
         return False
-    default_attr = getattr(torch.jit.RecursiveScriptModule, attr, None)
+    default_attr = get_function_from_type(torch.jit.RecursiveScriptModule, attr)
     if default_attr is None:
         return False
     return script_attr != default_attr
@@ -418,7 +418,7 @@ def add_sequential_forward(script_module, nn_module):
     forward_func = getattr(nn_module.forward, "__func__", None)
     # we aren't currently able to support compiling Sequential.forward
     # so if we encounter it, use this forward instead. support for self._modules.values() is blocking
-    if forward_func == get_function_from_type(Sequential.forward, "forward"):
+    if forward_func == get_function_from_type(Sequential, "forward"):
         script_module.define("""
         def forward(self, input):
             for m in self:
@@ -491,7 +491,7 @@ def infer_methods_to_compile(nn_module):
     if hasattr(nn_module, 'forward'):
         forward_func = getattr(nn_module.forward, "__func__", None)
         module_forward = get_function_from_type(torch.nn.Module, "forward")
-        sequential_forward = get_function_from_type(Sequential.forward, "forward")
+        sequential_forward = get_function_from_type(Sequential, "forward")
         if forward_func == module_forward or forward_func == sequential_forward:
             # TODO, we deleted a check that forward is actually defined, instead skipping it
             pass
