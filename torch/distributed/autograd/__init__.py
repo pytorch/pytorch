@@ -1,5 +1,17 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import sys
+import torch
+
+
+def is_available():
+    return sys.version_info >= (3, 0) and hasattr(torch._C, "_dist_autograd_init")
+
+
+if is_available() and not torch._C._dist_autograd_init():
+    raise RuntimeError("Failed to initialize torch.distributed.autograd")
+
+
 class context(object):
     '''
     Autograd context object to wrap forward and backward passes when using

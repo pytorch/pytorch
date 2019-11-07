@@ -9,7 +9,7 @@ namespace at { namespace native {
 DEFINE_DISPATCH(cross_stub);
 
 Tensor cross(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
-  Tensor out = at::empty_like(input);
+  Tensor out = at::empty_like(input, at::MemoryFormat::Contiguous);
   native::cross_out(out, input, other, dimension);
   return out;
 }
