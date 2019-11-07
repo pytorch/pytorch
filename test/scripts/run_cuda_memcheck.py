@@ -20,6 +20,7 @@ import subprocess
 import tqdm
 import re
 import os
+import sys
 import cuda_memcheck_common as cmc
 
 ALL_TESTS = []
@@ -36,6 +37,10 @@ parser.add_argument('--nproc', type=int, default=multiprocessing.cpu_count(),
                     help='Number of processes running tests, default to number of cores in the system')
 parser.add_argument('--gpus', default='all',
                     help='GPU assignments for each process, it could be "all", or : separated list like "1,2:3,4:5,6"')
+parser.add_argument('--ci', action='store_true',
+                    help='Whether this script is executed in CI. When executed inside a CI, this script fails when '
+                         'an error is detected. Also, it will not show tqdm progress bar, but directly print the error'
+                         'to stdout instead.')
 args = parser.parse_args()
 
 # Filters that ignores cublas/cudnn errors
@@ -78,8 +83,14 @@ for line in lines:
 # These subprocesses are balanced across different GPUs on the system by assigning one devices per process,
 # or as specified by the user
 progress = 0
-logfile = open('result.log', 'w')
-progressbar = tqdm.tqdm(total=len(ALL_TESTS))
+if not args.ci:
+    logfile = open('result.log', 'w')
+    progressbar = tqdm.tqdm(total=len(ALL_TESTS))
+else:
+    logfile = sys.stdout
+    # create a fake progress bar that does not display anything
+    progressbar = object()
+    progressbar.update = lambda _: None
 
 async def run1(coroutine_id):
     global progress
@@ -101,6 +112,8 @@ async def run1(coroutine_id):
         except asyncio.TimeoutError:
             print('Timeout:', test, file=logfile)
             proc.kill()
+            if args.ci:
+                sys.exit("Hang detected on cuda-memcheck")
         else:
             if proc.returncode == 0:
                 print('Success:', test, file=logfile)
@@ -112,6 +125,8 @@ async def run1(coroutine_id):
                     print('Fail:', test, file=logfile)
                     print(stdout, file=logfile)
                     print(stderr, file=logfile)
+                    if args.ci:
+                        sys.exit("Failure detected on cuda-memcheck")
                 else:
                     print('Ignored:', test, file=logfile)
         del proc
