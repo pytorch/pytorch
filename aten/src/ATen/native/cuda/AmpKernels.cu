@@ -43,13 +43,17 @@ Tensor& _amp_unscale_inf_check_cuda(Tensor& scaled_grad,
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t val) -> scalar_t {
+      // gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t val) -> scalar_t {
+      //     auto fval = static_cast<float>(val);
+      //     if (!std::isfinite(fval)) {
+      //       *found_inf_ptr = 1.f;
+      //     }
+      //     const auto inv_scale = *inv_scale_ptr; // Every thread accesses inv_scale, but it will hit in cache.
+      //     return static_cast<scalar_t>(inv_scale == 1.f ? fval : fval*inv_scale);
+      //   });
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t val) -> scalar_t {
           auto fval = static_cast<float>(val);
-          if (!std::isfinite(fval)) {
-            *found_inf_ptr = 1.f;
-          }
-          const auto inv_scale = *inv_scale_ptr; // Every thread accesses inv_scale, but it will hit in cache.
-          return static_cast<scalar_t>(inv_scale == 1.f ? fval : fval*inv_scale);
+          return static_cast<scalar_t>(fval);
         });
     });
 

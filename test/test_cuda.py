@@ -2112,27 +2112,27 @@ t2.start()
 
         self._run_scaling_case(run, unskipped=3, skipped=1)
 
-    def test_grad_scaling_accumulation(self):
-        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
-            iters_to_accumulate = 2
-            for i, (input, target) in enumerate(data):
-                output = model(input)
-                loss = loss_fn(output, target)
-                loss = loss / iters_to_accumulate
-                if try_scaling_api:
-                    scaler.scale(loss).backward()
-                else:
-                    loss.backward()
-                if (i + 1) % iters_to_accumulate == 0:
-                    if try_scaling_api:
-                        scaler.step(optimizer)
-                        scaler.update()
-                        optimizer.zero_grad()
-                    else:
-                        optimizer.step()
-                        optimizer.zero_grad()
+    # def test_grad_scaling_accumulation(self):
+    #     def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+    #         iters_to_accumulate = 2
+    #         for i, (input, target) in enumerate(data):
+    #             output = model(input)
+    #             loss = loss_fn(output, target)
+    #             loss = loss / iters_to_accumulate
+    #             if try_scaling_api:
+    #                 scaler.scale(loss).backward()
+    #             else:
+    #                 loss.backward()
+    #             if (i + 1) % iters_to_accumulate == 0:
+    #                 if try_scaling_api:
+    #                     scaler.step(optimizer)
+    #                     scaler.update()
+    #                     optimizer.zero_grad()
+    #                 else:
+    #                     optimizer.step()
+    #                     optimizer.zero_grad()
 
-        self._run_scaling_case(run, unskipped=2, skipped=0)
+    #     self._run_scaling_case(run, unskipped=2, skipped=0)
 
     def test_grad_scaling_multiple(self):
         # Tests gradient scaling with 2 models and 2 optimizers that both receive gradients from 2 losses.
