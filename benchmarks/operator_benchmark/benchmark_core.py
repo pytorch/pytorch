@@ -241,7 +241,8 @@ class BenchmarkRunner(object):
             self._check_keep(op_test_config.tag, self.args.tag_filter) and
             self._check_keep_list(test_case.op_bench.module_name(), operators) and
             self._check_keep_list(test_case.framework, frameworks) and
-                (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only)):
+                (not self.args.forward_only or op_test_config.run_backward != self.args.forward_only) and
+                (self.args.device == 'None' or self.args.device in op_test_config.test_name)):
             return True
 
         return False
