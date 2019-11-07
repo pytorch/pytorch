@@ -37,7 +37,7 @@ struct CAFFE2_API Dimname {
 
 using DimnameList = c10::ArrayRef<Dimname>;
 
-static Symbol kWildcard = Symbol::dimname("*");
+extern Symbol kWildcard;
 
 CAFFE2_API std::ostream& operator<<(std::ostream& out, const Dimname& dimname);
 
