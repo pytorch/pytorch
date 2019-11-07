@@ -15,5 +15,5 @@
   inline const T& name() const noexcept { /* NOLINT */                  \
     return this->name##_;                                        \
   }                                                              \
- protected:                                                        \
+ private:                                                        \
   T name##_ /* NOLINT */
