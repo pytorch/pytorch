@@ -11,7 +11,7 @@ from torch.autograd import Variable, function
 from torch.jit.frontend import get_jit_class_def, get_jit_def, get_default_args
 from torch.nn import Module
 from torch.serialization import validate_cuda_device
-from torch._six import PY2, PY37, with_metaclass, string_classes
+from torch._six import PY2, PY37, with_metaclass, string_classes, get_function_from_type
 from ..nn.modules.utils import _single, _pair, _triple, _quadruple, \
     _list_with_default
 from torch.utils import set_module
@@ -1757,7 +1757,7 @@ if _enabled:
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = getattr(self, "__dir__")
-            if self_method.__func__ == getattr(RecursiveScriptModule, "__dir__"):
+            if self_method.__func__ == get_function_from_type(RecursiveScriptModule, "__dir__"):
                 return super().__dir__()
             return self_method()
 
