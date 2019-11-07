@@ -14,7 +14,7 @@ inline Tensor interpolate(
   const Tensor& input,
   std::vector<int64_t> size = {},
   std::vector<double> scale_factor = {},
-  InterpolateOptions::mode_t mode = torch::kNearest,
+  InterpolateFuncOptions::mode_t mode = torch::kNearest,
   c10::optional<bool> align_corners = c10::nullopt) {
   auto _check_size_scale_factor = [&](size_t dim) {
     if (size.empty() && scale_factor.empty()) {
@@ -109,7 +109,7 @@ inline Tensor interpolate(
 }
 } // namespace detail
 
-inline Tensor interpolate(const Tensor& input, InterpolateOptions options = {}) {
+inline Tensor interpolate(const Tensor& input, InterpolateFuncOptions options = {}) {
   return detail::interpolate(
     input,
     options.size(),

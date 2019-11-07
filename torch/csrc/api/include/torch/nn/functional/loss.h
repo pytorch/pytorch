@@ -11,7 +11,7 @@ namespace detail {
 inline Tensor l1_loss(
     const Tensor& input,
     const Tensor& target,
-    L1LossOptions::reduction_t reduction = torch::kMean) {
+    L1LossFuncOptions::reduction_t reduction = torch::kMean) {
   return torch::l1_loss(
     input,
     target,
@@ -22,7 +22,7 @@ inline Tensor l1_loss(
 inline Tensor l1_loss(
     const Tensor& input,
     const Tensor& target,
-    const L1LossOptions& options = {}) {
+    const L1LossFuncOptions& options = {}) {
   return detail::l1_loss(input, target, options.reduction());
 }
 
@@ -32,7 +32,7 @@ namespace detail {
 inline Tensor kl_div(
     const Tensor& input,
     const Tensor& target,
-    KLDivLossOptions::reduction_t reduction = torch::kMean) {
+    KLDivLossFuncOptions::reduction_t reduction = torch::kMean) {
   torch::Reduction::Reduction reduction_enum;
 
   if (c10::get_if<enumtype::kMean>(&reduction)) {
@@ -61,7 +61,7 @@ inline Tensor kl_div(
 inline Tensor kl_div(
     const Tensor& input,
     const Tensor& target,
-    const KLDivLossOptions& options = {}) {
+    const KLDivLossFuncOptions& options = {}) {
   return detail::kl_div(input, target, options.reduction());
 }
 
@@ -71,7 +71,7 @@ namespace detail {
 inline Tensor mse_loss(
     const Tensor& input,
     const Tensor& target,
-    MSELossOptions::reduction_t reduction = torch::kMean) {
+    MSELossFuncOptions::reduction_t reduction = torch::kMean) {
   if (!(target.sizes() == input.sizes())) {
     TORCH_WARN("Using a target size (", target.sizes(),
                ") that is different to the input size (", input.sizes(), "). ",
@@ -100,7 +100,7 @@ inline Tensor mse_loss(
 inline Tensor mse_loss(
     const Tensor& input,
     const Tensor& target,
-    const MSELossOptions& options = {}) {
+    const MSELossFuncOptions& options = {}) {
   return detail::mse_loss(input, target, options.reduction());
 }
 
@@ -111,7 +111,7 @@ inline Tensor binary_cross_entropy(
     const Tensor& input,
     const Tensor& target,
     Tensor weight = {},
-    BCELossOptions::reduction_t reduction = torch::kMean) {
+    BCELossFuncOptions::reduction_t reduction = torch::kMean) {
   auto reduction_enum = enumtype::reduction_get_enum(reduction);
 
   if (target.sizes() != input.sizes()) {
@@ -138,7 +138,7 @@ inline Tensor binary_cross_entropy(
 inline Tensor binary_cross_entropy(
     const Tensor& input,
     const Tensor& target,
-    const BCELossOptions& options = {}) {
+    const BCELossFuncOptions& options = {}) {
   return detail::binary_cross_entropy(input, target, options.weight(), options.reduction());
 }
 
@@ -149,7 +149,7 @@ inline Tensor hinge_embedding_loss(
     const Tensor& input,
     const Tensor& target,
     double margin = 1.0,
-    HingeEmbeddingLossOptions::reduction_t reduction = torch::kMean) {
+    HingeEmbeddingLossFuncOptions::reduction_t reduction = torch::kMean) {
   return torch::hinge_embedding_loss(
       input,
       target,
@@ -161,7 +161,7 @@ inline Tensor hinge_embedding_loss(
 inline Tensor hinge_embedding_loss(
     const Tensor& input,
     const Tensor& target,
-    const HingeEmbeddingLossOptions& options = {}) {
+    const HingeEmbeddingLossFuncOptions& options = {}) {
   return detail::hinge_embedding_loss(input, target, options.margin(), options.reduction());
 }
 
@@ -174,7 +174,7 @@ inline Tensor multi_margin_loss(
     int64_t p = 1,
     double margin = 1.0,
     Tensor weight = Tensor(),
-    MultiMarginLossOptions::reduction_t reduction = torch::kMean) {
+    MultiMarginLossFuncOptions::reduction_t reduction = torch::kMean) {
   TORCH_CHECK(p == 1 || p == 2, "only p == 1 and p == 2 supported");
   if (weight.defined()) {
     TORCH_CHECK(weight.dim() == 1, "weight must be one-dimensional");
@@ -194,7 +194,7 @@ inline Tensor multi_margin_loss(
 inline Tensor multi_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    const MultiMarginLossOptions& options = {}) {
+    const MultiMarginLossFuncOptions& options = {}) {
   return detail::multi_margin_loss(input, target, options.p(), options.margin(), options.weight(), options.reduction());
 }
 
@@ -206,7 +206,7 @@ inline Tensor cosine_embedding_loss(
     const Tensor& input2,
     const Tensor& target,
     double margin = 0.0,
-    CosineEmbeddingLossOptions::reduction_t reduction = torch::kMean) {
+    CosineEmbeddingLossFuncOptions::reduction_t reduction = torch::kMean) {
   return torch::cosine_embedding_loss(
     input1,
     input2,
@@ -220,7 +220,7 @@ inline Tensor cosine_embedding_loss(
     const Tensor& input1,
     const Tensor& input2,
     const Tensor& target,
-    const CosineEmbeddingLossOptions& options = {}) {
+    const CosineEmbeddingLossFuncOptions& options = {}) {
   return detail::cosine_embedding_loss(input1, input2, target, options.margin(), options.reduction());
 }
 
@@ -260,7 +260,7 @@ inline Tensor smooth_l1_loss(
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
-    const SmoothL1LossOptions& options = {}) {
+    const SmoothL1LossFuncOptions& options = {}) {
   return detail::smooth_l1_loss(input, target, options.reduction());
 }
 
@@ -270,7 +270,7 @@ namespace detail {
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    MultiLabelMarginLossOptions::reduction_t reduction = torch::kMean) {
+    MultiLabelMarginLossFuncOptions::reduction_t reduction = torch::kMean) {
   return torch::multilabel_margin_loss(
     input,
     target,
@@ -281,7 +281,7 @@ inline Tensor multilabel_margin_loss(
 inline Tensor multilabel_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    const MultiLabelMarginLossOptions& options = {}) {
+    const MultiLabelMarginLossFuncOptions& options = {}) {
   return detail::multilabel_margin_loss(input, target, options.reduction());
 }
 
@@ -291,7 +291,7 @@ namespace detail {
 inline Tensor soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    SoftMarginLossOptions::reduction_t reduction = torch::kMean) {
+    SoftMarginLossFuncOptions::reduction_t reduction = torch::kMean) {
   return torch::soft_margin_loss(
     input,
     target,
@@ -302,7 +302,7 @@ inline Tensor soft_margin_loss(
 inline Tensor soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    const SoftMarginLossOptions& options = {}) {
+    const SoftMarginLossFuncOptions& options = {}) {
   return detail::soft_margin_loss(input, target, options.reduction());
 }
 
@@ -313,7 +313,7 @@ inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
     Tensor weight = Tensor(),
-    MultiLabelSoftMarginLossOptions::reduction_t reduction = torch::kMean) {
+    MultiLabelSoftMarginLossFuncOptions::reduction_t reduction = torch::kMean) {
   auto loss = -(target * torch::log_sigmoid(input) + (1 - target) * torch::log_sigmoid(-input));
   if (weight.defined()) {
     loss = loss * weight;
@@ -343,7 +343,7 @@ inline Tensor multilabel_soft_margin_loss(
 inline Tensor multilabel_soft_margin_loss(
     const Tensor& input,
     const Tensor& target,
-    const MultiLabelSoftMarginLossOptions& options = {}) {
+    const MultiLabelSoftMarginLossFuncOptions& options = {}) {
   return detail::multilabel_soft_margin_loss(input, target, options.weight(), options.reduction());
 }
 
@@ -358,7 +358,7 @@ inline Tensor triplet_margin_loss(
     double p = 2.0,
     double eps = 1e-6,
     bool swap = false,
-    TripletMarginLossOptions::reduction_t reduction = torch::kMean) {
+    TripletMarginLossFuncOptions::reduction_t reduction = torch::kMean) {
   return torch::triplet_margin_loss(
       anchor,
       positive,
@@ -375,7 +375,7 @@ inline Tensor triplet_margin_loss(
     const Tensor& anchor,
     const Tensor& positive,
     const Tensor& negative,
-    const TripletMarginLossOptions& options = {}) {
+    const TripletMarginLossFuncOptions& options = {}) {
   return detail::triplet_margin_loss(
     anchor,
     positive,
@@ -395,7 +395,7 @@ inline Tensor ctc_loss(const Tensor& log_probs,
                        const Tensor& input_lengths,
                        const Tensor& target_lengths,
                        int64_t blank = 0,
-                       CTCLossOptions::reduction_t reduction = torch::kMean,
+                       CTCLossFuncOptions::reduction_t reduction = torch::kMean,
                        bool zero_infinity = false) {
   return torch::ctc_loss(
     log_probs,
@@ -412,7 +412,7 @@ inline Tensor ctc_loss(const Tensor& log_probs,
                        const Tensor& targets,
                        const Tensor& input_lengths,
                        const Tensor& target_lengths,
-                       const CTCLossOptions& options = {}) {
+                       const CTCLossFuncOptions& options = {}) {
   return detail::ctc_loss(
     log_probs,
     targets,
@@ -431,7 +431,7 @@ inline Tensor poisson_nll_loss(const Tensor& input,
                                bool log_input = true,
                                bool full = false,
                                double eps = 1e-8,
-                               PoissonNLLLossOptions::reduction_t reduction = torch::kMean) {
+                               PoissonNLLLossFuncOptions::reduction_t reduction = torch::kMean) {
   return torch::poisson_nll_loss(
     input, target,
     log_input, full, eps, enumtype::reduction_get_enum(reduction));
@@ -439,7 +439,7 @@ inline Tensor poisson_nll_loss(const Tensor& input,
 } // namespace detail
 
 inline Tensor poisson_nll_loss(const Tensor& input, const Tensor& target,
-                               const PoissonNLLLossOptions& options = {}) {
+                               const PoissonNLLLossFuncOptions& options = {}) {
   return detail::poisson_nll_loss(
     input, target,
     options.log_input(), options.full(), options.eps(), options.reduction());
@@ -452,7 +452,7 @@ inline Tensor margin_ranking_loss(const Tensor& input1,
                                   const Tensor& input2,
                                   const Tensor& target,
                                   double margin = 0,
-                                  MarginRankingLossOptions::reduction_t reduction = torch::kMean) {
+                                  MarginRankingLossFuncOptions::reduction_t reduction = torch::kMean) {
   TORCH_CHECK(
     input1.dim() != 0 && input2.dim() != 0 && target.dim() != 0,
     "margin_ranking_loss does not support scalars, got sizes: "
@@ -464,7 +464,7 @@ inline Tensor margin_ranking_loss(const Tensor& input1,
 } // namespace detail
 
 inline Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2,
-  const Tensor& target, const MarginRankingLossOptions& options = {}) {
+  const Tensor& target, const MarginRankingLossFuncOptions& options = {}) {
   return detail::margin_ranking_loss(input1, input2, target, options.margin(), options.reduction());
 }
 
