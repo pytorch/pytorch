@@ -190,6 +190,25 @@ class BasePruningMethod(ABC):
 
         return method
 
+    def prune(self, t, default_mask=None):
+        r"""Computes and returns a pruned version of input tensor ``t``
+        according to the pruning rule specified in :meth:`compute_mask`.
+
+        Args:
+            t (torch.Tensor): tensor to prune (of same dimensions as 
+                ``default_mask``).
+            default_mask (torch.Tensor, optional): mask from previous pruning
+                iteration, if any. To be considered when determining what
+                portion of the tensor that pruning should act on. If None,
+                default to a mask of ones.
+
+        Returns:
+            pruned version of tensor ``t``.
+        """
+        if default_mask is None:
+            default_mask = torch.ones_like(t)
+        return t * self.compute_mask(t, default_mask=default_mask)
+
     def remove(self, module):
         r"""Removes the pruning reparameterization from a module. The pruned
         parameter named ``name`` remains permanently pruned, and the parameter
