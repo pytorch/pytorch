@@ -10,7 +10,7 @@ namespace detail {
 inline Tensor pixel_shuffle(
     const Tensor& input,
     int64_t upscale_factor) {
-  return ::torch::pixel_shuffle(
+  return torch::pixel_shuffle(
     input,
     upscale_factor
   );
@@ -25,4 +25,4 @@ inline Tensor pixel_shuffle(
 
 } // namespace functional
 } // namespace nn
-} // namespace
+} // namespace torch

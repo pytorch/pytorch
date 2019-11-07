@@ -120,4 +120,4 @@ inline Tensor interpolate(const Tensor& input, InterpolateOptions options = {}) 
 
 } // namespace functional
 } // namespace nn
-} // na
+} // namespace torch
