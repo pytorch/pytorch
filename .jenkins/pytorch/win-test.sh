@@ -48,4 +48,9 @@ run_tests() {
     fi
 }
 
+@echo off
+echo @echo off >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
+for /f "usebackq tokens=*" %%i in (`set`) do echo set "%%i" >> %TMP_DIR%/ci_scripts/pytorch_env_restore.bat
+@echo on
+
 run_tests && assert_git_not_dirty && echo "TEST PASSED"
