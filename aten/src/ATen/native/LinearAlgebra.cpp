@@ -309,10 +309,9 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
   bmm_out_or_baddbmm_(result, batch1, batch2, beta, alpha, true);
 #ifdef BUILD_NAMEDTENSOR
   }
-  namedinference::propagate_names(
+  namedinference::propagate_names_if_nonempty(
       result,
-      namedinference::compute_bmm_outnames(result, batch1, batch2),
-      /*validate_names=*/false);
+      namedinference::compute_bmm_outnames(result, batch1, batch2));
 #endif
   return result;
 }
@@ -458,22 +457,22 @@ Tensor matmul(
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
+  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
 #endif
   auto result = at::native::matmul(c10::nullopt, tensor1, tensor2);
 #ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
 
 Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
 #ifdef BUILD_NAMEDTENSOR
-  auto outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
+  auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
 #endif
   at::native::matmul(c10::optional<Tensor>(result), tensor1, tensor2);
 #ifdef BUILD_NAMEDTENSOR
-  namedinference::propagate_names(result, std::move(outnames), /*validate_names=*/false);
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
 #endif
   return result;
 }
