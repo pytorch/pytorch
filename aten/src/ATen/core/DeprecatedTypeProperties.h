@@ -19,8 +19,8 @@ class Tensor;
 // dtype-specific.
 class CAFFE2_API DeprecatedTypeProperties {
  public:
-  DeprecatedTypeProperties(Backend backend, ScalarType scalar_type)
-    : backend_(backend), scalar_type_(scalar_type) {}
+  DeprecatedTypeProperties(Backend backend, ScalarType scalar_type, bool is_variable)
+    : backend_(backend), scalar_type_(scalar_type), is_variable_(is_variable) {}
 
   Backend backend() const {
     return backend_;
@@ -50,6 +50,10 @@ class CAFFE2_API DeprecatedTypeProperties {
     return scalarTypeToTypeMeta(scalar_type_);
   }
 
+  bool is_variable() const {
+    return is_variable_;
+  }
+
   bool operator==(const DeprecatedTypeProperties& other) const {
     return backend_ == other.backend() && scalar_type_ == other.scalarType();
   }
@@ -65,17 +69,20 @@ class CAFFE2_API DeprecatedTypeProperties {
     } else {
       base_str = std::string(at::toString(backend_)) + at::toString(scalar_type_) + "Type";
     }
+    if (is_variable_) {
+      return "Variable[" + base_str + "]";
+    }
     return base_str;
   }
 
   DeprecatedTypeProperties & toBackend(Backend b) const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        b, scalar_type_);
+        b, scalar_type_, is_variable_);
   }
 
   DeprecatedTypeProperties & toScalarType(ScalarType s) const {
     return globalDeprecatedTypePropertiesRegistry().getDeprecatedTypeProperties(
-        backend_, s);
+        backend_, s, is_variable_);
   }
 
   DeprecatedTypeProperties & cpu() const {
@@ -94,7 +101,8 @@ class CAFFE2_API DeprecatedTypeProperties {
   TensorOptions options(int16_t device_index = -1) const {
     return TensorOptions().dtype(typeMeta())
                           .device(device_type(), device_index)
-                          .layout(layout());
+                          .layout(layout())
+                          .is_variable(is_variable());
   }
 
   /// Constructs the `TensorOptions` from a type and a Device.  Asserts that
@@ -126,6 +134,7 @@ class CAFFE2_API DeprecatedTypeProperties {
  private:
   Backend backend_;
   ScalarType scalar_type_;
+  bool is_variable_;
 };
 
 }  // namespace at
