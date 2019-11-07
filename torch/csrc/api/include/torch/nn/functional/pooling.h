@@ -7,43 +7,115 @@ namespace torch {
 namespace nn{
 namespace functional {
 
-inline Tensor avg_pool1d(const Tensor& input, const AvgPool1dOptions& options) {
+namespace detail {
+inline Tensor avg_pool1d(const Tensor& input,
+                         ExpandingArray<1> kernel_size,
+                         ExpandingArray<1> stride,
+                         ExpandingArray<1> padding = 0,
+                         bool ceil_mode = false,
+                         bool count_include_pad = true) {
   return torch::avg_pool1d(
       input,
-      options.kernel_size(),
-      options.stride(),
-      options.padding(),
-      options.ceil_mode(),
-      options.count_include_pad());
+      kernel_size,
+      stride,
+      padding,
+      ceil_mode,
+      count_include_pad);
+}
+} // namespace detail
+
+inline Tensor avg_pool1d(const Tensor& input, const AvgPool1dOptions& options) {
+  return avg_pool1d(
+    input,
+    options.kernel_size(),
+    options.stride(),
+    options.padding(),
+    options.ceil_mode(),
+    options.count_include_pad());
 }
 
-inline Tensor avg_pool2d(const Tensor& input, const AvgPool2dOptions& options) {
+namespace detail {
+inline Tensor avg_pool2d(const Tensor& input,
+                         ExpandingArray<2> kernel_size,
+                         ExpandingArray<2> stride,
+                         ExpandingArray<2> padding = 0,
+                         bool ceil_mode = false,
+                         bool count_include_pad = true,
+                         c10::optional<int64_t> divisor_override = c10::nullopt) {
   return torch::avg_pool2d(
       input,
-      options.kernel_size(),
-      options.stride(),
-      options.padding(),
-      options.ceil_mode(),
-      options.count_include_pad(),
-      options.divisor_override());
+      kernel_size,
+      stride,
+      padding,
+      ceil_mode,
+      count_include_pad,
+      divisor_override);
+}
+} // namespace detail
+
+inline Tensor avg_pool2d(const Tensor& input, const AvgPool2dOptions& options) {
+  return detail::avg_pool2d(
+    input,
+    options.kernel_size(),
+    options.stride(),
+    options.padding(),
+    options.ceil_mode(),
+    options.count_include_pad(),
+    options.divisor_override());
 }
 
-inline Tensor avg_pool3d(const Tensor& input, const AvgPool3dOptions& options) {
+namespace detail {
+inline Tensor avg_pool3d(const Tensor& input,
+                         ExpandingArray<3> kernel_size,
+                         ExpandingArray<3> stride,
+                         ExpandingArray<3> padding = 0,
+                         bool ceil_mode = false,
+                         bool count_include_pad = true,
+                         c10::optional<int64_t> divisor_override = c10::nullopt) {
   return torch::avg_pool3d(
       input,
-      options.kernel_size(),
-      options.stride(),
-      options.padding(),
-      options.ceil_mode(),
-      options.count_include_pad(),
-      options.divisor_override());
+      kernel_size,
+      stride,
+      padding,
+      ceil_mode,
+      count_include_pad,
+      divisor_override);
+}
+} // namespace detail
+
+inline Tensor avg_pool3d(const Tensor& input, const AvgPool3dOptions& options) {
+  return detail::avg_pool3d(
+    input,
+    options.kernel_size(),
+    options.stride(),
+    options.padding(),
+    options.ceil_mode(),
+    options.count_include_pad(),
+    options.divisor_override());
 }
 
 // ============================================================================
 
-inline Tensor max_pool1d(const Tensor& input, const MaxPool1dOptions& options) {
+namespace detail {
+inline Tensor max_pool1d(const Tensor& input,
+                         ExpandingArray<1> kernel_size,
+                         ExpandingArray<1> stride,
+                         ExpandingArray<1> padding = 0,
+                         ExpandingArray<1> dilation = 1,
+                         bool ceil_mode = false) {
    return torch::max_pool1d(
       input,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      ceil_mode);
+}
+} // namespace detail
+
+inline Tensor max_pool1d(const Tensor& input, const MaxPool1dOptions& options) {
+   return detail::max_pool1d(
+      input,
       options.kernel_size(),
       options.stride(),
       options.padding(),
@@ -51,9 +123,27 @@ inline Tensor max_pool1d(const Tensor& input, const MaxPool1dOptions& options) {
       options.ceil_mode());
 }
 
-inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, const MaxPool1dOptions& options) {
+namespace detail {
+inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(
+  const Tensor& input,
+  ExpandingArray<1> kernel_size,
+  ExpandingArray<1> stride,
+  ExpandingArray<1> padding = 0,
+  ExpandingArray<1> dilation = 1,
+  bool ceil_mode = false) {
   return torch::max_pool1d_with_indices(
       input,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      ceil_mode);
+}
+} // namespace detail
+
+inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, const MaxPool1dOptions& options) {
+  return detail::max_pool1d_with_indices(
+      input,
       options.kernel_size(),
       options.stride(),
       options.padding(),
@@ -61,9 +151,26 @@ inline std::tuple<Tensor, Tensor> max_pool1d_with_indices(const Tensor& input, c
       options.ceil_mode());
 }
 
-inline Tensor max_pool2d(const Tensor& input, const MaxPool2dOptions& options) {
+namespace detail {
+inline Tensor max_pool2d(const Tensor& input,
+                         ExpandingArray<2> kernel_size,
+                         ExpandingArray<2> stride,
+                         ExpandingArray<2> padding = 0,
+                         ExpandingArray<2> dilation = 1,
+                         bool ceil_mode = false) {
   return torch::max_pool2d(
       input,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      ceil_mode);
+}
+} // namespace detail
+
+inline Tensor max_pool2d(const Tensor& input, const MaxPool2dOptions& options) {
+  return detail::max_pool2d(
+      input,
       options.kernel_size(),
       options.stride(),
       options.padding(),
@@ -71,18 +178,26 @@ inline Tensor max_pool2d(const Tensor& input, const MaxPool2dOptions& options) {
       options.ceil_mode());
 }
 
-inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(const Tensor& input, const MaxPool2dOptions& options) {
+namespace detail {
+inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(
+  const Tensor& input,
+  ExpandingArray<2> kernel_size,
+  ExpandingArray<2> stride,
+  ExpandingArray<2> padding = 0,
+  ExpandingArray<2> dilation = 1,
+  bool ceil_mode = false) {
   return torch::max_pool2d_with_indices(
       input,
-      options.kernel_size(),
-      options.stride(),
-      options.padding(),
-      options.dilation(),
-      options.ceil_mode());
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      ceil_mode);
 }
+} // namespace detail
 
-inline Tensor max_pool3d(const Tensor& input, const MaxPool3dOptions& options) {
-  return torch::max_pool3d(
+inline std::tuple<Tensor, Tensor> max_pool2d_with_indices(const Tensor& input, const MaxPool2dOptions& options) {
+  return detail::max_pool2d_with_indices(
       input,
       options.kernel_size(),
       options.stride(),
@@ -91,8 +206,53 @@ inline Tensor max_pool3d(const Tensor& input, const MaxPool3dOptions& options) {
       options.ceil_mode());
 }
 
-inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, const MaxPool3dOptions& options) {
+namespace detail {
+inline Tensor max_pool3d(const Tensor& input,
+                         ExpandingArray<3> kernel_size,
+                         ExpandingArray<3> stride,
+                         ExpandingArray<3> padding = 0,
+                         ExpandingArray<3> dilation = 1,
+                         bool ceil_mode = false) {
+  return torch::max_pool3d(
+      input,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      ceil_mode);
+}
+} // namespace detail
+
+inline Tensor max_pool3d(const Tensor& input, const MaxPool3dOptions& options) {
+  return detail::max_pool3d(
+      input,
+      options.kernel_size(),
+      options.stride(),
+      options.padding(),
+      options.dilation(),
+      options.ceil_mode());
+}
+
+namespace detail {
+inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(
+  const Tensor& input,
+  ExpandingArray<3> kernel_size,
+  ExpandingArray<3> stride,
+  ExpandingArray<3> padding = 0,
+  ExpandingArray<3> dilation = 1,
+  bool ceil_mode = false) {
   return torch::max_pool3d_with_indices(
+      input,
+      kernel_size,
+      stride,
+      padding,
+      dilation,
+      ceil_mode);
+}
+} // namespace detail
+
+inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, const MaxPool3dOptions& options) {
+  return detail::max_pool3d_with_indices(
       input,
       options.kernel_size(),
       options.stride(),
@@ -102,52 +262,115 @@ inline std::tuple<Tensor, Tensor> max_pool3d_with_indices(const Tensor& input, c
 }
 
 // ============================================================================
+
+namespace detail {
+inline Tensor adaptive_max_pool1d(const Tensor& input,
+  ExpandingArray<1> output_size) {
+   return std::get<0>(torch::adaptive_max_pool1d(input, output_size));
+}
+} // namespace detail
 
 inline Tensor adaptive_max_pool1d(const Tensor& input,
   const AdaptiveMaxPool1dOptions& options) {
-   return std::get<0>(torch::adaptive_max_pool1d(input, options.output_size()));
+   return detail::adaptive_max_pool1d(input, options.output_size());
 }
+
+namespace detail {
+inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
+  const Tensor& input, ExpandingArray<1> output_size) {
+   return torch::adaptive_max_pool1d(input, output_size);
+}
+} // namespace detail
 
 inline std::tuple<Tensor, Tensor> adaptive_max_pool1d_with_indices(
   const Tensor& input, const AdaptiveMaxPool1dOptions& options) {
-   return torch::adaptive_max_pool1d(input, options.output_size());
+   return detail::adaptive_max_pool1d_with_indices(input, options.output_size());
 }
+
+namespace detail {
+inline Tensor adaptive_max_pool2d(const Tensor& input,
+  ExpandingArray<2> output_size) {
+   return std::get<0>(torch::adaptive_max_pool2d(input, output_size));
+}
+} // namespace detail
 
 inline Tensor adaptive_max_pool2d(const Tensor& input,
   const AdaptiveMaxPool2dOptions& options) {
-   return std::get<0>(torch::adaptive_max_pool2d(input, options.output_size()));
+   return detail::adaptive_max_pool2d(input, options.output_size());
 }
+
+namespace detail {
+inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
+  const Tensor& input, ExpandingArray<2> output_size) {
+   return torch::adaptive_max_pool2d(input, output_size);
+}
+} // namespace detail
 
 inline std::tuple<Tensor, Tensor> adaptive_max_pool2d_with_indices(
   const Tensor& input, const AdaptiveMaxPool2dOptions& options) {
-   return torch::adaptive_max_pool2d(input, options.output_size());
+   return detail::adaptive_max_pool2d_with_indices(input, options.output_size());
 }
+
+namespace detail {
+inline Tensor adaptive_max_pool3d(const Tensor& input,
+  ExpandingArray<3> output_size) {
+   return std::get<0>(torch::adaptive_max_pool3d(input, output_size));
+}
+} // namespace detail
 
 inline Tensor adaptive_max_pool3d(const Tensor& input,
   const AdaptiveMaxPool3dOptions& options) {
-   return std::get<0>(torch::adaptive_max_pool3d(input, options.output_size()));
+   return detail::adaptive_max_pool3d(input, options.output_size());
 }
+
+namespace detail {
+inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
+  const Tensor& input, ExpandingArray<3> output_size) {
+   return torch::adaptive_max_pool3d(input, output_size);
+}
+} // namespace detail
 
 inline std::tuple<Tensor, Tensor> adaptive_max_pool3d_with_indices(
   const Tensor& input, const AdaptiveMaxPool3dOptions& options) {
-   return torch::adaptive_max_pool3d(input, options.output_size());
+   return detail::adaptive_max_pool3d_with_indices(input, options.output_size());
 }
 
 // ============================================================================
 
+namespace detail {
+inline Tensor adaptive_avg_pool1d(const Tensor& input,
+  ExpandingArray<1> output_size) {
+   return torch::adaptive_avg_pool1d(input, output_size);
+}
+} // namespace detail
+
 inline Tensor adaptive_avg_pool1d(const Tensor& input,
   const AdaptiveAvgPool1dOptions& options) {
-   return torch::adaptive_avg_pool1d(input, options.output_size());
+   return detail::adaptive_avg_pool1d(input, options.output_size());
 }
+
+namespace detail {
+inline Tensor adaptive_avg_pool2d(const Tensor& input,
+  ExpandingArray<2> output_size) {
+   return torch::adaptive_avg_pool2d(input, output_size);
+}
+} // namespace detail
 
 inline Tensor adaptive_avg_pool2d(const Tensor& input,
   const AdaptiveAvgPool2dOptions& options) {
-   return torch::adaptive_avg_pool2d(input, options.output_size());
+   return detail::adaptive_avg_pool2d(input, options.output_size());
 }
+
+namespace detail {
+inline Tensor adaptive_avg_pool3d(const Tensor& input,
+  ExpandingArray<3> output_size) {
+   return torch::adaptive_avg_pool3d(input, output_size);
+}
+} // namespace detail
 
 inline Tensor adaptive_avg_pool3d(const Tensor& input,
   const AdaptiveAvgPool3dOptions& options) {
-   return torch::adaptive_avg_pool3d(input, options.output_size());
+   return detail::adaptive_avg_pool3d(input, options.output_size());
 }
 
 // ============================================================================
@@ -186,56 +409,151 @@ inline std::vector<int64_t> _unpool_output_size(const Tensor& input,
   }
 }
 
-inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
-    const MaxUnpool1dOptions& options,
+namespace detail {
+inline Tensor max_unpool1d(
+    const Tensor& input,
+    const Tensor& indices,
+    ExpandingArray<1> kernel_size,
+    ExpandingArray<1> stride,
+    ExpandingArray<1> padding = 0,
     const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
-  auto output_size_ = _unpool_output_size(input, options.kernel_size(),
-                                          options.stride(), options.padding(),
+  auto output_size_ = _unpool_output_size(input, kernel_size,
+                                          stride, padding,
                                           output_size);
   output_size_.push_back(1);
   return torch::max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3),
                              output_size_).squeeze(3);
 }
+} // namespace detail
 
-inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
-  const MaxUnpool2dOptions& options,
+inline Tensor max_unpool1d(const Tensor& input, const Tensor& indices,
+    const MaxUnpool1dOptions& options,
+    const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+  return detail::max_unpool1d(
+    input,
+    indices,
+    options.kernel_size(),
+    options.stride(),
+    options.padding(),
+    output_size);
+}
+
+namespace detail {
+inline Tensor max_unpool2d(
+  const Tensor& input,
+  const Tensor& indices,
+  ExpandingArray<2> kernel_size,
+  ExpandingArray<2> stride,
+  ExpandingArray<2> padding = 0,
   const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
-  auto output_size_ = _unpool_output_size(input, options.kernel_size(),
-                                          options.stride(), options.padding(),
+  auto output_size_ = _unpool_output_size(input, kernel_size,
+                                          stride, padding,
                                           output_size);
 
   return torch::max_unpool2d(input, indices, output_size_);
 }
+} // namespace detail
+
+inline Tensor max_unpool2d(const Tensor& input, const Tensor& indices,
+  const MaxUnpool2dOptions& options,
+  const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+  return detail::max_unpool2d(
+    input,
+    indices,
+    options.kernel_size(),
+    options.stride(),
+    options.padding(),
+    output_size);
+}
+
+namespace detail {
+inline Tensor max_unpool3d(
+  const Tensor& input,
+  const Tensor& indices,
+  ExpandingArray<3> kernel_size,
+  ExpandingArray<3> stride,
+  ExpandingArray<3> padding = 0,
+  const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
+  auto output_size_ = _unpool_output_size(input, kernel_size,
+                                          stride, padding,
+                                          output_size);
+
+  return torch::max_unpool3d(input, indices, output_size_,
+                             stride, padding);
+}
+} // namespace detail
 
 inline Tensor max_unpool3d(const Tensor& input, const Tensor& indices,
   const MaxUnpool3dOptions& options,
   const c10::optional<IntArrayRef>& output_size = c10::nullopt) {
-  auto output_size_ = _unpool_output_size(input, options.kernel_size(),
-                                          options.stride(), options.padding(),
-                                          output_size);
-
-  return torch::max_unpool3d(input, indices, output_size_,
-                             options.stride(), options.padding());
+  return detail::max_unpool3d(
+    input,
+    indices,
+    options.kernel_size(),
+    options.stride(),
+    options.padding(),
+    output_size);
 }
+
+// ============================================================================
+
+namespace detail {
+inline Tensor lp_pool1d(
+  const Tensor& input,
+  float norm_type,
+  ExpandingArray<1> kernel_size,
+  ExpandingArray<1> stride,
+  bool ceil_mode = false) {
+  Tensor out = detail::avg_pool1d(
+    input.pow(norm_type),
+    kernel_size,
+    stride,
+    /*padding=*/0,
+    ceil_mode);
+
+  return (torch::sign(out) * relu(torch::abs(out))).mul((*kernel_size)[0]).pow(1. / norm_type);
+}
+} // namespace detail
 
 inline Tensor lp_pool1d(const Tensor& input, const LPPool1dOptions& options) {
-  Tensor out = avg_pool1d(
-    input.pow(options.norm_type()),
-    AvgPool1dOptions(options.kernel_size()).stride(options.stride()).padding(0).ceil_mode(options.ceil_mode()));
-
-  return (torch::sign(out) * relu(torch::abs(out))).mul((*options.kernel_size())[0]).pow(1. / options.norm_type());
+  return detail::lp_pool1d(
+    input,
+    options.norm_type(),
+    options.kernel_size(),
+    options.stride(),
+    options.ceil_mode());
 }
 
-inline Tensor lp_pool2d(const Tensor& input, const LPPool2dOptions& options) {
-  int kw = (*options.kernel_size())[0];
-  int kh = (*options.kernel_size())[1];
-  Tensor out = avg_pool2d(
-    input.pow(options.norm_type()),
-    AvgPool2dOptions(options.kernel_size()).stride(options.stride()).padding(0).ceil_mode(options.ceil_mode()));
+namespace detail {
+inline Tensor lp_pool2d(
+  const Tensor& input,
+  float norm_type,
+  ExpandingArray<2> kernel_size,
+  ExpandingArray<2> stride,
+  bool ceil_mode = false) {
+  int kw = (*kernel_size)[0];
+  int kh = (*kernel_size)[1];
+  Tensor out = detail::avg_pool2d(
+    input.pow(norm_type),
+    kernel_size,
+    stride,
+    /*padding=*/0,
+    ceil_mode);
 
-  return (torch::sign(out) * relu(torch::abs(out))).mul(kw * kh).pow(1. / options.norm_type());
+  return (torch::sign(out) * relu(torch::abs(out))).mul(kw * kh).pow(1. / norm_type);
+}
+} // namespace detail
+
+inline Tensor lp_pool2d(const Tensor& input, const LPPool2dOptions& options) {
+  return detail::lp_pool2d(
+    input,
+    options.norm_type(),
+    options.kernel_size(),
+    options.stride(),
+    options.ceil_mode());
 }
 
 } // namespace functional
 } // namespace nn
 } // namespace torch
+
