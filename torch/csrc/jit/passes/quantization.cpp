@@ -44,7 +44,10 @@ void fillQConfigMap(
   }
 }
 
-std::string getFuncName(const c10::QualifiedName& qname) {
+std::string getFuncName(Value* func_value) {
+  auto func_node = func_value->node();
+  auto func = func_node->output()->type()->expect<FunctionType>()->function();
+  const auto& qname = func->qualname();
   const auto& name = qname.qualifiedName();
   auto rdot_idx = name.rfind('.');
   if (rdot_idx != std::string::npos) {
@@ -71,9 +74,7 @@ bool nodeQuantizable(Node* n) {
       std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
       aten_funcs.end();
   if (n->kind() == prim::CallFunction) {
-    auto func_node = n->inputs()[0]->node();
-    auto func = func_node->output()->type()->expect<FunctionType>()->function();
-    auto func_name = getFuncName(func->qualname());
+    auto func_name = getFuncName(n->inputs()[0]);
     is_quantizable |=
         std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
         call_funcs.end();
@@ -646,10 +647,8 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
-    auto linear_node = match_vmap.at(vmap.at("linear"))->node();
-    auto func =
-        linear_node->output()->type()->expect<FunctionType>()->function();
-    auto func_name = getFuncName(func->qualname());
+    auto linear_value = match_vmap.at(vmap.at("linear"));
+    auto func_name = getFuncName(linear_value);
     if (func_name == "linear") {
       return true;
     }
