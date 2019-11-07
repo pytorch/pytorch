@@ -408,8 +408,7 @@ def get_overload_annotations(mod):
     # original function => [(mangled overload name, overload function)]
     overloads = {}
 
-    # TODO: should this be dir(type(mod))?
-    for name in dir(mod):
+    for name in dir(type(mod)):
         item = getattr(mod, name, None)
         if not callable(item):
             continue
