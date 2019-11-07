@@ -1911,7 +1911,7 @@ t2.start()
 
         num_threads = 2
         trials = 3
-        test_iters = 1000
+        test_iters = 100
         barrier = threading.Barrier(num_threads)
 
         def _worker(t):
