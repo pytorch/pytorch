@@ -2,39 +2,75 @@
 
 #include <exception>
 #include <string>
+#include <memory>
+#include <queue>
+#include <mutex>
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/THP_export.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/auto_gil.h>
+#include <c10/util/StringUtil.h>
 
-#define HANDLE_TH_ERRORS                                                       \
-  try {
-#define END_HANDLE_TH_ERRORS_RET(retval)                           \
-  }                                                                \
-  catch (python_error & e) {                                       \
-    return retval;                                                 \
-  }                                                                \
-  catch (const c10::IndexError& e) {                               \
-    auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-    PyErr_SetString(PyExc_IndexError, msg.c_str());                \
-    return retval;                                                 \
-  }                                                                \
-  catch (const c10::Error& e) {                                    \
-    auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-    PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
-    return retval;                                                 \
-  }                                                                \
-  catch (torch::PyTorchError & e) {                                \
-    auto msg = torch::processErrorMsg(e.what());                   \
-    PyErr_SetString(e.python_type(), msg.c_str());                 \
-    return retval;                                                 \
-  }                                                                \
-  catch (const std::exception& e) {                                \
-    auto msg = torch::processErrorMsg(e.what());                   \
-    PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
-    return retval;                                                 \
-  }
+/// NOTE [ Conversion Cpp Python Warning ]
+/// The warning handler cannot set python warnings immediately
+/// as it requires acquirering the GIL (potential deadlock)
+/// and would need to cleanly exit if the warning raised a
+/// python error. To solve this, we buffer the warnings and
+/// process them when we go back to python.
+/// This requires the two try/catch blocks below to handle the
+/// following cases:
+///   - If there is no Error raised in the inner try/catch, the
+///     bufferred warnings are processed as python warnings.
+///     - If they don't raise an error, the function process with the
+///       original return code.
+///     - If any of them raise an error, the error is set (PyErr_*) and
+///       the destructor will raise a cpp exception python_error() that
+///       will be caught by the outer try/catch that will be able to change
+///       the return value of the function to reflect the error.
+///   - If an Error was raised in the inner try/catch, the inner try/catch
+///     must set the python error. The buffered warnings are then
+///     processed as cpp warnings as we cannot predict before hand
+///     whether a python warning will raise an error or not and we
+///     cannot handle two errors at the same time.
+/// This advanced handler will only be used in the current thread.
+/// If any other thread is used, warnings will be processed as
+/// cpp warnings.
+#define HANDLE_TH_ERRORS                                             \
+  try {                                                              \
+    torch::PyWarningHandler __enforce_warning_buffer;                \
+    try{
+
+#define CATCH_TH_ERRORS(retval)                                      \
+    catch (python_error & e) {                                       \
+      return retval;                                                 \
+    }                                                                \
+    catch (const c10::IndexError& e) {                               \
+      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
+      PyErr_SetString(PyExc_IndexError, msg.c_str());                \
+      return retval;                                                 \
+    }                                                                \
+    catch (const c10::Error& e) {                                    \
+      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
+      PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
+      return retval;                                                 \
+    }                                                                \
+    catch (torch::PyTorchError & e) {                                \
+      auto msg = torch::processErrorMsg(e.what());                   \
+      PyErr_SetString(e.python_type(), msg.c_str());                 \
+      return retval;                                                 \
+    }                                                                \
+    catch (const std::exception& e) {                                \
+      auto msg = torch::processErrorMsg(e.what());                   \
+      PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
+      return retval;                                                 \
+    }
+
+#define END_HANDLE_TH_ERRORS_RET(retval)                             \
+    }                                                                \
+    CATCH_TH_ERRORS(retval)                                          \
+  }                                                                  \
+  CATCH_TH_ERRORS(retval)
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
@@ -184,6 +220,25 @@ struct ValueError : public PyTorchError {
   PyObject* python_type() override {
     return PyExc_ValueError;
   }
+};
+
+// ATen warning handler for Python
+struct PyWarningHandler: at::WarningHandler {
+public:
+/// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
+  TORCH_API PyWarningHandler() noexcept(true);
+  TORCH_API ~PyWarningHandler() noexcept(false) override;
+
+  void process(const at::SourceLocation &source_location,
+               const std::string &msg) override;
+
+private:
+  using warning_buffer_t =
+    std::vector<std::pair<c10::SourceLocation, std::string>>;
+
+  warning_buffer_t warning_buffer_;
+
+  at::WarningHandler* prev_handler_;
 };
 
 } // namespace torch
