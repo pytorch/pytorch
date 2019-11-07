@@ -1,16 +1,22 @@
-from . import invoke_rpc_builtin, invoke_rpc_python_udf
-from . import invoke_remote_builtin, invoke_remote_python_udf
-from . import _start_rpc_agent
-from . import _destroy_rref_context, _cleanup_python_rpc_handler
-from . import WorkerInfo
-from . import backend_registry
-from .constants import DEFAULT_RPC_TIMEOUT, DEFAULT_NUM_SEND_RECV_THREADS
-from .internal import _internal_rpc_pickler, PythonUDF
-
 import datetime
 import functools
 import sys
+
 import torch
+
+from . import (
+    WorkerInfo,
+    _cleanup_python_rpc_handler,
+    _destroy_rref_context,
+    _start_rpc_agent,
+    backend_registry,
+    invoke_remote_builtin,
+    invoke_remote_python_udf,
+    invoke_rpc_builtin,
+    invoke_rpc_python_udf,
+)
+from .constants import DEFAULT_NUM_SEND_RECV_THREADS, DEFAULT_RPC_TIMEOUT
+from .internal import PythonUDF, _internal_rpc_pickler
 
 
 _agent = None
@@ -25,6 +31,7 @@ def _require_initialized(func):
                 "torch.distributed.rpc.init_model_parallel first."
             )
         return func(*args, **kwargs)
+
     return wrapper
 
 
@@ -59,7 +66,6 @@ def sync_rpc():
     _agent.sync()
 
 
-
 # TODO: add a context manager to wrap _init_rpc and join_rpc
 def _init_rpc(
     backend=backend_registry.BackendType.PROCESS_GROUP,
@@ -68,7 +74,7 @@ def _init_rpc(
     self_rank=-1,
     worker_name_to_id=None,
     num_send_recv_threads=DEFAULT_NUM_SEND_RECV_THREADS,
-    global_process_timeout=DEFAULT_RPC_TIMEOUT,
+    global_rpc_server_processing_timeout=DEFAULT_RPC_TIMEOUT,
 ):
     if sys.version_info < (3, 0):
         raise RuntimeError("RPC package does not support Python2.")
@@ -79,8 +85,10 @@ def _init_rpc(
         raise RuntimeError("RPC is already initialized")
 
     # Initialize RPC.
-    if not isinstance(global_process_timeout, datetime.timedelta):
-        raise RuntimeError("`global_process_timeout` must be a `datetime.timedelta`.")
+    if not isinstance(global_rpc_server_processing_timeout, datetime.timedelta):
+        raise RuntimeError(
+            "`global_rpc_server_processing_timeout` must be a `datetime.timedelta`."
+        )
 
     _agent = backend_registry.init_backend(
         backend,
@@ -89,7 +97,7 @@ def _init_rpc(
         self_rank=self_rank,
         worker_name_to_id=worker_name_to_id,
         num_send_recv_threads=num_send_recv_threads,
-        global_process_timeout=global_process_timeout,
+        global_rpc_server_processing_timeout=global_rpc_server_processing_timeout,
     )
     _start_rpc_agent(_agent)
 
@@ -114,15 +122,16 @@ def get_worker_info(worker_name=None):
     else:
         return _agent.get_worker_info()
 
+
 @_require_initialized
-def get_global_process_timeout():
+def get_global_rpc_server_processing_timeout():
     """
     Retrieve the timeout for all RPCs that was set during RPC initialization.
 
     Returns:
         `datetime.timedelta` instance indicating the RPC timeout.
     """
-    return _agent._get_global_process_timeout()
+    return _agent._get_global_rpc_server_processing_timeout()
 
 
 def _to_worker_info(name_or_info):
@@ -180,13 +189,12 @@ def remote(to, func, args=None, kwargs=None):
 
     info = _to_worker_info(to)
     if qualified_name is not None:
-        return invoke_remote_builtin(
-            _agent, info, qualified_name, *args, **kwargs)
+        return invoke_remote_builtin(_agent, info, qualified_name, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
-            PythonUDF(func, args, kwargs))
-        return invoke_remote_python_udf(
-            _agent, info, pickled_python_udf, tensors)
+            PythonUDF(func, args, kwargs)
+        )
+        return invoke_remote_python_udf(_agent, info, pickled_python_udf, tensors)
 
 
 def _invoke_rpc(to, func, args=None, kwargs=None):
@@ -200,14 +208,12 @@ def _invoke_rpc(to, func, args=None, kwargs=None):
 
     info = _to_worker_info(to)
     if qualified_name is not None:
-        fut = invoke_rpc_builtin(
-            _agent, info, qualified_name, *args, **kwargs
-        )
+        fut = invoke_rpc_builtin(_agent, info, qualified_name, *args, **kwargs)
     else:
         (pickled_python_udf, tensors) = _internal_rpc_pickler.serialize(
-            PythonUDF(func, args, kwargs))
-        fut = invoke_rpc_python_udf(
-            _agent, info, pickled_python_udf, tensors)
+            PythonUDF(func, args, kwargs)
+        )
+        fut = invoke_rpc_python_udf(_agent, info, pickled_python_udf, tensors)
     return fut
 
 

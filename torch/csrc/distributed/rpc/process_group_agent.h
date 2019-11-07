@@ -39,7 +39,7 @@ class ProcessGroupAgent : public RpcAgent {
       std::string workerName,
       std::shared_ptr<c10d::ProcessGroup> pg,
       int numSendRecvThreads,
-      std::chrono::milliseconds globalProcessTimeouts);
+      std::chrono::milliseconds globalRpcServerProcessingTimeout);
 
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
 
