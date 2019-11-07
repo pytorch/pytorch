@@ -794,7 +794,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto row1 = indices.select(0, dim1);
 
     // swap row0 and row1
-    auto tmp = at::zeros_like(row0, at::MemoryFormat::Contiguous);
+    auto tmp = at::zeros_like(row0, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     tmp.copy_(row0);
     row0.copy_(row1);
     row1.copy_(tmp);
