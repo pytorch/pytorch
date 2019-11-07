@@ -44,7 +44,10 @@ void fillQConfigMap(
   }
 }
 
-std::string getFuncName(const c10::QualifiedName& qname) {
+std::string getFuncName(Value* func_value) {
+  auto func_node = func_value->node();
+  auto func = func_node->output()->type()->expect<FunctionType>()->function();
+  const auto& qname = func->qualname();
   const auto& name = qname.qualifiedName();
   auto rdot_idx = name.rfind('.');
   if (rdot_idx != std::string::npos) {
@@ -71,9 +74,7 @@ bool nodeQuantizable(Node* n) {
       std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
       aten_funcs.end();
   if (n->kind() == prim::CallFunction) {
-    auto func_node = n->inputs()[0]->node();
-    auto func = func_node->output()->type()->expect<FunctionType>()->function();
-    auto func_name = getFuncName(func->qualname());
+    auto func_name = getFuncName(n->inputs()[0]);
     is_quantizable |=
         std::find(call_funcs.begin(), call_funcs.end(), func_name) !=
         call_funcs.end();
@@ -171,9 +172,9 @@ Node* InsertObserversHelper::insertObserverFor(
     observer_module = std::get<0>(qconfig);
   }
   script::Module observer = observer_module.clone();
-  std::string observer_name = "_observer_" + std::to_string(uid_++);
+  std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.find_module(observer_name)) {
-    observer_name = "_observer_" + std::to_string(uid_++);
+    observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
   // Get handle of observer module
@@ -646,10 +647,8 @@ graph(%linear, %a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype):
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
-    auto linear_node = match_vmap.at(vmap.at("linear"))->node();
-    auto func =
-        linear_node->output()->type()->expect<FunctionType>()->function();
-    auto func_name = getFuncName(func->qualname());
+    auto linear_value = match_vmap.at(vmap.at("linear"));
+    auto func_name = getFuncName(linear_value);
     if (func_name == "linear") {
       return true;
     }
@@ -675,7 +674,7 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
         %packed_params = quantized::conv_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
         %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant_unpacked)
-        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
         return (%r) )";
 
   SubgraphRewriter rewriter;
@@ -883,8 +882,12 @@ graph(%self, %x):
       GRAPH_UPDATE("Deleting ", *matched_bn);
 
       auto new_w_b = computeUpdatedConvWeightAndBias(params);
-      params.conv_w.set_data(std::get<0>(new_w_b));
-      params.conv_b.set_data(std::get<1>(new_w_b));
+      conv_submodule.set_parameter("weight", std::get<0>(new_w_b));
+      if (conv_submodule.find_parameter("bias")) {
+        conv_submodule.set_parameter("bias", std::get<1>(new_w_b));
+      } else {
+        conv_submodule.register_parameter("bias", std::get<1>(new_w_b), false);
+      }
     }
 
     // Perform planned rewritings
@@ -1040,9 +1043,9 @@ graph(%a_dequant, %w, %b, %w_scale, %w_zero_point, %w_dtype, %stride, %padding, 
       auto w_quant_val = match_vmap.at(vmap.at("w_quant"));
       // unique name for the module based on %w_quant
       int uid = 0;
-      auto module_name = module_name_prefix + std::to_string(uid++);
+      auto module_name = module_name_prefix + c10::to_string(uid++);
       while (module.find_module(module_name)) {
-        module_name_prefix + std::to_string(uid++);
+        module_name_prefix + c10::to_string(uid++);
       }
       module.register_module(module_name, wrapper_module);
 

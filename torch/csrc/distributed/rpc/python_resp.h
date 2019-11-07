@@ -6,16 +6,16 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-// RPC call representing calling a Python UDF over RPC.
-class TORCH_API PythonUDFCall final : public RpcCommandBase {
+// RPC call representing the response of a Python UDF over RPC.
+class TORCH_API PythonResp final : public RpcCommandBase {
  public:
-  explicit PythonUDFCall(
+  explicit PythonResp(
       std::vector<char> pickledPayload,
       std::vector<torch::Tensor> tensors);
 
   Message toMessage() && override;
 
-  static std::unique_ptr<PythonUDFCall> fromMessage(const Message& message);
+  static std::unique_ptr<PythonResp> fromMessage(const Message& message);
 
   const std::vector<char>& pickledPayload() const;
 
