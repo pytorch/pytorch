@@ -19,7 +19,7 @@ namespace nccl {
 // Don't use them outside of these files.
 namespace detail {
 
-void throw_nccl_error(ncclResult_t status);
+TORCH_API void throw_nccl_error(ncclResult_t status);
 
 static inline void NCCL_CHECK(ncclResult_t status) {
   if (status != ncclSuccess) {
@@ -57,7 +57,7 @@ using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
 
 TORCH_API std::uint64_t version();
 
-bool is_available(at::TensorList tensors);
+TORCH_API bool is_available(at::TensorList tensors);
 
 TORCH_API void broadcast(
     at::TensorList tensors,
