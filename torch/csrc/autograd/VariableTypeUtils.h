@@ -80,10 +80,6 @@ inline void increment_version(Tensor & t) {
   as_variable_ref(t).bump_version();
 }
 
-inline bool isFloatingPoint(ScalarType s) {
-  return s == kFloat || s == kDouble || s == kHalf;
-}
-
 struct Flatten : IterArgs<Flatten> {
   Flatten(variable_list& out) : out(out) {}
   variable_list& out;

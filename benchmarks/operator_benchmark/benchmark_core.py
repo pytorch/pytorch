@@ -68,13 +68,13 @@ class BenchmarkRunner(object):
         self.iters = 200
         self.has_explicit_iteration_count = False
         self.multiplier = 2
-        self.predefined_minimum_secs = 4
+        self.predefined_minimum_secs = 2
         self.max_iters = 1e6
         self.use_jit = args.use_jit
         self.num_runs = args.num_runs
         self.print_per_iter = False
-        # 100 is the default warmup iterations 
-        if self.args.warmup_iterations == -1: 
+        # 100 is the default warmup iterations
+        if self.args.warmup_iterations == -1:
             self.args.warmup_iterations = 100
         if self.args.iterations and self.args.iterations != -1:
             self.has_explicit_iteration_count = True
@@ -83,9 +83,6 @@ class BenchmarkRunner(object):
         # to match the tag anymore
         if self.args.test_name is not None:
             self.args.tag_filter = None
-
-        if self.args.ai_pep_format:
-            self.print_per_iter = True
 
 
     def _print_header(self):
@@ -185,6 +182,7 @@ class BenchmarkRunner(object):
         The execution stops when the time becomes significant.
         """
         curr_test_total_time = 0
+        time_trace = []
         while True:
             # Wipe cache
             if self.args.wipe_cache:
@@ -196,17 +194,27 @@ class BenchmarkRunner(object):
             results_are_significant = self._iteration_result_is_significant(
                 iters, run_time_sec, curr_test_total_time, self.has_explicit_iteration_count)
 
+            report_run_time = 1e6 * run_time_sec / iters
+            time_trace.append(report_run_time)
+            # Print out the time spent in each epoch in ms
+            if self.args.ai_pep_format:
+                mode = "JIT" if self.use_jit else "Eager"
+                test_name = '_'.join([test_case.framework, test_case.test_config.test_name, mode])
+                print("PyTorchObserver " + json.dumps(
+                    {
+                        "type": test_name,
+                        "metric": "latency",
+                        "unit": "ms",
+                        "value": str(report_run_time / 1e3),
+                    }
+                ))
             if results_are_significant:
-                # Print out the last 50 values when running with AI PEP
-                if self.args.ai_pep_format:
-                    test_case._print_per_iter()
                 break
 
             # Re-estimate the hopefully-sufficient
             # iteration count, and run the benchmark again...
             iters = self._predict_num_iter_needed(iters)
-
-        reported_run_time_us = (1e6 * run_time_sec / iters)
+        reported_run_time_us = np.percentile(np.array(time_trace), 50)
         return reported_run_time_us
 
     def _check_keep(self, test_flag, cmd_flag):
