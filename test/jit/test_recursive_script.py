@@ -238,9 +238,11 @@ class TestRecursiveScript(JitTestCase):
             dir_set = dir(mod)
             scripted_mod = torch.jit.script(mod)
             dir_scripted = set(dir(scripted_mod))
+            # set not currently copied over
+            ignore_set = ["training", "__delitem__", "__setitem__", "clear", "items",
+                          "keys", "pop", "update", "values"]
             for attr in dir_set:
-                # training is currently not copied over
-                if attr == "training" or attr == "__delitem__":
+                if attr in ignore_set:
                     continue
                 self.assertTrue(attr in dir_scripted, attr)
 
