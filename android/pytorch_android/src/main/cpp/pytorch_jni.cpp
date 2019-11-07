@@ -418,7 +418,7 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
     } else if (JIValue::kTypeCodeLong == typeCode) {
       static const auto jMethodGetLong =
           JIValue::javaClassStatic()->getMethod<jlong()>("toLong");
-      return at::IValue{(int64_t)jMethodGetLong(jivalue)};
+      return at::IValue{jMethodGetLong(jivalue)};
     } else if (JIValue::kTypeCodeDouble == typeCode) {
       static const auto jMethodGetDouble =
           JIValue::javaClassStatic()->getMethod<jdouble()>("toDouble");
@@ -554,11 +554,11 @@ class JIValue : public facebook::jni::JavaClass<JIValue> {
       auto firstEntryValue = JIValue::JIValueToAtIValue(it->second);
       c10::TypePtr typePtr = firstEntryValue.type();
       c10::impl::GenericDict dict{c10::IntType::get(), typePtr};
-      dict.insert((int64_t)it->first->longValue(), firstEntryValue);
+      dict.insert(it->first->longValue(), firstEntryValue);
       it++;
       for (; it != jmap->end(); it++) {
         dict.insert(
-            (int64_t)it->first->longValue(), JIValue::JIValueToAtIValue(it->second));
+            it->first->longValue(), JIValue::JIValueToAtIValue(it->second));
       }
       return at::IValue{dict};
     }
