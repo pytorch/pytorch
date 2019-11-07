@@ -46,12 +46,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &RpcAgent::sync,
               py::call_guard<py::gil_scoped_release>());
 
-  auto pyFuture = shared_ptr_class_<PyFuture>(module, "Future")
-                      .def(
-                          "wait",
-                          &PyFuture::wait,
-                          py::call_guard<py::gil_scoped_release>());
-
   auto pyRRef =
       shared_ptr_class_<PyRRef>(module, "RRef")
           .def(
