@@ -2,7 +2,7 @@
 #define THP_EXPORT_H
 
 #ifdef _WIN32
-# ifdef _THP_CORE
+# ifdef THP_BUILD_MAIN_LIB
 #  define THP_API extern __declspec(dllexport)
 #  define THP_CLASS __declspec(dllexport)
 # else
